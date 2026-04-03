@@ -5,6 +5,8 @@ import {
   WorkspaceFileSystemError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
+
+const READ_FILE_MAX_SIZE_BYTES = 2_000_000; // 2 MB
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
 
@@ -49,7 +51,43 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { writeFile } satisfies WorkspaceFileSystemShape;
+
+  const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn("WorkspaceFileSystem.readFile")(
+    function* (input) {
+      const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+      });
+
+      const contents = yield* fileSystem.readFileString(target.absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.readFile",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+
+      const sizeBytes = new TextEncoder().encode(contents).length;
+
+      if (sizeBytes > READ_FILE_MAX_SIZE_BYTES) {
+        return yield* new WorkspaceFileSystemError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          operation: "workspaceFileSystem.readFile",
+          detail: `File too large to open in editor (${Math.round(sizeBytes / 1024)}KB > 2MB limit)`,
+        });
+      }
+
+      return { contents, sizeBytes };
+    },
+  );
+
+  return { writeFile, readFile } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

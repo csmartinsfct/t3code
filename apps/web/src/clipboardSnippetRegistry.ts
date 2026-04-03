@@ -1,0 +1,82 @@
+/**
+ * clipboardSnippetRegistry — in-memory store for enriched clipboard entries.
+ *
+ * When the user presses Cmd+C inside the file editor, CodeEditorView writes
+ * the selection's metadata here alongside the plain-text clipboard write.
+ * When the composer receives a paste event, it checks this registry and, if
+ * the pasted text matches the last registered entry, converts it to a code
+ * snippet chip instead of inserting raw text.
+ *
+ * Why not custom MIME types: `paste` event clipboardData.getData() does not
+ * reliably expose custom MIME types written via the async ClipboardItem API
+ * across all Chromium/Electron versions. This registry is simpler, reliable,
+ * and correctly scoped to single-session use.
+ */
+
+export interface ClipboardSnippetEntry {
+  text: string;
+  cwd: string;
+  relativePath: string;
+  startLine: number; // 1-indexed
+  endLine: number; // 1-indexed
+}
+
+interface PendingEntry extends ClipboardSnippetEntry {
+  timestamp: number;
+}
+
+const TTL_MS = 30_000; // entries expire after 30 seconds
+
+let _pending: PendingEntry | null = null;
+let _expireTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Register an enriched clipboard entry. Called by CodeEditorView on Cmd+C.
+ * Replaces any previously pending entry.
+ */
+export function registerClipboardSnippet(entry: ClipboardSnippetEntry): void {
+  if (_expireTimer !== null) {
+    clearTimeout(_expireTimer);
+    _expireTimer = null;
+  }
+  _pending = { ...entry, timestamp: Date.now() };
+  _expireTimer = setTimeout(() => {
+    _pending = null;
+    _expireTimer = null;
+  }, TTL_MS);
+}
+
+/**
+ * Consume the pending entry if its `text` matches the pasted text.
+ * Returns the entry and clears it, or returns null if no match.
+ */
+export function consumeClipboardSnippet(pastedText: string): ClipboardSnippetEntry | null {
+  if (!_pending) return null;
+
+  // Trim both sides to handle trailing newlines/whitespace that editors may add or strip.
+  // Also allow paste to match if it starts with the registered text (some editors append a newline).
+  const registeredTrimmed = _pending.text.trim();
+  const pastedTrimmed = pastedText.trim();
+  const matches =
+    registeredTrimmed === pastedTrimmed ||
+    pastedTrimmed.startsWith(registeredTrimmed) ||
+    registeredTrimmed.startsWith(pastedTrimmed);
+  if (!matches || registeredTrimmed.length === 0) return null;
+
+  const entry: ClipboardSnippetEntry = {
+    text: _pending.text,
+    cwd: _pending.cwd,
+    relativePath: _pending.relativePath,
+    startLine: _pending.startLine,
+    endLine: _pending.endLine,
+  };
+
+  // Clear — each entry can only be consumed once
+  _pending = null;
+  if (_expireTimer !== null) {
+    clearTimeout(_expireTimer);
+    _expireTimer = null;
+  }
+
+  return entry;
+}

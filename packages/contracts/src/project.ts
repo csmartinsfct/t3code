@@ -3,6 +3,7 @@ import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
+const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -48,6 +49,57 @@ export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
 export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteFileError>()(
   "ProjectWriteFileError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+// ─── listDirectory ───────────────────────────────────────────────────────────
+
+export const ProjectListDirectoryInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  /** Relative path inside the workspace root. Use "" for the root itself. */
+  path: Schema.String,
+});
+export type ProjectListDirectoryInput = typeof ProjectListDirectoryInput.Type;
+
+export const ProjectListDirectoryEntry = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  kind: Schema.Literals(["file", "directory"]),
+});
+export type ProjectListDirectoryEntry = typeof ProjectListDirectoryEntry.Type;
+
+export const ProjectListDirectoryResult = Schema.Struct({
+  entries: Schema.Array(ProjectListDirectoryEntry),
+});
+export type ProjectListDirectoryResult = typeof ProjectListDirectoryResult.Type;
+
+export class ProjectListDirectoryError extends Schema.TaggedErrorClass<ProjectListDirectoryError>()(
+  "ProjectListDirectoryError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+// ─── readFile ────────────────────────────────────────────────────────────────
+
+export const ProjectReadFileInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+});
+export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
+
+export const ProjectReadFileResult = Schema.Struct({
+  contents: Schema.String,
+  sizeBytes: Schema.Number,
+});
+export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
+
+export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFileError>()(
+  "ProjectReadFileError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

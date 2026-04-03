@@ -35,6 +35,14 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
+  parseFileExplorerRouteSearch,
+  stripFileExplorerSearchParams,
+} from "../fileExplorerRouteSearch";
+import { useFileExplorerStore } from "../fileExplorerStore";
+import { consumeClipboardSnippet } from "../clipboardSnippetRegistry";
+import { snippetLanguage } from "../lib/snippetUtils";
+import type { ComposerCodeSnippetAttachment } from "../composerDraftStore";
+import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
   collapseExpandedComposerCursor,
@@ -156,6 +164,8 @@ import {
 } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
+import { FileSearchModal } from "./file-explorer/FileSearchModal";
+import { ComposerCodeSnippets } from "./ComposerCodeSnippets";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -208,6 +218,18 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+
+function formatCodeSnippetsForModel(snippets: ComposerCodeSnippetAttachment[]): string {
+  if (snippets.length === 0) return "";
+  return snippets
+    .map((s) => {
+      const lang = snippetLanguage(s.relativePath);
+      const lineLabel =
+        s.startLine === s.endLine ? `line ${s.startLine}` : `lines ${s.startLine}–${s.endLine}`;
+      return `\`${s.relativePath}\` (${lineLabel}):\n\`\`\`${lang}\n${s.code}\n\`\`\``;
+    })
+    .join("\n\n");
+}
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -583,7 +605,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
-    select: (params) => parseDiffRouteSearch(params),
+    select: (params) => ({
+      ...parseDiffRouteSearch(params),
+      ...parseFileExplorerRouteSearch(params),
+    }),
   });
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
@@ -592,6 +617,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
+  const composerCodeSnippets = composerDraft.codeSnippets;
   const composerSendState = useMemo(
     () =>
       deriveComposerSendState({
@@ -611,6 +637,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
+  const addComposerDraftCodeSnippet = useComposerDraftStore((store) => store.addCodeSnippet);
+  const removeComposerDraftCodeSnippet = useComposerDraftStore((store) => store.removeCodeSnippet);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
   );
@@ -833,6 +861,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
+  const fileExplorerOpen = rawSearch.fileExplorer === "1";
+  const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
   const activeThreadId = activeThread?.id ?? null;
   const existingOpenTerminalThreadIds = useMemo(() => {
     const existingThreadIds = new Set<ThreadId>([...serverThreadIds, ...draftThreadIds]);
@@ -1584,6 +1614,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
       },
     });
   }, [diffOpen, navigate, threadId]);
+
+  const onToggleFileExplorer = useCallback(() => {
+    void navigate({
+      to: "/$threadId",
+      params: { threadId },
+      replace: true,
+      search: (previous) => {
+        const rest = stripFileExplorerSearchParams(previous);
+        return fileExplorerOpen
+          ? { ...rest, fileExplorer: undefined }
+          : { ...rest, fileExplorer: "1" };
+      },
+    });
+  }, [fileExplorerOpen, navigate, threadId]);
+
+  const openFileInExplorerAction = useFileExplorerStore((s) => s.openFile);
+  const openFileInExplorer = useCallback(
+    (cwd: string, relativePath: string) => {
+      openFileInExplorerAction(cwd, relativePath, "primary");
+      if (!fileExplorerOpen) {
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+          search: (previous) => ({
+            ...stripFileExplorerSearchParams(previous),
+            fileExplorer: "1" as const,
+          }),
+        });
+      }
+    },
+    [fileExplorerOpen, navigate, openFileInExplorerAction, threadId],
+  );
 
   const envLocked = Boolean(
     activeThread &&
@@ -2580,6 +2642,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
+
+      // Cmd+P — quick file open. Checked directly (not via keybinding config)
+      // so it always works regardless of whether the user has a rule configured.
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const meta = isMac ? event.metaKey : event.ctrlKey;
+      if (meta && event.key === "p" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsFileSearchOpen(true);
+        return;
+      }
+
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
@@ -2632,6 +2706,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "fileExplorer.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleFileExplorer();
+        return;
+      }
+
+      if (command === "file.quickOpen") {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsFileSearchOpen(true);
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2654,6 +2742,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    onToggleFileExplorer,
+    setIsFileSearchOpen,
     toggleTerminalVisibility,
   ]);
 
@@ -2711,6 +2801,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    // Image paste handling (snippet paste is handled by the capture-phase listener below)
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) {
       return;
@@ -2722,6 +2813,52 @@ export default function ChatView({ threadId }: ChatViewProps) {
     event.preventDefault();
     addComposerImages(imageFiles);
   };
+
+  const removeComposerCodeSnippet = useCallback(
+    (snippetId: string) => {
+      if (!activeThreadId) return;
+      removeComposerDraftCodeSnippet(activeThreadId, snippetId);
+    },
+    [activeThreadId, removeComposerDraftCodeSnippet],
+  );
+
+  // ── Snippet paste — capture phase ────────────────────────────────────────
+  // Lexical registers its own native paste listener on the editor element (bubble
+  // phase). React synthetic onPaste fires after that — too late to prevent the
+  // text insertion. We use a document-level capture listener so we win the race.
+  const activeThreadIdRef = useRef(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
+  const addCodeSnippetRef = useRef(addComposerDraftCodeSnippet);
+  addCodeSnippetRef.current = addComposerDraftCodeSnippet;
+
+  useEffect(() => {
+    const captureHandler = (event: ClipboardEvent) => {
+      // Only intercept pastes that land inside the Lexical composer editor
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-testid="composer-editor"]')) return;
+
+      const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+      const snippetEntry = consumeClipboardSnippet(pastedText);
+      const threadId = activeThreadIdRef.current;
+      if (!snippetEntry || !threadId) return;
+
+      // Block Lexical from processing this paste entirely
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      addCodeSnippetRef.current(threadId, {
+        id: crypto.randomUUID(),
+        cwd: snippetEntry.cwd,
+        relativePath: snippetEntry.relativePath,
+        startLine: snippetEntry.startLine,
+        endLine: snippetEntry.endLine,
+        code: snippetEntry.text,
+      });
+    };
+
+    document.addEventListener("paste", captureHandler, true);
+    return () => document.removeEventListener("paste", captureHandler, true);
+  }, []); // empty deps — refs keep values current without re-registering
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes("Files")) {
@@ -2895,11 +3032,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
     const composerImagesSnapshot = [...composerImages];
+    const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
-    const messageTextForSend = appendTerminalContextsToPrompt(
+    const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
+    const baseMessageText = appendTerminalContextsToPrompt(
       promptForSend,
       composerTerminalContextsSnapshot,
     );
+    const messageTextForSend = snippetsBlock
+      ? `${snippetsBlock}\n\n${baseMessageText}`
+      : baseMessageText;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
@@ -3940,6 +4082,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {/* Cmd+P file search — thread-level (fires when file explorer is not focused) */}
+      {gitCwd && (
+        <FileSearchModal
+          cwd={gitCwd}
+          open={isFileSearchOpen}
+          onOpenChange={setIsFileSearchOpen}
+          onSelectFile={(relativePath) => {
+            openFileInExplorer(gitCwd, relativePath);
+          }}
+        />
+      )}
+
       {/* Top bar */}
       <header
         className={cn(
@@ -3965,6 +4119,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          fileExplorerOpen={fileExplorerOpen}
+          fileExplorerAvailable={activeProject !== undefined}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3973,6 +4129,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onToggleFileExplorer={onToggleFileExplorer}
         />
       </header>
 
@@ -4114,6 +4271,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
                       </div>
                     )}
+
+                    {!isComposerApprovalState &&
+                      pendingUserInputs.length === 0 &&
+                      composerCodeSnippets.length > 0 && (
+                        <div className="mb-2 -mx-3 sm:-mx-4">
+                          <ComposerCodeSnippets
+                            snippets={composerCodeSnippets}
+                            onRemove={removeComposerCodeSnippet}
+                          />
+                        </div>
+                      )}
 
                     {!isComposerApprovalState &&
                       pendingUserInputs.length === 0 &&

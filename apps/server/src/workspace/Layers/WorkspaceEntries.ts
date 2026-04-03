@@ -29,6 +29,22 @@ const IGNORED_DIRECTORY_NAMES = new Set([
   ".cache",
 ]);
 
+// Files that are noise in a code editor — OS metadata, editor internals, etc.
+// Mirrors VS Code / Cursor default `files.exclude` behaviour for files.
+const IGNORED_FILE_NAMES = new Set([
+  ".DS_Store",
+  ".DS_Store?",
+  "._DS_Store",
+  "Thumbs.db",
+  "ehthumbs.db",
+  "desktop.ini",
+  ".Spotlight-V100",
+  ".Trashes",
+  ".gitkeep",
+  ".keep",
+  ".npmrc.bak",
+]);
+
 interface WorkspaceIndex {
   scannedAt: number;
   entries: SearchableWorkspaceEntry[];
@@ -494,9 +510,44 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const listDirectory: WorkspaceEntriesShape["listDirectory"] = Effect.fn(
+    "WorkspaceEntries.listDirectory",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    const { dirents } = yield* readDirectoryEntries(normalizedCwd, input.path);
+
+    if (!dirents) {
+      return { entries: [] };
+    }
+
+    const entries = dirents
+      .filter((d) => {
+        if (!d.name || d.name === "." || d.name === "..") return false;
+        if (d.isDirectory() && IGNORED_DIRECTORY_NAMES.has(d.name)) return false;
+        if (d.isFile() && IGNORED_FILE_NAMES.has(d.name)) return false;
+        if (!d.isDirectory() && !d.isFile()) return false;
+        return true;
+      })
+      .map((d) => {
+        const childPath = toPosixPath(input.path ? path.join(input.path, d.name) : d.name);
+        return {
+          name: d.name,
+          path: childPath,
+          kind: d.isDirectory() ? ("directory" as const) : ("file" as const),
+        };
+      })
+      .sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    return { entries };
+  });
+
   return {
     invalidate,
     search,
+    listDirectory,
   } satisfies WorkspaceEntriesShape;
 });
 

@@ -158,12 +158,25 @@ const PersistedComposerDraftStoreStorage = Schema.Struct({
   state: PersistedComposerDraftStoreState,
 });
 
+/** A code selection copied from the file explorer editor. In-memory only — not persisted. */
+export interface ComposerCodeSnippetAttachment {
+  /** Stable UUID generated at paste-time. */
+  id: string;
+  cwd: string;
+  relativePath: string;
+  startLine: number; // 1-indexed
+  endLine: number; // 1-indexed
+  code: string;
+}
+
 export interface ComposerThreadDraftState {
   prompt: string;
   images: ComposerImageAttachment[];
   nonPersistedImageIds: string[];
   persistedAttachments: PersistedComposerImageAttachment[];
   terminalContexts: TerminalContextDraft[];
+  /** Code snippet references pasted from the file editor. Not persisted. */
+  codeSnippets: ComposerCodeSnippetAttachment[];
   modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
   activeProvider: ProviderKind | null;
   runtimeMode: RuntimeMode | null;
@@ -247,6 +260,9 @@ interface ComposerDraftStoreState {
   addImage: (threadId: ThreadId, image: ComposerImageAttachment) => void;
   addImages: (threadId: ThreadId, images: ComposerImageAttachment[]) => void;
   removeImage: (threadId: ThreadId, imageId: string) => void;
+  addCodeSnippet: (threadId: ThreadId, snippet: ComposerCodeSnippetAttachment) => void;
+  removeCodeSnippet: (threadId: ThreadId, snippetId: string) => void;
+  clearCodeSnippets: (threadId: ThreadId) => void;
   insertTerminalContext: (
     threadId: ThreadId,
     prompt: string,
@@ -313,12 +329,17 @@ Object.freeze(EMPTY_PERSISTED_ATTACHMENTS);
 const EMPTY_MODEL_SELECTION_BY_PROVIDER: Partial<Record<ProviderKind, ModelSelection>> =
   Object.freeze({});
 
+const EMPTY_CODE_SNIPPETS: ComposerCodeSnippetAttachment[] = Object.freeze(
+  [],
+) as unknown as ComposerCodeSnippetAttachment[];
+
 const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   prompt: "",
   images: EMPTY_IMAGES,
   nonPersistedImageIds: EMPTY_IDS,
   persistedAttachments: EMPTY_PERSISTED_ATTACHMENTS,
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
+  codeSnippets: EMPTY_CODE_SNIPPETS,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
   runtimeMode: null,
@@ -332,6 +353,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     nonPersistedImageIds: [],
     persistedAttachments: [],
     terminalContexts: [],
+    codeSnippets: [],
     modelSelectionByProvider: {},
     activeProvider: null,
     runtimeMode: null,
@@ -1259,6 +1281,8 @@ function toHydratedThreadDraft(
         ...context,
         text: "",
       })) ?? [],
+    // Code snippets are never persisted — always start empty
+    codeSnippets: [],
     modelSelectionByProvider,
     activeProvider,
     runtimeMode: persistedDraft.runtimeMode ?? null,
@@ -1945,6 +1969,52 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return { draftsByThreadId: nextDraftsByThreadId };
         });
       },
+      addCodeSnippet: (threadId, snippet) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          // Avoid duplicates by id
+          if (existing.codeSnippets.some((s) => s.id === snippet.id)) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...existing,
+                codeSnippets: [...existing.codeSnippets, snippet],
+              },
+            },
+          };
+        });
+      },
+      removeCodeSnippet: (threadId, snippetId) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...current,
+                codeSnippets: current.codeSnippets.filter((s) => s.id !== snippetId),
+              },
+            },
+          };
+        });
+      },
+      clearCodeSnippets: (threadId) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current || current.codeSnippets.length === 0) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: { ...current, codeSnippets: [] },
+            },
+          };
+        });
+      },
       insertTerminalContext: (threadId, prompt, context, index) => {
         if (threadId.length === 0) {
           return false;
@@ -2132,6 +2202,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nonPersistedImageIds: [],
             persistedAttachments: [],
             terminalContexts: [],
+            codeSnippets: [],
           };
           const nextDraftsByThreadId = { ...state.draftsByThreadId };
           if (shouldRemoveDraft(nextDraft)) {

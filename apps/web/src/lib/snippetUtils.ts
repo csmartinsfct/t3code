@@ -1,0 +1,60 @@
+/**
+ * Utilities for code snippet attachments in the chat composer.
+ */
+
+/** Maps a file path's extension to a fenced-code-block language identifier. */
+export function snippetLanguage(relativePath: string): string {
+  const ext = relativePath.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    ts: "typescript",
+    tsx: "tsx",
+    js: "javascript",
+    jsx: "jsx",
+    mjs: "javascript",
+    cjs: "javascript",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    swift: "swift",
+    css: "css",
+    scss: "scss",
+    less: "less",
+    html: "html",
+    htm: "html",
+    xml: "xml",
+    svg: "svg",
+    json: "json",
+    jsonc: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    md: "markdown",
+    mdx: "mdx",
+    mdc: "markdown",
+    sql: "sql",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    fish: "fish",
+    ps1: "powershell",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    c: "c",
+    h: "c",
+    hpp: "cpp",
+    cs: "csharp",
+    rb: "ruby",
+    php: "php",
+    r: "r",
+    lua: "lua",
+    tf: "hcl",
+    hcl: "hcl",
+    dockerfile: "dockerfile",
+    graphql: "graphql",
+    gql: "graphql",
+  };
+  return map[ext] ?? ext;
+}
