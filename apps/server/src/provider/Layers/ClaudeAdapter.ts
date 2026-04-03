@@ -20,7 +20,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
+  baseProviderKind,
   type CanonicalItemType,
+  type ClaudeModelSelection,
   type CanonicalRequestType,
   EventId,
   type ProviderApprovalDecision,
@@ -510,10 +512,13 @@ const CLAUDE_SETTING_SOURCES = [
 ] as const satisfies ReadonlyArray<SettingSource>;
 
 function buildPromptText(input: ProviderSendTurnInput): string {
-  const rawEffort =
-    input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.options?.effort : null;
-  const claudeModel =
-    input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.model : undefined;
+  const claudeSel =
+    input.modelSelection?.provider &&
+    baseProviderKind(input.modelSelection.provider) === "claudeAgent"
+      ? (input.modelSelection as ClaudeModelSelection)
+      : undefined;
+  const rawEffort = claudeSel?.options?.effort ?? null;
+  const claudeModel = claudeSel?.model;
   const caps = getClaudeModelCapabilities(claudeModel);
 
   // For prompt injection, we check if the raw effort is a prompt-injected level (e.g. "ultrathink").
@@ -2364,7 +2369,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
-      if (input.provider !== undefined && input.provider !== PROVIDER) {
+      if (
+        input.provider !== undefined &&
+        input.provider !== PROVIDER &&
+        !input.provider.startsWith(`${PROVIDER}:`)
+      ) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
           operation: "startSession",
@@ -2681,20 +2690,23 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       );
       const claudeSettings = allSettings.providers.claudeAgent;
 
-      // Resolve configDir: prefer profileId from modelSelection, then check
-      // discovered profiles, finally fall back to default claudeSettings.
-      const profileId =
-        input.modelSelection?.provider === "claudeAgent"
-          ? (input.modelSelection as { profileId?: string }).profileId
-          : undefined;
-      const profileConfigDir = profileId
-        ? allSettings.providers.claudeProfiles.find((p) => p.profileId === profileId)?.configDir
+      // Resolve configDir from the provider kind's profile suffix.
+      // "claudeAgent:zbd" → look up profile "zbd" → use its configDir.
+      const inputProviderProfileId = input.provider?.includes(":")
+        ? input.provider.slice(input.provider.indexOf(":") + 1)
+        : undefined;
+      const profileConfigDir = inputProviderProfileId
+        ? allSettings.providers.claudeProfiles.find((p) => p.profileId === inputProviderProfileId)
+            ?.configDir
         : undefined;
       const configDir = profileConfigDir || claudeSettings.configDir || undefined;
 
       const claudeBinaryPath = claudeSettings.binaryPath;
       const modelSelection =
-        input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
+        input.modelSelection?.provider &&
+        baseProviderKind(input.modelSelection.provider) === "claudeAgent"
+          ? (input.modelSelection as ClaudeModelSelection)
+          : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
       const apiModelId = modelSelection ? resolveApiModelId(modelSelection) : undefined;
       const effort = (resolveEffort(caps, modelSelection?.options?.effort) ??
@@ -2859,7 +2871,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);
     const modelSelection =
-      input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
+      input.modelSelection?.provider &&
+      baseProviderKind(input.modelSelection.provider) === "claudeAgent"
+        ? (input.modelSelection as ClaudeModelSelection)
+        : undefined;
 
     if (context.turnState) {
       // Auto-close a stale synthetic turn (from background agent responses

@@ -1,4 +1,5 @@
 import {
+  baseProviderKind,
   type ChatAttachment,
   CommandId,
   EventId,
@@ -308,7 +309,8 @@ const make = Effect.gen(function* () {
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
       const previousModelSelection = threadModelSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
-        currentProvider === "claudeAgent" &&
+        currentProvider !== undefined &&
+        baseProviderKind(currentProvider) === "claudeAgent" &&
         requestedModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
 

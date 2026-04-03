@@ -10,6 +10,7 @@
  * @module RoutingTextGeneration
  */
 import { Effect, Layer, ServiceMap } from "effect";
+import { baseProviderKind } from "@t3tools/contracts";
 
 import {
   TextGeneration,
@@ -40,7 +41,7 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
   const claude = yield* ClaudeTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+    provider && baseProviderKind(provider) === "claudeAgent" ? claude : codex;
 
   return {
     generateCommitMessage: (input) =>

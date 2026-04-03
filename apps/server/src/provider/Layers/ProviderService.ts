@@ -335,7 +335,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ),
           ),
         );
-        if (!settings.providers[input.provider].enabled) {
+        if (!settings.providers[baseProviderKind(input.provider)].enabled) {
           return yield* toValidationError(
             "ProviderService.startSession",
             `Provider '${input.provider}' is disabled in T3 Code settings.`,
@@ -353,7 +353,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
         });
 
-        if (session.provider !== adapter.provider) {
+        if (
+          session.provider !== adapter.provider &&
+          baseProviderKind(session.provider) !== adapter.provider
+        ) {
           return yield* toValidationError(
             "ProviderService.startSession",
             `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,

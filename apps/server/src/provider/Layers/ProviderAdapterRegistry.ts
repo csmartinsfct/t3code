@@ -8,6 +8,7 @@
  * @module ProviderAdapterRegistryLive
  */
 import { Effect, Layer } from "effect";
+import { baseProviderKind } from "@t3tools/contracts";
 
 import { ProviderUnsupportedError, type ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
@@ -32,7 +33,10 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
   const byProvider = new Map(adapters.map((adapter) => [adapter.provider, adapter]));
 
   const getByProvider: ProviderAdapterRegistryShape["getByProvider"] = (provider) => {
-    const adapter = byProvider.get(provider);
+    // Exact match first, then fall back to the base provider kind.
+    // This allows profiled providers like "claudeAgent:zbd" to use
+    // the "claudeAgent" adapter.
+    const adapter = byProvider.get(provider) ?? byProvider.get(baseProviderKind(provider));
     if (!adapter) {
       return Effect.fail(new ProviderUnsupportedError({ provider }));
     }
