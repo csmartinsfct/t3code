@@ -529,7 +529,7 @@ export function GeneralSettingsPanel() {
   const [openPathErrorByTarget, setOpenPathErrorByTarget] = useState<
     Partial<Record<"keybindings" | "logsDirectory", string | null>>
   >({});
-  const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
+  const [openProviderDetails, setOpenProviderDetails] = useState<Record<string, boolean>>({
     codex: Boolean(
       settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
       settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath ||
@@ -776,7 +776,8 @@ export function GeneralSettingsPanel() {
       }));
 
     return {
-      provider: effectiveProviderKind as BaseProviderKind,
+      provider: providerSettings.provider,
+      providerKind: effectiveProviderKind,
       title: providerSettings.title,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
@@ -1130,8 +1131,7 @@ export function GeneralSettingsPanel() {
         {providerCards.map((providerCard) => {
           const customModelInput = customModelInputByProvider[providerCard.provider];
           const customModelError = customModelErrorByProvider[providerCard.provider] ?? null;
-          const providerDisplayName =
-            PROVIDER_DISPLAY_NAMES[providerCard.provider] ?? providerCard.title;
+          const providerDisplayName = providerCard.title;
 
           return (
             <div key={providerCard.provider} className="border-t border-border first:border-t-0">
@@ -1182,7 +1182,7 @@ export function GeneralSettingsPanel() {
                       onClick={() =>
                         setOpenProviderDetails((existing) => ({
                           ...existing,
-                          [providerCard.provider]: !existing[providerCard.provider],
+                          [providerCard.providerKind]: !existing[providerCard.providerKind],
                         }))
                       }
                       aria-label={`Toggle ${providerDisplayName} details`}
@@ -1190,7 +1190,7 @@ export function GeneralSettingsPanel() {
                       <ChevronDownIcon
                         className={cn(
                           "size-3.5 transition-transform",
-                          openProviderDetails[providerCard.provider] && "rotate-180",
+                          openProviderDetails[providerCard.providerKind] && "rotate-180",
                         )}
                       />
                     </Button>
@@ -1223,11 +1223,11 @@ export function GeneralSettingsPanel() {
               </div>
 
               <Collapsible
-                open={openProviderDetails[providerCard.provider]}
+                open={openProviderDetails[providerCard.providerKind] ?? false}
                 onOpenChange={(open) =>
                   setOpenProviderDetails((existing) => ({
                     ...existing,
-                    [providerCard.provider]: open,
+                    [providerCard.providerKind]: open,
                   }))
                 }
               >

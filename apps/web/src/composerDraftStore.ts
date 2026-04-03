@@ -6,6 +6,7 @@ import {
   type CodexReasoningEffort,
   DEFAULT_MODEL_BY_PROVIDER,
   ModelSelection,
+  modelSelectionProviderKind,
   ProjectId,
   ProviderInteractionMode,
   ProviderKind,
@@ -531,11 +532,13 @@ function normalizeModelSelection(
     provider === "codex" ? legacy?.legacyCodex : undefined,
   );
   const options = provider === "codex" ? modelOptions?.codex : modelOptions?.claudeAgent;
+  const profileId = candidate?.profileId;
   return {
     provider,
     model,
+    ...(typeof profileId === "string" && profileId ? { profileId } : {}),
     ...(options ? { options } : {}),
-  };
+  } as ModelSelection;
 }
 
 // ── Legacy sync helpers (used only during migration from v2 storage) ──
@@ -1522,18 +1525,19 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           if (!normalized) {
             return state;
           }
+          const fullProviderKind = modelSelectionProviderKind(normalized);
           const nextMap: Partial<Record<ProviderKind, ModelSelection>> = {
             ...state.stickyModelSelectionByProvider,
-            [normalized.provider]: normalized,
+            [fullProviderKind]: normalized,
           };
           if (Equal.equals(state.stickyModelSelectionByProvider, nextMap)) {
-            return state.stickyActiveProvider === normalized.provider
+            return state.stickyActiveProvider === fullProviderKind
               ? state
-              : { stickyActiveProvider: normalized.provider };
+              : { stickyActiveProvider: fullProviderKind };
           }
           return {
             stickyModelSelectionByProvider: nextMap,
-            stickyActiveProvider: normalized.provider,
+            stickyActiveProvider: fullProviderKind,
           };
         });
       },
@@ -1635,20 +1639,23 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const base = existing ?? createEmptyThreadDraft();
           const nextMap = { ...base.modelSelectionByProvider };
           if (normalized) {
-            const current = nextMap[normalized.provider];
+            const normalizedFullKind = modelSelectionProviderKind(normalized);
+            const current = nextMap[normalizedFullKind];
             if (normalized.options !== undefined) {
               // Explicit options provided → use them
-              nextMap[normalized.provider] = normalized;
+              nextMap[normalizedFullKind] = normalized;
             } else {
               // No options in selection → preserve existing options, update provider+model
-              nextMap[normalized.provider] = {
+              nextMap[normalizedFullKind] = {
                 provider: normalized.provider,
                 model: normalized.model,
                 ...(current?.options ? { options: current.options } : {}),
-              };
+              } as ModelSelection;
             }
           }
-          const nextActiveProvider = normalized?.provider ?? base.activeProvider;
+          const nextActiveProvider = normalized
+            ? modelSelectionProviderKind(normalized)
+            : base.activeProvider;
           if (
             Equal.equals(base.modelSelectionByProvider, nextMap) &&
             base.activeProvider === nextActiveProvider

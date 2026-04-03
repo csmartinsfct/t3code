@@ -2,6 +2,8 @@ import {
   type ApprovalRequestId,
   baseProviderKind,
   type BaseProviderKind,
+  modelSelectionProviderKind,
+  providerProfileId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
@@ -984,11 +986,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const sessionProvider = activeThread?.session?.provider ?? null;
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
-  const threadProvider =
-    activeThread?.modelSelection.provider ?? activeProject?.defaultModelSelection?.provider ?? null;
+  const threadProvider: ProviderKind | null =
+    (activeThread?.modelSelection
+      ? modelSelectionProviderKind(activeThread.modelSelection)
+      : null) ??
+    activeProject?.defaultModelSelection?.provider ??
+    null;
   const hasThreadStarted = threadHasStarted(activeThread);
   const lockedProvider: ProviderKind | null = hasThreadStarted
-    ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
+    ? (threadProvider ?? sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
   const serverConfig = useServerConfig();
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
@@ -1019,14 +1025,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
-  const selectedModelSelection = useMemo<ModelSelection>(
-    () => ({
-      provider: baseProviderKind(selectedProvider),
+  const selectedModelSelection = useMemo<ModelSelection>(() => {
+    const base = baseProviderKind(selectedProvider);
+    const profileId = providerProfileId(selectedProvider);
+    return {
+      provider: base,
       model: selectedModel,
+      ...(base === "claudeAgent" && profileId ? { profileId } : {}),
       ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
-    }),
-    [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
-  );
+    } as ModelSelection;
+  }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
   const selectedModelForPicker = selectedModel;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
@@ -2999,14 +3007,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
+      const threadCreateBase = baseProviderKind(selectedProvider);
+      const threadCreateProfileId = providerProfileId(selectedProvider);
       const threadCreateModelSelection: ModelSelection = {
-        provider: baseProviderKind(selectedProvider),
+        provider: threadCreateBase,
         model:
           selectedModel ||
           activeProject.defaultModelSelection?.model ||
-          DEFAULT_MODEL_BY_PROVIDER.codex,
+          DEFAULT_MODEL_BY_PROVIDER[threadCreateBase],
+        ...(threadCreateBase === "claudeAgent" && threadCreateProfileId
+          ? { profileId: threadCreateProfileId }
+          : {}),
         ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
-      };
+      } as ModelSelection;
 
       if (isLocalDraftThread) {
         await api.orchestration.dispatchCommand({
@@ -3550,10 +3563,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         providerStatuses,
         model,
       );
+      const base = baseProviderKind(resolvedProvider);
+      const profileId = providerProfileId(resolvedProvider);
       const nextModelSelection: ModelSelection = {
-        provider: baseProviderKind(resolvedProvider),
+        provider: base,
         model: resolvedModel,
-      };
+        ...(base === "claudeAgent" && profileId ? { profileId } : {}),
+      } as ModelSelection;
       setComposerDraftModelSelection(activeThread.id, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();

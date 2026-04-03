@@ -63,6 +63,8 @@ import {
   Stream,
 } from "effect";
 
+import * as os from "node:os";
+import * as path from "node:path";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -2691,15 +2693,24 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const claudeSettings = allSettings.providers.claudeAgent;
 
       // Resolve configDir from the provider kind's profile suffix.
-      // "claudeAgent:zbd" → look up profile "zbd" → use its configDir.
+      // "claudeAgent:zbd" → configDir = ~/.claude-zbd
       const inputProviderProfileId = input.provider?.includes(":")
         ? input.provider.slice(input.provider.indexOf(":") + 1)
         : undefined;
-      const profileConfigDir = inputProviderProfileId
-        ? allSettings.providers.claudeProfiles.find((p) => p.profileId === inputProviderProfileId)
-            ?.configDir
-        : undefined;
-      const configDir = profileConfigDir || claudeSettings.configDir || undefined;
+      let configDir: string | undefined;
+      if (inputProviderProfileId) {
+        // Check explicitly configured profiles first
+        const configuredProfile = allSettings.providers.claudeProfiles.find(
+          (p) => p.profileId === inputProviderProfileId,
+        );
+        configDir = configuredProfile?.configDir;
+        // Fall back to convention: ~/.claude-{profileId}
+        if (!configDir) {
+          configDir = path.join(os.homedir(), `.claude-${inputProviderProfileId}`);
+        }
+      } else {
+        configDir = claudeSettings.configDir || undefined;
+      }
 
       const claudeBinaryPath = claudeSettings.binaryPath;
       const modelSelection =

@@ -1,6 +1,7 @@
 import {
   baseProviderKind,
   type ChatAttachment,
+  modelSelectionProviderKind,
   CommandId,
   EventId,
   type ModelSelection,
@@ -239,10 +240,12 @@ const make = Effect.gen(function* () {
       ? thread.session.providerName
       : undefined;
     const requestedModelSelection = options?.modelSelection;
-    const threadProvider: ProviderKind = currentProvider ?? thread.modelSelection.provider;
+    const threadProvider: ProviderKind =
+      currentProvider ?? modelSelectionProviderKind(thread.modelSelection);
     if (
       requestedModelSelection !== undefined &&
-      requestedModelSelection.provider !== threadProvider
+      baseProviderKind(modelSelectionProviderKind(requestedModelSelection)) !==
+        baseProviderKind(threadProvider)
     ) {
       return yield* new ProviderAdapterRequestError({
         provider: threadProvider,
@@ -268,7 +271,7 @@ const make = Effect.gen(function* () {
     }) =>
       providerService.startSession(threadId, {
         threadId,
-        ...(preferredProvider ? { provider: preferredProvider } : {}),
+        ...(preferredProvider ? { provider: preferredProvider as "codex" | "claudeAgent" } : {}),
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
