@@ -10,6 +10,7 @@ import {
   ProviderTurnStartResult,
   ThreadId,
   TurnId,
+  baseProviderKind,
   ProviderKind,
 } from "@t3tools/contracts";
 import { Effect, Queue, Stream } from "effect";
@@ -256,7 +257,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         const createdAt = nowIso();
 
         const session: ProviderSession = {
-          provider,
+          provider: baseProviderKind(provider),
           status: "ready",
           runtimeMode: input.runtimeMode,
           threadId,
@@ -364,7 +365,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
           yield* emit({
             type: "turn.completed",
             eventId: EventId.makeUnsafe(randomUUID()),
-            provider,
+            provider: baseProviderKind(provider),
             createdAt: nowIso(),
             threadId: state.snapshot.threadId,
             turnId,

@@ -10,6 +10,7 @@
  * @module ProviderServiceLive
  */
 import {
+  baseProviderKind,
   ModelSelection,
   NonNegativeInt,
   ThreadId,
@@ -247,7 +248,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
-        provider: input.binding.provider,
+        provider: baseProviderKind(input.binding.provider),
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),

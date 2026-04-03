@@ -1,12 +1,24 @@
 import type {
   ClaudeSettings,
   ModelCapabilities,
+  ProviderKind,
   ServerProvider,
   ServerProviderModel,
   ServerProviderAuth,
   ServerProviderState,
 } from "@t3tools/contracts";
-import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
+import {
+  Cache,
+  Duration,
+  Effect,
+  Equal,
+  Layer,
+  Option,
+  Result,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
@@ -26,6 +38,8 @@ import { makeManagedServerProvider } from "../makeManagedServerProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { ServerSettingsService } from "../../serverSettings";
 import { ServerSettingsError } from "@t3tools/contracts";
+import type { ServerProviderShape } from "../Services/ServerProvider";
+import type { DiscoveredClaudeProfile } from "../claudeProfileDiscovery";
 
 const PROVIDER = "claudeAgent" as const;
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
@@ -427,34 +441,56 @@ const probeClaudeCapabilities = (binaryPath: string) => {
   );
 };
 
-const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (args: ReadonlyArray<string>) {
+const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
+  args: ReadonlyArray<string>,
+  options?: { configDir?: string },
+) {
   const claudeSettings = yield* Effect.service(ServerSettingsService).pipe(
     Effect.flatMap((service) => service.getSettings),
     Effect.map((settings) => settings.providers.claudeAgent),
   );
+  const configDir = options?.configDir || claudeSettings.configDir;
   const command = ChildProcess.make(claudeSettings.binaryPath, [...args], {
     shell: process.platform === "win32",
+    ...(configDir ? { env: { ...process.env, CLAUDE_CONFIG_DIR: configDir } } : {}),
   });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+export interface ClaudeProviderCheckOptions {
+  readonly providerKind?: ProviderKind;
+  readonly configDir?: string;
+  readonly displayName?: string;
+  readonly settingsOverride?: ClaudeSettings;
+}
+
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
   resolveSubscriptionType?: (binaryPath: string) => Effect.Effect<string | undefined>,
+  checkOptions?: ClaudeProviderCheckOptions,
 ): Effect.fn.Return<
   ServerProvider,
   ServerSettingsError,
   ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
 > {
-  const claudeSettings = yield* Effect.service(ServerSettingsService).pipe(
-    Effect.flatMap((service) => service.getSettings),
-    Effect.map((settings) => settings.providers.claudeAgent),
-  );
+  const providerKind: ProviderKind = checkOptions?.providerKind ?? PROVIDER;
+  const configDir = checkOptions?.configDir;
+  const displayNameProp = checkOptions?.displayName
+    ? { displayName: checkOptions.displayName }
+    : {};
+
+  const claudeSettings =
+    checkOptions?.settingsOverride ??
+    (yield* Effect.service(ServerSettingsService).pipe(
+      Effect.flatMap((service) => service.getSettings),
+      Effect.map((settings) => settings.providers.claudeAgent),
+    ));
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, claudeSettings.customModels);
 
   if (!claudeSettings.enabled) {
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: false,
       checkedAt,
       models,
@@ -468,7 +504,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const versionProbe = yield* runClaudeCommand(["--version"]).pipe(
+  const cmdOpts = configDir ? { configDir } : undefined;
+  const versionProbe = yield* runClaudeCommand(["--version"], cmdOpts).pipe(
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.result,
   );
@@ -476,7 +513,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   if (Result.isFailure(versionProbe)) {
     const error = versionProbe.failure;
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
@@ -494,7 +532,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (Option.isNone(versionProbe.success)) {
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
@@ -514,7 +553,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   if (version.code !== 0) {
     const detail = detailFromResult(version);
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
@@ -532,7 +572,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   // ── Auth check + subscription detection ────────────────────────────
 
-  const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
+  const authProbe = yield* runClaudeCommand(["auth", "status"], cmdOpts).pipe(
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.result,
   );
@@ -562,7 +602,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   if (Result.isFailure(authProbe)) {
     const error = authProbe.failure;
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: claudeSettings.enabled,
       checkedAt,
       models: resolvedModels,
@@ -581,7 +622,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 
   if (Option.isNone(authProbe.success)) {
     return buildServerProvider({
-      provider: PROVIDER,
+      provider: providerKind,
+      ...displayNameProp,
       enabled: claudeSettings.enabled,
       checkedAt,
       models: resolvedModels,
@@ -598,7 +640,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
   const authMetadata = claudeAuthMetadata({ subscriptionType, authMethod });
   return buildServerProvider({
-    provider: PROVIDER,
+    provider: providerKind,
+    ...displayNameProp,
     enabled: claudeSettings.enabled,
     checkedAt,
     models: resolvedModels,
@@ -648,3 +691,51 @@ export const ClaudeProviderLive = Layer.effect(
     });
   }),
 );
+
+/**
+ * Create a `ServerProviderShape` for a discovered Claude profile.
+ * Each profile gets its own health-check cycle with its own `CLAUDE_CONFIG_DIR`.
+ */
+export function makeClaudeProfileProvider(
+  profile: DiscoveredClaudeProfile,
+): Effect.Effect<
+  ServerProviderShape,
+  ServerSettingsError,
+  ServerSettingsService | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+> {
+  return Effect.gen(function* () {
+    const serverSettings = yield* ServerSettingsService;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+    const subscriptionProbeCache = yield* Cache.make({
+      capacity: 1,
+      timeToLive: Duration.minutes(5),
+      lookup: (binaryPath: string) =>
+        probeClaudeCapabilities(binaryPath).pipe(Effect.map((r) => r?.subscriptionType)),
+    });
+
+    const checkProvider = checkClaudeProviderStatus(
+      (binaryPath) => Cache.get(subscriptionProbeCache, binaryPath),
+      {
+        providerKind: profile.providerKind,
+        configDir: profile.configDir,
+        displayName: profile.displayName,
+      },
+    ).pipe(
+      Effect.provideService(ServerSettingsService, serverSettings),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
+
+    return yield* makeManagedServerProvider<ClaudeSettings>({
+      getSettings: serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.providers.claudeAgent),
+        Effect.orDie,
+      ),
+      streamSettings: serverSettings.streamChanges.pipe(
+        Stream.map((settings) => settings.providers.claudeAgent),
+      ),
+      haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      checkProvider,
+    });
+  });
+}

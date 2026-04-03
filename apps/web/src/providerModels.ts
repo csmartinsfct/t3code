@@ -1,4 +1,5 @@
 import {
+  baseProviderKind,
   DEFAULT_MODEL_BY_PROVIDER,
   type ModelCapabilities,
   type ProviderKind,
@@ -64,6 +65,6 @@ export function getDefaultServerModel(
   return (
     models.find((model) => !model.isCustom)?.slug ??
     models[0]?.slug ??
-    DEFAULT_MODEL_BY_PROVIDER[provider]
+    DEFAULT_MODEL_BY_PROVIDER[baseProviderKind(provider)]
   );
 }

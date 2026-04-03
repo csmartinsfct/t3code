@@ -58,6 +58,7 @@ export type ServerProviderModel = typeof ServerProviderModel.Type;
 
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
+  displayName: Schema.optional(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

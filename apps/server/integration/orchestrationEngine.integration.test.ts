@@ -9,6 +9,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  baseProviderKind,
   ProviderKind,
   ThreadId,
   ModelSelection,
@@ -107,8 +108,9 @@ function withRealCodexHarness<A, E>(
 const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
   Effect.gen(function* () {
     const createdAt = nowIso();
-    const provider = harness.adapterHarness?.provider ?? "codex";
-    const defaultModel = DEFAULT_MODEL_BY_PROVIDER[provider];
+    const provider = harness.adapterHarness?.provider ?? ("codex" as ProviderKind);
+    const baseProvider = baseProviderKind(provider);
+    const defaultModel = DEFAULT_MODEL_BY_PROVIDER[baseProvider];
 
     yield* harness.engine.dispatch({
       type: "project.create",
@@ -117,7 +119,7 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
       title: "Integration Project",
       workspaceRoot: harness.workspaceDir,
       defaultModelSelection: {
-        provider,
+        provider: baseProvider,
         model: defaultModel,
       },
       createdAt,
@@ -130,7 +132,7 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
       projectId: PROJECT_ID,
       title: "Integration Thread",
       modelSelection: {
-        provider,
+        provider: baseProvider,
         model: defaultModel,
       },
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,

@@ -1,4 +1,6 @@
 import {
+  baseProviderKind,
+  type BaseProviderKind,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
@@ -24,7 +26,7 @@ export type ComposerProviderStateInput = {
 export type ComposerProviderState = {
   provider: ProviderKind;
   promptEffort: string | null;
-  modelOptionsForDispatch: ProviderModelOptions[ProviderKind] | undefined;
+  modelOptionsForDispatch: ProviderModelOptions[BaseProviderKind] | undefined;
   composerFrameClassName?: string;
   composerSurfaceClassName?: string;
   modelPickerIconClassName?: string;
@@ -36,7 +38,7 @@ type ProviderRegistryEntry = {
     threadId: ThreadId;
     model: string;
     models: ReadonlyArray<ServerProviderModel>;
-    modelOptions: ProviderModelOptions[ProviderKind] | undefined;
+    modelOptions: ProviderModelOptions[BaseProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
   }) => ReactNode;
@@ -44,7 +46,7 @@ type ProviderRegistryEntry = {
     threadId: ThreadId;
     model: string;
     models: ReadonlyArray<ServerProviderModel>;
-    modelOptions: ProviderModelOptions[ProviderKind] | undefined;
+    modelOptions: ProviderModelOptions[BaseProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
   }) => ReactNode;
@@ -55,7 +57,7 @@ function getProviderStateFromCapabilities(
 ): ComposerProviderState {
   const { provider, model, models, prompt, modelOptions } = input;
   const caps = getProviderModelCapabilities(models, model, provider);
-  const providerOptions = modelOptions?.[provider];
+  const providerOptions = modelOptions?.[baseProviderKind(provider)];
 
   // Resolve effort
   const rawEffort = providerOptions
@@ -90,7 +92,7 @@ function getProviderStateFromCapabilities(
   };
 }
 
-const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
+const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> = {
   codex: {
     getState: (input) => getProviderStateFromCapabilities(input),
     renderTraitsMenuContent: ({
@@ -158,7 +160,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
 };
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
-  return composerProviderRegistry[input.provider].getState(input);
+  return composerProviderRegistry[baseProviderKind(input.provider)].getState(input);
 }
 
 export function renderProviderTraitsMenuContent(input: {
@@ -166,11 +168,11 @@ export function renderProviderTraitsMenuContent(input: {
   threadId: ThreadId;
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
-  modelOptions: ProviderModelOptions[ProviderKind] | undefined;
+  modelOptions: ProviderModelOptions[BaseProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
 }): ReactNode {
-  return composerProviderRegistry[input.provider].renderTraitsMenuContent({
+  return composerProviderRegistry[baseProviderKind(input.provider)].renderTraitsMenuContent({
     threadId: input.threadId,
     model: input.model,
     models: input.models,
@@ -185,11 +187,11 @@ export function renderProviderTraitsPicker(input: {
   threadId: ThreadId;
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
-  modelOptions: ProviderModelOptions[ProviderKind] | undefined;
+  modelOptions: ProviderModelOptions[BaseProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
 }): ReactNode {
-  return composerProviderRegistry[input.provider].renderTraitsPicker({
+  return composerProviderRegistry[baseProviderKind(input.provider)].renderTraitsPicker({
     threadId: input.threadId,
     model: input.model,
     models: input.models,

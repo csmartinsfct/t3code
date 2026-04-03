@@ -1,4 +1,5 @@
 import type {
+  ProviderKind,
   ServerProvider,
   ServerProviderAuth,
   ServerProviderModel,
@@ -125,14 +126,16 @@ export function providerModelsFromSettings(
 }
 
 export function buildServerProvider(input: {
-  provider: ServerProvider["provider"];
+  provider: ProviderKind;
+  displayName?: string;
   enabled: boolean;
   checkedAt: string;
   models: ReadonlyArray<ServerProviderModel>;
   probe: ProviderProbeResult;
 }): ServerProvider {
   return {
-    provider: input.provider,
+    provider: input.provider as ServerProvider["provider"],
+    ...(input.displayName ? { displayName: input.displayName } : {}),
     enabled: input.enabled,
     installed: input.probe.installed,
     version: input.probe.version,

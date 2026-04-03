@@ -91,6 +91,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/usr/local/bin/claude",
+        configDir: "",
         customModels: ["claude-custom"],
       });
       assert.deepEqual(next.textGenerationModelSelection, {
@@ -166,6 +167,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/claude",
+        configDir: "",
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),

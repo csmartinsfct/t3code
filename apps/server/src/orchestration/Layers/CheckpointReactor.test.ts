@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+import { baseProviderKind } from "@t3tools/contracts";
 import type { ProviderKind, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
 import {
   CommandId,
@@ -247,7 +248,7 @@ describe("CheckpointReactor", () => {
       cwd,
       options?.hasSession ?? true,
       options?.providerSessionCwd ?? cwd,
-      options?.providerName ?? "codex",
+      baseProviderKind(options?.providerName ?? "codex"),
     );
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),

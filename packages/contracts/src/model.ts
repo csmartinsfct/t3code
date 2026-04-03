@@ -1,6 +1,11 @@
 import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
-import type { ProviderKind } from "./orchestration";
+import {
+  baseProviderKind,
+  providerProfileId,
+  type BaseProviderKind,
+  type ProviderKind,
+} from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
@@ -51,7 +56,7 @@ export const ModelCapabilities = Schema.Struct({
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
-export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
+export const DEFAULT_MODEL_BY_PROVIDER: Record<BaseProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
 };
@@ -59,12 +64,12 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 
 /** Per-provider text generation model defaults. */
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<BaseProviderKind, string> = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
 };
 
-export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
+export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<string, string>> = {
   codex: {
     "5.4": "gpt-5.4",
     "5.3": "gpt-5.3-codex",
@@ -90,7 +95,16 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 
 // ── Provider display names ────────────────────────────────────────────
 
-export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
+export const PROVIDER_DISPLAY_NAMES: Record<BaseProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
 };
+
+/** Resolve display name for any ProviderKind, including profiled ones like "claudeAgent:zbd". */
+export function providerDisplayName(kind: ProviderKind, overrideDisplayName?: string): string {
+  if (overrideDisplayName) return overrideDisplayName;
+  const base = baseProviderKind(kind);
+  const profile = providerProfileId(kind);
+  if (!profile) return PROVIDER_DISPLAY_NAMES[base];
+  return `${PROVIDER_DISPLAY_NAMES[base]} (${profile})`;
+}

@@ -1,8 +1,18 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  baseProviderKind,
+  type BaseProviderKind,
+  type ProviderKind,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
+import {
+  type ProviderPickerKind,
+  type ProviderOption,
+  PROVIDER_OPTIONS,
+  buildProviderOptions,
+} from "../../session-logic";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import {
@@ -22,7 +32,7 @@ import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Ico
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
 
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
+function isAvailableProviderOption(option: ProviderOption): option is {
   value: ProviderKind;
   label: string;
   available: true;
@@ -30,12 +40,27 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   return option.available;
 }
 
-const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
+const PROVIDER_ICON_BY_BASE: Record<BaseProviderKind | "cursor", Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
   cursor: CursorIcon,
 };
 
+function getProviderIcon(kind: ProviderPickerKind): Icon {
+  const base = baseProviderKind(kind as ProviderKind);
+  return PROVIDER_ICON_BY_BASE[base as BaseProviderKind | "cursor"] ?? ClaudeAI;
+}
+
+export function getAvailableProviderOptions(
+  serverProviders?: ReadonlyArray<ServerProvider>,
+): Array<ProviderOption & { available: true; value: ProviderKind }> {
+  const options = serverProviders?.length
+    ? buildProviderOptions(serverProviders)
+    : PROVIDER_OPTIONS;
+  return options.filter(isAvailableProviderOption);
+}
+
+/** @deprecated Use getAvailableProviderOptions with server providers instead */
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
 const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
@@ -47,7 +72,9 @@ function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
   fallbackClassName: string,
 ): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+  return provider === "claudeAgent" || provider.startsWith("claudeAgent:")
+    ? "text-[#d97757]"
+    : fallbackClassName;
 }
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -55,7 +82,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  modelOptionsByProvider: Record<BaseProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -65,17 +92,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
-  const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
+  const selectedProviderOptions = props.modelOptionsByProvider[baseProviderKind(activeProvider)];
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
-  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
+  const ProviderIcon = getProviderIcon(activeProvider);
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
     if (!value) return;
     const resolvedModel = resolveSelectableModel(
       provider,
       value,
-      props.modelOptionsByProvider[provider],
+      props.modelOptionsByProvider[baseProviderKind(provider)],
     );
     if (!resolvedModel) return;
     props.onProviderModelChange(provider, resolvedModel);
@@ -133,21 +160,23 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               value={props.model}
               onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
             >
-              {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
-                <MenuRadioItem
-                  key={`${props.lockedProvider}:${modelOption.slug}`}
-                  value={modelOption.slug}
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {modelOption.name}
-                </MenuRadioItem>
-              ))}
+              {props.modelOptionsByProvider[baseProviderKind(props.lockedProvider)].map(
+                (modelOption) => (
+                  <MenuRadioItem
+                    key={`${props.lockedProvider}:${modelOption.slug}`}
+                    value={modelOption.slug}
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    {modelOption.name}
+                  </MenuRadioItem>
+                ),
+              )}
             </MenuRadioGroup>
           </MenuGroup>
         ) : (
           <>
-            {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
-              const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
+            {getAvailableProviderOptions(props.providers).map((option) => {
+              const OptionIcon = getProviderIcon(option.value);
               const liveProvider = props.providers
                 ? getProviderSnapshot(props.providers, option.value)
                 : undefined;
@@ -191,15 +220,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                         value={props.provider === option.value ? props.model : ""}
                         onValueChange={(value) => handleModelChange(option.value, value)}
                       >
-                        {props.modelOptionsByProvider[option.value].map((modelOption) => (
-                          <MenuRadioItem
-                            key={`${option.value}:${modelOption.slug}`}
-                            value={modelOption.slug}
-                            onClick={() => setIsMenuOpen(false)}
-                          >
-                            {modelOption.name}
-                          </MenuRadioItem>
-                        ))}
+                        {props.modelOptionsByProvider[baseProviderKind(option.value)].map(
+                          (modelOption) => (
+                            <MenuRadioItem
+                              key={`${option.value}:${modelOption.slug}`}
+                              value={modelOption.slug}
+                              onClick={() => setIsMenuOpen(false)}
+                            >
+                              {modelOption.name}
+                            </MenuRadioItem>
+                          ),
+                        )}
                       </MenuRadioGroup>
                     </MenuGroup>
                   </MenuSubPopup>
@@ -208,7 +239,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             })}
             {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
             {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
-              const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
+              const OptionIcon = getProviderIcon(option.value);
               return (
                 <MenuItem key={option.value} disabled>
                   <OptionIcon

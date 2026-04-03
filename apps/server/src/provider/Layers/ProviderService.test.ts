@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  baseProviderKind,
   EventId,
   type ProviderKind,
   ProviderSessionStartInput,
@@ -73,7 +74,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     Effect.sync(() => {
       const now = new Date().toISOString();
       const session: ProviderSession = {
-        provider,
+        provider: baseProviderKind(provider),
         status: "ready",
         runtimeMode: input.runtimeMode,
         threadId: input.threadId,

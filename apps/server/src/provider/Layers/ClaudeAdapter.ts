@@ -2668,8 +2668,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
         runPromise(canUseToolEffect(toolName, toolInput, callbackOptions));
 
-      const claudeSettings = yield* serverSettingsService.getSettings.pipe(
-        Effect.map((settings) => settings.providers.claudeAgent),
+      const allSettings = yield* serverSettingsService.getSettings.pipe(
         Effect.mapError(
           (error) =>
             new ProviderAdapterProcessError({
@@ -2680,6 +2679,19 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             }),
         ),
       );
+      const claudeSettings = allSettings.providers.claudeAgent;
+
+      // Resolve configDir: prefer profileId from modelSelection, then check
+      // discovered profiles, finally fall back to default claudeSettings.
+      const profileId =
+        input.modelSelection?.provider === "claudeAgent"
+          ? (input.modelSelection as { profileId?: string }).profileId
+          : undefined;
+      const profileConfigDir = profileId
+        ? allSettings.providers.claudeProfiles.find((p) => p.profileId === profileId)?.configDir
+        : undefined;
+      const configDir = profileConfigDir || claudeSettings.configDir || undefined;
+
       const claudeBinaryPath = claudeSettings.binaryPath;
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
@@ -2714,7 +2726,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: process.env,
+        env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
       };
 

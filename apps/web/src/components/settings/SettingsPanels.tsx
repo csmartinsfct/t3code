@@ -12,6 +12,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  baseProviderKind,
+  type BaseProviderKind,
   PROVIDER_DISPLAY_NAMES,
   type ProviderKind,
   type ServerProvider,
@@ -87,13 +89,14 @@ const TIMESTAMP_FORMAT_LABELS = {
 } as const;
 
 type InstallProviderSettings = {
-  provider: ProviderKind;
+  provider: BaseProviderKind;
   title: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
   homePathKey?: "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
+  _profileProviderKind?: ProviderKind;
 };
 
 const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
@@ -643,7 +646,7 @@ export function GeneralSettingsPanel() {
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
 
   const addCustomModel = useCallback(
-    (provider: ProviderKind) => {
+    (provider: BaseProviderKind) => {
       const customModelInput = customModelInputByProvider[provider];
       const customModels = settings.providers[provider].customModels;
       const normalized = normalizeModelSlug(customModelInput, provider);
@@ -713,7 +716,7 @@ export function GeneralSettingsPanel() {
   );
 
   const removeCustomModel = useCallback(
-    (provider: ProviderKind, slug: string) => {
+    (provider: BaseProviderKind, slug: string) => {
       updateSettings({
         providers: {
           ...settings.providers,
@@ -733,9 +736,31 @@ export function GeneralSettingsPanel() {
     [settings, updateSettings],
   );
 
-  const providerCards = PROVIDER_SETTINGS.map((providerSettings) => {
+  // Build provider cards from static settings + discovered profiles
+  const allProviderSettings = useMemo(() => {
+    const base = [...PROVIDER_SETTINGS];
+    // Add entries for discovered Claude profiles from server providers
+    for (const sp of serverProviders) {
+      const kind = sp.provider as string;
+      if (kind === "codex" || kind === "claudeAgent") continue;
+      if (!kind.startsWith("claudeAgent:")) continue;
+      base.push({
+        provider: "claudeAgent" as BaseProviderKind,
+        title: sp.displayName ?? sp.provider,
+        binaryPlaceholder: "Claude binary path",
+        binaryDescription: "Path to the Claude binary",
+        _profileProviderKind: sp.provider as ProviderKind,
+      });
+    }
+    return base;
+  }, [serverProviders]);
+
+  const providerCards = allProviderSettings.map((providerSettings) => {
+    const effectiveProviderKind =
+      (providerSettings as { _profileProviderKind?: ProviderKind })._profileProviderKind ??
+      providerSettings.provider;
     const liveProvider = serverProviders.find(
-      (candidate) => candidate.provider === providerSettings.provider,
+      (candidate) => candidate.provider === effectiveProviderKind,
     );
     const providerConfig = settings.providers[providerSettings.provider];
     const defaultProviderConfig = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
@@ -751,7 +776,7 @@ export function GeneralSettingsPanel() {
       }));
 
     return {
-      provider: providerSettings.provider,
+      provider: effectiveProviderKind as BaseProviderKind,
       title: providerSettings.title,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
@@ -1029,7 +1054,10 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: { provider, model },
+                        textGenerationModelSelection: {
+                          provider: baseProviderKind(provider),
+                          model,
+                        },
                       },
                       serverProviders,
                     ),

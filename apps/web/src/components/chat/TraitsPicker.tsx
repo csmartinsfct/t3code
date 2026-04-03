@@ -1,4 +1,5 @@
 import {
+  type BaseProviderKind,
   type ClaudeModelOptions,
   type CodexModelOptions,
   type ProviderKind,
@@ -32,7 +33,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 
-type ProviderOptions = ProviderModelOptions[ProviderKind];
+type ProviderOptions = ProviderModelOptions[BaseProviderKind];
 type TraitsPersistence =
   | {
       threadId: ThreadId;

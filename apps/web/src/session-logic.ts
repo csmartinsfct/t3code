@@ -1,10 +1,12 @@
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
+  providerDisplayName,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   type ProviderKind,
+  type ServerProvider,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -22,15 +24,36 @@ import type {
 
 export type ProviderPickerKind = ProviderKind | "cursor";
 
-export const PROVIDER_OPTIONS: Array<{
+export type ProviderOption = {
   value: ProviderPickerKind;
   label: string;
   available: boolean;
-}> = [
+};
+
+/** Static fallback used when server providers aren't available yet. */
+export const PROVIDER_OPTIONS: Array<ProviderOption> = [
   { value: "codex", label: "Codex", available: true },
   { value: "claudeAgent", label: "Claude", available: true },
   { value: "cursor", label: "Cursor", available: false },
 ];
+
+/**
+ * Build the provider picker options from server-provided snapshots.
+ * Includes all server-registered providers (including Claude profiles)
+ * plus the static "coming soon" entries.
+ */
+export function buildProviderOptions(
+  serverProviders: ReadonlyArray<ServerProvider>,
+): Array<ProviderOption> {
+  const options: ProviderOption[] = serverProviders.map((p) => ({
+    value: p.provider as ProviderPickerKind,
+    label: p.displayName ?? providerDisplayName(p.provider),
+    available: true,
+  }));
+  // Append coming-soon entries
+  options.push({ value: "cursor", label: "Cursor", available: false });
+  return options;
+}
 
 export interface WorkLogEntry {
   id: string;

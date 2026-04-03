@@ -1,4 +1,5 @@
 import {
+  baseProviderKind,
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeCodeEffort,
@@ -134,7 +135,10 @@ export function normalizeModelSlug(
     return null;
   }
 
-  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[baseProviderKind(provider)] as Record<
+    string,
+    string
+  >;
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
     : undefined;
@@ -177,7 +181,7 @@ export function resolveSelectableModel(
 export function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
-    return DEFAULT_MODEL_BY_PROVIDER[provider];
+    return DEFAULT_MODEL_BY_PROVIDER[baseProviderKind(provider)];
   }
   return normalized;
 }

@@ -1,4 +1,6 @@
 import {
+  baseProviderKind,
+  type BaseProviderKind,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ModelSelection,
   type ProviderKind,
@@ -17,7 +19,7 @@ const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 
 export type ProviderCustomModelConfig = {
-  provider: ProviderKind;
+  provider: BaseProviderKind;
   title: string;
   description: string;
   placeholder: string;
@@ -30,7 +32,7 @@ export interface AppModelOption {
   isCustom: boolean;
 }
 
-const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConfig> = {
+const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModelConfig> = {
   codex: {
     provider: "codex",
     title: "Codex",
@@ -99,7 +101,7 @@ export function getAppModelOptions(
       .map((model) => model.slug),
   );
 
-  const customModels = settings.providers[provider].customModels;
+  const customModels = settings.providers[baseProviderKind(provider)].customModels;
   for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs, provider)) {
     if (seen.has(slug)) {
       continue;
@@ -151,7 +153,7 @@ export function getCustomModelOptionsByProvider(
   providers: ReadonlyArray<ServerProvider>,
   selectedProvider?: ProviderKind | null,
   selectedModel?: string | null,
-): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+): Record<BaseProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions(
       settings,
@@ -193,7 +195,7 @@ export function resolveAppModelSelectionState(
   });
 
   return {
-    provider,
+    provider: baseProviderKind(provider),
     model,
     ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
   };
