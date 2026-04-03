@@ -1,4 +1,6 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useRef } from "react";
+import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
+import { Schema } from "effect";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -71,6 +73,47 @@ const PlanSidebar = memo(function PlanSidebar({
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
+  // ── Resizable width ────────────────────────────────────────────────────────
+  const PLAN_SIDEBAR_MIN_WIDTH = 260;
+  const PLAN_SIDEBAR_MAX_WIDTH = 600;
+  const PLAN_SIDEBAR_STORAGE_KEY = "chat_plan_sidebar_width";
+  const [sidebarWidth, setSidebarWidth] = useState(
+    () => getLocalStorageItem(PLAN_SIDEBAR_STORAGE_KEY, Schema.Number) ?? 340,
+  );
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDraggingRef.current = true;
+      startXRef.current = e.clientX;
+      startWidthRef.current = sidebarWidth;
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!isDraggingRef.current) return;
+        // Dragging left (negative delta) widens the panel
+        const delta = startXRef.current - ev.clientX;
+        const next = Math.max(
+          PLAN_SIDEBAR_MIN_WIDTH,
+          Math.min(PLAN_SIDEBAR_MAX_WIDTH, startWidthRef.current + delta),
+        );
+        setSidebarWidth(next);
+      };
+      const onMouseUp = () => {
+        isDraggingRef.current = false;
+        setSidebarWidth((w) => {
+          setLocalStorageItem(PLAN_SIDEBAR_STORAGE_KEY, w, Schema.Number);
+          return w;
+        });
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [sidebarWidth],
+  );
+
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
   const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
@@ -118,7 +161,16 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [planMarkdown, workspaceRoot]);
 
   return (
-    <div className="flex h-full w-[340px] shrink-0 flex-col border-l border-border/70 bg-card/50">
+    <div
+      className="relative flex h-full shrink-0 flex-col border-l border-border/70 bg-card/50"
+      style={{ width: sidebarWidth }}
+    >
+      {/* Resize handle — left edge */}
+      <div
+        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize transition-colors hover:bg-primary/40 active:bg-primary/60"
+        onMouseDown={handleResizeMouseDown}
+        aria-hidden
+      />
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
         <div className="flex items-center gap-2">
