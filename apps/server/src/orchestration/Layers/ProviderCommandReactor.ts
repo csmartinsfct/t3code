@@ -1,4 +1,5 @@
 import {
+  asProviderInput,
   baseProviderKind,
   type ChatAttachment,
   modelSelectionProviderKind,
@@ -271,7 +272,7 @@ const make = Effect.gen(function* () {
     }) =>
       providerService.startSession(threadId, {
         threadId,
-        ...(preferredProvider ? { provider: preferredProvider as "codex" | "claudeAgent" } : {}),
+        ...(preferredProvider ? { provider: asProviderInput(preferredProvider) } : {}),
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
@@ -300,7 +301,8 @@ const make = Effect.gen(function* () {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const providerChanged =
         requestedModelSelection !== undefined &&
-        requestedModelSelection.provider !== currentProvider;
+        currentProvider !== undefined &&
+        baseProviderKind(requestedModelSelection.provider) !== baseProviderKind(currentProvider);
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
       const sessionModelSwitch =
         currentProvider === undefined

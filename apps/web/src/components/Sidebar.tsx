@@ -11,6 +11,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { Spinner } from "./ui/spinner";
 import { autoAnimate } from "@formkit/auto-animate";
 import {
   useCallback,
@@ -667,6 +668,7 @@ function SortableProjectItem({
 
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
+  const bootstrapComplete = useStore((store) => store.bootstrapComplete);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
   const threadIdsByProjectId = useStore((store) => store.threadIdsByProjectId);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
@@ -2163,8 +2165,8 @@ export default function Sidebar() {
               )}
 
               {projects.length === 0 && !shouldShowProjectPathEntry && (
-                <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-                  No projects yet
+                <div className="flex items-center justify-center px-2 pt-4 text-xs text-muted-foreground/60">
+                  {bootstrapComplete ? "No projects yet" : <Spinner className="size-3.5" />}
                 </div>
               )}
             </SidebarGroup>

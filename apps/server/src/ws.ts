@@ -1,11 +1,21 @@
-import { Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  PubSub,
+  Queue,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import {
   type GitActionProgressEvent,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
-  OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectListDirectoryError,
@@ -13,9 +23,12 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ResolveMcpServersError,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
+  baseProviderKind,
+  providerProfileId,
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -29,7 +42,7 @@ import { Keybindings } from "./keybindings";
 import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+
 import {
   observeRpcEffect,
   observeRpcStream,
@@ -43,10 +56,13 @@ import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
+import { resolveClaudeMcpServerNames, resolveCodexMcpServerNames } from "./mcpConfigReader";
+import * as nodeFs from "node:fs";
+import * as os from "node:os";
+import * as nodePath from "node:path";
 
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
-    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
@@ -86,21 +102,73 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       };
     });
 
+    // -----------------------------------------------------------------------
+    // MCP config file watchers
+    // -----------------------------------------------------------------------
+    const fs = yield* FileSystem.FileSystem;
+    const mcpConfigChangedPubSub = yield* PubSub.unbounded<void>();
+
+    const watchDirForFile = (dir: string, targetFile: string) =>
+      Effect.gen(function* () {
+        const dirExists = yield* fs.exists(dir);
+        if (!dirExists) return;
+
+        yield* fs
+          .watch(dir)
+          .pipe(
+            Stream.filter(
+              (event) =>
+                event.path === targetFile ||
+                event.path === nodePath.join(dir, targetFile) ||
+                nodePath.basename(event.path) === targetFile,
+            ),
+            Stream.debounce(Duration.millis(150)),
+            Stream.runForEach(() => PubSub.publish(mcpConfigChangedPubSub, undefined)),
+          )
+          .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped, Effect.asVoid);
+      }).pipe(Effect.ignoreCause({ log: true }));
+
+    // Watch ~/.claude/ for .claude.json
+    const home = os.homedir();
+    yield* watchDirForFile(nodePath.join(home, ".claude"), ".claude.json");
+
+    // Watch ~/.codex/ for config.toml
+    const currentSettings = yield* serverSettings.getSettings;
+    const codexHome =
+      currentSettings.providers.codex.homePath ||
+      process.env.CODEX_HOME ||
+      nodePath.join(home, ".codex");
+    yield* watchDirForFile(codexHome, "config.toml");
+
+    // Watch each ~/.claude-{profile}/ dir for .claude.json
+    try {
+      for (const entry of nodeFs.readdirSync(home)) {
+        if (!entry.startsWith(".claude-")) continue;
+        const profileDir = nodePath.join(home, entry);
+        try {
+          if (nodeFs.statSync(profileDir).isDirectory()) {
+            yield* watchDirForFile(profileDir, ".claude.json");
+          }
+        } catch {
+          // skip inaccessible entries
+        }
+      }
+    } catch {
+      // skip if home dir is unreadable
+    }
+
+    const mcpConfigChangedStream = Stream.fromPubSub(mcpConfigChangedPubSub).pipe(
+      Stream.map(() => ({
+        version: 1 as const,
+        type: "mcpConfigChanged" as const,
+      })),
+    );
+
     return WsRpcGroup.of({
       [ORCHESTRATION_WS_METHODS.getSnapshot]: (_input) =>
-        observeRpcEffect(
-          ORCHESTRATION_WS_METHODS.getSnapshot,
-          projectionSnapshotQuery.getSnapshot().pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestrationGetSnapshotError({
-                  message: "Failed to load orchestration snapshot",
-                  cause,
-                }),
-            ),
-          ),
-          { "rpc.aggregate": "orchestration" },
-        ),
+        observeRpcEffect(ORCHESTRATION_WS_METHODS.getSnapshot, orchestrationEngine.getReadModel(), {
+          "rpc.aggregate": "orchestration",
+        }),
       [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -265,6 +333,50 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.serverUpdateSettings, serverSettings.updateSettings(patch), {
           "rpc.aggregate": "server",
         }),
+      [WS_METHODS.serverResolveMcpServers]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverResolveMcpServers,
+          Effect.gen(function* () {
+            const base = baseProviderKind(input.provider);
+            if (base === "codex") {
+              const settings = yield* serverSettings.getSettings;
+              const codexHome =
+                settings.providers.codex.homePath ||
+                process.env.CODEX_HOME ||
+                nodePath.join(os.homedir(), ".codex");
+              const serverNames = yield* resolveCodexMcpServerNames(codexHome);
+              return { serverNames };
+            }
+            // Claude (default or profile)
+            const profileId = providerProfileId(input.provider);
+            const settings = yield* serverSettings.getSettings;
+            let configDir: string | undefined;
+            if (profileId) {
+              const configured = settings.providers.claudeProfiles.find(
+                (p) => p.profileId === profileId,
+              );
+              configDir = configured?.configDir;
+              if (!configDir) {
+                configDir = nodePath.join(os.homedir(), `.claude-${profileId}`);
+              }
+            } else {
+              configDir = settings.providers.claudeAgent.configDir || undefined;
+            }
+            if (!configDir) {
+              configDir = nodePath.join(os.homedir(), ".claude");
+            }
+            const serverNames = yield* resolveClaudeMcpServerNames(configDir, input.cwd);
+            return { serverNames };
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResolveMcpServersError({
+                  message: `Failed to resolve MCP servers: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         observeRpcEffect(
           WS_METHODS.projectsSearchEntries,
@@ -457,7 +569,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 type: "snapshot" as const,
                 config: yield* loadServerConfig,
               }),
-              Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
+              Stream.merge(
+                mcpConfigChangedStream,
+                Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
+              ),
             );
           }),
           { "rpc.aggregate": "server" },

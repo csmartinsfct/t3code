@@ -90,6 +90,7 @@ export function createWsNativeApi(): NativeApi {
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
+      resolveMcpServers: rpcClient.server.resolveMcpServers,
     },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,

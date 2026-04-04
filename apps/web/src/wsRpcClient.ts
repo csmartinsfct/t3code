@@ -84,6 +84,7 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly resolveMcpServers: RpcUnaryMethod<typeof WS_METHODS.serverResolveMcpServers>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
   };
@@ -185,6 +186,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      resolveMcpServers: (input) =>
+        transport.request((client) => client[WS_METHODS.serverResolveMcpServers](input)),
       subscribeConfig: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener),
       subscribeLifecycle: (listener) =>

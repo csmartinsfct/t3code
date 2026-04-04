@@ -29,12 +29,25 @@ export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
 
 /**
  * Runtime Schema that validates profiled provider kinds like "claudeAgent:zbd".
- * Cast to the same schema shape as BaseProviderKind so it works in struct fields.
+ *
+ * IMPORTANT: The runtime regex accepts profiled variants ("claudeAgent:zbd"),
+ * but the TS type is narrowed to base kinds for struct-field compatibility.
+ * Use {@link asProviderInput} at call sites that need to pass profiled kinds
+ * through schema-validated boundaries.
  */
 export const ProviderKind = Schema.String.check(
   Schema.isPattern(/^(codex|claudeAgent)(:[a-zA-Z0-9_-]+)?$/),
 ) as unknown as typeof BaseProviderKind;
 export type ProviderKind = BaseProviderKind | `codex:${string}` | `claudeAgent:${string}`;
+
+/**
+ * Safely narrow a full ProviderKind (possibly profiled) for use as a
+ * schema-validated provider input field. The runtime schema accepts profiled
+ * kinds; this is a compile-time bridge to satisfy the narrow TS type.
+ */
+export function asProviderInput(kind: ProviderKind): BaseProviderKind {
+  return kind as BaseProviderKind;
+}
 
 /** Extract the base provider kind from a (possibly profiled) ProviderKind. */
 export function baseProviderKind(kind: ProviderKind): BaseProviderKind {

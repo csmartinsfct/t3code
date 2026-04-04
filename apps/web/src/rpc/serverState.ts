@@ -11,7 +11,7 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 
 import type { WsRpcClient } from "../wsRpcClient";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
@@ -111,6 +111,13 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
       applySettingsUpdated(event.payload.settings);
       return;
     }
+    case "mcpConfigChanged": {
+      mcpConfigRevision++;
+      for (const listener of mcpConfigRevisionListeners) {
+        listener();
+      }
+      return;
+    }
   }
 }
 
@@ -205,6 +212,29 @@ export function resetServerStateForTests() {
 }
 
 let nextServerConfigUpdatedNotificationId = 1;
+
+// ---------------------------------------------------------------------------
+// MCP config revision counter — incremented when the server signals that MCP
+// config files changed on disk.  The `useMcpConfigRevision` hook lets
+// components re-fetch MCP data reactively.
+// ---------------------------------------------------------------------------
+let mcpConfigRevision = 0;
+const mcpConfigRevisionListeners = new Set<() => void>();
+
+function subscribeMcpConfigRevision(listener: () => void): () => void {
+  mcpConfigRevisionListeners.add(listener);
+  return () => {
+    mcpConfigRevisionListeners.delete(listener);
+  };
+}
+
+function getMcpConfigRevisionSnapshot(): number {
+  return mcpConfigRevision;
+}
+
+export function useMcpConfigRevision(): number {
+  return useSyncExternalStore(subscribeMcpConfigRevision, getMcpConfigRevisionSnapshot);
+}
 
 function resolveServerConfig(config: ServerConfig): void {
   appAtomRegistry.set(serverConfigAtom, config);

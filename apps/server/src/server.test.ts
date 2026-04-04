@@ -43,7 +43,7 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
-import { PersistenceSqlError } from "./persistence/Errors.ts";
+
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -1136,10 +1136,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       yield* buildAppUnderTest({
         layers: {
-          projectionSnapshotQuery: {
-            getSnapshot: () => Effect.succeed(snapshot),
-          },
           orchestrationEngine: {
+            getReadModel: () => Effect.succeed(snapshot),
             dispatch: () => Effect.succeed({ sequence: 7 }),
             readEvents: () => Stream.empty,
           },
@@ -1305,35 +1303,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           [2, 3, 4],
         );
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("routes websocket rpc orchestration.getSnapshot errors", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          projectionSnapshotQuery: {
-            getSnapshot: () =>
-              Effect.fail(
-                new PersistenceSqlError({
-                  operation: "ProjectionSnapshotQuery.getSnapshot",
-                  detail: "projection unavailable",
-                }),
-              ),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})).pipe(
-          Effect.result,
-        ),
-      );
-
-      assertTrue(result._tag === "Failure");
-      assertTrue(result.failure._tag === "OrchestrationGetSnapshotError");
-      assertInclude(result.failure.message, "Failed to load orchestration snapshot");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc terminal methods", () =>

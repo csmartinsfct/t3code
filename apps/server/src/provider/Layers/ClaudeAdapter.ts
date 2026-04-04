@@ -20,7 +20,9 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
+  asProviderInput,
   baseProviderKind,
+  makeProviderKind,
   type CanonicalItemType,
   type ClaudeModelSelection,
   type CanonicalRequestType,
@@ -2694,19 +2696,27 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       // Resolve configDir from the provider kind's profile suffix.
       // "claudeAgent:zbd" → configDir = ~/.claude-zbd
+      // Also check modelSelection.profileId as a fallback — older persisted
+      // sessions may have lost the provider suffix but still carry the
+      // profileId inside their modelSelection.
       const inputProviderProfileId = input.provider?.includes(":")
         ? input.provider.slice(input.provider.indexOf(":") + 1)
         : undefined;
+      const modelSelectionProfileId =
+        input.modelSelection?.provider === "claudeAgent"
+          ? (input.modelSelection as { profileId?: string }).profileId
+          : undefined;
+      const effectiveProfileId = inputProviderProfileId ?? modelSelectionProfileId;
       let configDir: string | undefined;
-      if (inputProviderProfileId) {
+      if (effectiveProfileId) {
         // Check explicitly configured profiles first
         const configuredProfile = allSettings.providers.claudeProfiles.find(
-          (p) => p.profileId === inputProviderProfileId,
+          (p) => p.profileId === effectiveProfileId,
         );
         configDir = configuredProfile?.configDir;
         // Fall back to convention: ~/.claude-{profileId}
         if (!configDir) {
-          configDir = path.join(os.homedir(), `.claude-${inputProviderProfileId}`);
+          configDir = path.join(os.homedir(), `.claude-${effectiveProfileId}`);
         }
       } else {
         configDir = claudeSettings.configDir || undefined;
@@ -2768,9 +2778,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           }),
       });
 
+      // Ensure the session carries the full profiled provider kind.
+      // If input.provider already has the profile suffix ("claudeAgent:zbd"), use it.
+      // Otherwise, recover the profile from modelSelection.profileId — this
+      // self-heals sessions persisted before the profile-suffix fix.
+      const sessionProvider = effectiveProfileId
+        ? makeProviderKind(PROVIDER, effectiveProfileId)
+        : (input.provider ?? PROVIDER);
+
       const session: ProviderSession = {
         threadId,
-        provider: PROVIDER,
+        provider: asProviderInput(sessionProvider),
         status: "ready",
         runtimeMode: input.runtimeMode,
         ...(input.cwd ? { cwd: input.cwd } : {}),

@@ -158,11 +158,19 @@ export const ServerConfigStreamSettingsUpdatedEvent = Schema.Struct({
 export type ServerConfigStreamSettingsUpdatedEvent =
   typeof ServerConfigStreamSettingsUpdatedEvent.Type;
 
+export const ServerConfigStreamMcpConfigChangedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("mcpConfigChanged"),
+});
+export type ServerConfigStreamMcpConfigChangedEvent =
+  typeof ServerConfigStreamMcpConfigChangedEvent.Type;
+
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
   ServerConfigStreamProviderStatusesEvent,
   ServerConfigStreamSettingsUpdatedEvent,
+  ServerConfigStreamMcpConfigChangedEvent,
 ]);
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 
@@ -205,3 +213,23 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+// ---------------------------------------------------------------------------
+// MCP server resolution
+// ---------------------------------------------------------------------------
+
+export const ResolveMcpServersInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: Schema.optional(TrimmedNonEmptyString),
+});
+export type ResolveMcpServersInput = typeof ResolveMcpServersInput.Type;
+
+export const ResolveMcpServersResult = Schema.Struct({
+  serverNames: Schema.Array(TrimmedNonEmptyString),
+});
+export type ResolveMcpServersResult = typeof ResolveMcpServersResult.Type;
+
+export class ResolveMcpServersError extends Schema.TaggedErrorClass<ResolveMcpServersError>()(
+  "ResolveMcpServersError",
+  { message: TrimmedNonEmptyString },
+) {}

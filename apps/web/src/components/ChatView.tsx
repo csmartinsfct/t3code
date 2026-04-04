@@ -109,8 +109,6 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   ListTodoIcon,
-  LockIcon,
-  LockOpenIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -136,6 +134,7 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "../providerModels";
+import { useMcpServerNames } from "../hooks/useMcpServerNames";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -175,6 +174,7 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
+import { McpServersPicker } from "./chat/McpServersPicker";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
@@ -630,7 +630,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
@@ -1033,6 +1032,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const mcpServerNames = useMcpServerNames(selectedProvider, activeProject?.cwd);
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
     providers: providerStatuses,
@@ -2044,25 +2044,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeProject, persistProjectScripts],
   );
 
-  const handleRuntimeModeChange = useCallback(
-    (mode: RuntimeMode) => {
-      if (mode === runtimeMode) return;
-      setComposerDraftRuntimeMode(threadId, mode);
-      if (isLocalDraftThread) {
-        setDraftThreadContext(threadId, { runtimeMode: mode });
-      }
-      scheduleComposerFocus();
-    },
-    [
-      isLocalDraftThread,
-      runtimeMode,
-      scheduleComposerFocus,
-      setComposerDraftRuntimeMode,
-      setDraftThreadContext,
-      threadId,
-    ],
-  );
-
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
       if (mode === interactionMode) return;
@@ -2084,11 +2065,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const toggleRuntimeMode = useCallback(() => {
-    void handleRuntimeModeChange(
-      runtimeMode === "full-access" ? "approval-required" : "full-access",
-    );
-  }, [handleRuntimeModeChange, runtimeMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
@@ -4435,18 +4411,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
 
                         {isComposerFooterCompact ? (
-                          <CompactComposerControlsMenu
-                            activePlan={Boolean(
-                              activePlan || sidebarProposedPlan || planSidebarOpen,
-                            )}
-                            interactionMode={interactionMode}
-                            planSidebarOpen={planSidebarOpen}
-                            runtimeMode={runtimeMode}
-                            traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
-                            onTogglePlanSidebar={togglePlanSidebar}
-                            onToggleRuntimeMode={toggleRuntimeMode}
-                          />
+                          <>
+                            <McpServersPicker serverNames={mcpServerNames} compact />
+                            <CompactComposerControlsMenu
+                              activePlan={Boolean(
+                                activePlan || sidebarProposedPlan || planSidebarOpen,
+                              )}
+                              interactionMode={interactionMode}
+                              planSidebarOpen={planSidebarOpen}
+                              traitsMenuContent={providerTraitsMenuContent}
+                              onToggleInteractionMode={toggleInteractionMode}
+                              onTogglePlanSidebar={togglePlanSidebar}
+                            />
+                          </>
                         ) : (
                           <>
                             {providerTraitsPicker ? (
@@ -4486,30 +4463,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               orientation="vertical"
                               className="mx-0.5 hidden h-4 sm:block"
                             />
-
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={() =>
-                                void handleRuntimeModeChange(
-                                  runtimeMode === "full-access"
-                                    ? "approval-required"
-                                    : "full-access",
-                                )
-                              }
-                              title={
-                                runtimeMode === "full-access"
-                                  ? "Full access — click to require approvals"
-                                  : "Approval required — click for full access"
-                              }
-                            >
-                              {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
-                              <span className="sr-only sm:not-sr-only">
-                                {runtimeMode === "full-access" ? "Full access" : "Supervised"}
-                              </span>
-                            </Button>
+                            <McpServersPicker serverNames={mcpServerNames} />
 
                             {activePlan || sidebarProposedPlan || planSidebarOpen ? (
                               <>

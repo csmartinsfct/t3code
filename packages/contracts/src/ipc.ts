@@ -30,6 +30,8 @@ import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
+  ResolveMcpServersInput,
+  ResolveMcpServersResult,
 } from "./server";
 import type {
   TerminalClearInput,
@@ -177,6 +179,7 @@ export interface NativeApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    resolveMcpServers: (input: ResolveMcpServersInput) => Promise<ResolveMcpServersResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

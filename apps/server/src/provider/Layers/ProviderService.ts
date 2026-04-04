@@ -10,6 +10,7 @@
  * @module ProviderServiceLive
  */
 import {
+  asProviderInput,
   baseProviderKind,
   ModelSelection,
   NonNegativeInt,
@@ -248,13 +249,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
-        provider: baseProviderKind(input.binding.provider),
+        provider: asProviderInput(input.binding.provider),
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
         runtimeMode: input.binding.runtimeMode ?? "full-access",
       });
-      if (resumed.provider !== adapter.provider) {
+      if (
+        resumed.provider !== adapter.provider &&
+        baseProviderKind(resumed.provider) !== adapter.provider
+      ) {
         return yield* toValidationError(
           input.operation,
           `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${resumed.provider}'.`,
