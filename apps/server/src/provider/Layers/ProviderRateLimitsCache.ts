@@ -79,17 +79,26 @@ export const ProviderRateLimitsCacheLive = Layer.effect(
     const setOAuthTiers: ProviderRateLimitsCacheShape["setOAuthTiers"] = (
       provider: ProviderKind,
       tiers: ReadonlyArray<OAuthUsageTier>,
+      warning?: string,
     ) =>
       Effect.gen(function* () {
         const nextMap = yield* Ref.updateAndGet(cacheRef, (map) => {
           const existing = map.get(provider);
           const snapshot: ProviderRateLimitsSnapshot = existing
-            ? { ...existing, oauthUsageTiers: [...tiers], updatedAt: new Date().toISOString() }
+            ? {
+                ...existing,
+                oauthUsageTiers: [...tiers],
+                updatedAt: new Date().toISOString(),
+                ...(warning !== undefined
+                  ? { fetchWarning: warning }
+                  : { fetchWarning: undefined }),
+              }
             : {
                 provider: asProviderInput(provider),
                 rateLimitInfo: { status: "allowed" },
                 updatedAt: new Date().toISOString(),
                 oauthUsageTiers: [...tiers],
+                ...(warning !== undefined ? { fetchWarning: warning } : {}),
               };
           const next = new Map(map);
           next.set(provider, snapshot);

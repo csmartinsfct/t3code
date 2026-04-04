@@ -32,7 +32,23 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { fetchClaudeOAuthUsage } from "../../provider/Layers/claudeOAuthUsage.ts";
+import {
+  fetchClaudeOAuthUsage,
+  getBackoffState,
+  resolveOAuthToken,
+} from "../../provider/Layers/claudeOAuthUsage.ts";
+import {
+  discoverClaudeProfiles,
+  mergeClaudeProfiles,
+} from "../../provider/claudeProfileDiscovery.ts";
+
+/** Format a backoffUntil timestamp as a human-readable "Xm" or "Xs" string. */
+function formatBackoffMinutes(backoffUntil: number): string {
+  const diffMs = backoffUntil - Date.now();
+  if (diffMs <= 0) return "now";
+  const minutes = Math.ceil(diffMs / 60_000);
+  return minutes >= 1 ? `${minutes}m` : `${Math.ceil(diffMs / 1_000)}s`;
+}
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -199,9 +215,16 @@ function normalizeRateLimitPayload(
 
   // -----------------------------------------------------------------------
   // Path 2: Codex — has `primary` / `secondary` windows with `used_percent`.
+  // The Codex app-server payload may be double-wrapped: the adapter wraps
+  // `event.payload` (which itself contains a `rateLimits` key) into
+  // `{ rateLimits: event.payload }`, producing `{ rateLimits: { rateLimits: { primary: ... } } }`.
+  // Unwrap one level when the outer object doesn't have `primary`/`secondary`
+  // but has a nested `rateLimits` object that does.
   // -----------------------------------------------------------------------
-  const primary = asCodexWindow(outer.primary);
-  const secondary = asCodexWindow(outer.secondary);
+  const codexData =
+    outer.primary || outer.secondary ? outer : (asRecord(outer.rateLimits) ?? outer);
+  const primary = asCodexWindow(codexData.primary);
+  const secondary = asCodexWindow(codexData.secondary);
   if (!primary && !secondary) return null;
 
   const tiers: OAuthUsageTier[] = [];
@@ -1481,30 +1504,89 @@ const make = Effect.fn("make")(function* () {
       }).pipe(Effect.delay("2 seconds"), Effect.ignoreCause({ log: true })),
     );
 
-    // Periodically fetch multi-tier OAuth usage from the Anthropic API.
-    // The fetchClaudeOAuthUsage function has its own 180s response cache.
+    // Periodically fetch multi-tier OAuth usage from the Anthropic API for
+    // the base Claude provider AND every discovered/configured profile.
+    // Each profile has its own credentials and independent per-dir cache.
     yield* Effect.forkScoped(
       Effect.gen(function* () {
-        const settings = yield* serverSettingsService.getSettings.pipe(
-          Effect.catch(() => Effect.succeed(null)),
-          Effect.catchDefect(() => Effect.succeed(null)),
-        );
-        const configDir = settings?.providers.claudeAgent.configDir || undefined;
-        const provider = "claudeAgent" as ProviderKind;
-
         const poll = Effect.gen(function* () {
-          const tiers = yield* Effect.tryPromise({
-            try: () => fetchClaudeOAuthUsage(configDir),
-            catch: () => [] as const,
-          });
-          if (tiers.length > 0) {
-            yield* rateLimitsCache.setOAuthTiers(provider, tiers);
+          // Re-read settings each cycle so newly added profiles are picked up.
+          const settings = yield* serverSettingsService.getSettings.pipe(
+            Effect.catch(() => Effect.succeed(null)),
+            Effect.catchDefect(() => Effect.succeed(null)),
+          );
+
+          // Build the list of {provider, configDir} targets to poll.
+          const targets: Array<{ provider: ProviderKind; configDir: string | undefined }> = [
+            {
+              provider: "claudeAgent" as ProviderKind,
+              configDir: settings?.providers.claudeAgent.configDir || undefined,
+            },
+          ];
+
+          if (settings) {
+            const discovered = yield* discoverClaudeProfiles();
+            const profiles = mergeClaudeProfiles(discovered, settings.providers.claudeProfiles);
+            for (const profile of profiles) {
+              targets.push({
+                provider: profile.providerKind,
+                configDir: profile.configDir,
+              });
+            }
           }
+
+          // Deduplicate targets by resolved OAuth token so we make at most
+          // one API call per unique Anthropic account, then fan out the result
+          // to every profile that shares that token.
+          const byToken = new Map<
+            string,
+            Array<{ provider: ProviderKind; configDir: string | undefined }>
+          >();
+          for (const target of targets) {
+            const token = resolveOAuthToken(target.configDir);
+            const key = token ?? `__none__:${target.configDir ?? "default"}`;
+            let group = byToken.get(key);
+            if (!group) {
+              group = [];
+              byToken.set(key, group);
+            }
+            group.push(target);
+          }
+
+          yield* Effect.logDebug(
+            `oauth-poll: ${targets.length} target(s) deduplicated to ${byToken.size} unique token(s)`,
+          );
+
+          // Fetch once per unique token, then store tiers for all profiles in that group.
+          yield* Effect.forEach(
+            [...byToken.values()],
+            (group) =>
+              Effect.gen(function* () {
+                // Use the first target's configDir for the actual fetch.
+                const representative = group[0]!;
+                const tiers = yield* Effect.tryPromise({
+                  try: () => fetchClaudeOAuthUsage(representative.configDir),
+                  catch: () => [] as const,
+                });
+
+                // Derive a warning when the API is in backoff (e.g. 429).
+                const backoff = getBackoffState(representative.configDir);
+                const warning = backoff?.inBackoff
+                  ? `Retrying in ${formatBackoffMinutes(backoff.backoffUntil)}`
+                  : undefined;
+
+                // Always update so warnings propagate even when tiers are empty.
+                for (const target of group) {
+                  yield* rateLimitsCache.setOAuthTiers(target.provider, tiers, warning);
+                }
+              }).pipe(Effect.ignoreCause({ log: true })),
+            { concurrency: "unbounded" },
+          );
         }).pipe(Effect.ignoreCause({ log: true }));
 
         // Initial fetch after a short delay.
         yield* poll;
-        // Repeat on a 60s schedule (the fetcher has its own cache + 429 backoff).
+        // Repeat on a 60s schedule (the fetcher has its own per-dir cache + 429 backoff).
         yield* poll.pipe(Effect.repeat(Schedule.spaced(Duration.seconds(60))));
       }).pipe(Effect.delay("5 seconds"), Effect.ignoreCause({ log: true })),
     );

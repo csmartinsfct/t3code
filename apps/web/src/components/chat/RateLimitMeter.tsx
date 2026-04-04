@@ -225,6 +225,11 @@ export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
             </div>
           ) : null}
 
+          {/* Fetch warning */}
+          {rateLimit.fetchWarning ? (
+            <div className="text-[10px] text-warning/70">{rateLimit.fetchWarning}</div>
+          ) : null}
+
           {/* Timestamp */}
           <div className="text-[10px] text-muted-foreground/40">
             {formatUpdatedAt(rateLimit.updatedAt)}

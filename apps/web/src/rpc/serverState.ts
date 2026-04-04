@@ -1,5 +1,6 @@
 import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import {
+  baseProviderKind,
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
   type ProviderKind,
@@ -16,7 +17,23 @@ import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 
 import type { WsRpcClient } from "../wsRpcClient";
+import { toastManager } from "../components/ui/toast";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
+
+/** Deduplicate: only show one rate-limit warning toast at a time. */
+let activeRateLimitWarningToastId: ReturnType<typeof toastManager.add> | null = null;
+
+function showRateLimitWarningToast(message: string): void {
+  // Dismiss previous warning toast if still visible.
+  if (activeRateLimitWarningToastId !== null) {
+    toastManager.close(activeRateLimitWarningToastId);
+  }
+  activeRateLimitWarningToastId = toastManager.add({
+    type: "warning",
+    title: "Usage data unavailable",
+    description: message,
+  });
+}
 
 export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 
@@ -125,7 +142,19 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
       return;
     }
     case "rateLimitsUpdated": {
+      const prev = (appAtomRegistry.get(providerRateLimitsAtom) ??
+        []) as ReadonlyArray<ProviderRateLimitsSnapshot>;
       appAtomRegistry.set(providerRateLimitsAtom, event.payload.rateLimits);
+
+      // Show a toast when a new fetch warning appears for a provider.
+      for (const entry of event.payload.rateLimits) {
+        if (entry.fetchWarning) {
+          const prevEntry = prev.find((e) => e.provider === entry.provider);
+          if (!prevEntry?.fetchWarning) {
+            showRateLimitWarningToast(entry.fetchWarning);
+          }
+        }
+      }
       return;
     }
   }
@@ -354,6 +383,21 @@ export function useProviderRateLimit(
   const all = useProviderRateLimits();
   return useMemo(() => {
     if (!provider) return null;
-    return all.find((entry) => entry.provider === provider) ?? null;
+    // Exact match first.
+    const exact = all.find((entry) => entry.provider === provider);
+    if (exact) return exact;
+    // Fallback: if the requested provider is a base kind (e.g. "claudeAgent"),
+    // find a profiled entry that shares the same base (e.g. "claudeAgent:zbd").
+    // If the requested provider is profiled but has no entry, try the base entry.
+    const base = baseProviderKind(provider);
+    if (base === provider) {
+      return (
+        all.find(
+          (entry) =>
+            entry.provider !== base && baseProviderKind(entry.provider as ProviderKind) === base,
+        ) ?? null
+      );
+    }
+    return all.find((entry) => entry.provider === base) ?? null;
   }, [all, provider]);
 }

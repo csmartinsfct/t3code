@@ -910,11 +910,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // The hook is called unconditionally here with a stable null so that
   // the hook call order is preserved; it is re-derived in a memo below
   // once `selectedProvider` is available.
+  // Prefer model selection (which includes profileId for profiled providers)
+  // over session.provider (which only stores the base kind).
   const rateLimitProviderEarly =
-    activeThread?.session?.provider ??
     (activeThread?.modelSelection
       ? modelSelectionProviderKind(activeThread.modelSelection)
       : null) ??
+    activeThread?.session?.provider ??
     null;
   const rateLimitEntryEarly = useProviderRateLimit(rateLimitProviderEarly);
   useEffect(() => {
@@ -1068,7 +1070,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // Rate limits: prefer the thread-level provider when available, fall back to
   // the composer's selected provider so the meter is visible even on draft
   // threads that have no session or model selection yet.
-  const rateLimitProvider = rateLimitProviderEarly ?? selectedProvider;
+  // The composer stores only the base provider kind (e.g. "claudeAgent"); the
+  // profile is tracked in the model selection's profileId.  Reconstruct the
+  // full profiled kind so the rate-limit lookup finds the correct entry.
+  const rateLimitProvider = useMemo(() => {
+    if (rateLimitProviderEarly) return rateLimitProviderEarly;
+    const base = baseProviderKind(selectedProvider);
+    const sel = composerDraft.modelSelectionByProvider?.[base];
+    if (sel) return modelSelectionProviderKind(sel);
+    return selectedProvider;
+  }, [rateLimitProviderEarly, selectedProvider, composerDraft.modelSelectionByProvider]);
   const rateLimitEntryFull = useProviderRateLimit(rateLimitProvider);
   const rateLimitEntry = rateLimitEntryEarly ?? rateLimitEntryFull;
   const activeRateLimit = useMemo(

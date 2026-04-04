@@ -48,6 +48,8 @@ export interface RateLimitSnapshot {
   readonly oauthTiers: ReadonlyArray<OAuthTierSnapshot>;
   /** The highest-utilization tier, used for the circle display. */
   readonly primaryTier: OAuthTierSnapshot | null;
+  /** Warning when the usage-data fetch is degraded (e.g. API 429 backoff). */
+  readonly fetchWarning: string | null;
 }
 
 const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
@@ -118,6 +120,7 @@ export function deriveRateLimitSnapshot(entry: ProviderRateLimitsSnapshot): Rate
     provider: entry.provider,
     oauthTiers,
     primaryTier,
+    fetchWarning: entry.fetchWarning ?? null,
   };
 }
 

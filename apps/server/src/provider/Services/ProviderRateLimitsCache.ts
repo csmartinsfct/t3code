@@ -26,10 +26,15 @@ export interface ProviderRateLimitsCacheShape {
   /**
    * Merge multi-tier OAuth usage data into the existing snapshot for a
    * provider.  Creates a minimal snapshot when none exists.
+   *
+   * When `warning` is provided it is stored on the snapshot so the client
+   * can display a degraded-state message (e.g. API 429 backoff).  Passing
+   * `undefined` clears any previous warning.
    */
   readonly setOAuthTiers: (
     provider: ProviderKind,
     tiers: ReadonlyArray<OAuthUsageTier>,
+    warning?: string,
   ) => Effect.Effect<void>;
 
   /**

@@ -187,6 +187,8 @@ export const ProviderRateLimitsSnapshot = Schema.Struct({
   updatedAt: IsoDateTime,
   /** Multi-tier OAuth usage data (5h, 7d, model-specific). Absent when unavailable. */
   oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
+  /** Warning message when the usage-data fetch is degraded (e.g. API 429 backoff). */
+  fetchWarning: Schema.optional(Schema.String),
 });
 export type ProviderRateLimitsSnapshot = typeof ProviderRateLimitsSnapshot.Type;
 
