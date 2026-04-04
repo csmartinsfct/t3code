@@ -244,6 +244,14 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
   });
 
+  it("parses standalone /plan-accept command", () => {
+    expect(parseStandaloneComposerSlashCommand("/plan-accept")).toBe("plan-accept");
+  });
+
+  it("parses standalone /plan-accept command with whitespace", () => {
+    expect(parseStandaloneComposerSlashCommand(" /plan-accept  ")).toBe("plan-accept");
+  });
+
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
   });

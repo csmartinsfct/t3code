@@ -51,6 +51,7 @@ export const ModelCapabilities = Schema.Struct({
   reasoningEffortLevels: Schema.Array(EffortOption),
   supportsFastMode: Schema.Boolean,
   supportsThinkingToggle: Schema.Boolean,
+  supportsPlan: Schema.Boolean,
   contextWindowOptions: Schema.Array(ContextWindowOption),
   promptInjectedEffortLevels: Schema.Array(TrimmedNonEmptyString),
 });

@@ -1,4 +1,4 @@
-import { ProviderInteractionMode } from "@t3tools/contracts";
+import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -13,8 +13,9 @@ import {
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
+  supportsPlan: boolean;
   traitsMenuContent?: ReactNode;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
 }) {
   return (
     <Menu>
@@ -42,11 +43,16 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           value={props.interactionMode}
           onValueChange={(value) => {
             if (!value || value === props.interactionMode) return;
-            props.onToggleInteractionMode();
+            props.onInteractionModeChange(value as ProviderInteractionMode);
           }}
         >
           <MenuRadioItem value="default">Chat</MenuRadioItem>
-          <MenuRadioItem value="plan">Plan</MenuRadioItem>
+          {props.supportsPlan ? (
+            <>
+              <MenuRadioItem value="plan">Plan</MenuRadioItem>
+              <MenuRadioItem value="plan-accept">Plan + Accept</MenuRadioItem>
+            </>
+          ) : null}
         </MenuRadioGroup>
       </MenuPopup>
     </Menu>

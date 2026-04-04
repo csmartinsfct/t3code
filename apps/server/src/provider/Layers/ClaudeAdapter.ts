@@ -104,6 +104,7 @@ interface ClaudeResumeState {
   readonly resume?: string;
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
+  readonly fork?: boolean;
 }
 
 interface ClaudeTurnState {
@@ -150,8 +151,8 @@ interface ToolInFlight {
 
 interface ClaudeSessionContext {
   session: ProviderSession;
-  readonly promptQueue: Queue.Queue<PromptQueueItem>;
-  readonly query: ClaudeQueryRuntime;
+  promptQueue: Queue.Queue<PromptQueueItem>;
+  query: ClaudeQueryRuntime;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
@@ -170,6 +171,12 @@ interface ClaudeSessionContext {
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
+  readonly recovery: {
+    readonly runFork: <A, E>(effect: Effect.Effect<A, E>) => Fiber.Fiber<A, E>;
+    readonly canUseTool: CanUseTool;
+    readonly baseQueryOptions: ClaudeQueryOptions;
+    readonly contextRef: Ref.Ref<ClaudeSessionContext | undefined>;
+  };
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
@@ -243,6 +250,22 @@ function isClaudeInterruptedCause(cause: Cause.Cause<Error>): boolean {
     Cause.hasInterruptsOnly(cause) ||
     normalizeClaudeStreamMessages(cause).some(isClaudeInterruptedMessage)
   );
+}
+
+function isRateLimitMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("rate_limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("overloaded") ||
+    normalized.includes("resource_exhausted")
+  );
+}
+
+function isRateLimitCause(cause: Cause.Cause<Error>): boolean {
+  return normalizeClaudeStreamMessages(cause).some(isRateLimitMessage);
 }
 
 function messageFromClaudeStreamCause(cause: Cause.Cause<Error>, fallback: string): string {
@@ -366,6 +389,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     sessionId?: unknown;
     resumeSessionAt?: unknown;
     turnCount?: unknown;
+    fork?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -383,6 +407,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
   const turnCountValue = typeof cursor.turnCount === "number" ? cursor.turnCount : undefined;
+  const fork = typeof cursor.fork === "boolean" ? cursor.fork : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
@@ -391,6 +416,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
+    ...(fork ? { fork } : {}),
   };
 }
 
@@ -2260,6 +2286,46 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             interruptionMessageFromClaudeCause(exit.cause),
           );
         }
+      } else if (isRateLimitCause(exit.cause)) {
+        // Rate limit path — keep session alive so the user can retry.
+        const message = messageFromClaudeStreamCause(
+          exit.cause,
+          "Rate limited. Send a new message to continue.",
+        );
+        yield* emitRuntimeError(context, message, Cause.pretty(exit.cause));
+        if (context.turnState) {
+          yield* completeTurn(context, "failed", message);
+        }
+
+        // Clean up dead stream resources without destroying the session.
+        context.streamFiber = undefined;
+        // @effect-diagnostics-next-line tryCatchInEffectGen:off
+        try {
+          context.query.close();
+        } catch {
+          /* query already dead */
+        }
+        context.inFlightTools.clear();
+
+        // Transition to "ready" — user can send a new message.
+        const updatedAt = yield* nowIso;
+        context.session = {
+          ...context.session,
+          status: "ready",
+          activeTurnId: undefined,
+          updatedAt,
+        };
+        const stamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "session.state.changed",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          payload: { state: "ready" },
+          providerRefs: {},
+        });
+        return; // DO NOT call stopSessionInternal
       } else {
         const message = messageFromClaudeStreamCause(exit.cause, "Claude runtime stream failed.");
         yield* emitRuntimeError(context, message, Cause.pretty(exit.cause));
@@ -2272,6 +2338,61 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* stopSessionInternal(context, {
       emitExitEvent: true,
     });
+  });
+
+  /**
+   * Rebuild the SDK query + stream fiber after a transient failure (e.g. rate
+   * limit). The session stays alive and resumes from the same SDK session ID.
+   */
+  const recreateQueryAndStream = Effect.fn("recreateQueryAndStream")(function* (
+    context: ClaudeSessionContext,
+  ) {
+    // 1. Shut down old queue (discards any pending items from the failed turn).
+    yield* Queue.shutdown(context.promptQueue);
+
+    // 2. Create fresh queue + prompt iterable.
+    const newQueue = yield* Queue.unbounded<PromptQueueItem>();
+    const newPrompt = Stream.fromQueue(newQueue).pipe(
+      Stream.filter((item) => item.type === "message"),
+      Stream.map((item) => item.message),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.failCause(cause),
+      ),
+      Stream.toAsyncIterable,
+    );
+
+    // 3. Build recovery options — resume from same session.
+    const recoveryOptions: ClaudeQueryOptions = {
+      ...context.recovery.baseQueryOptions,
+      ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
+      canUseTool: context.recovery.canUseTool,
+      ...(context.currentApiModelId ? { model: context.currentApiModelId } : {}),
+    };
+
+    // 4. Create new query.
+    const newQuery = createQuery({ prompt: newPrompt, options: recoveryOptions });
+
+    // 5. Update context fields.
+    context.promptQueue = newQueue;
+    context.query = newQuery;
+
+    // 6. Fork new stream fiber (same pattern as startSession).
+    let streamFiber: Fiber.Fiber<void, never>;
+    streamFiber = context.recovery.runFork(
+      Effect.exit(runSdkStream(context)).pipe(
+        Effect.flatMap((exit) => {
+          if (context.stopped) return Effect.void;
+          if (context.streamFiber === streamFiber) context.streamFiber = undefined;
+          return handleStreamExit(context, exit);
+        }),
+      ),
+    );
+    context.streamFiber = streamFiber;
+    streamFiber.addObserver(() => {
+      if (context.streamFiber === streamFiber) context.streamFiber = undefined;
+    });
+
+    yield* Ref.set(context.recovery.contextRef, context);
   });
 
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
@@ -2389,9 +2510,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
+      const isFork = existingResumeSessionId !== undefined && resumeState?.fork === true;
       const newSessionId =
-        existingResumeSessionId === undefined ? yield* Random.nextUUIDv4 : undefined;
-      const sessionId = existingResumeSessionId ?? newSessionId;
+        existingResumeSessionId === undefined || isFork ? yield* Random.nextUUIDv4 : undefined;
+      const sessionId = isFork ? newSessionId : (existingResumeSessionId ?? newSessionId);
 
       const services = yield* Effect.services();
       const runFork = Effect.runForkWith(services);
@@ -2756,7 +2878,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
-        ...(newSessionId ? { sessionId: newSessionId } : {}),
+        ...(isFork ? { forkSession: true } : {}),
+        ...(isFork && newSessionId
+          ? { sessionId: newSessionId }
+          : newSessionId
+            ? { sessionId: newSessionId }
+            : {}),
         includePartialMessages: true,
         canUseTool,
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
@@ -2804,6 +2931,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         updatedAt: startedAt,
       };
 
+      // Build base query options for recovery (without session-specific resume/sessionId/forkSession).
+      const baseQueryOptions = { ...queryOptions };
+      delete (baseQueryOptions as Record<string, unknown>).resume;
+      delete (baseQueryOptions as Record<string, unknown>).sessionId;
+      delete (baseQueryOptions as Record<string, unknown>).forkSession;
+
       const context: ClaudeSessionContext = {
         session,
         promptQueue,
@@ -2812,7 +2945,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         startedAt,
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
-        resumeSessionId: sessionId,
+        resumeSessionId: isFork ? newSessionId : sessionId,
         pendingApprovals,
         pendingUserInputs,
         turns: [],
@@ -2823,6 +2956,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,
+        recovery: { runFork, canUseTool, baseQueryOptions, contextRef },
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
@@ -2899,6 +3033,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);
+
+    // Lazily recreate stream if it died (e.g., after rate limit).
+    if (!context.streamFiber && !context.stopped && context.resumeSessionId) {
+      yield* recreateQueryAndStream(context);
+    }
+
     const modelSelection =
       input.modelSelection?.provider &&
       baseProviderKind(input.modelSelection.provider) === "claudeAgent"
@@ -2927,10 +3067,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     // Apply interaction mode by switching the SDK's permission mode.
-    // "plan" maps directly to the SDK's "plan" permission mode;
+    // "plan" and "plan-accept" both map to the SDK's "plan" permission mode;
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
+    if (input.interactionMode === "plan" || input.interactionMode === "plan-accept") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
@@ -2997,6 +3137,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {
       const context = yield* requireSession(threadId);
+      if (!context.streamFiber) return; // Nothing to interrupt (e.g. stream died from rate limit)
       yield* Effect.tryPromise({
         try: () => context.query.interrupt(),
         catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),

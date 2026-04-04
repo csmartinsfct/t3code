@@ -48,6 +48,27 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
+const FORK_CONTEXT_MAX_CHARS = 100_000;
+
+function buildForkContextString(
+  messages: ReadonlyArray<{ readonly role: string; readonly text: string }>,
+): string {
+  const parts: string[] = [];
+  let totalChars = 0;
+  // Build from most recent to oldest, truncate oldest messages if too long.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const entry = `[${messages[i]!.role}]: ${messages[i]!.text}`;
+    if (totalChars + entry.length + 2 > FORK_CONTEXT_MAX_CHARS) break;
+    parts.unshift(entry);
+    totalChars += entry.length + 2;
+  }
+  const conversation = parts.join("\n\n");
+  return (
+    `<previous_conversation>\n${conversation}\n</previous_conversation>` +
+    `\n\nThe above is the conversation history from a forked thread. Continue from where it left off.`
+  );
+}
+
 function mapProviderSessionStatusToOrchestrationStatus(
   status: "connecting" | "ready" | "running" | "error" | "closed",
 ): OrchestrationSession["status"] {
@@ -169,6 +190,40 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+
+  // Track fork source bindings so we can pass resume cursors to forked sessions.
+  const forkSourceBindings = new Map<
+    string,
+    {
+      resumeCursor: unknown;
+      provider: string;
+      capturedAt: number;
+    }
+  >();
+  // Pending fork context to inject into the first turn on a forked thread.
+  const pendingForkContext = new Map<string, { context: string; capturedAt: number }>();
+
+  const FORK_BINDING_TTL_MS = 30 * 60 * 1000;
+  const forkBindingCleanupInterval = setInterval(
+    () => {
+      const now = Date.now();
+      for (const [key, value] of forkSourceBindings) {
+        if (now - value.capturedAt > FORK_BINDING_TTL_MS) {
+          forkSourceBindings.delete(key);
+        }
+      }
+      for (const [key, value] of pendingForkContext) {
+        if (now - value.capturedAt > FORK_BINDING_TTL_MS) {
+          pendingForkContext.delete(key);
+        }
+      }
+    },
+    5 * 60 * 1000,
+  );
+  // Prevent the cleanup timer from blocking process exit.
+  if (typeof forkBindingCleanupInterval === "object" && "unref" in forkBindingCleanupInterval) {
+    forkBindingCleanupInterval.unref();
+  }
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -360,6 +415,53 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
+    // Check for fork source binding — if this thread was forked from another,
+    // decide whether to use SDK-level fork or generic context injection.
+    const forkSource = forkSourceBindings.get(threadId);
+    if (forkSource) {
+      forkSourceBindings.delete(threadId);
+
+      const sourceBase = baseProviderKind(forkSource.provider as ProviderKind);
+      const targetBase = baseProviderKind(preferredProvider);
+      const sourceProfileId = forkSource.provider.includes(":")
+        ? forkSource.provider.slice(forkSource.provider.indexOf(":") + 1)
+        : undefined;
+      const targetProfileId = preferredProvider.includes(":")
+        ? preferredProvider.slice(preferredProvider.indexOf(":") + 1)
+        : undefined;
+      const sameProfile = sourceProfileId === targetProfileId;
+
+      // SDK-level fork: ONLY Claude same-profile (SDK natively copies transcript).
+      if (
+        sourceBase === "claudeAgent" &&
+        targetBase === "claudeAgent" &&
+        sameProfile &&
+        forkSource.resumeCursor
+      ) {
+        const forkResumeCursor = {
+          ...(typeof forkSource.resumeCursor === "object" && forkSource.resumeCursor !== null
+            ? forkSource.resumeCursor
+            : {}),
+          fork: true,
+        };
+        const startedSession = yield* startProviderSession({ resumeCursor: forkResumeCursor });
+        yield* bindSessionToThread(startedSession);
+        return startedSession.threadId;
+      }
+
+      // All other forks: start fresh session, store context for first-turn injection.
+      const forkReadModel = yield* orchestrationEngine.getReadModel();
+      const forkThread = forkReadModel.threads.find((t) => t.id === threadId);
+      if (forkThread && forkThread.messages.length > 0) {
+        pendingForkContext.set(threadId, {
+          context: buildForkContextString(forkThread.messages),
+          capturedAt: Date.now(),
+        });
+      }
+      // Fall through to normal fresh session start below.
+    }
+
+    // Original path: no fork (or generic fork), fresh session.
     const startedSession = yield* startProviderSession(undefined);
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
@@ -370,7 +472,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: "default" | "plan" | "plan-accept";
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -386,6 +488,15 @@ const make = Effect.gen(function* () {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
+
+    // Inject fork conversation context into the first turn on a forked thread.
+    let effectiveInput = normalizedInput;
+    const forkCtx = pendingForkContext.get(input.threadId);
+    if (forkCtx) {
+      pendingForkContext.delete(input.threadId);
+      effectiveInput = effectiveInput ? `${forkCtx.context}\n\n${effectiveInput}` : forkCtx.context;
+    }
+
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()
@@ -410,7 +521,7 @@ const make = Effect.gen(function* () {
 
     yield* providerService.sendTurn({
       threadId: input.threadId,
-      ...(normalizedInput ? { input: normalizedInput } : {}),
+      ...(effectiveInput ? { input: effectiveInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
@@ -798,6 +909,24 @@ const make = Effect.gen(function* () {
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
+      // Capture fork source binding when a forked thread is created.
+      if (event.type === "thread.created") {
+        const payload = event.payload as Record<string, unknown>;
+        const sourceThreadId = payload.sourceThreadId;
+        if (typeof sourceThreadId === "string") {
+          const sessions = yield* providerService.listSessions();
+          const sourceSession = sessions.find((s) => s.threadId === sourceThreadId);
+          if (sourceSession?.resumeCursor) {
+            forkSourceBindings.set(String(payload.threadId), {
+              resumeCursor: sourceSession.resumeCursor,
+              provider: sourceSession.provider,
+              capturedAt: Date.now(),
+            });
+          }
+        }
+        return;
+      }
+
       if (
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||

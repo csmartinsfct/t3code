@@ -62,6 +62,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
               ],
               supportsFastMode: true,
               supportsThinkingToggle: false,
+              supportsPlan: true,
               contextWindowOptions: [],
               promptInjectedEffortLevels: ["ultrathink"],
             },
@@ -74,6 +75,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
               reasoningEffortLevels: [],
               supportsFastMode: false,
               supportsThinkingToggle: true,
+              supportsPlan: false,
               contextWindowOptions: [],
               promptInjectedEffortLevels: [],
             },
@@ -91,6 +93,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
               ],
               supportsFastMode: false,
               supportsThinkingToggle: false,
+              supportsPlan: true,
               contextWindowOptions: [],
               promptInjectedEffortLevels: ["ultrathink"],
             },
@@ -108,6 +111,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
               ],
               supportsFastMode: true,
               supportsThinkingToggle: false,
+              supportsPlan: true,
               contextWindowOptions: [],
               promptInjectedEffortLevels: [],
             },
@@ -116,6 +120,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   const screen = await render(
     <CompactComposerControlsMenu
       interactionMode="default"
+      supportsPlan
       traitsMenuContent={
         <TraitsMenuContent
           provider={provider}
@@ -127,7 +132,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onToggleInteractionMode={vi.fn()}
+      onInteractionModeChange={vi.fn()}
     />,
     { container: host },
   );

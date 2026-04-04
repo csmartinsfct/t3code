@@ -121,7 +121,7 @@ export function modelSelectionProviderKind(sel: ModelSelection): ProviderKind {
 export const RuntimeMode = Schema.Literals(["approval-required", "full-access"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
+export const ProviderInteractionMode = Schema.Literals(["default", "plan", "plan-accept"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
@@ -732,6 +732,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  sourceThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

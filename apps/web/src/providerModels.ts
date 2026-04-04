@@ -12,6 +12,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [],
   supportsFastMode: false,
   supportsThinkingToggle: false,
+  supportsPlan: true,
   contextWindowOptions: [],
   promptInjectedEffortLevels: [],
 };

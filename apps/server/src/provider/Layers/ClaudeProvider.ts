@@ -57,6 +57,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: true,
       supportsThinkingToggle: false,
+      supportsPlan: true,
       contextWindowOptions: [
         { value: "200k", label: "200k", isDefault: true },
         { value: "1m", label: "1M" },
@@ -77,6 +78,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       ],
       supportsFastMode: false,
       supportsThinkingToggle: false,
+      supportsPlan: true,
       contextWindowOptions: [
         { value: "200k", label: "200k", isDefault: true },
         { value: "1m", label: "1M" },
@@ -92,6 +94,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       reasoningEffortLevels: [],
       supportsFastMode: false,
       supportsThinkingToggle: true,
+      supportsPlan: false,
       contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     } satisfies ModelCapabilities,
@@ -105,6 +108,7 @@ export function getClaudeModelCapabilities(model: string | null | undefined): Mo
       reasoningEffortLevels: [],
       supportsFastMode: false,
       supportsThinkingToggle: false,
+      supportsPlan: false,
       contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     }

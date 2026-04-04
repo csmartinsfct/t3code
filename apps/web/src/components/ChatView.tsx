@@ -717,6 +717,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
+  // Tracks the last plan id that was auto-accepted in "plan-accept" mode
+  // to prevent double-triggering for the same plan.
+  const planAutoAcceptedIdRef = useRef<string | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
@@ -1088,6 +1091,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     settings,
   });
   const selectedProviderModels = getProviderModels(providerStatuses, selectedProvider);
+  const selectedModelCapabilities = getProviderModelCapabilities(
+    selectedProviderModels,
+    selectedModel,
+    selectedProvider,
+  );
+  const supportsPlan = selectedModelCapabilities.supportsPlan;
   const composerProviderState = useMemo(
     () =>
       getComposerProviderState({
@@ -1188,7 +1197,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
-    interactionMode === "plan" &&
+    (interactionMode === "plan" || interactionMode === "plan-accept") &&
     latestTurnSettled &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
@@ -2109,8 +2118,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
-  }, [handleInteractionModeChange, interactionMode]);
+    if (!supportsPlan) {
+      handleInteractionModeChange("default");
+      return;
+    }
+    const cycle: ProviderInteractionMode[] = ["default", "plan", "plan-accept"];
+    const currentIndex = cycle.indexOf(interactionMode);
+    const nextIndex = (currentIndex + 1) % cycle.length;
+    handleInteractionModeChange(cycle[nextIndex]!);
+  }, [handleInteractionModeChange, interactionMode, supportsPlan]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
@@ -3753,6 +3769,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
+  // Auto-accept: when in "plan-accept" mode and a plan is ready, automatically
+  // submit it for implementation without requiring user interaction.
+  // Uses the same resolvePlanFollowUpSubmission path as the manual "Implement" button.
+  useEffect(() => {
+    if (interactionMode !== "plan-accept" || !showPlanFollowUpPrompt || !activeProposedPlan) {
+      return;
+    }
+    // Guard against double-triggering for the same plan.
+    if (planAutoAcceptedIdRef.current === activeProposedPlan.id) {
+      return;
+    }
+    planAutoAcceptedIdRef.current = activeProposedPlan.id;
+    const followUp = resolvePlanFollowUpSubmission({
+      draftText: "",
+      planMarkdown: activeProposedPlan.planMarkdown,
+    });
+    void onSubmitPlanFollowUp({
+      text: followUp.text,
+      interactionMode: followUp.interactionMode,
+    });
+  }, [activeProposedPlan, interactionMode, onSubmitPlanFollowUp, showPlanFollowUpPrompt]);
+
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();
     if (
@@ -4639,8 +4677,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             />
                             <CompactComposerControlsMenu
                               interactionMode={interactionMode}
+                              supportsPlan={supportsPlan}
                               traitsMenuContent={providerTraitsMenuContent}
-                              onToggleInteractionMode={toggleInteractionMode}
+                              onInteractionModeChange={handleInteractionModeChange}
                             />
                           </>
                         ) : (
@@ -4660,23 +4699,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
-                              </span>
-                            </Button>
+                            {supportsPlan ? (
+                              <Button
+                                variant="ghost"
+                                className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                                size="sm"
+                                type="button"
+                                onClick={toggleInteractionMode}
+                                title={
+                                  interactionMode === "plan-accept"
+                                    ? "Plan + Accept mode — click to return to normal chat mode"
+                                    : interactionMode === "plan"
+                                      ? "Plan mode — click to enter plan + accept mode"
+                                      : "Default mode — click to enter plan mode"
+                                }
+                              >
+                                <BotIcon />
+                                <span className="sr-only sm:not-sr-only">
+                                  {interactionMode === "plan-accept"
+                                    ? "Plan + Accept"
+                                    : interactionMode === "plan"
+                                      ? "Plan"
+                                      : "Chat"}
+                                </span>
+                              </Button>
+                            ) : null}
 
                             <Separator
                               orientation="vertical"

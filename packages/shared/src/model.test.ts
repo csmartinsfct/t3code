@@ -27,6 +27,7 @@ const codexCaps: ModelCapabilities = {
   ],
   supportsFastMode: true,
   supportsThinkingToggle: false,
+  supportsPlan: true,
   contextWindowOptions: [],
   promptInjectedEffortLevels: [],
 };
@@ -39,6 +40,7 @@ const claudeCaps: ModelCapabilities = {
   ],
   supportsFastMode: false,
   supportsThinkingToggle: false,
+  supportsPlan: true,
   contextWindowOptions: [
     { value: "200k", label: "200k" },
     { value: "1m", label: "1M", isDefault: true },
@@ -126,6 +128,7 @@ describe("resolveEffort", () => {
       reasoningEffortLevels: [],
       supportsFastMode: false,
       supportsThinkingToggle: false,
+      supportsPlan: false,
       contextWindowOptions: [],
       promptInjectedEffortLevels: [],
     };

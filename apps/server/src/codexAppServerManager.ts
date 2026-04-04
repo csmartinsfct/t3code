@@ -332,7 +332,7 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: "default" | "plan" | "plan-accept";
   readonly model?: string;
   readonly effort?: string;
 }):
@@ -348,14 +348,17 @@ function buildCodexCollaborationMode(input: {
   if (input.interactionMode === undefined) {
     return undefined;
   }
+  // "plan-accept" is a client-side auto-accept variant of plan mode;
+  // map it to "plan" before passing to the Codex app server.
+  const effectiveMode = input.interactionMode === "plan-accept" ? "plan" : input.interactionMode;
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
   return {
-    mode: input.interactionMode,
+    mode: effectiveMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
       developer_instructions:
-        input.interactionMode === "plan"
+        effectiveMode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
           : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
     },
