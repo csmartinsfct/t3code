@@ -33,6 +33,7 @@ let shuttingDown = false;
 let restartTimer = null;
 let currentApp = null;
 let restartQueue = Promise.resolve();
+let launchCount = 0;
 const expectedExits = new WeakSet();
 const watchers = [];
 
@@ -57,6 +58,8 @@ function startApp() {
     return;
   }
 
+  launchCount++;
+
   const app = spawn(
     resolveElectronPath(),
     [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
@@ -65,6 +68,7 @@ function startApp() {
       env: {
         ...childEnv,
         VITE_DEV_SERVER_URL: devServerUrl,
+        ...(launchCount > 1 ? { T3_DEV_RESTARTING: "1" } : {}),
       },
       stdio: "inherit",
     },

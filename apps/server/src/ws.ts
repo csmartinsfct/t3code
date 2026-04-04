@@ -24,6 +24,7 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   ResolveMcpServersError,
+  ResolveSkillsError,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
@@ -57,6 +58,7 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { resolveClaudeMcpServerNames, resolveCodexMcpServerNames } from "./mcpConfigReader";
+import { resolveSkills } from "./skillsReader";
 import * as nodeFs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -372,6 +374,20 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ResolveMcpServersError({
                   message: `Failed to resolve MCP servers: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverResolveSkills]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverResolveSkills,
+          resolveSkills(input.cwd).pipe(
+            Effect.map((skills) => ({ skills })),
+            Effect.mapError(
+              (cause) =>
+                new ResolveSkillsError({
+                  message: `Failed to resolve skills: ${String(cause)}`,
                 }),
             ),
           ),

@@ -1402,7 +1402,14 @@ function createWindow(): BrowserWindow {
     emitUpdateState();
   });
   window.once("ready-to-show", () => {
-    window.show();
+    if (isDevelopment && process.env.T3_DEV_RESTARTING) {
+      // After a dev-mode restart (file-watch triggered), show the window
+      // without activating the app so it doesn't steal focus from the
+      // editor or terminal the developer is working in.
+      window.showInactive();
+    } else {
+      window.show();
+    }
   });
 
   if (isDevelopment) {

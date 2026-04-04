@@ -91,6 +91,7 @@ export function createWsNativeApi(): NativeApi {
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
       resolveMcpServers: rpcClient.server.resolveMcpServers,
+      resolveSkills: rpcClient.server.resolveSkills,
     },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,

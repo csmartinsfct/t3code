@@ -23,6 +23,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   TerminalOpenInput,
+  type SkillEntry,
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
@@ -41,7 +42,7 @@ import {
 import { useFileExplorerStore } from "../fileExplorerStore";
 import { consumeClipboardSnippet } from "../clipboardSnippetRegistry";
 import { snippetLanguage } from "../lib/snippetUtils";
-import type { ComposerCodeSnippetAttachment } from "../composerDraftStore";
+import type { ComposerCodeSnippetAttachment, ComposerSkillAttachment } from "../composerDraftStore";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -135,6 +136,8 @@ import {
   resolveSelectableProvider,
 } from "../providerModels";
 import { useMcpServerNames } from "../hooks/useMcpServerNames";
+import { useSkills } from "../hooks/useSkills";
+import { useRehydrateSkillContent } from "../hooks/useRehydrateSkillContent";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -165,6 +168,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { FileSearchModal } from "./file-explorer/FileSearchModal";
 import { ComposerCodeSnippets } from "./ComposerCodeSnippets";
+import { ComposerSkillChips } from "./ComposerSkillChips";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -175,6 +179,7 @@ import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommand
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import { McpServersPicker } from "./chat/McpServersPicker";
+import { SkillsPicker } from "./chat/SkillsPicker";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
@@ -228,6 +233,14 @@ function formatCodeSnippetsForModel(snippets: ComposerCodeSnippetAttachment[]): 
         s.startLine === s.endLine ? `line ${s.startLine}` : `lines ${s.startLine}–${s.endLine}`;
       return `\`${s.relativePath}\` (${lineLabel}):\n\`\`\`${lang}\n${s.code}\n\`\`\``;
     })
+    .join("\n\n");
+}
+
+function formatSkillsForModel(skills: ComposerSkillAttachment[]): string {
+  const loaded = skills.filter((s) => s.content !== null);
+  if (loaded.length === 0) return "";
+  return loaded
+    .map((s) => `<skill name="${s.name}" source="${s.source}">\n${s.content}\n</skill>`)
     .join("\n\n");
 }
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
@@ -618,14 +631,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerCodeSnippets = composerDraft.codeSnippets;
+  const composerSkills = composerDraft.skills;
   const composerSendState = useMemo(
     () =>
       deriveComposerSendState({
         prompt,
         imageCount: composerImages.length,
         terminalContexts: composerTerminalContexts,
+        skillCount: composerSkills.length,
       }),
-    [composerImages.length, composerTerminalContexts, prompt],
+    [composerImages.length, composerTerminalContexts, composerSkills.length, prompt],
   );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
@@ -638,6 +653,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftCodeSnippet = useComposerDraftStore((store) => store.addCodeSnippet);
   const removeComposerDraftCodeSnippet = useComposerDraftStore((store) => store.removeCodeSnippet);
+  const addComposerDraftSkill = useComposerDraftStore((store) => store.addSkill);
+  const removeComposerDraftSkill = useComposerDraftStore((store) => store.removeSkill);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
   );
@@ -1033,6 +1050,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
   const mcpServerNames = useMcpServerNames(selectedProvider, activeProject?.cwd);
+  const availableSkills = useSkills(activeProject?.cwd);
+  useRehydrateSkillContent(threadId, activeProject?.cwd);
+  const attachedSkillIds = useMemo(
+    () => new Set(composerSkills.map((s) => s.id)),
+    [composerSkills],
+  );
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
     providers: providerStatuses,
@@ -2798,6 +2821,48 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThreadId, removeComposerDraftCodeSnippet],
   );
 
+  const onAttachSkill = useCallback(
+    (skill: SkillEntry) => {
+      if (!activeThreadId) return;
+      addComposerDraftSkill(activeThreadId, {
+        id: skill.id,
+        name: skill.name,
+        source: skill.source,
+        absolutePath: skill.absolutePath,
+        relativePath: skill.relativePath,
+        content: skill.content,
+        group: skill.group,
+      });
+    },
+    [activeThreadId, addComposerDraftSkill],
+  );
+
+  const onRevealSkill = useCallback(
+    (skill: SkillEntry) => {
+      const cwd = activeProject?.cwd;
+      if (!cwd) return;
+      if (skill.absolutePath.startsWith(cwd + "/") || skill.absolutePath.startsWith(cwd + "\\")) {
+        const relative = skill.absolutePath.slice(cwd.length + 1);
+        openFileInExplorer(cwd, relative);
+      } else {
+        // Skill outside workspace (e.g. user-level) — open in default editor.
+        const api = readNativeApi();
+        if (api) {
+          void api.shell.openExternal(skill.absolutePath);
+        }
+      }
+    },
+    [activeProject?.cwd, openFileInExplorer],
+  );
+
+  const removeComposerSkill = useCallback(
+    (skillId: string) => {
+      if (!activeThreadId) return;
+      removeComposerDraftSkill(activeThreadId, skillId);
+    },
+    [activeThreadId, removeComposerDraftSkill],
+  );
+
   // ── Snippet paste — capture phase ────────────────────────────────────────
   // Lexical registers its own native paste listener on the editor element (bubble
   // phase). React synthetic onPaste fires after that — too late to prevent the
@@ -2940,6 +3005,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       prompt: promptForSend,
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
+      skillCount: composerSkills.length,
     });
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -2958,7 +3024,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
+      composerImages.length === 0 &&
+      sendableComposerTerminalContexts.length === 0 &&
+      composerSkills.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -3009,15 +3077,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const composerImagesSnapshot = [...composerImages];
     const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
+    const composerSkillsSnapshot = [...composerSkills];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
+    const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
     const baseMessageText = appendTerminalContextsToPrompt(
       promptForSend,
       composerTerminalContextsSnapshot,
     );
-    const messageTextForSend = snippetsBlock
-      ? `${snippetsBlock}\n\n${baseMessageText}`
-      : baseMessageText;
+    const preamble = [skillsBlock, snippetsBlock].filter(Boolean).join("\n\n");
+    const messageTextForSend = preamble ? `${preamble}\n\n${baseMessageText}` : baseMessageText;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
@@ -4250,6 +4319,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
                     {!isComposerApprovalState &&
                       pendingUserInputs.length === 0 &&
+                      composerSkills.length > 0 && (
+                        <div className="-mx-3 mb-2 sm:-mx-4">
+                          <ComposerSkillChips
+                            skills={composerSkills}
+                            onRemove={removeComposerSkill}
+                          />
+                        </div>
+                      )}
+
+                    {!isComposerApprovalState &&
+                      pendingUserInputs.length === 0 &&
                       composerCodeSnippets.length > 0 && (
                         <div className="mb-2 -mx-3 sm:-mx-4">
                           <ComposerCodeSnippets
@@ -4413,6 +4493,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         {isComposerFooterCompact ? (
                           <>
                             <McpServersPicker serverNames={mcpServerNames} compact />
+                            <SkillsPicker
+                              skills={availableSkills}
+                              attachedSkillIds={attachedSkillIds}
+                              compact
+                              onAttachSkill={onAttachSkill}
+                              onRevealSkill={onRevealSkill}
+                            />
                             <CompactComposerControlsMenu
                               activePlan={Boolean(
                                 activePlan || sidebarProposedPlan || planSidebarOpen,
@@ -4464,6 +4551,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
                             <McpServersPicker serverNames={mcpServerNames} />
+                            <SkillsPicker
+                              skills={availableSkills}
+                              attachedSkillIds={attachedSkillIds}
+                              onAttachSkill={onAttachSkill}
+                              onRevealSkill={onRevealSkill}
+                            />
 
                             {activePlan || sidebarProposedPlan || planSidebarOpen ? (
                               <>

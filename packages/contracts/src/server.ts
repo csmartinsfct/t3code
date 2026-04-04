@@ -233,3 +233,34 @@ export class ResolveMcpServersError extends Schema.TaggedErrorClass<ResolveMcpSe
   "ResolveMcpServersError",
   { message: TrimmedNonEmptyString },
 ) {}
+
+// ---------------------------------------------------------------------------
+// Skills resolution
+// ---------------------------------------------------------------------------
+
+export const SkillEntry = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  source: TrimmedNonEmptyString,
+  absolutePath: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString,
+  content: Schema.String,
+  /** Sub-package name for monorepo grouping. `null` for top-level skills. */
+  group: Schema.NullOr(Schema.String),
+});
+export type SkillEntry = typeof SkillEntry.Type;
+
+export const ResolveSkillsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ResolveSkillsInput = typeof ResolveSkillsInput.Type;
+
+export const ResolveSkillsResult = Schema.Struct({
+  skills: Schema.Array(SkillEntry),
+});
+export type ResolveSkillsResult = typeof ResolveSkillsResult.Type;
+
+export class ResolveSkillsError extends Schema.TaggedErrorClass<ResolveSkillsError>()(
+  "ResolveSkillsError",
+  { message: TrimmedNonEmptyString },
+) {}

@@ -32,6 +32,8 @@ import type {
   ServerUpsertKeybindingResult,
   ResolveMcpServersInput,
   ResolveMcpServersResult,
+  ResolveSkillsInput,
+  ResolveSkillsResult,
 } from "./server";
 import type {
   TerminalClearInput,
@@ -180,6 +182,7 @@ export interface NativeApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     resolveMcpServers: (input: ResolveMcpServersInput) => Promise<ResolveMcpServersResult>;
+    resolveSkills: (input: ResolveSkillsInput) => Promise<ResolveSkillsResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

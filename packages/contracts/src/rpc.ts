@@ -76,6 +76,9 @@ import {
   ResolveMcpServersInput,
   ResolveMcpServersResult,
   ResolveMcpServersError,
+  ResolveSkillsInput,
+  ResolveSkillsResult,
+  ResolveSkillsError,
 } from "./server";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
 
@@ -120,6 +123,7 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverResolveMcpServers: "server.resolveMcpServers",
+  serverResolveSkills: "server.resolveSkills",
 
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
@@ -161,6 +165,12 @@ export const WsServerResolveMcpServersRpc = Rpc.make(WS_METHODS.serverResolveMcp
   payload: ResolveMcpServersInput,
   success: ResolveMcpServersResult,
   error: ResolveMcpServersError,
+});
+
+export const WsServerResolveSkillsRpc = Rpc.make(WS_METHODS.serverResolveSkills, {
+  payload: ResolveSkillsInput,
+  success: ResolveSkillsResult,
+  error: ResolveSkillsError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -358,6 +368,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerResolveMcpServersRpc,
+  WsServerResolveSkillsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsProjectsListDirectoryRpc,
