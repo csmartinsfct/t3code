@@ -421,7 +421,12 @@ const make = Effect.gen(function* () {
     if (forkSource) {
       forkSourceBindings.delete(threadId);
 
-      const sourceBase = baseProviderKind(forkSource.provider as ProviderKind);
+      // Source provider may be empty if the source session was no longer active
+      // (e.g. app restart). In that case, skip the SDK fork path entirely.
+      const hasSourceProvider = forkSource.provider.length > 0;
+      const sourceBase = hasSourceProvider
+        ? baseProviderKind(forkSource.provider as ProviderKind)
+        : undefined;
       const targetBase = baseProviderKind(preferredProvider);
       const sourceProfileId = forkSource.provider.includes(":")
         ? forkSource.provider.slice(forkSource.provider.indexOf(":") + 1)
@@ -910,19 +915,21 @@ const make = Effect.gen(function* () {
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       // Capture fork source binding when a forked thread is created.
+      // Always store a binding when sourceThreadId is present — the generic
+      // fork path builds context from the orchestration read model and doesn't
+      // need a source provider session. The resume cursor is only needed for
+      // Claude SDK-level same-profile forks.
       if (event.type === "thread.created") {
         const payload = event.payload as Record<string, unknown>;
         const sourceThreadId = payload.sourceThreadId;
         if (typeof sourceThreadId === "string") {
           const sessions = yield* providerService.listSessions();
           const sourceSession = sessions.find((s) => s.threadId === sourceThreadId);
-          if (sourceSession?.resumeCursor) {
-            forkSourceBindings.set(String(payload.threadId), {
-              resumeCursor: sourceSession.resumeCursor,
-              provider: sourceSession.provider,
-              capturedAt: Date.now(),
-            });
-          }
+          forkSourceBindings.set(String(payload.threadId), {
+            resumeCursor: sourceSession?.resumeCursor ?? null,
+            provider: sourceSession?.provider ?? "",
+            capturedAt: Date.now(),
+          });
         }
         return;
       }
