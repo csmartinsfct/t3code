@@ -553,6 +553,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-sent":
+        case "thread.messages-deleted":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended": {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -656,6 +657,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
           });
+          return;
+        }
+
+        case "thread.messages-deleted": {
+          if (event.payload.messageIds.length === 0) return;
+          yield* projectionThreadMessageRepository.deleteByMessageIds({
+            threadId: event.payload.threadId,
+            messageIds: event.payload.messageIds,
+          });
+          // Attachment cleanup: recompute retained paths
+          const remainingMessages = yield* projectionThreadMessageRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          attachmentSideEffects.prunedThreadRelativePaths.set(
+            event.payload.threadId,
+            collectThreadAttachmentRelativePaths(event.payload.threadId, remainingMessages),
+          );
           return;
         }
 

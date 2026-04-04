@@ -344,15 +344,15 @@ const commandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
 } as const;
 
-const rootCommand = Command.make("t3", commandFlags).pipe(
+const runRootCommand = (flags: CliServerFlags) =>
+  Effect.gen(function* () {
+    const logLevel = yield* GlobalFlag.LogLevel;
+    const config = yield* resolveServerConfig(flags, logLevel);
+    return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
+  });
+
+const rootCommand = Command.make("t3", commandFlags, runRootCommand).pipe(
   Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((flags) =>
-    Effect.gen(function* () {
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveServerConfig(flags, logLevel);
-      return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
-    }),
-  ),
 );
 
 export const cli = rootCommand;

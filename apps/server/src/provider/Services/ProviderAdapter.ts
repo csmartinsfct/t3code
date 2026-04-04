@@ -11,6 +11,7 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderKind,
+  ProviderRateLimitInfo,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -123,4 +124,13 @@ export interface ProviderAdapterShape<TError> {
    * Canonical runtime event stream emitted by this adapter.
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Send a lightweight probe to retrieve account-level rate-limit info
+   * without creating a user-visible session. Returns `null` when the
+   * provider does not support probing or the probe fails gracefully.
+   *
+   * Optional — adapters that don't implement this are never probed.
+   */
+  readonly probeRateLimits?: () => Effect.Effect<ProviderRateLimitInfo | null, TError>;
 }

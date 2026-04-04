@@ -525,6 +525,40 @@ const AccountUpdatedPayload = Schema.Struct({
 });
 export type AccountUpdatedPayload = typeof AccountUpdatedPayload.Type;
 
+// ---------------------------------------------------------------------------
+// Rate-limit info – provider-agnostic normalized shape.
+//
+// Claude Agent SDK emits `rate_limit_event` with `rate_limit_info` containing
+// these fields.  Codex emits `account/rateLimits/updated` with a similar
+// (but less structured) payload.  Both adapters should normalize into this
+// shape before yielding the runtime event.
+// ---------------------------------------------------------------------------
+
+export const RateLimitStatus = Schema.Literals(["allowed", "allowed_warning", "rejected"]);
+export type RateLimitStatus = typeof RateLimitStatus.Type;
+
+export const RateLimitType = Schema.Literals([
+  "five_hour",
+  "seven_day",
+  "seven_day_opus",
+  "seven_day_sonnet",
+  "overage",
+]);
+export type RateLimitType = typeof RateLimitType.Type;
+
+export const ProviderRateLimitInfo = Schema.Struct({
+  status: RateLimitStatus,
+  rateLimitType: Schema.optional(TrimmedNonEmptyStringSchema),
+  utilization: Schema.optional(Schema.Number),
+  resetsAt: Schema.optional(Schema.Number),
+  isUsingOverage: Schema.optional(Schema.Boolean),
+  overageStatus: Schema.optional(RateLimitStatus),
+  overageResetsAt: Schema.optional(Schema.Number),
+  overageDisabledReason: Schema.optional(TrimmedNonEmptyStringSchema),
+  surpassedThreshold: Schema.optional(Schema.Number),
+});
+export type ProviderRateLimitInfo = typeof ProviderRateLimitInfo.Type;
+
 const AccountRateLimitsUpdatedPayload = Schema.Struct({
   rateLimits: Schema.Unknown,
 });

@@ -169,6 +169,68 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.fork": {
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: sourceThread.projectId,
+      });
+      const threadCreatedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: sourceThread.projectId,
+          title: `Fork of ${sourceThread.title}`,
+          modelSelection: command.modelSelection,
+          runtimeMode: sourceThread.runtimeMode,
+          interactionMode: sourceThread.interactionMode,
+          branch: sourceThread.branch,
+          worktreePath: sourceThread.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const messageEvents: Omit<OrchestrationEvent, "sequence">[] = sourceThread.messages.map(
+        (msg) => ({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.message-sent" as const,
+          payload: {
+            threadId: command.threadId,
+            messageId: crypto.randomUUID(),
+            role: msg.role,
+            text: msg.text,
+            ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
+            turnId: null,
+            streaming: false,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        }),
+      );
+      return [threadCreatedEvent, ...messageEvents];
+    }
+
     case "thread.delete": {
       yield* requireThread({
         readModel,
@@ -186,6 +248,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.deleted",
         payload: {
           threadId: command.threadId,
+          deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.messages.delete": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.messages-deleted",
+        payload: {
+          threadId: command.threadId,
+          messageIds: command.messageIds,
           deletedAt: occurredAt,
         },
       };

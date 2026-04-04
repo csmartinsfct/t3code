@@ -10,6 +10,7 @@ import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
 import { ProviderKind } from "./orchestration";
+import { ProviderRateLimitInfo } from "./providerRuntime";
 import { ServerSettings } from "./settings";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -165,12 +166,47 @@ export const ServerConfigStreamMcpConfigChangedEvent = Schema.Struct({
 export type ServerConfigStreamMcpConfigChangedEvent =
   typeof ServerConfigStreamMcpConfigChangedEvent.Type;
 
+// ---------------------------------------------------------------------------
+// Provider rate-limits – account-level, not thread-level.
+// ---------------------------------------------------------------------------
+
+/** A single usage tier returned by the Anthropic OAuth usage API. */
+export const OAuthUsageTier = Schema.Struct({
+  /** Tier key, e.g. "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet". */
+  tier: TrimmedNonEmptyString,
+  /** Utilization as 0–1 fraction (API returns 0–100; normalize before storing). */
+  utilization: Schema.Number,
+  /** ISO 8601 UTC reset timestamp. `null` when unknown. */
+  resetsAt: Schema.NullOr(IsoDateTime),
+});
+export type OAuthUsageTier = typeof OAuthUsageTier.Type;
+
+export const ProviderRateLimitsSnapshot = Schema.Struct({
+  provider: ProviderKind,
+  rateLimitInfo: ProviderRateLimitInfo,
+  updatedAt: IsoDateTime,
+  /** Multi-tier OAuth usage data (5h, 7d, model-specific). Absent when unavailable. */
+  oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
+});
+export type ProviderRateLimitsSnapshot = typeof ProviderRateLimitsSnapshot.Type;
+
+export const ServerConfigStreamRateLimitsUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("rateLimitsUpdated"),
+  payload: Schema.Struct({
+    rateLimits: Schema.Array(ProviderRateLimitsSnapshot),
+  }),
+});
+export type ServerConfigStreamRateLimitsUpdatedEvent =
+  typeof ServerConfigStreamRateLimitsUpdatedEvent.Type;
+
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
   ServerConfigStreamProviderStatusesEvent,
   ServerConfigStreamSettingsUpdatedEvent,
   ServerConfigStreamMcpConfigChangedEvent,
+  ServerConfigStreamRateLimitsUpdatedEvent,
 ]);
 export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 

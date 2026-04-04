@@ -15,7 +15,9 @@ import {
   ModelSelection,
   NonNegativeInt,
   ThreadId,
+  type ProviderKind,
   ProviderInterruptTurnInput,
+  type ProviderRateLimitInfo,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
@@ -746,6 +748,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  const probeAllRateLimits: ProviderServiceShape["probeAllRateLimits"] = Effect.fn(
+    "probeAllRateLimits",
+  )(function* () {
+    const results: Array<{ provider: ProviderKind; info: ProviderRateLimitInfo }> = [];
+    yield* Effect.forEach(
+      adapters,
+      (adapter) =>
+        Effect.gen(function* () {
+          if (!adapter.probeRateLimits) return;
+          const info = yield* adapter.probeRateLimits().pipe(
+            Effect.timeout("30 seconds"),
+            Effect.catch(() => Effect.succeed(null)),
+            Effect.catchDefect(() => Effect.succeed(null)),
+          );
+          if (info) {
+            results.push({ provider: adapter.provider, info });
+          }
+        }),
+      { concurrency: "unbounded" },
+    );
+    return results;
+  });
+
   return {
     startSession,
     sendTurn,
@@ -756,6 +781,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listSessions,
     getCapabilities,
     rollbackConversation,
+    probeAllRateLimits,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

@@ -2,6 +2,8 @@ import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
+  type ProviderKind,
+  type ProviderRateLimitsSnapshot,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerConfigUpdatedPayload,
@@ -11,7 +13,7 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 
 import type { WsRpcClient } from "../wsRpcClient";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
@@ -69,6 +71,10 @@ export const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload |
   "server-providers-updated",
   null,
 );
+export const providerRateLimitsAtom = makeStateAtom<ReadonlyArray<ProviderRateLimitsSnapshot>>(
+  "provider-rate-limits",
+  [],
+);
 
 export function getServerConfig(): ServerConfig | null {
   return appAtomRegistry.get(serverConfigAtom);
@@ -116,6 +122,10 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
       for (const listener of mcpConfigRevisionListeners) {
         listener();
       }
+      return;
+    }
+    case "rateLimitsUpdated": {
+      appAtomRegistry.set(providerRateLimitsAtom, event.payload.rateLimits);
       return;
     }
   }
@@ -326,4 +336,24 @@ export function useServerConfigUpdatedSubscription(
   listener: (notification: ServerConfigUpdatedNotification) => void,
 ): void {
   useLatestAtomSubscription(serverConfigUpdatedAtom, listener);
+}
+
+// ---------------------------------------------------------------------------
+// Provider rate-limits
+// ---------------------------------------------------------------------------
+
+const EMPTY_RATE_LIMITS: ReadonlyArray<ProviderRateLimitsSnapshot> = [];
+
+export function useProviderRateLimits(): ReadonlyArray<ProviderRateLimitsSnapshot> {
+  return useAtomValue(providerRateLimitsAtom) ?? EMPTY_RATE_LIMITS;
+}
+
+export function useProviderRateLimit(
+  provider: ProviderKind | null,
+): ProviderRateLimitsSnapshot | null {
+  const all = useProviderRateLimits();
+  return useMemo(() => {
+    if (!provider) return null;
+    return all.find((entry) => entry.provider === provider) ?? null;
+  }, [all, provider]);
 }

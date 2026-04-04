@@ -49,6 +49,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation";
+import { ProviderRateLimitsCache } from "./provider/Services/ProviderRateLimitsCache";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
@@ -59,7 +60,6 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { resolveClaudeMcpServerNames, resolveCodexMcpServerNames } from "./mcpConfigReader";
 import { resolveSkills } from "./skillsReader";
-import * as nodeFs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 
@@ -73,6 +73,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const git = yield* GitCore;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const rateLimitsCache = yield* ProviderRateLimitsCache;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
@@ -115,19 +116,19 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         const dirExists = yield* fs.exists(dir);
         if (!dirExists) return;
 
-        yield* fs
-          .watch(dir)
-          .pipe(
-            Stream.filter(
-              (event) =>
-                event.path === targetFile ||
-                event.path === nodePath.join(dir, targetFile) ||
-                nodePath.basename(event.path) === targetFile,
-            ),
-            Stream.debounce(Duration.millis(150)),
-            Stream.runForEach(() => PubSub.publish(mcpConfigChangedPubSub, undefined)),
-          )
-          .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped, Effect.asVoid);
+        yield* fs.watch(dir).pipe(
+          Stream.filter(
+            (event) =>
+              event.path === targetFile ||
+              event.path === nodePath.join(dir, targetFile) ||
+              nodePath.basename(event.path) === targetFile,
+          ),
+          Stream.debounce(Duration.millis(150)),
+          Stream.runForEach(() => PubSub.publish(mcpConfigChangedPubSub, undefined)),
+          Effect.ignoreCause({ log: true }),
+          Effect.forkScoped,
+          Effect.asVoid,
+        );
       }).pipe(Effect.ignoreCause({ log: true }));
 
     // Watch ~/.claude/ for .claude.json
@@ -143,20 +144,16 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     yield* watchDirForFile(codexHome, "config.toml");
 
     // Watch each ~/.claude-{profile}/ dir for .claude.json
-    try {
-      for (const entry of nodeFs.readdirSync(home)) {
-        if (!entry.startsWith(".claude-")) continue;
-        const profileDir = nodePath.join(home, entry);
-        try {
-          if (nodeFs.statSync(profileDir).isDirectory()) {
-            yield* watchDirForFile(profileDir, ".claude.json");
-          }
-        } catch {
-          // skip inaccessible entries
-        }
+    const homeEntries = yield* fs
+      .readDirectory(home)
+      .pipe(Effect.orElseSucceed(() => [] as string[]));
+    for (const entry of homeEntries) {
+      if (!entry.startsWith(".claude-")) continue;
+      const profileDir = nodePath.join(home, entry);
+      const stat = yield* fs.stat(profileDir).pipe(Effect.orElseSucceed(() => undefined));
+      if (stat?.type === "Directory") {
+        yield* watchDirForFile(profileDir, ".claude.json");
       }
-    } catch {
-      // skip if home dir is unreadable
     }
 
     const mcpConfigChangedStream = Stream.fromPubSub(mcpConfigChangedPubSub).pipe(
@@ -578,6 +575,31 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 payload: { settings },
               })),
             );
+            const rateLimitsUpdates = rateLimitsCache.streamChanges.pipe(
+              Stream.map((rateLimits) => ({
+                version: 1 as const,
+                type: "rateLimitsUpdated" as const,
+                payload: { rateLimits },
+              })),
+            );
+
+            // Emit the cached rate-limits snapshot right after the config
+            // snapshot so that new connections see the latest data immediately.
+            const initialRateLimits = Stream.fromEffect(
+              rateLimitsCache.getAll.pipe(
+                Effect.map((rateLimits) =>
+                  rateLimits.length > 0
+                    ? [
+                        {
+                          version: 1 as const,
+                          type: "rateLimitsUpdated" as const,
+                          payload: { rateLimits },
+                        },
+                      ]
+                    : [],
+                ),
+              ),
+            ).pipe(Stream.flatMap(Stream.fromIterable));
 
             return Stream.concat(
               Stream.make({
@@ -585,9 +607,18 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 type: "snapshot" as const,
                 config: yield* loadServerConfig,
               }),
-              Stream.merge(
-                mcpConfigChangedStream,
-                Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
+              Stream.concat(
+                initialRateLimits,
+                Stream.merge(
+                  mcpConfigChangedStream,
+                  Stream.merge(
+                    rateLimitsUpdates,
+                    Stream.merge(
+                      keybindingsUpdates,
+                      Stream.merge(providerStatuses, settingsUpdates),
+                    ),
+                  ),
+                ),
               ),
             );
           }),
@@ -612,6 +643,8 @@ const WsRpcLayer = WsRpcGroup.toLayer(
   }),
 );
 
+const WsRpcRuntimeLayer = WsRpcLayer.pipe(Layer.provideMerge(RpcSerialization.layerJson));
+
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
@@ -620,7 +653,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         "rpc.transport": "websocket",
         "rpc.system": "effect-rpc",
       },
-    }).pipe(Effect.provide(Layer.mergeAll(WsRpcLayer, RpcSerialization.layerJson)));
+    }).pipe(Effect.provide(WsRpcRuntimeLayer));
     return HttpRouter.add(
       "GET",
       "/ws",

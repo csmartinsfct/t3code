@@ -109,7 +109,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  ListTodoIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -130,6 +129,7 @@ import {
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
+import { useMessageSelectionStore } from "~/messageSelectionStore";
 import {
   getProviderModelCapabilities,
   getProviderModels,
@@ -158,6 +158,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
+import { deriveRateLimitSnapshot } from "../lib/rateLimit";
 import {
   resolveComposerFooterContentWidth,
   shouldForceCompactComposerFooterForFit,
@@ -173,6 +174,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
+import { RateLimitMeter } from "./chat/RateLimitMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -214,6 +216,7 @@ import {
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import {
+  useProviderRateLimit,
   useServerAvailableEditors,
   useServerConfig,
   useServerKeybindings,
@@ -714,9 +717,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  // When set, the thread-change reset effect will open the sidebar instead of closing it.
-  // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
-  const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
@@ -902,6 +902,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveLatestContextWindowSnapshot(activeThread?.activities ?? []),
     [activeThread?.activities],
   );
+
+  // Rate limits — resolved below after `selectedProvider` is known.
+  // The hook is called unconditionally here with a stable null so that
+  // the hook call order is preserved; it is re-derived in a memo below
+  // once `selectedProvider` is available.
+  const rateLimitProviderEarly =
+    activeThread?.session?.provider ??
+    (activeThread?.modelSelection
+      ? modelSelectionProviderKind(activeThread.modelSelection)
+      : null) ??
+    null;
+  const rateLimitEntryEarly = useProviderRateLimit(rateLimitProviderEarly);
   useEffect(() => {
     setMountedTerminalThreadIds((currentThreadIds) => {
       const nextThreadIds = reconcileMountedTerminalThreadIds({
@@ -1049,6 +1061,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+
+  // Rate limits: prefer the thread-level provider when available, fall back to
+  // the composer's selected provider so the meter is visible even on draft
+  // threads that have no session or model selection yet.
+  const rateLimitProvider = rateLimitProviderEarly ?? selectedProvider;
+  const rateLimitEntryFull = useProviderRateLimit(rateLimitProvider);
+  const rateLimitEntry = rateLimitEntryEarly ?? rateLimitEntryFull;
+  const activeRateLimit = useMemo(
+    () => (rateLimitEntry ? deriveRateLimitSnapshot(rateLimitEntry) : null),
+    [rateLimitEntry],
+  );
   const mcpServerNames = useMcpServerNames(selectedProvider, activeProject?.cwd);
   const availableSkills = useSkills(activeProject?.cwd);
   useRehydrateSkillContent(threadId, activeProject?.cwd);
@@ -2393,12 +2416,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     setExpandedWorkGroups({});
     setPullRequestDialogState(null);
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(true);
-    } else {
-      setPlanSidebarOpen(false);
-    }
+    setPlanSidebarOpen(false);
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
 
@@ -2986,6 +3004,129 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
+
+  // --- Message selection & deletion ---
+  const messageSelectionMode = useMessageSelectionStore((s) => s.selectionMode);
+
+  const confirmAndDeleteMessages = useCallback(
+    async (messageIds: MessageId[]) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || messageIds.length === 0) return;
+      const count = messageIds.length;
+      const confirmed = await api.dialogs.confirm(
+        count === 1
+          ? "Delete this message?\nThis action cannot be undone."
+          : `Delete ${count} messages?\nThis action cannot be undone.`,
+      );
+      if (!confirmed) return;
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.messages.delete",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          messageIds,
+        });
+      } catch {
+        // Silently ignore — the event store is the source of truth
+      }
+      useMessageSelectionStore.getState().exitSelectionMode();
+    },
+    [activeThread],
+  );
+
+  const onMessageContextMenu = useCallback(
+    async (messageId: MessageId, _messageRole: string, position: { x: number; y: number }) => {
+      const api = readNativeApi();
+      if (!api) return;
+
+      const selectionState = useMessageSelectionStore.getState();
+
+      // Branch 1: Selection mode active + message is selected → multi-select menu
+      if (selectionState.selectionMode && selectionState.selectedMessageIds.has(messageId)) {
+        const count = selectionState.selectedMessageIds.size;
+        const clicked = await api.contextMenu.show(
+          [
+            {
+              id: "delete",
+              label: `Delete (${count})`,
+              destructive: true,
+            },
+            { id: "cancel", label: "Cancel selection" },
+          ],
+          position,
+        );
+        if (clicked === "delete") {
+          await confirmAndDeleteMessages([...selectionState.selectedMessageIds]);
+          return;
+        }
+        if (clicked === "cancel") {
+          useMessageSelectionStore.getState().exitSelectionMode();
+          return;
+        }
+        return;
+      }
+
+      // Branch 2: Normal / unselected message menu
+      const items: { id: string; label: string; destructive?: boolean }[] = [
+        { id: "delete", label: "Delete message", destructive: true },
+        { id: "select", label: "Select message" },
+      ];
+      if (selectionState.selectionMode) {
+        items.push({ id: "cancel", label: "Cancel selection" });
+      }
+      const clicked = await api.contextMenu.show(items, position);
+
+      if (clicked === "delete") {
+        await confirmAndDeleteMessages([messageId]);
+        return;
+      }
+      if (clicked === "select") {
+        useMessageSelectionStore.getState().enterSelectionMode(messageId);
+        return;
+      }
+      if (clicked === "cancel") {
+        useMessageSelectionStore.getState().exitSelectionMode();
+        return;
+      }
+    },
+    [confirmAndDeleteMessages],
+  );
+
+  const onMessageSelectionClick = useCallback(
+    (messageId: MessageId, shiftKey: boolean) => {
+      if (!messageSelectionMode) return;
+      if (shiftKey) {
+        const orderedMessageIds = timelineEntries
+          .filter(
+            (entry): entry is Extract<typeof entry, { kind: "message" }> =>
+              entry.kind === "message",
+          )
+          .map((entry) => entry.message.id);
+        useMessageSelectionStore.getState().rangeSelectTo(messageId, orderedMessageIds);
+      } else {
+        useMessageSelectionStore.getState().toggleMessage(messageId);
+      }
+    },
+    [messageSelectionMode, timelineEntries],
+  );
+
+  // Escape key exits message selection mode
+  useEffect(() => {
+    if (!messageSelectionMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        useMessageSelectionStore.getState().exitSelectionMode();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [messageSelectionMode]);
+
+  // Reset message selection when thread changes
+  useEffect(() => {
+    useMessageSelectionStore.getState().exitSelectionMode();
+  }, [threadId]);
 
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
@@ -3578,13 +3719,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
             : {}),
           createdAt: messageCreatedAt,
         });
-        // Optimistically open the plan sidebar when implementing (not refining).
-        // "default" mode here means the agent is executing the plan, which produces
-        // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default") {
-          planSidebarDismissedForTurnRef.current = null;
-          setPlanSidebarOpen(true);
-        }
         sendInFlightRef.current = false;
       } catch (err) {
         setOptimisticUserMessages((existing) =>
@@ -3695,8 +3829,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return waitForStartedServerThread(nextThreadId);
       })
       .then(() => {
-        // Signal that the plan sidebar should open on the new thread.
-        planSidebarOpenOnNextThreadRef.current = true;
         return navigate({
           to: "/$threadId",
           params: { threadId: nextThreadId },
@@ -4152,6 +4284,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
+          hasActivePlan={Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)}
+          planSidebarOpen={planSidebarOpen}
           activeProjectScripts={activeProject?.scripts}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
@@ -4166,6 +4300,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffOpen={diffOpen}
           fileExplorerOpen={fileExplorerOpen}
           fileExplorerAvailable={activeProject !== undefined}
+          onTogglePlanSidebar={togglePlanSidebar}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -4228,6 +4363,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
+                onMessageContextMenu={onMessageContextMenu}
+                onMessageSelectionClick={onMessageSelectionClick}
               />
             </div>
 
@@ -4501,14 +4638,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               onRevealSkill={onRevealSkill}
                             />
                             <CompactComposerControlsMenu
-                              activePlan={Boolean(
-                                activePlan || sidebarProposedPlan || planSidebarOpen,
-                              )}
                               interactionMode={interactionMode}
-                              planSidebarOpen={planSidebarOpen}
                               traitsMenuContent={providerTraitsMenuContent}
                               onToggleInteractionMode={toggleInteractionMode}
-                              onTogglePlanSidebar={togglePlanSidebar}
                             />
                           </>
                         ) : (
@@ -4557,33 +4689,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               onAttachSkill={onAttachSkill}
                               onRevealSkill={onRevealSkill}
                             />
-
-                            {activePlan || sidebarProposedPlan || planSidebarOpen ? (
-                              <>
-                                <Separator
-                                  orientation="vertical"
-                                  className="mx-0.5 hidden h-4 sm:block"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  className={cn(
-                                    "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                                    planSidebarOpen
-                                      ? "text-blue-400 hover:text-blue-300"
-                                      : "text-muted-foreground/70 hover:text-foreground/80",
-                                  )}
-                                  size="sm"
-                                  type="button"
-                                  onClick={togglePlanSidebar}
-                                  title={
-                                    planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"
-                                  }
-                                >
-                                  <ListTodoIcon />
-                                  <span className="sr-only sm:not-sr-only">Plan</span>
-                                </Button>
-                              </>
-                            ) : null}
                           </>
                         )}
                       </div>
@@ -4597,6 +4702,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         }
                         className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                       >
+                        {activeRateLimit ? <RateLimitMeter rateLimit={activeRateLimit} /> : null}
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />
                         ) : null}

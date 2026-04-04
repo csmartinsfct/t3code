@@ -48,6 +48,13 @@ export const DeleteProjectionThreadMessagesInput = Schema.Struct({
 });
 export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type;
 
+export const DeleteProjectionThreadMessagesByIdsInput = Schema.Struct({
+  threadId: ThreadId,
+  messageIds: Schema.Array(MessageId),
+});
+export type DeleteProjectionThreadMessagesByIdsInput =
+  typeof DeleteProjectionThreadMessagesByIdsInput.Type;
+
 /**
  * ProjectionThreadMessageRepositoryShape - Service API for projected thread messages.
  */
@@ -82,6 +89,13 @@ export interface ProjectionThreadMessageRepositoryShape {
    */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadMessagesInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Delete specific projected thread messages by their IDs.
+   */
+  readonly deleteByMessageIds: (
+    input: DeleteProjectionThreadMessagesByIdsInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

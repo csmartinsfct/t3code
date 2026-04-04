@@ -3,6 +3,7 @@ import {
   type AssistantDeliveryMode,
   CommandId,
   MessageId,
+  type OAuthUsageTier,
   type OrchestrationEvent,
   type OrchestrationProposedPlanId,
   CheckpointRef,
@@ -12,11 +13,15 @@ import {
   TurnId,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
+  type ProviderKind,
+  type ProviderRateLimitInfo,
+  type AccountRateLimitsUpdatedPayload,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Cache, Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -27,6 +32,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { fetchClaudeOAuthUsage } from "../../provider/Layers/claudeOAuthUsage.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -40,6 +46,186 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
+
+// ---------------------------------------------------------------------------
+// Rate-limit payload normalization
+// ---------------------------------------------------------------------------
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+const VALID_RATE_LIMIT_STATUSES = new Set(["allowed", "allowed_warning", "rejected"]);
+
+/** Pick the first defined string from camelCase / snake_case variants. */
+function pickString(rec: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/** Pick the first defined finite number from camelCase / snake_case variants. */
+function pickNumber(rec: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+/** Pick the first defined boolean from camelCase / snake_case variants. */
+function pickBoolean(rec: Record<string, unknown>, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+function pickRateLimitStatus(
+  rec: Record<string, unknown>,
+  ...keys: string[]
+): ProviderRateLimitInfo["status"] | undefined {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "string" && VALID_RATE_LIMIT_STATUSES.has(value)) {
+      return value as ProviderRateLimitInfo["status"];
+    }
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Codex rate-limit window helpers
+// ---------------------------------------------------------------------------
+
+/** Labels for Codex rate-limit windows by approximate window duration. */
+const CODEX_WINDOW_LABELS: Record<string, string> = {
+  five_hour: "five_hour",
+  weekly: "seven_day",
+};
+
+function codexWindowTierKey(windowMinutes: number | undefined): string {
+  if (windowMinutes !== undefined && windowMinutes <= 360) return "five_hour";
+  return "seven_day";
+}
+
+interface CodexWindowData {
+  usedPercent: number;
+  windowMinutes?: number;
+  resetsInSeconds?: number;
+}
+
+function asCodexWindow(value: unknown): CodexWindowData | null {
+  const rec = asRecord(value);
+  if (!rec) return null;
+  const pct = pickNumber(rec, "used_percent", "usedPercent");
+  if (pct === undefined) return null;
+  const windowMinutes = pickNumber(rec, "window_minutes", "windowMinutes");
+  const resetsInSeconds = pickNumber(rec, "resets_in_seconds", "resetsInSeconds");
+  return {
+    usedPercent: pct,
+    ...(windowMinutes !== undefined ? { windowMinutes } : {}),
+    ...(resetsInSeconds !== undefined ? { resetsInSeconds } : {}),
+  };
+}
+
+function codexWindowToTier(win: CodexWindowData): OAuthUsageTier {
+  const tier = codexWindowTierKey(win.windowMinutes);
+  const resetsAt =
+    win.resetsInSeconds !== undefined
+      ? new Date(Date.now() + win.resetsInSeconds * 1000).toISOString()
+      : null;
+  return {
+    tier,
+    utilization: win.usedPercent / 100, // 0-100 → 0-1
+    resetsAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
+
+interface NormalizedRateLimitResult {
+  info: ProviderRateLimitInfo;
+  /** Additional tiers extracted from Codex primary/secondary windows. */
+  tiers: ReadonlyArray<OAuthUsageTier>;
+}
+
+/**
+ * Normalize the raw `account.rate-limits.updated` payload.
+ *
+ * Claude SDK wraps the info as `{ rateLimits: { type: "rate_limit_event", rate_limit_info: {...} } }`.
+ * Codex sends `{ rateLimits: { primary: {...}, secondary: {...} } }` or
+ * `{ rateLimits: { rate_limits_by_name: {...} } }`.
+ * We try the Claude path first, then fall back to Codex window extraction.
+ */
+function normalizeRateLimitPayload(
+  payload: AccountRateLimitsUpdatedPayload,
+): NormalizedRateLimitResult | null {
+  const outer = asRecord(payload.rateLimits);
+  if (!outer) return null;
+
+  // -----------------------------------------------------------------------
+  // Path 1: Claude — has a `status` field (directly or nested in rate_limit_info).
+  // -----------------------------------------------------------------------
+  const inner = asRecord(outer.rate_limit_info) ?? outer;
+  const status = pickRateLimitStatus(inner, "status");
+  if (status) {
+    return {
+      info: {
+        status,
+        rateLimitType: pickString(inner, "rateLimitType", "rate_limit_type"),
+        utilization: pickNumber(inner, "utilization"),
+        resetsAt: pickNumber(inner, "resetsAt", "resets_at"),
+        isUsingOverage: pickBoolean(inner, "isUsingOverage", "is_using_overage"),
+        overageStatus: pickRateLimitStatus(inner, "overageStatus", "overage_status"),
+        overageResetsAt: pickNumber(inner, "overageResetsAt", "overage_resets_at"),
+        overageDisabledReason: pickString(
+          inner,
+          "overageDisabledReason",
+          "overage_disabled_reason",
+        ),
+        surpassedThreshold: pickNumber(inner, "surpassedThreshold", "surpassed_threshold"),
+      },
+      tiers: [],
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Path 2: Codex — has `primary` / `secondary` windows with `used_percent`.
+  // -----------------------------------------------------------------------
+  const primary = asCodexWindow(outer.primary);
+  const secondary = asCodexWindow(outer.secondary);
+  if (!primary && !secondary) return null;
+
+  const tiers: OAuthUsageTier[] = [];
+  if (primary) tiers.push(codexWindowToTier(primary));
+  if (secondary) tiers.push(codexWindowToTier(secondary));
+
+  // Derive a single ProviderRateLimitInfo from the most-constraining window.
+  const highestPct = Math.max(primary?.usedPercent ?? 0, secondary?.usedPercent ?? 0);
+  const highestWindow =
+    primary && primary.usedPercent >= (secondary?.usedPercent ?? 0) ? primary : secondary;
+
+  return {
+    info: {
+      status: highestPct >= 80 ? "allowed_warning" : "allowed",
+      utilization: highestPct / 100,
+      rateLimitType: highestWindow ? codexWindowTierKey(highestWindow.windowMinutes) : undefined,
+      resetsAt:
+        highestWindow?.resetsInSeconds !== undefined
+          ? Math.floor(Date.now() / 1000) + highestWindow.resetsInSeconds
+          : undefined,
+    },
+    tiers,
+  };
+}
 
 type TurnStartRequestedDomainEvent = Extract<
   OrchestrationEvent,
@@ -503,6 +689,7 @@ function runtimeEventToActivities(
 const make = Effect.fn("make")(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const rateLimitsCache = yield* ProviderRateLimitsCache;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
 
@@ -875,6 +1062,19 @@ const make = Effect.fn("make")(function* () {
   const processRuntimeEvent = Effect.fn("processRuntimeEvent")(function* (
     event: ProviderRuntimeEvent,
   ) {
+    // Rate limits are account/provider-scoped, not thread-scoped.
+    // Intercept before the thread existence guard so we always cache them.
+    if (event.type === "account.rate-limits.updated") {
+      const normalized = normalizeRateLimitPayload(event.payload);
+      if (normalized) {
+        yield* rateLimitsCache.set(event.provider, normalized.info);
+        if (normalized.tiers.length > 0) {
+          yield* rateLimitsCache.setOAuthTiers(event.provider, normalized.tiers);
+        }
+      }
+      return;
+    }
+
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === event.threadId);
     if (!thread) return;
@@ -1257,6 +1457,56 @@ const make = Effect.fn("make")(function* () {
         }
         return worker.enqueue({ source: "domain", event });
       }),
+    );
+
+    // Probe rate-limits once on startup when the cache is empty.
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        const cached = yield* rateLimitsCache.getAll;
+        if (cached.length > 0) return;
+
+        yield* Effect.logDebug("rate-limits cache empty — probing providers");
+        const emptyResults: ReadonlyArray<{ provider: ProviderKind; info: ProviderRateLimitInfo }> =
+          [];
+        const results = yield* providerService.probeAllRateLimits().pipe(
+          Effect.catch(() => Effect.succeed(emptyResults)),
+          Effect.catchDefect(() => Effect.succeed(emptyResults)),
+        );
+        for (const entry of results) {
+          yield* rateLimitsCache.set(entry.provider, entry.info);
+        }
+        if (results.length > 0) {
+          yield* Effect.logDebug(`rate-limits probe completed for ${results.length} provider(s)`);
+        }
+      }).pipe(Effect.delay("2 seconds"), Effect.ignoreCause({ log: true })),
+    );
+
+    // Periodically fetch multi-tier OAuth usage from the Anthropic API.
+    // The fetchClaudeOAuthUsage function has its own 180s response cache.
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        const settings = yield* serverSettingsService.getSettings.pipe(
+          Effect.catch(() => Effect.succeed(null)),
+          Effect.catchDefect(() => Effect.succeed(null)),
+        );
+        const configDir = settings?.providers.claudeAgent.configDir || undefined;
+        const provider = "claudeAgent" as ProviderKind;
+
+        const poll = Effect.gen(function* () {
+          const tiers = yield* Effect.tryPromise({
+            try: () => fetchClaudeOAuthUsage(configDir),
+            catch: () => [] as const,
+          });
+          if (tiers.length > 0) {
+            yield* rateLimitsCache.setOAuthTiers(provider, tiers);
+          }
+        }).pipe(Effect.ignoreCause({ log: true }));
+
+        // Initial fetch after a short delay.
+        yield* poll;
+        // Repeat on a 60s schedule (the fetcher has its own cache + 429 backoff).
+        yield* poll.pipe(Effect.repeat(Schedule.spaced(Duration.seconds(60))));
+      }).pipe(Effect.delay("5 seconds"), Effect.ignoreCause({ log: true })),
     );
   });
 

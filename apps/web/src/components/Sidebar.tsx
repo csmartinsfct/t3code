@@ -44,9 +44,13 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  baseProviderKind,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
   ProjectId,
+  providerDisplayName,
+  providerProfileId,
+  type ProviderKind,
   ThreadId,
   type GitStatusResult,
 } from "@t3tools/contracts";
@@ -59,7 +63,13 @@ import {
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import {
+  isLinuxPlatform,
+  isMacPlatform,
+  newCommandId,
+  newProjectId,
+  newThreadId,
+} from "../lib/utils";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -129,7 +139,7 @@ import {
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings } from "../rpc/serverState";
+import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
 const THREAD_PREVIEW_LIMIT = 6;
@@ -701,6 +711,7 @@ export default function Sidebar() {
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
   const keybindings = useServerKeybindings();
+  const serverProviders = useServerProviders();
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
@@ -1065,16 +1076,72 @@ export default function Sidebar() {
       if (!thread) return;
       const threadWorkspacePath =
         thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null;
+
+      const forkChildren = serverProviders
+        .filter((sp) => sp.enabled && sp.status === "ready")
+        .flatMap((sp) =>
+          sp.models.map((model) => ({
+            id: `fork::${sp.provider}::${model.slug}`,
+            label: `${providerDisplayName(sp.provider)} \u2014 ${model.name}`,
+          })),
+        );
+
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
+          {
+            id: "fork",
+            label: "Fork with model",
+            children: forkChildren,
+            disabled: forkChildren.length === 0,
+          },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
           { id: "delete", label: "Delete", destructive: true },
         ],
         position,
       );
+
+      if (clicked?.startsWith("fork::")) {
+        const rest = clicked.slice("fork::".length);
+        const sepIdx = rest.indexOf("::");
+        const provider = rest.slice(0, sepIdx) as ProviderKind;
+        const model = rest.slice(sepIdx + 2);
+        const base = baseProviderKind(provider);
+        const profileId = providerProfileId(provider);
+
+        const modelSelection =
+          base === "codex"
+            ? { provider: "codex" as const, model }
+            : {
+                provider: "claudeAgent" as const,
+                model,
+                ...(profileId ? { profileId } : {}),
+              };
+
+        const forkThreadId = newThreadId();
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.fork",
+            commandId: newCommandId(),
+            threadId: forkThreadId,
+            sourceThreadId: threadId,
+            modelSelection,
+            createdAt: new Date().toISOString(),
+          });
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: forkThreadId },
+          });
+        } catch {
+          toastManager.add({
+            type: "error",
+            title: "Failed to fork thread",
+          });
+        }
+        return;
+      }
 
       if (clicked === "rename") {
         setRenamingThreadId(threadId);
@@ -1123,7 +1190,9 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       markThreadUnread,
+      navigate,
       projectCwdById,
+      serverProviders,
       sidebarThreadsById,
     ],
   );

@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -53,6 +54,8 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useMessageSelectionStore } from "~/messageSelectionStore";
+import { Checkbox } from "../ui/checkbox";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 import {
@@ -96,6 +99,12 @@ interface MessagesTimelineProps {
       end: number;
     }>;
   }) => void;
+  onMessageContextMenu?: (
+    messageId: MessageId,
+    messageRole: string,
+    position: { x: number; y: number },
+  ) => void;
+  onMessageSelectionClick?: (messageId: MessageId, shiftKey: boolean) => void;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -121,6 +130,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   onVirtualizerSnapshot,
+  onMessageContextMenu,
+  onMessageSelectionClick,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -303,6 +314,38 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }));
   }, []);
 
+  const messageSelectionMode = useMessageSelectionStore((s) => s.selectionMode);
+  const selectedMessageIds = useMessageSelectionStore((s) => s.selectedMessageIds);
+
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      const messageEl = (event.target as Element).closest<HTMLElement>("[data-message-id]");
+      if (!messageEl) return;
+      const messageId = messageEl.dataset.messageId;
+      const messageRole = messageEl.dataset.messageRole;
+      if (!messageId || !messageRole) return;
+      event.preventDefault();
+      onMessageContextMenu?.(messageId as MessageId, messageRole, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [onMessageContextMenu],
+  );
+
+  const handleSelectionClick = useCallback(
+    (event: ReactMouseEvent, messageId: MessageId) => {
+      if (!messageSelectionMode) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.shiftKey) {
+        window.getSelection()?.removeAllRanges();
+      }
+      onMessageSelectionClick?.(messageId, event.shiftKey);
+    },
+    [messageSelectionMode, onMessageSelectionClick],
+  );
+
   const renderRowContent = (row: TimelineRow) => (
     <div
       className="pb-4"
@@ -361,7 +404,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
-            <div className="flex justify-end">
+            <div
+              className={cn("flex justify-end", messageSelectionMode && "items-start gap-2")}
+              onClick={
+                messageSelectionMode ? (e) => handleSelectionClick(e, row.message.id) : undefined
+              }
+            >
+              {messageSelectionMode && (
+                <div className="flex shrink-0 items-center pt-2">
+                  <Checkbox
+                    checked={selectedMessageIds.has(row.message.id)}
+                    onCheckedChange={() => onMessageSelectionClick?.(row.message.id, false)}
+                  />
+                </div>
+              )}
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
@@ -439,90 +495,105 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
           return (
-            <>
-              {row.showCompletionDivider && (
-                <div className="my-3 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {completionSummary ? `Response • ${completionSummary}` : "Response"}
-                  </span>
-                  <span className="h-px flex-1 bg-border" />
+            <div
+              className={cn(messageSelectionMode && "flex items-start gap-2")}
+              onClick={
+                messageSelectionMode ? (e) => handleSelectionClick(e, row.message.id) : undefined
+              }
+            >
+              {messageSelectionMode && (
+                <div className="flex shrink-0 items-center pt-2">
+                  <Checkbox
+                    checked={selectedMessageIds.has(row.message.id)}
+                    onCheckedChange={() => onMessageSelectionClick?.(row.message.id, false)}
+                  />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
-                  return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
-                          )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            data-scroll-anchor-ignore
-                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
-                          >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
+              <div className="min-w-0 flex-1">
+                {row.showCompletionDivider && (
+                  <div className="my-3 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                      {completionSummary ? `Response • ${completionSummary}` : "Response"}
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                <div className="min-w-0 px-1 py-0.5">
+                  <ChatMarkdown
+                    text={messageText}
+                    cwd={markdownCwd}
+                    isStreaming={Boolean(row.message.streaming)}
+                  />
+                  {(() => {
+                    const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
+                    if (!turnSummary) return null;
+                    const checkpointFiles = turnSummary.files;
+                    if (checkpointFiles.length === 0) return null;
+                    const summaryStat = summarizeTurnDiffStats(checkpointFiles);
+                    const changedFileCountLabel = String(checkpointFiles.length);
+                    const allDirectoriesExpanded =
+                      allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
+                    return (
+                      <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
+                            <span>Changed files ({changedFileCountLabel})</span>
+                            {hasNonZeroStat(summaryStat) && (
+                              <>
+                                <span className="mx-1">•</span>
+                                <DiffStatLabel
+                                  additions={summaryStat.additions}
+                                  deletions={summaryStat.deletions}
+                                />
+                              </>
+                            )}
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              data-scroll-anchor-ignore
+                              onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                            >
+                              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              onClick={() =>
+                                onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
+                              }
+                            >
+                              View diff
+                            </Button>
+                          </div>
                         </div>
+                        <ChangedFilesTree
+                          key={`changed-files-tree:${turnSummary.turnId}`}
+                          turnId={turnSummary.turnId}
+                          files={checkpointFiles}
+                          allDirectoriesExpanded={allDirectoriesExpanded}
+                          resolvedTheme={resolvedTheme}
+                          onOpenTurnDiff={onOpenTurnDiff}
+                        />
                       </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
-                    </div>
-                  );
-                })()}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.durationStart, nowIso)
-                      : formatElapsed(row.durationStart, row.message.completedAt),
-                    timestampFormat,
-                  )}
-                </p>
+                    );
+                  })()}
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/30">
+                    {formatMessageMeta(
+                      row.message.createdAt,
+                      row.message.streaming
+                        ? formatElapsed(row.durationStart, nowIso)
+                        : formatElapsed(row.durationStart, row.message.completedAt),
+                      timestampFormat,
+                    )}
+                  </p>
+                </div>
               </div>
-            </>
+            </div>
           );
         })()}
 
@@ -570,6 +641,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       ref={timelineRootRef}
       data-timeline-root="true"
       className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+      onContextMenu={handleContextMenu}
     >
       {virtualizedRowCount > 0 && (
         <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>

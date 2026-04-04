@@ -890,6 +890,15 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       });
     }
 
+    case "thread.messages-deleted": {
+      return updateThreadState(state, event.payload.threadId, (thread) => {
+        const deletedIds = new Set(event.payload.messageIds);
+        const messages = thread.messages.filter((msg) => !deletedIds.has(msg.id));
+        if (messages.length === thread.messages.length) return thread;
+        return { ...thread, messages, updatedAt: event.occurredAt };
+      });
+    }
+
     case "thread.session-set": {
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,

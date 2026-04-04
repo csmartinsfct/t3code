@@ -22,6 +22,7 @@ import {
   ApprovalRequestId,
   asProviderInput,
   baseProviderKind,
+  type ProviderRateLimitInfo,
   makeProviderKind,
   type CanonicalItemType,
   type ClaudeModelSelection,
@@ -302,6 +303,10 @@ function maxClaudeContextWindowFromModelUsage(modelUsage: unknown): number | und
   return maxContextWindow;
 }
 
+function safeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : undefined;
+}
+
 function normalizeClaudeTokenUsage(
   usage: unknown,
   contextWindow?: number,
@@ -311,45 +316,34 @@ function normalizeClaudeTokenUsage(
   }
 
   const record = usage as Record<string, unknown>;
-  const directUsedTokens =
-    typeof record.total_tokens === "number" && Number.isFinite(record.total_tokens)
-      ? record.total_tokens
-      : undefined;
-  const inputTokens =
-    (typeof record.input_tokens === "number" && Number.isFinite(record.input_tokens)
-      ? record.input_tokens
-      : 0) +
-    (typeof record.cache_creation_input_tokens === "number" &&
-    Number.isFinite(record.cache_creation_input_tokens)
-      ? record.cache_creation_input_tokens
-      : 0) +
-    (typeof record.cache_read_input_tokens === "number" &&
-    Number.isFinite(record.cache_read_input_tokens)
-      ? record.cache_read_input_tokens
-      : 0);
-  const outputTokens =
-    typeof record.output_tokens === "number" && Number.isFinite(record.output_tokens)
-      ? record.output_tokens
-      : 0;
+  const directUsedTokens = safeInt(record.total_tokens);
+  const rawInput = safeInt(record.input_tokens) ?? 0;
+  const rawCacheCreation = safeInt(record.cache_creation_input_tokens) ?? 0;
+  const rawCacheRead = safeInt(record.cache_read_input_tokens) ?? 0;
+  const inputTokens = rawInput + rawCacheCreation + rawCacheRead;
+  const cachedInputTokens = rawCacheCreation + rawCacheRead;
+  const outputTokens = safeInt(record.output_tokens) ?? 0;
   const derivedUsedTokens = inputTokens + outputTokens;
   const usedTokens = directUsedTokens ?? (derivedUsedTokens > 0 ? derivedUsedTokens : undefined);
   if (usedTokens === undefined || usedTokens <= 0) {
     return undefined;
   }
 
+  const maxTokens =
+    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+      ? Math.round(contextWindow)
+      : undefined;
+
   return {
     usedTokens,
     lastUsedTokens: usedTokens,
     ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
-      ? { maxTokens: contextWindow }
-      : {}),
-    ...(typeof record.tool_uses === "number" && Number.isFinite(record.tool_uses)
-      ? { toolUses: record.tool_uses }
-      : {}),
-    ...(typeof record.duration_ms === "number" && Number.isFinite(record.duration_ms)
-      ? { durationMs: record.duration_ms }
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(safeInt(record.tool_uses) !== undefined ? { toolUses: safeInt(record.tool_uses) } : {}),
+    ...(safeInt(record.duration_ms) !== undefined
+      ? { durationMs: safeInt(record.duration_ms) }
       : {}),
   };
 }
@@ -1355,17 +1349,21 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     );
     const lastGoodUsage = context.lastKnownTokenUsage;
     const maxTokens = resultContextWindow ?? context.lastKnownContextWindow;
-    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
+    const baseSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
       ? {
           ...lastGoodUsage,
           ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
-            ? { maxTokens }
+            ? { maxTokens: Math.round(maxTokens) }
             : {}),
           ...(accumulatedSnapshot && accumulatedSnapshot.usedTokens > lastGoodUsage.usedTokens
             ? { totalProcessedTokens: accumulatedSnapshot.usedTokens }
             : {}),
         }
       : accumulatedSnapshot;
+    // Claude auto-compacts context when approaching the limit.
+    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = baseSnapshot
+      ? { ...baseSnapshot, compactsAutomatically: true }
+      : undefined;
 
     const turnState = context.turnState;
     if (!turnState) {
@@ -2035,7 +2033,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             context.lastKnownContextWindow,
           );
           if (normalizedUsage) {
-            context.lastKnownTokenUsage = normalizedUsage;
+            const withCompact = { ...normalizedUsage, compactsAutomatically: true };
+            context.lastKnownTokenUsage = withCompact;
             const usageStamp = yield* makeEventStamp();
             yield* offerRuntimeEvent({
               ...base,
@@ -2043,7 +2042,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               createdAt: usageStamp.createdAt,
               type: "thread.token-usage.updated",
               payload: {
-                usage: normalizedUsage,
+                usage: withCompact,
               },
             });
           }
@@ -2067,7 +2066,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             context.lastKnownContextWindow,
           );
           if (normalizedUsage) {
-            context.lastKnownTokenUsage = normalizedUsage;
+            const withCompact = { ...normalizedUsage, compactsAutomatically: true };
+            context.lastKnownTokenUsage = withCompact;
             const usageStamp = yield* makeEventStamp();
             yield* offerRuntimeEvent({
               ...base,
@@ -2075,7 +2075,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               createdAt: usageStamp.createdAt,
               type: "thread.token-usage.updated",
               payload: {
-                usage: normalizedUsage,
+                usage: withCompact,
               },
             });
           }
@@ -3094,6 +3094,125 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     ).pipe(Effect.tap(() => Queue.shutdown(runtimeEventQueue))),
   );
 
+  // ---------------------------------------------------------------------------
+  // probeRateLimits — lightweight "hi" query to trigger a rate_limit_event
+  // without creating a user-visible session.
+  // ---------------------------------------------------------------------------
+
+  const VALID_PROBE_STATUSES = new Set(["allowed", "allowed_warning", "rejected"]);
+
+  /** Run the entire probe as a single async promise — avoids `for await` in Effect generators. */
+  async function runRateLimitProbe(
+    binaryPath: string,
+    cwd: string,
+    configDir: string | undefined,
+  ): Promise<ProviderRateLimitInfo | null> {
+    async function* singleMessagePrompt(): AsyncIterable<SDKUserMessage> {
+      yield { type: "user", content: "hi" } as unknown as SDKUserMessage;
+    }
+
+    const probeOptions: ClaudeQueryOptions = {
+      cwd,
+      pathToClaudeCodeExecutable: binaryPath,
+      permissionMode: "bypassPermissions" as PermissionMode,
+      allowDangerouslySkipPermissions: true,
+      settings: { maxTurnTokens: 256 },
+      ...(configDir ? { env: { ...process.env, CLAUDE_CONFIG_DIR: configDir } } : {}),
+    };
+
+    let runtime: ClaudeQueryRuntime | undefined;
+    try {
+      runtime = createQuery({ prompt: singleMessagePrompt(), options: probeOptions });
+
+      for await (const message of runtime) {
+        if (message.type !== "rate_limit_event") continue;
+        const raw = message as Record<string, unknown>;
+        const info = (raw.rate_limit_info ?? raw) as Record<string, unknown>;
+        const status = typeof info.status === "string" ? info.status : null;
+        if (!status || !VALID_PROBE_STATUSES.has(status)) continue;
+
+        const pickStr = (...keys: string[]): string | undefined => {
+          for (const k of keys) {
+            const v = info[k];
+            if (typeof v === "string" && v.length > 0) return v;
+          }
+        };
+        const pickNum = (...keys: string[]): number | undefined => {
+          for (const k of keys) {
+            const v = info[k];
+            if (typeof v === "number" && Number.isFinite(v)) return v;
+          }
+        };
+        const pickBool = (...keys: string[]): boolean | undefined => {
+          for (const k of keys) {
+            const v = info[k];
+            if (typeof v === "boolean") return v;
+          }
+        };
+        const pickRlStatus = (...keys: string[]): ProviderRateLimitInfo["status"] | undefined => {
+          for (const k of keys) {
+            const v = info[k];
+            if (typeof v === "string" && VALID_PROBE_STATUSES.has(v)) {
+              return v as ProviderRateLimitInfo["status"];
+            }
+          }
+        };
+
+        void runtime.interrupt().catch(() => {});
+        return {
+          status: status as ProviderRateLimitInfo["status"],
+          rateLimitType: pickStr("rateLimitType", "rate_limit_type"),
+          utilization: pickNum("utilization"),
+          resetsAt: pickNum("resetsAt", "resets_at"),
+          isUsingOverage: pickBool("isUsingOverage", "is_using_overage"),
+          overageStatus: pickRlStatus("overageStatus", "overage_status"),
+          overageResetsAt: pickNum("overageResetsAt", "overage_resets_at"),
+          overageDisabledReason: pickStr("overageDisabledReason", "overage_disabled_reason"),
+          surpassedThreshold: pickNum("surpassedThreshold", "surpassed_threshold"),
+        } satisfies ProviderRateLimitInfo;
+      }
+
+      return null;
+    } catch {
+      return null;
+    } finally {
+      if (runtime) {
+        void runtime.interrupt().catch(() => {});
+      }
+    }
+  }
+
+  const probeRateLimits: NonNullable<ClaudeAdapterShape["probeRateLimits"]> = Effect.fn(
+    "probeRateLimits",
+  )(function* () {
+    const allSettings = yield* serverSettingsService.getSettings.pipe(
+      Effect.mapError(
+        (err) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: ThreadId.makeUnsafe("__probe__"),
+            detail: `Failed to load settings: ${err.message}`,
+            cause: err,
+          }),
+      ),
+    );
+    const claudeSettings = allSettings.providers.claudeAgent;
+    return yield* Effect.tryPromise({
+      try: () =>
+        runRateLimitProbe(
+          claudeSettings.binaryPath,
+          serverConfig.cwd,
+          claudeSettings.configDir || undefined,
+        ),
+      catch: () =>
+        new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId: ThreadId.makeUnsafe("__probe__"),
+          detail: "Rate-limit probe failed",
+        }),
+    });
+  });
+
   return {
     provider: PROVIDER,
     capabilities: {
@@ -3110,6 +3229,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     listSessions,
     hasSession,
     stopAll,
+    probeRateLimits,
     streamEvents: Stream.fromQueue(runtimeEventQueue),
   } satisfies ClaudeAdapterShape;
 });

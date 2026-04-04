@@ -6,8 +6,9 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, FolderOpenIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, FolderOpenIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
@@ -20,6 +21,8 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
+  hasActivePlan: boolean;
+  planSidebarOpen: boolean;
   activeProjectScripts: ProjectScript[] | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -32,6 +35,7 @@ interface ChatHeaderProps {
   diffOpen: boolean;
   fileExplorerOpen: boolean;
   fileExplorerAvailable: boolean;
+  onTogglePlanSidebar: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -47,6 +51,8 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectName,
   isGitRepo,
   openInCwd,
+  hasActivePlan,
+  planSidebarOpen,
   activeProjectScripts,
   preferredScriptId,
   keybindings,
@@ -59,6 +65,7 @@ export const ChatHeader = memo(function ChatHeader({
   diffOpen,
   fileExplorerOpen,
   fileExplorerAvailable,
+  onTogglePlanSidebar,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -89,6 +96,27 @@ export const ChatHeader = memo(function ChatHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
+        {hasActivePlan && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant={planSidebarOpen ? "default" : "outline"}
+                  className="shrink-0 gap-1"
+                  onClick={onTogglePlanSidebar}
+                  aria-label={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                >
+                  <ListTodoIcon className="size-3" />
+                  <span className="sr-only @3xl/header-actions:not-sr-only">Plan</span>
+                </Button>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

@@ -117,86 +117,83 @@ export const resolveSkills = Effect.fn("resolveSkills")(function* (cwd: string) 
   const skills: DiscoveredSkill[] = [];
 
   // Scan a single directory for skill files matching the given pattern.
-  const scanDir = function* (
-    pattern: SkillScanPattern,
-    dir: string,
-    group: string | null,
-  ): Generator<Effect.Effect<any, any, any>, void, any> {
-    const dirExists = yield* fileSystem.exists(dir).pipe(Effect.orElseSucceed(() => false));
-    if (!dirExists) return;
+  const scanDir = (pattern: SkillScanPattern, dir: string, group: string | null) =>
+    Effect.gen(function* () {
+      const dirExists = yield* fileSystem.exists(dir).pipe(Effect.orElseSucceed(() => false));
+      if (!dirExists) return;
 
-    const stat = yield* fileSystem.stat(dir).pipe(Effect.orElseSucceed(() => undefined));
-    if (!stat || stat.type !== "Directory") return;
+      const stat = yield* fileSystem.stat(dir).pipe(Effect.orElseSucceed(() => undefined));
+      if (!stat || stat.type !== "Directory") return;
 
-    const entries = yield* fileSystem
-      .readDirectory(dir)
-      .pipe(Effect.orElseSucceed(() => [] as string[]));
+      const entries = yield* fileSystem
+        .readDirectory(dir)
+        .pipe(Effect.orElseSucceed(() => [] as string[]));
 
-    const groupPrefix = group ? `${group}/` : "";
+      const groupPrefix = group ? `${group}/` : "";
 
-    for (const entry of entries) {
-      const entryPath = path.join(dir, entry);
+      for (const entry of entries) {
+        const entryPath = path.join(dir, entry);
 
-      // Check direct file matches (e.g. commands/review.md)
-      const matchesExt = pattern.extensions.some((ext) => entry.endsWith(ext));
-      if (matchesExt) {
-        const content = yield* fileSystem
-          .readFileString(entryPath)
-          .pipe(Effect.orElseSucceed(() => undefined));
-
-        if (content === undefined) continue;
-
-        // Strip any known extension to derive the name.
-        let name = entry;
-        for (const ext of pattern.extensions) {
-          if (name.endsWith(ext)) {
-            name = name.slice(0, -ext.length);
-            break;
-          }
-        }
-
-        skills.push({
-          id: `${pattern.source}:${groupPrefix}${entry}`,
-          name,
-          source: pattern.source,
-          absolutePath: entryPath,
-          relativePath: entry,
-          content,
-          group,
-        });
-        continue;
-      }
-
-      // Check folder skills with known entry files (e.g. skills/create-mr/SKILL.md)
-      if (pattern.entryFiles && pattern.entryFiles.length > 0) {
-        const entryStat = yield* fileSystem
-          .stat(entryPath)
-          .pipe(Effect.orElseSucceed(() => undefined));
-        if (!entryStat || entryStat.type !== "Directory") continue;
-
-        for (const entryFile of pattern.entryFiles) {
-          const entryFilePath = path.join(entryPath, entryFile);
+        // Check direct file matches (e.g. commands/review.md)
+        const matchesExt = pattern.extensions.some((ext) => entry.endsWith(ext));
+        if (matchesExt) {
           const content = yield* fileSystem
-            .readFileString(entryFilePath)
+            .readFileString(entryPath)
             .pipe(Effect.orElseSucceed(() => undefined));
 
           if (content === undefined) continue;
 
-          // Name is the directory name, not the entry file name.
+          // Strip any known extension to derive the name.
+          let name = entry;
+          for (const ext of pattern.extensions) {
+            if (name.endsWith(ext)) {
+              name = name.slice(0, -ext.length);
+              break;
+            }
+          }
+
           skills.push({
-            id: `${pattern.source}:${groupPrefix}${entry}/${entryFile}`,
-            name: entry,
+            id: `${pattern.source}:${groupPrefix}${entry}`,
+            name,
             source: pattern.source,
-            absolutePath: entryFilePath,
-            relativePath: `${entry}/${entryFile}`,
+            absolutePath: entryPath,
+            relativePath: entry,
             content,
             group,
           });
-          break; // Only one entry file per folder
+          continue;
+        }
+
+        // Check folder skills with known entry files (e.g. skills/create-mr/SKILL.md)
+        if (pattern.entryFiles && pattern.entryFiles.length > 0) {
+          const entryStat = yield* fileSystem
+            .stat(entryPath)
+            .pipe(Effect.orElseSucceed(() => undefined));
+          if (!entryStat || entryStat.type !== "Directory") continue;
+
+          for (const entryFile of pattern.entryFiles) {
+            const entryFilePath = path.join(entryPath, entryFile);
+            const content = yield* fileSystem
+              .readFileString(entryFilePath)
+              .pipe(Effect.orElseSucceed(() => undefined));
+
+            if (content === undefined) continue;
+
+            // Name is the directory name, not the entry file name.
+            skills.push({
+              id: `${pattern.source}:${groupPrefix}${entry}/${entryFile}`,
+              name: entry,
+              source: pattern.source,
+              absolutePath: entryFilePath,
+              relativePath: `${entry}/${entryFile}`,
+              content,
+              group,
+            });
+            break; // Only one entry file per folder
+          }
         }
       }
-    }
-  };
+    });
 
   // ── Root-level scan ──────────────────────────────────────────────────────
   for (const pattern of SKILL_SCAN_PATTERNS) {

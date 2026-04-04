@@ -30,6 +30,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { createSafeStdIoWrite } from "./safeStdio";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -101,7 +102,13 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
-let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+let backendObservabilitySettings: {
+  readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
+} = {
+  otlpTracesUrl: undefined,
+  otlpMetricsUrl: undefined,
+};
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
@@ -112,6 +119,9 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 });
 const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+
+installStdIoCapture();
+backendObservabilitySettings = readPersistedBackendObservabilitySettings();
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -215,36 +225,20 @@ function writeDesktopStreamChunk(
 }
 
 function installStdIoCapture(): void {
-  if (!app.isPackaged || desktopLogSink === null || restoreStdIoCapture !== null) {
+  if (restoreStdIoCapture !== null) {
     return;
   }
 
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
-
-  const patchWrite =
-    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
-    (
-      chunk: string | Uint8Array,
-      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-      callback?: (error?: Error | null) => void,
-    ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-      writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
-        return originalWrite(chunk, encodingOrCallback);
-      }
-      if (callback !== undefined) {
-        return originalWrite(chunk, encoding, callback);
-      }
-      if (encoding !== undefined) {
-        return originalWrite(chunk, encoding);
-      }
-      return originalWrite(chunk);
-    };
-
-  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
-  process.stderr.write = patchWrite("stderr", originalStderrWrite);
+  process.stdout.write = createSafeStdIoWrite(originalStdoutWrite, (chunk, encoding) => {
+    if (!app.isPackaged || desktopLogSink === null) return;
+    writeDesktopStreamChunk("stdout", chunk, encoding);
+  });
+  process.stderr.write = createSafeStdIoWrite(originalStderrWrite, (chunk, encoding) => {
+    if (!app.isPackaged || desktopLogSink === null) return;
+    writeDesktopStreamChunk("stderr", chunk, encoding);
+  });
 
   restoreStdIoCapture = () => {
     process.stdout.write = originalStdoutWrite;
@@ -266,7 +260,6 @@ function initializePackagedLogging(): void {
       maxBytes: LOG_FILE_MAX_BYTES,
       maxFiles: LOG_FILE_MAX_FILES,
     });
-    installStdIoCapture();
     writeDesktopLogHeader(`runtime log capture enabled logDir=${LOG_DIR}`);
   } catch (error) {
     // Logging setup should never block app startup.
@@ -1210,14 +1203,32 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     CONTEXT_MENU_CHANNEL,
     async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
-      const normalizedItems = items
-        .filter((item) => typeof item.id === "string" && typeof item.label === "string")
-        .map((item) => ({
-          id: item.id,
-          label: item.label,
-          destructive: item.destructive === true,
-          disabled: item.disabled === true,
-        }));
+      type NormalizedItem = {
+        id: string;
+        label: string;
+        destructive: boolean;
+        disabled: boolean;
+        children?: NormalizedItem[];
+      };
+
+      function normalizeItems(raw: ContextMenuItem[]): NormalizedItem[] {
+        return raw
+          .filter((item) => typeof item.id === "string" && typeof item.label === "string")
+          .map((item) => {
+            const normalized: NormalizedItem = {
+              id: item.id,
+              label: item.label,
+              destructive: item.destructive === true,
+              disabled: item.disabled === true,
+            };
+            if (Array.isArray(item.children) && item.children.length > 0) {
+              normalized.children = normalizeItems(item.children as ContextMenuItem[]);
+            }
+            return normalized;
+          });
+      }
+
+      const normalizedItems = normalizeItems(items);
       if (normalizedItems.length === 0) {
         return null;
       }
@@ -1238,27 +1249,35 @@ function registerIpcHandlers(): void {
       if (!window) return null;
 
       return new Promise<string | null>((resolve) => {
-        const template: MenuItemConstructorOptions[] = [];
-        let hasInsertedDestructiveSeparator = false;
-        for (const item of normalizedItems) {
-          if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
-            template.push({ type: "separator" });
-            hasInsertedDestructiveSeparator = true;
-          }
-          const itemOption: MenuItemConstructorOptions = {
-            label: item.label,
-            enabled: !item.disabled,
-            click: () => resolve(item.id),
-          };
-          if (item.destructive) {
-            const destructiveIcon = getDestructiveMenuIcon();
-            if (destructiveIcon) {
-              itemOption.icon = destructiveIcon;
+        function buildMenuTemplate(menuItems: NormalizedItem[]): MenuItemConstructorOptions[] {
+          const template: MenuItemConstructorOptions[] = [];
+          let hasInsertedDestructiveSeparator = false;
+          for (const item of menuItems) {
+            if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
+              template.push({ type: "separator" });
+              hasInsertedDestructiveSeparator = true;
             }
+            const itemOption: MenuItemConstructorOptions = {
+              label: item.label,
+              enabled: !item.disabled,
+            };
+            if (item.children && item.children.length > 0) {
+              itemOption.submenu = buildMenuTemplate(item.children);
+            } else {
+              itemOption.click = () => resolve(item.id);
+            }
+            if (item.destructive) {
+              const destructiveIcon = getDestructiveMenuIcon();
+              if (destructiveIcon) {
+                itemOption.icon = destructiveIcon;
+              }
+            }
+            template.push(itemOption);
           }
-          template.push(itemOption);
+          return template;
         }
 
+        const template = buildMenuTemplate(normalizedItems);
         const menu = Menu.buildFromTemplate(template);
         menu.popup({
           window,

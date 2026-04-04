@@ -12,6 +12,12 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
+function barColor(pct: number): string {
+  if (pct >= 80) return "var(--color-destructive)";
+  if (pct >= 50) return "var(--color-warning, #f59e0b)";
+  return "var(--color-muted-foreground)";
+}
+
 export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
   const { usage } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
@@ -77,35 +83,51 @@ export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
           </button>
         }
       />
-      <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2">
-        <div className="space-y-1.5 leading-tight">
+      <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2.5">
+        <div className="min-w-[180px] space-y-2 leading-tight">
+          {/* Header */}
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Context window
           </div>
+
+          {/* Usage stats */}
           {usage.maxTokens !== null && usedPercentage ? (
-            <div className="whitespace-nowrap text-xs font-medium text-foreground">
-              <span>{usedPercentage}</span>
-              <span className="mx-1">⋅</span>
-              <span>{formatContextWindowTokens(usage.usedTokens)}</span>
-              <span>/</span>
-              <span>{formatContextWindowTokens(usage.maxTokens ?? null)} context used</span>
+            <div className="space-y-1">
+              <div className="flex items-baseline justify-between gap-4 text-xs font-medium text-foreground">
+                <span>{usedPercentage}</span>
+                <span className="text-muted-foreground">
+                  {formatContextWindowTokens(usage.usedTokens)}/
+                  {formatContextWindowTokens(usage.maxTokens ?? null)}
+                </span>
+              </div>
+              {/* Progress bar */}
+              <div className="h-[3px] w-full overflow-hidden rounded-full bg-muted/50">
+                <div
+                  className="h-full rounded-full transition-[width] duration-500 ease-out"
+                  style={{
+                    width: `${Math.min(100, normalizedPercentage)}%`,
+                    backgroundColor: barColor(normalizedPercentage),
+                  }}
+                />
+              </div>
             </div>
           ) : (
-            <div className="text-sm text-foreground">
-              {formatContextWindowTokens(usage.usedTokens)} tokens used so far
+            <div className="text-xs font-medium text-foreground">
+              {formatContextWindowTokens(usage.usedTokens)} tokens
             </div>
           )}
+
+          {/* Total processed (only if meaningfully different from used) */}
           {(usage.totalProcessedTokens ?? null) !== null &&
           (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
-            <div className="text-xs text-muted-foreground">
-              Total processed: {formatContextWindowTokens(usage.totalProcessedTokens ?? null)}{" "}
-              tokens
+            <div className="text-[10px] text-muted-foreground/60">
+              {formatContextWindowTokens(usage.totalProcessedTokens ?? null)} total processed
             </div>
           ) : null}
+
+          {/* Auto-compaction note */}
           {usage.compactsAutomatically ? (
-            <div className="text-xs text-muted-foreground">
-              Automatically compacts its context when needed.
-            </div>
+            <div className="text-[10px] text-muted-foreground/40">Auto-compacts when needed</div>
           ) : null}
         </div>
       </PopoverPopup>

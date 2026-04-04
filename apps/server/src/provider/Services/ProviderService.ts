@@ -14,6 +14,7 @@
 import type {
   ProviderInterruptTurnInput,
   ProviderKind,
+  ProviderRateLimitInfo,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
@@ -105,6 +106,17 @@ export interface ProviderServiceShape {
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Probe all adapters that support rate-limit probing and return the results.
+   *
+   * This sends a lightweight throwaway query to each capable provider to
+   * trigger a `rate_limit_event` response. Intended to be called once on
+   * startup when the rate-limits cache is empty.
+   */
+  readonly probeAllRateLimits: () => Effect.Effect<
+    ReadonlyArray<{ provider: ProviderKind; info: ProviderRateLimitInfo }>
+  >;
 }
 
 /**

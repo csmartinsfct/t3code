@@ -48,6 +48,10 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import {
+  ProviderRateLimitsCache,
+  type ProviderRateLimitsCacheShape,
+} from "./provider/Services/ProviderRateLimitsCache.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -121,6 +125,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerRateLimitsCache?: Partial<ProviderRateLimitsCacheShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
@@ -182,6 +187,14 @@ const buildAppUnderTest = (options?: {
           refresh: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderRateLimitsCache)({
+          set: () => Effect.void,
+          getAll: Effect.succeed([]),
+          streamChanges: Stream.empty,
+          ...options?.layers?.providerRateLimitsCache,
         }),
       ),
       Layer.provide(
@@ -274,8 +287,7 @@ const buildAppUnderTest = (options?: {
 
 const wsRpcProtocolLayer = (wsUrl: string) =>
   RpcClient.layerProtocolSocket().pipe(
-    Layer.provide(NodeSocket.layerWebSocket(wsUrl)),
-    Layer.provide(RpcSerialization.layerJson),
+    Layer.provide(Layer.mergeAll(NodeSocket.layerWebSocket(wsUrl), RpcSerialization.layerJson)),
   );
 
 const makeWsRpcClient = RpcClient.make(WsRpcGroup);
