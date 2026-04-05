@@ -1,4 +1,5 @@
 import {
+  type CronJobStreamEvent,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -69,6 +70,17 @@ export interface WsRpcClient {
       projectId: string,
       listener: (event: ManagedRunStreamEvent) => void,
     ) => () => void;
+  };
+  readonly cronJobs: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.cronJobsList>;
+    readonly get: RpcUnaryMethod<typeof WS_METHODS.cronJobsGet>;
+    readonly create: RpcUnaryMethod<typeof WS_METHODS.cronJobsCreate>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.cronJobsUpdate>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.cronJobsDelete>;
+    readonly toggle: RpcUnaryMethod<typeof WS_METHODS.cronJobsToggle>;
+    readonly runNow: RpcUnaryMethod<typeof WS_METHODS.cronJobsRunNow>;
+    readonly listRuns: RpcUnaryMethod<typeof WS_METHODS.cronJobsListRuns>;
+    readonly onEvent: (listener: (event: CronJobStreamEvent) => void) => () => void;
   };
   readonly shell: {
     readonly openInEditor: (input: {
@@ -176,6 +188,19 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           (client) => client[WS_METHODS.subscribeManagedRunEvents]({ projectId } as never),
           listener,
         ),
+    },
+    cronJobs: {
+      list: () => transport.request((client) => client[WS_METHODS.cronJobsList]({})),
+      get: (input) => transport.request((client) => client[WS_METHODS.cronJobsGet](input)),
+      create: (input) => transport.request((client) => client[WS_METHODS.cronJobsCreate](input)),
+      update: (input) => transport.request((client) => client[WS_METHODS.cronJobsUpdate](input)),
+      delete: (input) => transport.request((client) => client[WS_METHODS.cronJobsDelete](input)),
+      toggle: (input) => transport.request((client) => client[WS_METHODS.cronJobsToggle](input)),
+      runNow: (input) => transport.request((client) => client[WS_METHODS.cronJobsRunNow](input)),
+      listRuns: (input) =>
+        transport.request((client) => client[WS_METHODS.cronJobsListRuns](input)),
+      onEvent: (listener) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeCronJobEvents]({}), listener),
     },
     shell: {
       openInEditor: (input) =>

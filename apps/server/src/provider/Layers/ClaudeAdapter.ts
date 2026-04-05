@@ -75,6 +75,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
+import { CRON_JOBS_SYSTEM_PROMPT } from "../../cronJobs/systemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
@@ -2892,6 +2893,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             url: `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`,
             headers: { Authorization: `Bearer ${access.token}` },
           },
+          t3_cron_jobs: {
+            type: "http",
+            url: `http://127.0.0.1:${serverConfig.port}/mcp/cron-jobs`,
+            headers: { Authorization: `Bearer ${access.token}` },
+          },
         };
       }
 
@@ -2918,13 +2924,15 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(mcpServersConfig ? { mcpServers: mcpServersConfig } : {}),
-        ...(mcpServersConfig ? { allowedTools: ["mcp__t3_managed_runs__*"] } : {}),
+        ...(mcpServersConfig
+          ? { allowedTools: ["mcp__t3_managed_runs__*", "mcp__t3_cron_jobs__*"] }
+          : {}),
         ...(mcpServersConfig
           ? {
               systemPrompt: {
                 type: "preset" as const,
                 preset: "claude_code" as const,
-                append: MANAGED_RUNS_SYSTEM_PROMPT,
+                append: MANAGED_RUNS_SYSTEM_PROMPT + "\n\n" + CRON_JOBS_SYSTEM_PROMPT,
               },
             }
           : {}),

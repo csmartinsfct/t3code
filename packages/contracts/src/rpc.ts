@@ -56,6 +56,19 @@ import {
   ManagedRunSummary,
 } from "./managedRuns";
 import {
+  CronJob,
+  CronJobCreateInput,
+  CronJobDeleteInput,
+  CronJobError,
+  CronJobGetInput,
+  CronJobListRunsInput,
+  CronJobRunNowInput,
+  CronJobStreamEvent,
+  CronJobToggleInput,
+  CronJobUpdateInput,
+  CronThreadRun,
+} from "./cronJobs";
+import {
   ProjectListDirectoryError,
   ProjectListDirectoryInput,
   ProjectListDirectoryResult,
@@ -146,10 +159,21 @@ export const WS_METHODS = {
   serverResolveMcpServers: "server.resolveMcpServers",
   serverResolveSkills: "server.resolveSkills",
 
+  // Cron job methods
+  cronJobsList: "cronJobs.list",
+  cronJobsGet: "cronJobs.get",
+  cronJobsCreate: "cronJobs.create",
+  cronJobsUpdate: "cronJobs.update",
+  cronJobsDelete: "cronJobs.delete",
+  cronJobsToggle: "cronJobs.toggle",
+  cronJobsRunNow: "cronJobs.runNow",
+  cronJobsListRuns: "cronJobs.listRuns",
+
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeManagedRunEvents: "subscribeManagedRunEvents",
+  subscribeCronJobEvents: "subscribeCronJobEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
 } as const;
@@ -423,6 +447,59 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
+export const WsCronJobsListRpc = Rpc.make(WS_METHODS.cronJobsList, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(CronJob),
+  error: CronJobError,
+});
+
+export const WsCronJobsGetRpc = Rpc.make(WS_METHODS.cronJobsGet, {
+  payload: CronJobGetInput,
+  success: CronJob,
+  error: CronJobError,
+});
+
+export const WsCronJobsCreateRpc = Rpc.make(WS_METHODS.cronJobsCreate, {
+  payload: CronJobCreateInput,
+  success: CronJob,
+  error: CronJobError,
+});
+
+export const WsCronJobsUpdateRpc = Rpc.make(WS_METHODS.cronJobsUpdate, {
+  payload: CronJobUpdateInput,
+  success: CronJob,
+  error: CronJobError,
+});
+
+export const WsCronJobsDeleteRpc = Rpc.make(WS_METHODS.cronJobsDelete, {
+  payload: CronJobDeleteInput,
+  error: CronJobError,
+});
+
+export const WsCronJobsToggleRpc = Rpc.make(WS_METHODS.cronJobsToggle, {
+  payload: CronJobToggleInput,
+  success: CronJob,
+  error: CronJobError,
+});
+
+export const WsCronJobsRunNowRpc = Rpc.make(WS_METHODS.cronJobsRunNow, {
+  payload: CronJobRunNowInput,
+  success: CronThreadRun,
+  error: CronJobError,
+});
+
+export const WsCronJobsListRunsRpc = Rpc.make(WS_METHODS.cronJobsListRuns, {
+  payload: CronJobListRunsInput,
+  success: Schema.Array(CronThreadRun),
+  error: CronJobError,
+});
+
+export const WsSubscribeCronJobEventsRpc = Rpc.make(WS_METHODS.subscribeCronJobEvents, {
+  payload: Schema.Struct({}),
+  success: CronJobStreamEvent,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -463,6 +540,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeManagedRunEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsCronJobsListRpc,
+  WsCronJobsGetRpc,
+  WsCronJobsCreateRpc,
+  WsCronJobsUpdateRpc,
+  WsCronJobsDeleteRpc,
+  WsCronJobsToggleRpc,
+  WsCronJobsRunNowRpc,
+  WsCronJobsListRunsRpc,
+  WsSubscribeCronJobEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

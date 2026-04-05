@@ -60,6 +60,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
+import { CronJobService } from "./cronJobs/Services/CronJobs";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
@@ -86,6 +87,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
     const managedRuns = yield* ManagedRunService;
+    const cronJobs = yield* CronJobService;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
     const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
@@ -799,6 +801,42 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.managedRunsStop]: (input) =>
         observeRpcEffect(WS_METHODS.managedRunsStop, managedRuns.stop(input), {
           "rpc.aggregate": "managed-runs",
+        }),
+      [WS_METHODS.cronJobsList]: () =>
+        observeRpcEffect(WS_METHODS.cronJobsList, cronJobs.list(), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsGet]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsGet, cronJobs.get(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsCreate]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsCreate, cronJobs.create(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsUpdate]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsUpdate, cronJobs.update(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsDelete]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsDelete, cronJobs.delete(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsToggle]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsToggle, cronJobs.toggle(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsRunNow]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsRunNow, cronJobs.runNow(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.cronJobsListRuns]: (input) =>
+        observeRpcEffect(WS_METHODS.cronJobsListRuns, cronJobs.listRuns(input), {
+          "rpc.aggregate": "cron-jobs",
+        }),
+      [WS_METHODS.subscribeCronJobEvents]: () =>
+        observeRpcStream(WS_METHODS.subscribeCronJobEvents, cronJobs.streamEvents, {
+          "rpc.aggregate": "cron-jobs",
         }),
       [WS_METHODS.terminalOpen]: (input) =>
         observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {

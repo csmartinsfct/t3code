@@ -22,9 +22,15 @@ import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { isProposeActionBlock, parseProposeActionPayload } from "../lib/proposeActionParser";
+import {
+  isProposeCronJobBlock,
+  parseProposeCronJobPayload,
+  type ProposeCronJobPayload,
+} from "../lib/proposeCronJobParser";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import ProposeActionCard from "./chat/ProposeActionCard";
+import ProposeCronJobCard from "./chat/ProposeCronJobCard";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -57,11 +63,24 @@ export interface ProposeActionEvent {
   services?: DeclaredService[];
 }
 
+export interface ProposeCronJobEvent {
+  action: "accept" | "reject";
+  name: string;
+  description: string | null;
+  cronExpression: string;
+  projectId: string;
+  skillId?: string;
+  prompt?: string;
+  autoSend: boolean;
+}
+
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
   onProposeAction?: (event: ProposeActionEvent) => void;
+  onProposeCronJob?: (event: ProposeCronJobEvent) => void;
+  resolveProjectName?: (projectId: string) => string;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -248,7 +267,14 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false, onProposeAction }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  cwd,
+  isStreaming = false,
+  onProposeAction,
+  onProposeCronJob,
+  resolveProjectName,
+}: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
@@ -308,6 +334,22 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onProposeAction }: ChatM
           return <pre {...props}>{children}</pre>;
         }
 
+        if (isProposeCronJobBlock(codeBlock.className)) {
+          const payload = parseProposeCronJobPayload(codeBlock.code);
+          if (payload && onProposeCronJob) {
+            return (
+              <ProposeCronJobCard
+                {...payload}
+                projectName={resolveProjectName?.(payload.projectId) ?? payload.projectId}
+                isStreaming={isStreaming}
+                onAccept={(data) => onProposeCronJob({ action: "accept", ...data })}
+                onReject={() => onProposeCronJob({ action: "reject", ...payload })}
+              />
+            );
+          }
+          return <pre {...props}>{children}</pre>;
+        }
+
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
@@ -324,7 +366,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onProposeAction }: ChatM
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming, onProposeAction],
+    [cwd, diffThemeName, isStreaming, onProposeAction, onProposeCronJob, resolveProjectName],
   );
 
   return (

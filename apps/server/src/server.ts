@@ -52,6 +52,9 @@ import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScrip
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
+import { CronJobRepositoryLive } from "./persistence/Layers/CronJobs";
+import { CronJobServiceLive } from "./cronJobs/Layers/CronJobs";
+import { cronJobsMcpRouteLayer } from "./cronJobs/http";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -215,6 +218,18 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
+  Layer.provideMerge(
+    CronJobServiceLive.pipe(
+      Layer.provide(CronJobRepositoryLive),
+      Layer.provide(
+        OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provide(PersistenceLayerLive)),
+      ),
+      Layer.provide(
+        OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+      ),
+      Layer.provide(PersistenceLayerLive),
+    ),
+  ),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ProviderRateLimitsCacheLive),
@@ -237,6 +252,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   managedRunsMcpRouteLayer,
+  cronJobsMcpRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );

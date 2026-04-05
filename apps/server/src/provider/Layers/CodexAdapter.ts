@@ -41,6 +41,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
+import { CRON_JOBS_SYSTEM_PROMPT } from "../../cronJobs/systemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1422,6 +1423,11 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         configOverrides.push(
           `mcp_servers.t3_managed_runs.http_headers.Authorization="Bearer ${access.token}"`,
         );
+        const cronJobsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/cron-jobs`;
+        configOverrides.push(`mcp_servers.t3_cron_jobs.url="${cronJobsUrl}"`);
+        configOverrides.push(
+          `mcp_servers.t3_cron_jobs.http_headers.Authorization="Bearer ${access.token}"`,
+        );
       }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
@@ -1433,7 +1439,10 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(homePath ? { homePath } : {}),
         ...(configOverrides.length > 0 ? { configOverrides } : {}),
         ...(configOverrides.length > 0
-          ? { appendDeveloperInstructions: MANAGED_RUNS_SYSTEM_PROMPT }
+          ? {
+              appendDeveloperInstructions:
+                MANAGED_RUNS_SYSTEM_PROMPT + "\n\n" + CRON_JOBS_SYSTEM_PROMPT,
+            }
           : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }

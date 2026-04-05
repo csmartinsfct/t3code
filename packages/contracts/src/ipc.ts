@@ -36,6 +36,18 @@ import type {
   ResolveSkillsResult,
 } from "./server";
 import type {
+  CronJob,
+  CronJobCreateInput,
+  CronJobDeleteInput,
+  CronJobGetInput,
+  CronJobListRunsInput,
+  CronJobRunNowInput,
+  CronJobStreamEvent,
+  CronJobToggleInput,
+  CronJobUpdateInput,
+  CronThreadRun,
+} from "./cronJobs";
+import type {
   ManagedRunDetail,
   ManagedRunGetInput,
   ManagedRunGetLogsInput,
@@ -206,6 +218,17 @@ export interface NativeApi {
     getLogs: (input: ManagedRunGetLogsInput) => Promise<ReadonlyArray<ManagedRunLogLine>>;
     stop: (input: ManagedRunStopInput) => Promise<void>;
     onEvent: (projectId: string, callback: (event: ManagedRunStreamEvent) => void) => () => void;
+  };
+  cronJobs: {
+    list: () => Promise<ReadonlyArray<CronJob>>;
+    get: (input: CronJobGetInput) => Promise<CronJob>;
+    create: (input: CronJobCreateInput) => Promise<CronJob>;
+    update: (input: CronJobUpdateInput) => Promise<CronJob>;
+    delete: (input: CronJobDeleteInput) => Promise<void>;
+    toggle: (input: CronJobToggleInput) => Promise<CronJob>;
+    runNow: (input: CronJobRunNowInput) => Promise<CronThreadRun>;
+    listRuns: (input: CronJobListRunsInput) => Promise<ReadonlyArray<CronThreadRun>>;
+    onEvent: (callback: (event: CronJobStreamEvent) => void) => () => void;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

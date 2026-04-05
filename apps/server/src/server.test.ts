@@ -57,6 +57,7 @@ import {
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
+import { CronJobService } from "./cronJobs/Services/CronJobs.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -434,6 +435,22 @@ const buildAppUnderTest = (options?: {
               threadId: "test" as any,
             }),
           resolveContextForToken: () => Effect.succeed(null),
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(CronJobService, {
+          list: () => Effect.succeed([]),
+          get: () => Effect.die(new Error("not mocked")),
+          create: () => Effect.die(new Error("not mocked")),
+          update: () => Effect.die(new Error("not mocked")),
+          delete: () => Effect.void,
+          toggle: () => Effect.die(new Error("not mocked")),
+          runNow: () => Effect.die(new Error("not mocked")),
+          listRuns: () => Effect.succeed([]),
+          executeJob: () => Effect.die(new Error("not mocked")),
+          executeDueJobs: () => Effect.void,
+          catchUpMissedRuns: () => Effect.void,
+          streamEvents: Stream.empty,
         }),
       ),
       Layer.provide(workspaceAndProjectServicesLayer),

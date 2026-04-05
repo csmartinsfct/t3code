@@ -59,6 +59,17 @@ export function createWsNativeApi(): NativeApi {
       stop: rpcClient.managedRuns.stop,
       onEvent: (projectId, callback) => rpcClient.managedRuns.onEvent(projectId, callback),
     },
+    cronJobs: {
+      list: rpcClient.cronJobs.list,
+      get: rpcClient.cronJobs.get,
+      create: rpcClient.cronJobs.create,
+      update: rpcClient.cronJobs.update,
+      delete: rpcClient.cronJobs.delete,
+      toggle: rpcClient.cronJobs.toggle,
+      runNow: rpcClient.cronJobs.runNow,
+      listRuns: rpcClient.cronJobs.listRuns,
+      onEvent: (callback) => rpcClient.cronJobs.onEvent(callback),
+    },
     shell: {
       openInEditor: (cwd, editor) => rpcClient.shell.openInEditor({ cwd, editor }),
       openExternal: async (url) => {

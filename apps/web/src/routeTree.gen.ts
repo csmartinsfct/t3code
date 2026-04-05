@@ -13,8 +13,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsCronRouteImport } from './routes/settings.cron'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
+import { Route as SettingsCronIndexRouteImport } from './routes/settings.cron.index'
+import { Route as SettingsCronJobIdRouteImport } from './routes/settings.cron.$jobId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -35,6 +38,11 @@ const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   path: '/general',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsCronRoute = SettingsCronRouteImport.update({
+  id: '/cron',
+  path: '/cron',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
@@ -45,13 +53,26 @@ const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => ChatRoute,
 } as any)
+const SettingsCronIndexRoute = SettingsCronIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsCronRoute,
+} as any)
+const SettingsCronJobIdRoute = SettingsCronJobIdRouteImport.update({
+  id: '/$jobId',
+  path: '/$jobId',
+  getParentRoute: () => SettingsCronRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/cron': typeof SettingsCronRouteWithChildren
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
+  '/settings/cron/': typeof SettingsCronIndexRoute
 }
 export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
@@ -59,6 +80,8 @@ export interface FileRoutesByTo {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/': typeof ChatIndexRoute
+  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
+  '/settings/cron': typeof SettingsCronIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -66,8 +89,11 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/cron': typeof SettingsCronRouteWithChildren
   '/settings/general': typeof SettingsGeneralRoute
   '/_chat/': typeof ChatIndexRoute
+  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
+  '/settings/cron/': typeof SettingsCronIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -76,7 +102,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
+    | '/settings/cron'
     | '/settings/general'
+    | '/settings/cron/$jobId'
+    | '/settings/cron/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/settings'
@@ -84,14 +113,19 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/general'
     | '/'
+    | '/settings/cron/$jobId'
+    | '/settings/cron'
   id:
     | '__root__'
     | '/_chat'
     | '/settings'
     | '/_chat/$threadId'
     | '/settings/archived'
+    | '/settings/cron'
     | '/settings/general'
     | '/_chat/'
+    | '/settings/cron/$jobId'
+    | '/settings/cron/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -129,6 +163,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsGeneralRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/cron': {
+      id: '/settings/cron'
+      path: '/cron'
+      fullPath: '/settings/cron'
+      preLoaderRoute: typeof SettingsCronRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/archived': {
       id: '/settings/archived'
       path: '/archived'
@@ -142,6 +183,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/$threadId'
       preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/settings/cron/': {
+      id: '/settings/cron/'
+      path: '/'
+      fullPath: '/settings/cron/'
+      preLoaderRoute: typeof SettingsCronIndexRouteImport
+      parentRoute: typeof SettingsCronRoute
+    }
+    '/settings/cron/$jobId': {
+      id: '/settings/cron/$jobId'
+      path: '/$jobId'
+      fullPath: '/settings/cron/$jobId'
+      preLoaderRoute: typeof SettingsCronJobIdRouteImport
+      parentRoute: typeof SettingsCronRoute
     }
   }
 }
@@ -158,13 +213,29 @@ const ChatRouteChildren: ChatRouteChildren = {
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
+interface SettingsCronRouteChildren {
+  SettingsCronJobIdRoute: typeof SettingsCronJobIdRoute
+  SettingsCronIndexRoute: typeof SettingsCronIndexRoute
+}
+
+const SettingsCronRouteChildren: SettingsCronRouteChildren = {
+  SettingsCronJobIdRoute: SettingsCronJobIdRoute,
+  SettingsCronIndexRoute: SettingsCronIndexRoute,
+}
+
+const SettingsCronRouteWithChildren = SettingsCronRoute._addFileChildren(
+  SettingsCronRouteChildren,
+)
+
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
+  SettingsCronRoute: typeof SettingsCronRouteWithChildren
   SettingsGeneralRoute: typeof SettingsGeneralRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
+  SettingsCronRoute: SettingsCronRouteWithChildren,
   SettingsGeneralRoute: SettingsGeneralRoute,
 }
 

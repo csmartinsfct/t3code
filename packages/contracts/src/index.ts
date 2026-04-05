@@ -12,4 +12,5 @@ export * from "./orchestration";
 export * from "./editor";
 export * from "./project";
 export * from "./managedRuns";
+export * from "./cronJobs";
 export * from "./rpc";

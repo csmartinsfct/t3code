@@ -2099,6 +2099,107 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeProject, activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
   );
 
+  const handleProposeCronJob = useCallback(
+    async (event: {
+      action: "accept" | "reject";
+      name: string;
+      description: string | null;
+      cronExpression: string;
+      projectId: string;
+      skillId?: string;
+      prompt?: string;
+      autoSend: boolean;
+    }) => {
+      const api = readNativeApi();
+      if (!api || !activeThreadId) return;
+
+      if (event.action === "accept") {
+        let created = false;
+        try {
+          await api.cronJobs.create({
+            name: event.name,
+            description: event.description,
+            cronExpression: event.cronExpression,
+            enabled: true,
+            jobType: "new_thread",
+            newThreadConfig: {
+              projectId: event.projectId as never,
+              ...(event.skillId ? { skillId: event.skillId } : {}),
+              ...(event.prompt ? { prompt: event.prompt } : {}),
+              autoSend: event.autoSend,
+            },
+          });
+          created = true;
+        } catch (error) {
+          console.error("Failed to create cron job from proposal:", error);
+        }
+
+        const messageIdForSend = newMessageId();
+        const messageText = created
+          ? `Cron job added: ${event.name} (schedule: ${event.cronExpression})`
+          : `Failed to create cron job "${event.name}".`;
+        const createdAt = new Date().toISOString();
+
+        setOptimisticUserMessages((existing) => [
+          ...existing,
+          { id: messageIdForSend, role: "user", text: messageText, createdAt, streaming: false },
+        ]);
+
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: activeThreadId,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: messageText,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+      } else {
+        const messageIdForSend = newMessageId();
+        const messageText = "User rejected the proposed cron job.";
+        const createdAt = new Date().toISOString();
+
+        setOptimisticUserMessages((existing) => [
+          ...existing,
+          { id: messageIdForSend, role: "user", text: messageText, createdAt, streaming: false },
+        ]);
+
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: activeThreadId,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: messageText,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+      }
+    },
+    [activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
+  );
+
+  const resolveProjectName = useCallback(
+    (projectId: string) => {
+      if (activeProject && activeProject.id === projectId) {
+        return activeProject.name;
+      }
+      return projectId;
+    },
+    [activeProject],
+  );
+
   const updateProjectScript = useCallback(
     async (scriptId: string, input: NewProjectScriptInput) => {
       if (!activeProject) return;
@@ -4497,6 +4598,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
                 onProposeAction={handleProposeAction}
+                onProposeCronJob={handleProposeCronJob}
+                resolveProjectName={resolveProjectName}
                 onMessageContextMenu={onMessageContextMenu}
                 onMessageSelectionClick={onMessageSelectionClick}
               />
