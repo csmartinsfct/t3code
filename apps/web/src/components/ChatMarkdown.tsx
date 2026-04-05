@@ -21,8 +21,10 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
+import { isProposeActionBlock, parseProposeActionPayload } from "../lib/proposeActionParser";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import ProposeActionCard from "./chat/ProposeActionCard";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -45,10 +47,21 @@ class CodeHighlightErrorBoundary extends React.Component<
   }
 }
 
+import type { DeclaredService, ProjectScriptIcon } from "@t3tools/contracts";
+
+export interface ProposeActionEvent {
+  action: "accept" | "reject";
+  name: string;
+  command: string;
+  icon: ProjectScriptIcon;
+  services?: DeclaredService[];
+}
+
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  onProposeAction?: (event: ProposeActionEvent) => void;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -235,7 +248,7 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, onProposeAction }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
@@ -269,6 +282,32 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           return <pre {...props}>{children}</pre>;
         }
 
+        if (isProposeActionBlock(codeBlock.className)) {
+          const payload = parseProposeActionPayload(codeBlock.code);
+          if (payload && onProposeAction) {
+            return (
+              <ProposeActionCard
+                name={payload.name}
+                command={payload.command}
+                icon={payload.icon}
+                {...(payload.services ? { services: payload.services } : {})}
+                isStreaming={isStreaming}
+                onAccept={(data) => onProposeAction({ action: "accept", ...data })}
+                onReject={() =>
+                  onProposeAction({
+                    action: "reject",
+                    name: payload.name,
+                    command: payload.command,
+                    icon: payload.icon,
+                  })
+                }
+              />
+            );
+          }
+          // Incomplete JSON during streaming or no handler — render as raw code
+          return <pre {...props}>{children}</pre>;
+        }
+
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
@@ -285,7 +324,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, onProposeAction],
   );
 
   return (

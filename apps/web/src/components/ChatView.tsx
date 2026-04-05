@@ -9,6 +9,7 @@ import {
   type MessageId,
   type ModelSelection,
   type ProjectScript,
+  type ProjectScriptIcon,
   type ProviderKind,
   type ProjectEntry,
   type ProjectId,
@@ -19,11 +20,13 @@ import {
   type ThreadId,
   type TurnId,
   type KeybindingCommand,
+  type ManagedRunSummary,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
   TerminalOpenInput,
   type SkillEntry,
+  type DeclaredService,
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
@@ -1871,54 +1874,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
-      const baseTerminalId =
-        terminalState.activeTerminalId ||
-        terminalState.terminalIds[0] ||
-        DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
-      const targetTerminalId = shouldCreateNewTerminal
-        ? `terminal-${randomUUID()}`
-        : baseTerminalId;
-
-      setTerminalOpen(true);
-      if (shouldCreateNewTerminal) {
-        storeNewTerminal(activeThreadId, targetTerminalId);
-      } else {
-        storeSetActiveTerminal(activeThreadId, targetTerminalId);
-      }
-      setTerminalFocusRequestId((value) => value + 1);
-
-      const runtimeEnv = projectScriptRuntimeEnv({
-        project: {
-          cwd: activeProject.cwd,
-        },
-        worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
-        ...(options?.env ? { extraEnv: options.env } : {}),
-      });
-      const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
-        ? {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            env: runtimeEnv,
-            cols: SCRIPT_TERMINAL_COLS,
-            rows: SCRIPT_TERMINAL_ROWS,
-          }
-        : {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            env: runtimeEnv,
-          };
 
       try {
-        await api.terminal.open(openTerminalInput);
-        await api.terminal.write({
+        await api.managedRuns.launchProjectScript({
+          projectId: activeProject.id,
           threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          data: `${script.command}\r`,
+          scriptId: script.id,
+          cwd: targetCwd,
+          worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
+          ...(options?.env ? { env: options.env } : {}),
         });
       } catch (error) {
         setThreadError(
@@ -1932,16 +1896,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
       activeThread,
       activeThreadId,
       gitCwd,
-      setTerminalOpen,
       setThreadError,
-      storeNewTerminal,
-      storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
-      terminalState.activeTerminalId,
-      terminalState.runningTerminalIds,
-      terminalState.terminalIds,
     ],
   );
+
+  const [activeManagedRuns, setActiveManagedRuns] = useState<ReadonlyArray<ManagedRunSummary>>([]);
+
+  useEffect(() => {
+    const api = readNativeApi();
+    const projectId = activeProject?.id;
+    if (!api || !projectId) {
+      setActiveManagedRuns([]);
+      return;
+    }
+
+    const upsertRun = (current: ReadonlyArray<ManagedRunSummary>, run: ManagedRunSummary) => {
+      const next = current.filter((entry) => entry.runId !== run.runId);
+      if (run.status === "starting" || run.status === "running") {
+        next.push(run);
+        next.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      }
+      return next;
+    };
+
+    return api.managedRuns.onEvent(projectId, (event) => {
+      if (event.type === "snapshot") {
+        setActiveManagedRuns(event.runs);
+        return;
+      }
+      setActiveManagedRuns((current) => upsertRun(current, event.run));
+    });
+  }, [activeProject?.id]);
 
   useEffect(() => {
     if (!pendingPullRequestSetupRequest || !activeProject || !activeThreadId || !activeThread) {
@@ -2045,6 +2031,94 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeProject, persistProjectScripts],
   );
+
+  const handleProposeAction = useCallback(
+    async (event: {
+      action: "accept" | "reject";
+      name: string;
+      command: string;
+      icon: ProjectScriptIcon;
+      services?: DeclaredService[];
+    }) => {
+      const api = readNativeApi();
+      if (!api || !activeProject || !activeThreadId) return;
+
+      if (event.action === "accept") {
+        const nextId = nextProjectScriptId(
+          event.name,
+          activeProject.scripts.map((s) => s.id),
+        );
+        const nextScript: ProjectScript = {
+          id: nextId,
+          name: event.name,
+          command: event.command,
+          icon: event.icon,
+          runOnWorktreeCreate: false,
+          ...(event.services ? { services: event.services } : {}),
+        };
+        const nextScripts = [...activeProject.scripts, nextScript];
+
+        await api.orchestration.dispatchCommand({
+          type: "project.meta.update",
+          commandId: newCommandId(),
+          projectId: activeProject.id,
+          scripts: nextScripts,
+        });
+
+        const messageIdForSend = newMessageId();
+        const messageText = `Action added: ${event.name} (id: ${nextId}, command: ${event.command})`;
+        const createdAt = new Date().toISOString();
+
+        setOptimisticUserMessages((existing) => [
+          ...existing,
+          { id: messageIdForSend, role: "user", text: messageText, createdAt, streaming: false },
+        ]);
+
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: activeThreadId,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: messageText,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+      } else {
+        const messageIdForSend = newMessageId();
+        const messageText = "User rejected the proposed action.";
+        const createdAt = new Date().toISOString();
+
+        setOptimisticUserMessages((existing) => [
+          ...existing,
+          { id: messageIdForSend, role: "user", text: messageText, createdAt, streaming: false },
+        ]);
+
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: activeThreadId,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: messageText,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+      }
+    },
+    [activeProject, activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
+  );
+
   const updateProjectScript = useCallback(
     async (scriptId: string, input: NewProjectScriptInput) => {
       if (!activeProject) return;
@@ -2081,10 +2155,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const deleteProjectScript = useCallback(
     async (scriptId: string) => {
-      if (!activeProject) return;
+      const api = readNativeApi();
+      if (!activeProject || !api) return;
       const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
 
       const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+
+      // Stop any active managed runs for this script before deleting
+      const runsToStop = activeManagedRuns.filter(
+        (run) =>
+          run.scriptId === scriptId && (run.status === "starting" || run.status === "running"),
+      );
+      for (const run of runsToStop) {
+        await api.managedRuns.stop({ runId: run.runId }).catch(() => {});
+      }
 
       try {
         await persistProjectScripts({
@@ -2107,7 +2191,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeManagedRuns, persistProjectScripts],
   );
 
   const handleInteractionModeChange = useCallback(
@@ -4336,6 +4420,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           hasActivePlan={Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)}
           planSidebarOpen={planSidebarOpen}
           activeProjectScripts={activeProject?.scripts}
+          activeManagedRuns={activeManagedRuns}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
           }
@@ -4412,6 +4497,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
+                onProposeAction={handleProposeAction}
                 onMessageContextMenu={onMessageContextMenu}
                 onMessageSelectionClick={onMessageSelectionClick}
               />

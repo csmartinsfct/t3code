@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
+import { ProjectId } from "./baseSchemas";
 import { OpenError, OpenInEditorInput } from "./editor";
 import {
   GitActionProgressEvent,
@@ -41,6 +42,19 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration";
+import {
+  ManagedRunError,
+  ManagedRunGetInput,
+  ManagedRunGetLogsInput,
+  ManagedRunDetail,
+  ManagedRunLaunchProjectScriptInput,
+  ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInput,
+  ManagedRunLogLine,
+  ManagedRunStopInput,
+  ManagedRunStreamEvent,
+  ManagedRunSummary,
+} from "./managedRuns";
 import {
   ProjectListDirectoryError,
   ProjectListDirectoryInput,
@@ -108,6 +122,13 @@ export const WS_METHODS = {
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
+  // Managed run methods
+  managedRunsLaunchProjectScript: "managedRuns.launchProjectScript",
+  managedRunsList: "managedRuns.list",
+  managedRunsGet: "managedRuns.get",
+  managedRunsGetLogs: "managedRuns.getLogs",
+  managedRunsStop: "managedRuns.stop",
+
   // Terminal methods
   terminalOpen: "terminal.open",
   terminalWrite: "terminal.write",
@@ -128,6 +149,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
+  subscribeManagedRunEvents: "subscribeManagedRunEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
 } as const;
@@ -297,6 +319,38 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: TerminalError,
 });
 
+export const WsManagedRunsLaunchProjectScriptRpc = Rpc.make(
+  WS_METHODS.managedRunsLaunchProjectScript,
+  {
+    payload: ManagedRunLaunchProjectScriptInput,
+    success: ManagedRunLaunchProjectScriptResult,
+    error: ManagedRunError,
+  },
+);
+
+export const WsManagedRunsListRpc = Rpc.make(WS_METHODS.managedRunsList, {
+  payload: ManagedRunListInput,
+  success: Schema.Array(ManagedRunSummary),
+  error: ManagedRunError,
+});
+
+export const WsManagedRunsGetRpc = Rpc.make(WS_METHODS.managedRunsGet, {
+  payload: ManagedRunGetInput,
+  success: ManagedRunDetail,
+  error: ManagedRunError,
+});
+
+export const WsManagedRunsGetLogsRpc = Rpc.make(WS_METHODS.managedRunsGetLogs, {
+  payload: ManagedRunGetLogsInput,
+  success: Schema.Array(ManagedRunLogLine),
+  error: ManagedRunError,
+});
+
+export const WsManagedRunsStopRpc = Rpc.make(WS_METHODS.managedRunsStop, {
+  payload: ManagedRunStopInput,
+  error: ManagedRunError,
+});
+
 export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getSnapshot, {
   payload: OrchestrationGetSnapshotInput,
   success: OrchestrationRpcSchemas.getSnapshot.output,
@@ -348,6 +402,14 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsSubscribeManagedRunEventsRpc = Rpc.make(WS_METHODS.subscribeManagedRunEvents, {
+  payload: Schema.Struct({
+    projectId: ProjectId,
+  }),
+  success: ManagedRunStreamEvent,
+  stream: true,
+});
+
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
@@ -385,6 +447,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitCreateBranchRpc,
   WsGitCheckoutRpc,
   WsGitInitRpc,
+  WsManagedRunsLaunchProjectScriptRpc,
+  WsManagedRunsListRpc,
+  WsManagedRunsGetRpc,
+  WsManagedRunsGetLogsRpc,
+  WsManagedRunsStopRpc,
   WsTerminalOpenRpc,
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,
@@ -393,6 +460,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalCloseRpc,
   WsSubscribeOrchestrationDomainEventsRpc,
   WsSubscribeTerminalEventsRpc,
+  WsSubscribeManagedRunEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsOrchestrationGetSnapshotRpc,

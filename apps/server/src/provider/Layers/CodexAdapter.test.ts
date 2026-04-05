@@ -22,6 +22,8 @@ import {
   type CodexAppServerSendTurnInput,
 } from "../../codexAppServerManager.ts";
 import { ServerConfig } from "../../config.ts";
+import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
@@ -148,12 +150,34 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
 });
 
+const managedRunServiceTestLayer = Layer.succeed(ManagedRunService, {
+  launchProjectScript: () => Effect.die(new Error("not mocked")),
+  list: () => Effect.succeed([]),
+  get: () => Effect.die(new Error("not mocked")),
+  getLogs: () => Effect.succeed([]),
+  stop: () => Effect.void,
+  streamEvents: () => Stream.empty,
+  issueMcpAccess: () =>
+    Effect.succeed({ token: "test", projectId: "test" as any, threadId: "test" as any }),
+  resolveContextForToken: () => Effect.succeed(null),
+});
+
+const projectionSnapshotQueryTestLayer = Layer.succeed(ProjectionSnapshotQuery, {
+  getSnapshot: () => Effect.die(new Error("not mocked")),
+  getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+  getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+  getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+  getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+});
+
 const validationManager = new FakeCodexManager();
 const validationLayer = it.layer(
   makeCodexAdapterLive({ manager: validationManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(managedRunServiceTestLayer),
+    Layer.provideMerge(projectionSnapshotQueryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
 );
@@ -221,6 +245,8 @@ const sessionErrorLayer = it.layer(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(managedRunServiceTestLayer),
+    Layer.provideMerge(projectionSnapshotQueryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
 );
@@ -290,6 +316,8 @@ const lifecycleLayer = it.layer(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(managedRunServiceTestLayer),
+    Layer.provideMerge(projectionSnapshotQueryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
 );

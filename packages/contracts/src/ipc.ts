@@ -36,6 +36,18 @@ import type {
   ResolveSkillsResult,
 } from "./server";
 import type {
+  ManagedRunDetail,
+  ManagedRunGetInput,
+  ManagedRunGetLogsInput,
+  ManagedRunLaunchProjectScriptInput,
+  ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInput,
+  ManagedRunLogLine,
+  ManagedRunStreamEvent,
+  ManagedRunStopInput,
+  ManagedRunSummary,
+} from "./managedRuns";
+import type {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -184,6 +196,16 @@ export interface NativeApi {
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     resolveMcpServers: (input: ResolveMcpServersInput) => Promise<ResolveMcpServersResult>;
     resolveSkills: (input: ResolveSkillsInput) => Promise<ResolveSkillsResult>;
+  };
+  managedRuns: {
+    launchProjectScript: (
+      input: ManagedRunLaunchProjectScriptInput,
+    ) => Promise<ManagedRunLaunchProjectScriptResult>;
+    list: (input: ManagedRunListInput) => Promise<ReadonlyArray<ManagedRunSummary>>;
+    get: (input: ManagedRunGetInput) => Promise<ManagedRunDetail>;
+    getLogs: (input: ManagedRunGetLogsInput) => Promise<ReadonlyArray<ManagedRunLogLine>>;
+    stop: (input: ManagedRunStopInput) => Promise<void>;
+    onEvent: (projectId: string, callback: (event: ManagedRunStreamEvent) => void) => () => void;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

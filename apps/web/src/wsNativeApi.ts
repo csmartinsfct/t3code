@@ -47,6 +47,14 @@ export function createWsNativeApi(): NativeApi {
       listDirectory: rpcClient.projects.listDirectory,
       readFile: rpcClient.projects.readFile,
     },
+    managedRuns: {
+      launchProjectScript: rpcClient.managedRuns.launchProjectScript,
+      list: rpcClient.managedRuns.list,
+      get: rpcClient.managedRuns.get,
+      getLogs: rpcClient.managedRuns.getLogs,
+      stop: rpcClient.managedRuns.stop,
+      onEvent: (projectId, callback) => rpcClient.managedRuns.onEvent(projectId, callback),
+    },
     shell: {
       openInEditor: (cwd, editor) => rpcClient.shell.openInEditor({ cwd, editor }),
       openExternal: async (url) => {

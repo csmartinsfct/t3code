@@ -188,12 +188,35 @@ export const ProjectScriptIcon = Schema.Literals([
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
+export const ServiceHealthCheck = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("url"), url: TrimmedNonEmptyString }),
+  Schema.Struct({ type: Schema.Literal("docker"), container: TrimmedNonEmptyString }),
+  Schema.Struct({
+    type: Schema.Literal("port"),
+    port: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(65_535)),
+    host: Schema.optional(TrimmedNonEmptyString),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("command"),
+    command: TrimmedNonEmptyString,
+    cwd: Schema.optional(TrimmedNonEmptyString),
+  }),
+]);
+export type ServiceHealthCheck = typeof ServiceHealthCheck.Type;
+
+export const DeclaredService = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  healthCheck: ServiceHealthCheck,
+});
+export type DeclaredService = typeof DeclaredService.Type;
+
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  services: Schema.optional(Schema.Array(DeclaredService)),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

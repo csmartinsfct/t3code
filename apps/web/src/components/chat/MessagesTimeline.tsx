@@ -99,6 +99,7 @@ interface MessagesTimelineProps {
       end: number;
     }>;
   }) => void;
+  onProposeAction?: (event: import("../ChatMarkdown").ProposeActionEvent) => void;
   onMessageContextMenu?: (
     messageId: MessageId,
     messageRole: string,
@@ -129,6 +130,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  onProposeAction,
   onVirtualizerSnapshot,
   onMessageContextMenu,
   onMessageSelectionClick,
@@ -524,6 +526,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     text={messageText}
                     cwd={markdownCwd}
                     isStreaming={Boolean(row.message.streaming)}
+                    {...(onProposeAction ? { onProposeAction } : {})}
                   />
                   {(() => {
                     const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);

@@ -69,6 +69,7 @@ import {
   type TestProviderAdapterHarness,
 } from "./TestProviderAdapter.integration.ts";
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
+import { ManagedRunService } from "../src/managedRuns/Services/ManagedRuns.ts";
 import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
 
@@ -277,20 +278,32 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
+    const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
+    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+    const managedRunServiceLayer = Layer.succeed(ManagedRunService, {
+      launchProjectScript: () => Effect.die(new Error("not mocked")),
+      list: () => Effect.succeed([]),
+      get: () => Effect.die(new Error("not mocked")),
+      getLogs: () => Effect.succeed([]),
+      stop: () => Effect.void,
+      streamEvents: () => Stream.empty,
+      issueMcpAccess: () =>
+        Effect.succeed({ token: "test", projectId: "test" as any, threadId: "test" as any }),
+      resolveContextForToken: () => Effect.succeed(null),
+    });
     const providerLayer = useRealCodex
       ? makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
           Layer.provide(realCodexRegistry),
           Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(managedRunServiceLayer),
+          Layer.provide(projectionSnapshotQueryLayer),
         )
       : makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
           Layer.provide(fakeRegistry!),
           Layer.provide(AnalyticsService.layerTest),
         );
-
-    const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
       orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),

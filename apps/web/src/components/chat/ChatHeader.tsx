@@ -1,5 +1,6 @@
 import {
   type EditorId,
+  type ManagedRunSummary,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
@@ -11,6 +12,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ManagedRunsControl from "../ManagedRunsControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -24,6 +26,7 @@ interface ChatHeaderProps {
   hasActivePlan: boolean;
   planSidebarOpen: boolean;
   activeProjectScripts: ProjectScript[] | undefined;
+  activeManagedRuns: ReadonlyArray<ManagedRunSummary>;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
@@ -54,6 +57,7 @@ export const ChatHeader = memo(function ChatHeader({
   hasActivePlan,
   planSidebarOpen,
   activeProjectScripts,
+  activeManagedRuns,
   preferredScriptId,
   keybindings,
   availableEditors,
@@ -116,6 +120,12 @@ export const ChatHeader = memo(function ChatHeader({
               {planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
             </TooltipPopup>
           </Tooltip>
+        )}
+        {activeProjectName && (
+          <ManagedRunsControl
+            runs={activeManagedRuns}
+            {...(activeProjectScripts ? { scripts: activeProjectScripts } : {})}
+          />
         )}
         {activeProjectScripts && (
           <ProjectScriptsControl

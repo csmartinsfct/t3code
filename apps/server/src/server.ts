@@ -3,6 +3,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, projectFaviconRouteLayer, staticAndDevRouteLayer } from "./http";
+import { managedRunsMcpRouteLayer } from "./managedRuns/http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
@@ -43,6 +44,8 @@ import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ObservabilityLive } from "./observability/Layers/Observability";
+import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
+import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -137,12 +140,21 @@ const ProviderLayerLive = Layer.unwrap(
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
     );
+    const snapshotQueryDeps = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(PersistenceLayerLive),
+    );
+    const managedRunDeps = ManagedRunServiceLive.pipe(
+      Layer.provide(ManagedRunRepositoryLive),
+      Layer.provide(TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive))),
+      Layer.provide(snapshotQueryDeps),
+      Layer.provide(PersistenceLayerLive),
+    );
     const codexAdapterLayer = makeCodexAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
-    );
+    ).pipe(Layer.provide(managedRunDeps), Layer.provide(snapshotQueryDeps));
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
-    );
+    ).pipe(Layer.provide(managedRunDeps), Layer.provide(snapshotQueryDeps));
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
@@ -189,6 +201,16 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(
+    ManagedRunServiceLive.pipe(
+      Layer.provide(ManagedRunRepositoryLive),
+      Layer.provide(TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive))),
+      Layer.provide(
+        OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provide(PersistenceLayerLive)),
+      ),
+      Layer.provide(PersistenceLayerLive),
+    ),
+  ),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ProviderRateLimitsCacheLive),
@@ -205,6 +227,7 @@ const RuntimeServicesLive = Layer.empty.pipe(
 export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   projectFaviconRouteLayer,
+  managedRunsMcpRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );
