@@ -372,6 +372,7 @@ const make = Effect.gen(function* () {
         currentProvider !== undefined &&
         baseProviderKind(currentProvider) === "claudeAgent" &&
         requestedModelSelection !== undefined &&
+        previousModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
 
       if (

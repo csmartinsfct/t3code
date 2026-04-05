@@ -91,31 +91,31 @@ Migration: `apps/server/src/persistence/Migrations/023_CronJobs.ts`
 
 ### `crons_jobs`
 
-| Column | Type | Notes |
-|--------|------|-------|
-| job_id | TEXT PK | UUID |
-| name | TEXT NOT NULL | |
-| description | TEXT | nullable |
-| cron_expression | TEXT NOT NULL | 5-field cron |
-| enabled | INTEGER | 0/1 |
-| job_type | TEXT | "new_thread" |
-| new_thread_config_json | TEXT | JSON blob |
-| created_at | TEXT | ISO 8601 |
-| updated_at | TEXT | ISO 8601 |
-| last_run_at | TEXT | nullable |
-| next_run_at | TEXT | nullable, null when disabled |
+| Column                 | Type          | Notes                        |
+| ---------------------- | ------------- | ---------------------------- |
+| job_id                 | TEXT PK       | UUID                         |
+| name                   | TEXT NOT NULL |                              |
+| description            | TEXT          | nullable                     |
+| cron_expression        | TEXT NOT NULL | 5-field cron                 |
+| enabled                | INTEGER       | 0/1                          |
+| job_type               | TEXT          | "new_thread"                 |
+| new_thread_config_json | TEXT          | JSON blob                    |
+| created_at             | TEXT          | ISO 8601                     |
+| updated_at             | TEXT          | ISO 8601                     |
+| last_run_at            | TEXT          | nullable                     |
+| next_run_at            | TEXT          | nullable, null when disabled |
 
 ### `crons_thread_runs`
 
-| Column | Type | Notes |
-|--------|------|-------|
-| run_id | TEXT PK | UUID |
-| job_id | TEXT NOT NULL | references crons_jobs |
-| status | TEXT NOT NULL | "created", "skipped", "failed" |
-| thread_id | TEXT | nullable |
-| error_message | TEXT | nullable |
-| scheduled_at | TEXT NOT NULL | ISO 8601 |
-| executed_at | TEXT NOT NULL | ISO 8601 |
+| Column        | Type          | Notes                          |
+| ------------- | ------------- | ------------------------------ |
+| run_id        | TEXT PK       | UUID                           |
+| job_id        | TEXT NOT NULL | references crons_jobs          |
+| status        | TEXT NOT NULL | "created", "skipped", "failed" |
+| thread_id     | TEXT          | nullable                       |
+| error_message | TEXT          | nullable                       |
+| scheduled_at  | TEXT NOT NULL | ISO 8601                       |
+| executed_at   | TEXT NOT NULL | ISO 8601                       |
 
 Indexes: `idx_crons_thread_runs_job (job_id, executed_at DESC)`, `idx_crons_jobs_enabled_due (enabled, next_run_at)`.
 
@@ -182,17 +182,17 @@ Reuses managed runs token resolution — `ManagedRunService.resolveContextForTok
 
 ### Tools
 
-| Tool | Purpose |
-|------|---------|
-| `list_cron_jobs` | List all scheduled cron jobs. |
-| `get_cron_job` | Get details of a specific job by ID. |
-| `create_cron_job` | Create a new job directly (no user review). |
-| `update_cron_job` | Update an existing job. |
-| `delete_cron_job` | Delete a job and all its run history. |
-| `toggle_cron_job` | Enable or disable a job. |
-| `run_cron_job_now` | Manually trigger a job. |
-| `list_cron_job_runs` | List run history for a job. |
-| `propose_cron_job` | Propose a job. Returns JSON that the AI must include as a `` ```t3:propose-cron `` code block. |
+| Tool                 | Purpose                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| `list_cron_jobs`     | List all scheduled cron jobs.                                                                |
+| `get_cron_job`       | Get details of a specific job by ID.                                                         |
+| `create_cron_job`    | Create a new job directly (no user review).                                                  |
+| `update_cron_job`    | Update an existing job.                                                                      |
+| `delete_cron_job`    | Delete a job and all its run history.                                                        |
+| `toggle_cron_job`    | Enable or disable a job.                                                                     |
+| `run_cron_job_now`   | Manually trigger a job.                                                                      |
+| `list_cron_job_runs` | List run history for a job.                                                                  |
+| `propose_cron_job`   | Propose a job. Returns JSON that the AI must include as a ` ```t3:propose-cron ` code block. |
 
 ### MCP config injection into providers
 

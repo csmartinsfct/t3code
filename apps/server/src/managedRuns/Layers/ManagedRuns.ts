@@ -394,10 +394,10 @@ const makeManagedRunService = Effect.gen(function* () {
         stream: "pty",
         line,
       };
-    yield* Effect.tryPromise({
-      try: () => appendNdjsonLine(logsDir, live.projectId, runId, logLine),
-      catch: (cause) => toManagedRunOperationError("managedRuns.appendLogLine", cause),
-    }).pipe(
+      yield* Effect.tryPromise({
+        try: () => appendNdjsonLine(logsDir, live.projectId, runId, logLine),
+        catch: (cause) => toManagedRunOperationError("managedRuns.appendLogLine", cause),
+      }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to append managed run log line", {
             runId,
@@ -492,9 +492,9 @@ const makeManagedRunService = Effect.gen(function* () {
           yield* updateRun(runId, (current) => ({
             ...current,
             status: "running",
-              updatedAt: nowIso(),
-              lastExitCode: exitCode,
-              lastExitSignal: exitSignal,
+            updatedAt: nowIso(),
+            lastExitCode: exitCode,
+            lastExitSignal: exitSignal,
           })).pipe(Effect.catch(() => Effect.void));
           yield* startHealthPollFiber(runId);
         } else {
@@ -570,7 +570,7 @@ const makeManagedRunService = Effect.gen(function* () {
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
     if (event.type === "output") {
-        return handleTerminalOutput(event.threadId, event.terminalId, event.data).pipe(
+      return handleTerminalOutput(event.threadId, event.terminalId, event.data).pipe(
         Effect.catch(() => Effect.void),
       );
     }

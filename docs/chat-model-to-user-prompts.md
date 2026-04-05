@@ -17,7 +17,7 @@ Lets the model propose a new project action/script for the user to review.
 
 **Data flow:**
 
-```
+````
 MCP tool: propose_project_script (managedRuns/http.ts)
   → model outputs ```t3:propose-action ... ``` code block
   → ChatMarkdown.tsx detects via isProposeActionBlock() (lib/proposeActionParser.ts)
@@ -28,9 +28,10 @@ MCP tool: propose_project_script (managedRuns/http.ts)
   → ChatView.tsx handleProposeAction():
       accept: dispatches project.meta.update + thread.turn.start with "Action added: ..."
       reject: dispatches thread.turn.start with "User rejected the proposed action."
-```
+````
 
 **Key files:**
+
 - Parser: `apps/web/src/lib/proposeActionParser.ts`
 - Card: `apps/web/src/components/chat/ProposeActionCard.tsx`
 - MCP tool: `apps/server/src/managedRuns/http.ts` → `propose_project_script`
@@ -42,7 +43,7 @@ Lets the model propose a scheduled cron job for the user to review.
 
 **Data flow:**
 
-```
+````
 MCP tool: propose_cron_job (cronJobs/http.ts)
   → model outputs ```t3:propose-cron ... ``` code block
   → ChatMarkdown.tsx detects via isProposeCronJobBlock() (lib/proposeCronJobParser.ts)
@@ -53,9 +54,10 @@ MCP tool: propose_cron_job (cronJobs/http.ts)
   → ChatView.tsx handleProposeCronJob():
       accept: calls api.cronJobs.create() + thread.turn.start with "Cron job added: ..."
       reject: dispatches thread.turn.start with "User rejected the proposed cron job."
-```
+````
 
 **Key files:**
+
 - Parser: `apps/web/src/lib/proposeCronJobParser.ts`
 - Card: `apps/web/src/components/chat/ProposeCronJobCard.tsx`
 - MCP tool: `apps/server/src/cronJobs/http.ts` → `propose_cron_job`
@@ -90,6 +92,7 @@ Provider emits approval_requested activity
 ```
 
 **Key files:**
+
 - Logic: `apps/web/src/session-logic.ts` → `derivePendingApprovals()`
 - Panel: `apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx`
 - Actions: `apps/web/src/components/chat/ComposerPendingApprovalActions.tsx`
@@ -109,6 +112,7 @@ Provider emits user_input_requested activity with questions[]
 ```
 
 **Key files:**
+
 - Logic: `apps/web/src/session-logic.ts` → `derivePendingUserInputs()`
 - Panel: `apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx`
 
@@ -128,6 +132,7 @@ Model outputs structured plan → server persists as ProposedPlan
 ```
 
 **Key files:**
+
 - Card: `apps/web/src/components/chat/ProposedPlanCard.tsx`
 - Sidebar: `apps/web/src/components/PlanSidebar.tsx`
 - Banner: `apps/web/src/components/chat/ComposerPlanFollowUpBanner.tsx`

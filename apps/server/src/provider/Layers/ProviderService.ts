@@ -350,7 +350,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
         const effectiveResumeCursor =
           input.resumeCursor ??
-          (persistedBinding?.provider === input.provider
+          (persistedBinding &&
+          baseProviderKind(persistedBinding.provider) === baseProviderKind(input.provider)
             ? persistedBinding.resumeCursor
             : undefined);
         const adapter = yield* registry.getByProvider(input.provider);
