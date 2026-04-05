@@ -44,6 +44,7 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
+import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -275,6 +276,23 @@ const buildAppUnderTest = (options?: {
           markHttpListening: Effect.void,
           enqueueCommand: (effect) => effect,
           ...options?.layers?.serverRuntimeStartup,
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(ManagedRunService, {
+          launchProjectScript: () => Effect.die(new Error("not mocked")),
+          list: () => Effect.succeed([]),
+          get: () => Effect.die(new Error("not mocked")),
+          getLogs: () => Effect.succeed([]),
+          stop: () => Effect.void,
+          streamEvents: () => Stream.empty,
+          issueMcpAccess: () =>
+            Effect.succeed({
+              token: "test",
+              projectId: ProjectId.makeUnsafe("test"),
+              threadId: "test" as any,
+            }),
+          resolveContextForToken: () => Effect.succeed(null),
         }),
       ),
       Layer.provide(workspaceAndProjectServicesLayer),

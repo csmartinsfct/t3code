@@ -81,6 +81,7 @@ interface CodexSessionContext {
   collabReceiverTurns: Map<string, TurnId>;
   nextRequestId: number;
   stopping: boolean;
+  appendDeveloperInstructions?: string;
 }
 
 interface JsonRpcError {
@@ -124,6 +125,8 @@ export interface CodexAppServerStartSessionInput {
   readonly resumeCursor?: unknown;
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly configOverrides?: ReadonlyArray<string>;
+  readonly appendDeveloperInstructions?: string;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -335,6 +338,7 @@ function buildCodexCollaborationMode(input: {
   readonly interactionMode?: "default" | "plan" | "plan-accept";
   readonly model?: string;
   readonly effort?: string;
+  readonly appendDeveloperInstructions?: string;
 }):
   | {
       mode: "default" | "plan";
@@ -358,9 +362,10 @@ function buildCodexCollaborationMode(input: {
       model,
       reasoning_effort: input.effort ?? "medium",
       developer_instructions:
-        effectiveMode === "plan"
+        (effectiveMode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS) +
+        (input.appendDeveloperInstructions ? `\n\n${input.appendDeveloperInstructions}` : ""),
     },
   };
 }
@@ -462,12 +467,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       const codexBinaryPath = input.binaryPath;
       const codexHomePath = input.homePath;
+      const codexArgs = [
+        "app-server",
+        ...(input.configOverrides?.flatMap((override) => ["-c", override]) ?? []),
+      ];
       this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      const child = spawn(codexBinaryPath, ["app-server"], {
+      const child = spawn(codexBinaryPath, codexArgs, {
         cwd: resolvedCwd,
         env: {
           ...process.env,
@@ -493,6 +502,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         collabReceiverTurns: new Map(),
         nextRequestId: 1,
         stopping: false,
+        ...(input.appendDeveloperInstructions
+          ? { appendDeveloperInstructions: input.appendDeveloperInstructions }
+          : {}),
       };
 
       this.sessions.set(threadId, context);
@@ -721,6 +733,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       ...(normalizedModel !== undefined ? { model: normalizedModel } : {}),
       ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(context.appendDeveloperInstructions
+        ? { appendDeveloperInstructions: context.appendDeveloperInstructions }
+        : {}),
     });
     if (collaborationMode) {
       if (!turnStartParams.model) {

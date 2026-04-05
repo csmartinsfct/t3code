@@ -22,7 +22,7 @@ import {
   TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -39,6 +39,9 @@ import {
 } from "../../codexAppServerManager.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
+import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -1378,6 +1381,8 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     }),
   );
   const serverSettingsService = yield* ServerSettingsService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const managedRunService = yield* ManagedRunService;
 
   const startSession: CodexAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
@@ -1403,6 +1408,21 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       );
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
+      const checkpointContext = yield* projectionSnapshotQuery
+        .getThreadCheckpointContext(input.threadId)
+        .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+      const configOverrides: string[] = [];
+      if (Option.isSome(checkpointContext) && serverConfig.port > 0) {
+        const access = yield* managedRunService.issueMcpAccess(
+          checkpointContext.value.projectId,
+          input.threadId,
+        );
+        const managedRunsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`;
+        configOverrides.push(`mcp_servers.t3_managed_runs.url="${managedRunsUrl}"`);
+        configOverrides.push(
+          `mcp_servers.t3_managed_runs.http_headers.Authorization="Bearer ${access.token}"`,
+        );
+      }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: "codex",
@@ -1411,6 +1431,10 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         runtimeMode: input.runtimeMode,
         binaryPath,
         ...(homePath ? { homePath } : {}),
+        ...(configOverrides.length > 0 ? { configOverrides } : {}),
+        ...(configOverrides.length > 0
+          ? { appendDeveloperInstructions: MANAGED_RUNS_SYSTEM_PROMPT }
+          : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }
           : {}),

@@ -54,6 +54,7 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
+import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
@@ -78,6 +79,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
+    const managedRuns = yield* ManagedRunService;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
 
@@ -513,6 +515,28 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         }),
       [WS_METHODS.gitInit]: (input) =>
         observeRpcEffect(WS_METHODS.gitInit, git.initRepo(input), { "rpc.aggregate": "git" }),
+      [WS_METHODS.managedRunsLaunchProjectScript]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.managedRunsLaunchProjectScript,
+          managedRuns.launchProjectScript(input),
+          { "rpc.aggregate": "managed-runs" },
+        ),
+      [WS_METHODS.managedRunsList]: (input) =>
+        observeRpcEffect(WS_METHODS.managedRunsList, managedRuns.list(input), {
+          "rpc.aggregate": "managed-runs",
+        }),
+      [WS_METHODS.managedRunsGet]: (input) =>
+        observeRpcEffect(WS_METHODS.managedRunsGet, managedRuns.get(input), {
+          "rpc.aggregate": "managed-runs",
+        }),
+      [WS_METHODS.managedRunsGetLogs]: (input) =>
+        observeRpcEffect(WS_METHODS.managedRunsGetLogs, managedRuns.getLogs(input), {
+          "rpc.aggregate": "managed-runs",
+        }),
+      [WS_METHODS.managedRunsStop]: (input) =>
+        observeRpcEffect(WS_METHODS.managedRunsStop, managedRuns.stop(input), {
+          "rpc.aggregate": "managed-runs",
+        }),
       [WS_METHODS.terminalOpen]: (input) =>
         observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
           "rpc.aggregate": "terminal",
@@ -547,6 +571,24 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             ),
           ),
           { "rpc.aggregate": "terminal" },
+        ),
+      [WS_METHODS.subscribeManagedRunEvents]: ({ projectId }) =>
+        observeRpcStreamEffect(
+          WS_METHODS.subscribeManagedRunEvents,
+          Effect.gen(function* () {
+            const snapshotRuns = yield* managedRuns
+              .list({ projectId })
+              .pipe(Effect.catch(() => Effect.succeed([])));
+            return Stream.concat(
+              Stream.make({
+                type: "snapshot" as const,
+                projectId,
+                runs: Array.from(snapshotRuns),
+              }),
+              managedRuns.streamEvents(projectId),
+            );
+          }),
+          { "rpc.aggregate": "managed-runs" },
         ),
       [WS_METHODS.subscribeServerConfig]: (_input) =>
         observeRpcStreamEffect(

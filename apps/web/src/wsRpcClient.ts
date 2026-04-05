@@ -2,6 +2,7 @@ import {
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type ManagedRunStreamEvent,
   type NativeApi,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
@@ -51,6 +52,17 @@ export interface WsRpcClient {
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
     readonly listDirectory: RpcUnaryMethod<typeof WS_METHODS.projectsListDirectory>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
+  };
+  readonly managedRuns: {
+    readonly launchProjectScript: RpcUnaryMethod<typeof WS_METHODS.managedRunsLaunchProjectScript>;
+    readonly list: RpcUnaryMethod<typeof WS_METHODS.managedRunsList>;
+    readonly get: RpcUnaryMethod<typeof WS_METHODS.managedRunsGet>;
+    readonly getLogs: RpcUnaryMethod<typeof WS_METHODS.managedRunsGetLogs>;
+    readonly stop: RpcUnaryMethod<typeof WS_METHODS.managedRunsStop>;
+    readonly onEvent: (
+      projectId: string,
+      listener: (event: ManagedRunStreamEvent) => void,
+    ) => () => void;
   };
   readonly shell: {
     readonly openInEditor: (input: {
@@ -136,6 +148,20 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsListDirectory](input)),
       readFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
+    },
+    managedRuns: {
+      launchProjectScript: (input) =>
+        transport.request((client) => client[WS_METHODS.managedRunsLaunchProjectScript](input)),
+      list: (input) => transport.request((client) => client[WS_METHODS.managedRunsList](input)),
+      get: (input) => transport.request((client) => client[WS_METHODS.managedRunsGet](input)),
+      getLogs: (input) =>
+        transport.request((client) => client[WS_METHODS.managedRunsGetLogs](input)),
+      stop: (input) => transport.request((client) => client[WS_METHODS.managedRunsStop](input)),
+      onEvent: (projectId, listener) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeManagedRunEvents]({ projectId } as never),
+          listener,
+        ),
     },
     shell: {
       openInEditor: (input) =>

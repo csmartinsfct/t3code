@@ -17,10 +17,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Random, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Random, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
@@ -130,6 +132,26 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   }
 }
 
+const managedRunServiceTestLayer = Layer.succeed(ManagedRunService, {
+  launchProjectScript: () => Effect.die(new Error("not mocked")),
+  list: () => Effect.succeed([]),
+  get: () => Effect.die(new Error("not mocked")),
+  getLogs: () => Effect.succeed([]),
+  stop: () => Effect.void,
+  streamEvents: () => Stream.empty,
+  issueMcpAccess: () =>
+    Effect.succeed({ token: "test", projectId: "test" as any, threadId: "test" as any }),
+  resolveContextForToken: () => Effect.succeed(null),
+});
+
+const projectionSnapshotQueryTestLayer = Layer.succeed(ProjectionSnapshotQuery, {
+  getSnapshot: () => Effect.die(new Error("not mocked")),
+  getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+  getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+  getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+  getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+});
+
 function makeHarness(config?: {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
@@ -170,6 +192,8 @@ function makeHarness(config?: {
         ),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(managedRunServiceTestLayer),
+      Layer.provideMerge(projectionSnapshotQueryTestLayer),
       Layer.provideMerge(NodeServices.layer),
     ),
     query,
@@ -1199,6 +1223,8 @@ describe("ClaudeAdapterLive", () => {
     }).pipe(
       Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
       Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(managedRunServiceTestLayer),
+      Layer.provideMerge(projectionSnapshotQueryTestLayer),
       Layer.provideMerge(NodeServices.layer),
     );
 

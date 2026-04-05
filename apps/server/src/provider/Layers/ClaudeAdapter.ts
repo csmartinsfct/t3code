@@ -60,6 +60,7 @@ import {
   FileSystem,
   Fiber,
   Layer,
+  Option,
   Queue,
   Random,
   Ref,
@@ -70,6 +71,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
+import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
 import {
@@ -961,6 +965,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const serverSettingsService = yield* ServerSettingsService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const managedRunService = yield* ManagedRunService;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
@@ -2866,6 +2872,27 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
       };
 
+      // Inject T3 managed runs MCP server when a project is active
+      const checkpointContext = yield* projectionSnapshotQuery
+        .getThreadCheckpointContext(input.threadId)
+        .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+      let mcpServersConfig:
+        | Record<string, { type: "http"; url: string; headers: Record<string, string> }>
+        | undefined;
+      if (Option.isSome(checkpointContext) && serverConfig.port > 0) {
+        const access = yield* managedRunService.issueMcpAccess(
+          checkpointContext.value.projectId,
+          input.threadId,
+        );
+        mcpServersConfig = {
+          t3_managed_runs: {
+            type: "http",
+            url: `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`,
+            headers: { Authorization: `Bearer ${access.token}` },
+          },
+        };
+      }
+
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2888,6 +2915,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
+        ...(mcpServersConfig ? { mcpServers: mcpServersConfig } : {}),
+        ...(mcpServersConfig ? { allowedTools: ["mcp__t3_managed_runs__*"] } : {}),
+        ...(mcpServersConfig
+          ? {
+              systemPrompt: {
+                type: "preset" as const,
+                preset: "claude_code" as const,
+                append: MANAGED_RUNS_SYSTEM_PROMPT,
+              },
+            }
+          : {}),
       };
 
       const queryRuntime = yield* Effect.try({
