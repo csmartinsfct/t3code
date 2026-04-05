@@ -20,6 +20,7 @@ import {
   ThreadMessagesDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
+  ThreadMovedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
@@ -328,6 +329,24 @@ export function projectEvent(
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
             updatedAt: payload.updatedAt,
           }),
+        })),
+      );
+
+    case "thread.moved":
+      return decodeForEvent(ThreadMovedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId
+              ? {
+                  ...thread,
+                  projectId: payload.targetProjectId,
+                  branch: null,
+                  worktreePath: null,
+                  updatedAt: payload.updatedAt,
+                }
+              : thread,
+          ),
         })),
       );
 

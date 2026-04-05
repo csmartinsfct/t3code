@@ -1086,6 +1086,14 @@ export default function Sidebar() {
           })),
         );
 
+      const moveChildren = projects
+        .filter((p) => p.id !== thread.projectId)
+        .map((p) => ({ id: `move::${p.id}`, label: p.name }));
+
+      const hasActiveSession =
+        thread.session != null &&
+        (thread.session.status === "running" || thread.session.status === "connecting");
+
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
@@ -1095,6 +1103,12 @@ export default function Sidebar() {
             label: "Fork with model",
             children: forkChildren,
             disabled: forkChildren.length === 0,
+          },
+          {
+            id: "move",
+            label: "Move to",
+            children: moveChildren,
+            disabled: moveChildren.length === 0 || hasActiveSession,
           },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -1138,6 +1152,39 @@ export default function Sidebar() {
           toastManager.add({
             type: "error",
             title: "Failed to fork thread",
+          });
+        }
+        return;
+      }
+
+      if (clicked?.startsWith("move::")) {
+        const targetProject = projects.find((p) => p.id === clicked.slice("move::".length));
+        if (!targetProject) return;
+
+        const parts = [`Move thread "${thread.title}" to project "${targetProject.name}"?`];
+        if (thread.worktreePath || thread.branch) {
+          parts.push("The thread's worktree and branch association will be cleared.");
+        }
+
+        const confirmed = await api.dialogs.confirm(parts.join("\n\n"));
+        if (!confirmed) return;
+
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.move",
+            commandId: newCommandId(),
+            threadId,
+            targetProjectId: targetProject.id,
+          });
+          toastManager.add({
+            type: "success",
+            title: "Thread moved",
+            description: `Moved to "${targetProject.name}".`,
+          });
+        } catch {
+          toastManager.add({
+            type: "error",
+            title: "Failed to move thread",
           });
         }
         return;
@@ -1192,6 +1239,7 @@ export default function Sidebar() {
       markThreadUnread,
       navigate,
       projectCwdById,
+      projects,
       serverProviders,
       sidebarThreadsById,
     ],

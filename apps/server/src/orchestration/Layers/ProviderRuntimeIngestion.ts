@@ -133,7 +133,8 @@ function codexWindowTierKey(windowMinutes: number | undefined): string {
 interface CodexWindowData {
   usedPercent: number;
   windowMinutes?: number;
-  resetsInSeconds?: number;
+  /** Absolute Unix timestamp (seconds) when this window resets. */
+  resetsAtEpoch?: number;
 }
 
 function asCodexWindow(value: unknown): CodexWindowData | null {
@@ -141,21 +142,34 @@ function asCodexWindow(value: unknown): CodexWindowData | null {
   if (!rec) return null;
   const pct = pickNumber(rec, "used_percent", "usedPercent");
   if (pct === undefined) return null;
-  const windowMinutes = pickNumber(rec, "window_minutes", "windowMinutes");
+  const windowMinutes = pickNumber(
+    rec,
+    "window_minutes",
+    "windowMinutes",
+    "window_duration_mins",
+    "windowDurationMins",
+  );
+  // resetsAt may be an absolute epoch (seconds) or a relative offset.
+  const resetsAtRaw = pickNumber(rec, "resets_at", "resetsAt");
   const resetsInSeconds = pickNumber(rec, "resets_in_seconds", "resetsInSeconds");
+  // Prefer the absolute timestamp; fall back to relative offset.
+  const resetsAtEpoch =
+    resetsAtRaw !== undefined
+      ? resetsAtRaw
+      : resetsInSeconds !== undefined
+        ? Math.floor(Date.now() / 1000) + resetsInSeconds
+        : undefined;
   return {
     usedPercent: pct,
     ...(windowMinutes !== undefined ? { windowMinutes } : {}),
-    ...(resetsInSeconds !== undefined ? { resetsInSeconds } : {}),
+    ...(resetsAtEpoch !== undefined ? { resetsAtEpoch } : {}),
   };
 }
 
 function codexWindowToTier(win: CodexWindowData): OAuthUsageTier {
   const tier = codexWindowTierKey(win.windowMinutes);
   const resetsAt =
-    win.resetsInSeconds !== undefined
-      ? new Date(Date.now() + win.resetsInSeconds * 1000).toISOString()
-      : null;
+    win.resetsAtEpoch !== undefined ? new Date(win.resetsAtEpoch * 1000).toISOString() : null;
   return {
     tier,
     utilization: win.usedPercent / 100, // 0-100 → 0-1
@@ -241,10 +255,7 @@ function normalizeRateLimitPayload(
       status: highestPct >= 80 ? "allowed_warning" : "allowed",
       utilization: highestPct / 100,
       rateLimitType: highestWindow ? codexWindowTierKey(highestWindow.windowMinutes) : undefined,
-      resetsAt:
-        highestWindow?.resetsInSeconds !== undefined
-          ? Math.floor(Date.now() / 1000) + highestWindow.resetsInSeconds
-          : undefined,
+      resetsAt: highestWindow?.resetsAtEpoch,
     },
     tiers,
   };

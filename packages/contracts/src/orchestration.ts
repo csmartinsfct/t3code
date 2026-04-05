@@ -458,6 +458,13 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 
+const ThreadMoveCommand = Schema.Struct({
+  type: Schema.Literal("thread.move"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  targetProjectId: ProjectId,
+});
+
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
   commandId: CommandId,
@@ -572,6 +579,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadMoveCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -595,6 +603,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
+  ThreadMoveCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -699,6 +708,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.archived",
   "thread.unarchived",
   "thread.meta-updated",
+  "thread.moved",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -788,6 +798,13 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadMovedPayload = Schema.Struct({
+  threadId: ThreadId,
+  sourceProjectId: ProjectId,
+  targetProjectId: ProjectId,
   updatedAt: IsoDateTime,
 });
 
@@ -958,6 +975,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.moved"),
+    payload: ThreadMovedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

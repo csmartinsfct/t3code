@@ -745,6 +745,50 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       }));
     }
 
+    case "thread.moved": {
+      const threadId = event.payload.threadId as ThreadId;
+      const sourceProjectId = event.payload.sourceProjectId;
+      const targetProjectId = event.payload.targetProjectId;
+
+      const threads = updateThread(state.threads, threadId, (thread) => ({
+        ...thread,
+        projectId: targetProjectId,
+        branch: null,
+        worktreePath: null,
+        updatedAt: event.payload.updatedAt,
+      }));
+
+      if (threads === state.threads) {
+        return state;
+      }
+
+      const movedThread = threads.find((t) => t.id === threadId);
+      const sidebarThreadsById = movedThread
+        ? {
+            ...state.sidebarThreadsById,
+            [threadId]: buildSidebarThreadSummary(movedThread),
+          }
+        : state.sidebarThreadsById;
+
+      let threadIdsByProjectId = removeThreadIdByProjectId(
+        state.threadIdsByProjectId,
+        sourceProjectId,
+        threadId,
+      );
+      threadIdsByProjectId = appendThreadIdByProjectId(
+        threadIdsByProjectId,
+        targetProjectId,
+        threadId,
+      );
+
+      return {
+        ...state,
+        threads,
+        sidebarThreadsById,
+        threadIdsByProjectId,
+      };
+    }
+
     case "thread.runtime-mode-set": {
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,

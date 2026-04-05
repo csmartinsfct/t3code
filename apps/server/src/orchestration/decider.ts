@@ -350,6 +350,47 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.move": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.targetProjectId,
+      });
+      if (thread.projectId === command.targetProjectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already belongs to project '${command.targetProjectId}'.`,
+        });
+      }
+      if (thread.session !== null && thread.session.status === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has an active session and cannot be moved.`,
+        });
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.moved",
+        payload: {
+          threadId: command.threadId,
+          sourceProjectId: thread.projectId,
+          targetProjectId: command.targetProjectId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.runtime-mode.set": {
       yield* requireThread({
         readModel,

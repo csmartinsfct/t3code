@@ -53,7 +53,7 @@ export interface RateLimitSnapshot {
 }
 
 const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
-  five_hour: "Current session",
+  five_hour: "5h",
   seven_day: "Weekly",
   seven_day_opus: "Weekly (Opus)",
   seven_day_sonnet: "Weekly (Sonnet)",
@@ -95,10 +95,9 @@ export function deriveRateLimitSnapshot(entry: ProviderRateLimitsSnapshot): Rate
   const rateLimitType = info.rateLimitType ?? null;
 
   const oauthTiers = (entry.oauthUsageTiers ?? []).map(deriveOAuthTierSnapshot);
-  const primaryTier =
-    oauthTiers.length > 0
-      ? oauthTiers.reduce((best, tier) => (tier.utilization > best.utilization ? tier : best))
-      : null;
+  // The first tier (typically `five_hour`) is the most actionable short-term
+  // limit and should be highlighted as primary in the UI.
+  const primaryTier = oauthTiers.length > 0 ? oauthTiers[0]! : null;
 
   // When OAuth tiers are available, use the primary tier's percentage for the circle.
   const usedPercentage = primaryTier !== null ? primaryTier.usedPercentage : sdkUsedPercentage;
