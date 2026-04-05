@@ -3425,7 +3425,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     hasSession,
     stopAll,
     probeRateLimits,
-    streamEvents: Stream.fromQueue(runtimeEventQueue),
+    get streamEvents() {
+      return Stream.fromQueue(runtimeEventQueue);
+    },
   } satisfies ClaudeAdapterShape;
 });
 

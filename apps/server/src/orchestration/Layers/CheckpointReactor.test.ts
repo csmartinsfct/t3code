@@ -98,7 +98,9 @@ function createProviderServiceHarness(
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     rollbackConversation,
     probeAllRateLimits: () => Effect.succeed([]),
-    streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+    get streamEvents() {
+      return Stream.fromPubSub(runtimeEventPubSub);
+    },
   };
 
   const emit = (event: LegacyProviderRuntimeEvent): void => {
