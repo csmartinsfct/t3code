@@ -209,9 +209,7 @@ describe("ProviderCommandReactor", () => {
         }),
       rollbackConversation: () => unsupported(),
       probeAllRateLimits: () => Effect.succeed([]),
-      get streamEvents() {
-        return Stream.fromPubSub(runtimeEventPubSub);
-      },
+      streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
 
     const orchestrationLayer = OrchestrationEngineLive.pipe(

@@ -1664,9 +1664,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     listSessions,
     hasSession,
     stopAll,
-    get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
-    },
+    streamEvents: Stream.fromQueue(runtimeEventQueue),
   } satisfies CodexAdapterShape;
 });
 

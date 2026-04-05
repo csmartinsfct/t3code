@@ -100,9 +100,7 @@ function createProviderServiceHarness() {
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     rollbackConversation: () => unsupported(),
     probeAllRateLimits: () => Effect.succeed([]),
-    get streamEvents() {
-      return Stream.fromPubSub(runtimeEventPubSub);
-    },
+    streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
 
   const setSession = (session: ProviderSession): void => {

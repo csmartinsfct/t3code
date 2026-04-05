@@ -4,7 +4,7 @@ import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from
 
 import ChatView from "../components/ChatView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
-import { projectScriptCwd } from "@t3tools/shared/projectScripts";
+import { projectScriptCwd } from "../projectScripts";
 import {
   DiffPanelHeaderSkeleton,
   DiffPanelLoadingState,

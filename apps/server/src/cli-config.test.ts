@@ -40,7 +40,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.none(),
           host: Option.none(),
           baseDir: Option.none(),
-          cwd: Option.none(),
           devUrl: Option.none(),
           noBrowser: Option.none(),
           authToken: Option.none(),
@@ -103,7 +102,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.some(8788),
           host: Option.some("127.0.0.1"),
           baseDir: Option.some(baseDir),
-          cwd: Option.none(),
           devUrl: Option.some(new URL("http://127.0.0.1:4173")),
           noBrowser: Option.some(true),
           authToken: Option.some("flag-token"),
@@ -180,7 +178,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.none(),
           host: Option.none(),
           baseDir: Option.none(),
-          cwd: Option.none(),
           devUrl: Option.none(),
           noBrowser: Option.none(),
           authToken: Option.none(),
@@ -231,7 +228,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-dirs-" });
-      const customCwd = path.join(baseDir, "nested", "project");
 
       const resolved = yield* resolveServerConfig(
         {
@@ -239,7 +235,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.some(4888),
           host: Option.none(),
           baseDir: Option.some(baseDir),
-          cwd: Option.some(customCwd),
           devUrl: Option.some(new URL("http://127.0.0.1:5173")),
           noBrowser: Option.none(),
           authToken: Option.none(),
@@ -258,7 +253,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       );
 
       for (const directory of [
-        customCwd,
         resolved.stateDir,
         resolved.logsDir,
         resolved.providerLogsDir,
@@ -270,7 +264,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       ]) {
         expect(yield* fs.exists(directory)).toBe(true);
       }
-      expect(resolved.cwd).toBe(path.resolve(customCwd));
     }),
   );
 
@@ -297,7 +290,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.some(8788),
           host: Option.some("127.0.0.1"),
           baseDir: Option.none(),
-          cwd: Option.none(),
           devUrl: Option.some(new URL("http://127.0.0.1:4173")),
           noBrowser: Option.none(),
           authToken: Option.some("flag-token"),
@@ -368,7 +360,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           port: Option.some(4888),
           host: Option.none(),
           baseDir: Option.some(baseDir),
-          cwd: Option.none(),
           devUrl: Option.none(),
           noBrowser: Option.none(),
           authToken: Option.none(),

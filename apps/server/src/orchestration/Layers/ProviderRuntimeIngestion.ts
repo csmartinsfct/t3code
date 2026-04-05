@@ -1502,9 +1502,9 @@ const make = Effect.fn("make")(function* () {
         yield* Effect.logDebug("rate-limits cache empty — probing providers");
         const emptyResults: ReadonlyArray<{ provider: ProviderKind; info: ProviderRateLimitInfo }> =
           [];
-        const results = yield* providerService
-          .probeAllRateLimits()
-          .pipe(Effect.catchDefect(() => Effect.succeed(emptyResults)));
+        const results = yield* providerService.probeAllRateLimits().pipe(
+          Effect.catchDefect(() => Effect.succeed(emptyResults)),
+        );
         for (const entry of results) {
           yield* rateLimitsCache.set(entry.provider, entry.info);
         }

@@ -192,9 +192,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     readThread,
     rollbackThread,
     stopAll,
-    get streamEvents() {
-      return Stream.fromPubSub(runtimeEventPubSub);
-    },
+    streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
 
   const emit = (event: LegacyProviderRuntimeEvent): void => {

@@ -1,7 +1,7 @@
 import { NetService } from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { Config, Effect, FileSystem, LogLevel, Option, Path, Schema } from "effect";
-import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
+import { Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
 import {
   DEFAULT_PORT,
@@ -13,7 +13,7 @@ import {
   type ServerConfigShape,
 } from "./config";
 import { readBootstrapEnvelope } from "./bootstrap";
-import { expandHomePath, resolveBaseDir } from "./os-jank";
+import { resolveBaseDir } from "./os-jank";
 import { runServer } from "./server";
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
@@ -140,7 +140,6 @@ interface CliServerFlags {
   readonly port: Option.Option<number>;
   readonly host: Option.Option<string>;
   readonly baseDir: Option.Option<string>;
-  readonly cwd: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
   readonly authToken: Option.Option<string>;
@@ -226,9 +225,6 @@ export const resolveServerConfig = (
         ),
       ),
     );
-    const rawCwd = Option.getOrElse(flags.cwd, () => process.cwd());
-    const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
-    yield* fs.makeDirectory(cwd, { recursive: true });
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
     yield* ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
@@ -319,7 +315,7 @@ export const resolveServerConfig = (
       otlpServiceName: env.otlpServiceName,
       mode,
       port,
-      cwd,
+      cwd: process.cwd(),
       baseDir,
       ...derivedPaths,
       serverTracePath,
@@ -340,12 +336,6 @@ const commandFlags = {
   port: portFlag,
   host: hostFlag,
   baseDir: baseDirFlag,
-  cwd: Argument.string("cwd").pipe(
-    Argument.withDescription(
-      "Working directory for provider sessions (defaults to the current directory).",
-    ),
-    Argument.optional,
-  ),
   devUrl: devUrlFlag,
   noBrowser: noBrowserFlag,
   authToken: authTokenFlag,

@@ -115,9 +115,7 @@ function makeMutableServerSettingsService(
           yield* PubSub.publish(changes, next);
           return next;
         }),
-      get streamChanges() {
-        return Stream.fromPubSub(changes);
-      },
+      streamChanges: Stream.fromPubSub(changes),
     } satisfies ServerSettingsShape;
   });
 }

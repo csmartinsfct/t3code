@@ -4,8 +4,6 @@ import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/obse
 import { ServerConfig } from "../../config.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import { makeLocalFileTracer } from "../LocalFileTracer.ts";
-import { BrowserTraceCollector } from "../Services/BrowserTraceCollector.ts";
-import { makeTraceSink } from "../TraceSink.ts";
 
 const otlpSerializationLayer = OtlpSerialization.layerJson;
 
@@ -18,14 +16,9 @@ export const ObservabilityLive = Layer.unwrap(
       Layer.succeed(References.TracerTimingEnabled, config.traceTimingEnabled),
     );
 
-    const tracerLayer = Layer.unwrap(
+    const tracerLayer = Layer.effect(
+      Tracer.Tracer,
       Effect.gen(function* () {
-        const sink = yield* makeTraceSink({
-          filePath: config.serverTracePath,
-          maxBytes: config.traceMaxBytes,
-          maxFiles: config.traceMaxFiles,
-          batchWindowMs: config.traceBatchWindowMs,
-        });
         const delegate =
           config.otlpTracesUrl === undefined
             ? undefined
@@ -41,26 +34,13 @@ export const ObservabilityLive = Layer.unwrap(
                 },
               });
 
-        const tracer = yield* makeLocalFileTracer({
+        return yield* makeLocalFileTracer({
           filePath: config.serverTracePath,
           maxBytes: config.traceMaxBytes,
           maxFiles: config.traceMaxFiles,
           batchWindowMs: config.traceBatchWindowMs,
-          sink,
           ...(delegate ? { delegate } : {}),
         });
-
-        return Layer.mergeAll(
-          Layer.succeed(Tracer.Tracer, tracer),
-          Layer.succeed(BrowserTraceCollector, {
-            record: (records) =>
-              Effect.sync(() => {
-                for (const record of records) {
-                  sink.push(record);
-                }
-              }),
-          }),
-        );
       }),
     ).pipe(Layer.provideMerge(otlpSerializationLayer));
 
