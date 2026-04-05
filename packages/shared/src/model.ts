@@ -86,6 +86,25 @@ export function resolveContextWindow(
   return hasContextWindowOption(caps, raw) ? raw : (defaultValue ?? undefined);
 }
 
+/**
+ * Convert a context window option string (e.g. "200k", "1m") to a token count.
+ * Returns `undefined` for unrecognised values.
+ */
+export function contextWindowOptionToTokens(value: string | null | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const lower = value.trim().toLowerCase();
+  if (lower.endsWith("m")) {
+    const n = Number(lower.slice(0, -1));
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 1_000_000) : undefined;
+  }
+  if (lower.endsWith("k")) {
+    const n = Number(lower.slice(0, -1));
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 1_000) : undefined;
+  }
+  const n = Number(lower);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+}
+
 export function normalizeCodexModelOptionsWithCapabilities(
   caps: ModelCapabilities,
   modelOptions: CodexModelOptions | null | undefined,

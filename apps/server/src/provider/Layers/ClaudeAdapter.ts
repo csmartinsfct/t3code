@@ -47,7 +47,9 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
+  contextWindowOptionToTokens,
   resolveApiModelId,
+  resolveContextWindow,
   resolveEffort,
   trimOrNull,
 } from "@t3tools/shared/model";
@@ -2975,6 +2977,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       delete (baseQueryOptions as Record<string, unknown>).sessionId;
       delete (baseQueryOptions as Record<string, unknown>).forkSession;
 
+      const resolvedContextWindow = resolveContextWindow(
+        caps,
+        modelSelection?.options?.contextWindow,
+      );
+      const initialContextWindow = contextWindowOptionToTokens(resolvedContextWindow);
+
       const context: ClaudeSessionContext = {
         session,
         promptQueue,
@@ -2989,7 +2997,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         turns: [],
         inFlightTools,
         turnState: undefined,
-        lastKnownContextWindow: undefined,
+        lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
@@ -3097,6 +3105,14 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),
         });
         context.currentApiModelId = apiModelId;
+      }
+      // Update context window estimate when model/options change.
+      const newCaps = getClaudeModelCapabilities(modelSelection.model);
+      const newContextWindow = contextWindowOptionToTokens(
+        resolveContextWindow(newCaps, modelSelection.options?.contextWindow),
+      );
+      if (newContextWindow !== undefined) {
+        context.lastKnownContextWindow = newContextWindow;
       }
       context.session = {
         ...context.session,

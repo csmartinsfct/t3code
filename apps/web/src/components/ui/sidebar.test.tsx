@@ -1,12 +1,21 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { getSidebarReferenceWidth } from "~/lib/persistedPanelWidth";
+
 import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
 } from "./sidebar";
+
+function measuredElement(width: number, parentElement: any = null) {
+  return {
+    getBoundingClientRect: () => ({ width }),
+    parentElement,
+  } as HTMLElement;
+}
 
 function renderSidebarButton(className?: string) {
   return renderToStaticMarkup(
@@ -49,5 +58,23 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+});
+
+describe("sidebar reference width", () => {
+  it("uses the wrapper width when the wrapper is materially wider than the sidebar", () => {
+    const parent = measuredElement(1200);
+    const wrapper = measuredElement(960, parent);
+    const sidebarContainer = measuredElement(320);
+
+    expect(getSidebarReferenceWidth({ sidebarContainer, wrapper })).toBe(960);
+  });
+
+  it("falls back to the parent layout width when the wrapper tracks the sidebar width", () => {
+    const parent = measuredElement(900);
+    const wrapper = measuredElement(320, parent);
+    const sidebarContainer = measuredElement(320);
+
+    expect(getSidebarReferenceWidth({ sidebarContainer, wrapper })).toBe(900);
   });
 });

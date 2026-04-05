@@ -1,10 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { Effect, Layer, Queue } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { z } from "zod";
 
-import type { ProjectId, ProjectScript, ThreadId } from "@t3tools/contracts";
+import type { ManagedRunError, ProjectId, ProjectScript, ThreadId } from "@t3tools/contracts";
 import { ManagedRunId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery";
 import { ManagedRunService, type ManagedRunServiceShape } from "./Services/ManagedRuns";
@@ -24,19 +24,18 @@ function responseHeaders(response: Response): Record<string, string> {
  * and executes them, preserving the SQLite connection scope.
  */
 type WorkItem = {
-  effect: Effect.Effect<unknown, unknown, never>;
+  effect: Effect.Effect<unknown, ManagedRunError, never>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 };
 
 function createEffectBridge() {
   const queue: WorkItem[] = [];
-  let notify: (() => void) | null = null;
   let waitResolve: (() => void) | null = null;
 
   return {
     /** Called from MCP tool callbacks (async context) */
-    run: <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
+    run: <A>(effect: Effect.Effect<A, ManagedRunError, never>): Promise<A> =>
       new Promise<A>((resolve, reject) => {
         queue.push({ effect, resolve: resolve as (v: unknown) => void, reject });
         // Wake up the Effect fiber if it's waiting
@@ -47,19 +46,15 @@ function createEffectBridge() {
     processAll: Effect.gen(function* () {
       while (queue.length > 0) {
         const item = queue.shift()!;
-        try {
-          const result = yield* item.effect.pipe(
-            Effect.catch((error) => {
-              item.reject(error);
-              return Effect.succeed(undefined);
-            }),
-          );
-          if (result !== undefined) {
+        const exit = yield* Effect.exit(item.effect);
+        Exit.match(exit, {
+          onFailure: (cause) => {
+            item.reject(Cause.squash(cause));
+          },
+          onSuccess: (result) => {
             item.resolve(result);
-          }
-        } catch (error) {
-          item.reject(error);
-        }
+          },
+        });
       }
     }),
 
@@ -93,7 +88,7 @@ function resolveScript(scripts: ReadonlyArray<ProjectScript>, scriptId: string) 
 function createMcpServer(
   managedRuns: ManagedRunServiceShape,
   projectId: ProjectId,
-  threadId: string,
+  threadId: ThreadId,
   scripts: ReadonlyArray<ProjectScript>,
   bridge: ReturnType<typeof createEffectBridge>,
 ) {
@@ -143,7 +138,7 @@ function createMcpServer(
         const result = await bridge.run(
           managedRuns.launchProjectScript({
             projectId,
-            threadId: threadId as ThreadId,
+            threadId,
             scriptId: TrimmedNonEmptyString.makeUnsafe(scriptId),
             ...(cwd ? { cwd: TrimmedNonEmptyString.makeUnsafe(cwd) } : {}),
           }),
@@ -351,13 +346,13 @@ const handleManagedRunsMcpRequest = Effect.gen(function* () {
   }
 
   // Resolve context
-  let context: { projectId: ProjectId; threadId: string } | null = null;
+  let context: { projectId: ProjectId; threadId: ThreadId } | null = null;
   if (DEV_BYPASS_TOKEN && token === DEV_BYPASS_TOKEN) {
     const url = new URL(webRequest.url, "http://localhost");
     const projectId = url.searchParams.get("projectId");
     const threadId = url.searchParams.get("threadId") ?? "dev-test-thread";
     if (projectId) {
-      context = { projectId: projectId as ProjectId, threadId };
+      context = { projectId: projectId as ProjectId, threadId: threadId as ThreadId };
     }
   }
   if (!context) {
@@ -405,14 +400,11 @@ const handleManagedRunsMcpRequest = Effect.gen(function* () {
   while (!mcp.done) {
     yield* bridge.processAll;
     if (!mcp.done) {
-      yield* Effect.tryPromise({
-        try: () => bridge.waitForWork(),
-        catch: () => undefined,
-      });
+      yield* Effect.promise(() => bridge.waitForWork());
     }
   }
   yield* bridge.processAll;
-  yield* Effect.tryPromise({ try: () => mcpPromise, catch: () => undefined });
+  yield* Effect.promise(() => mcpPromise);
 
   if (mcp.error || !mcp.response) {
     return HttpServerResponse.text(

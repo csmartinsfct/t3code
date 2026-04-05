@@ -1,6 +1,4 @@
-import { memo, useState, useCallback, useRef } from "react";
-import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
-import { Schema } from "effect";
+import { memo, useState, useCallback, useEffect, useRef } from "react";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -29,6 +27,14 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readNativeApi } from "~/nativeApi";
 import { toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import {
+  getPlanSidebarReferenceWidth,
+  readPersistedPanelWidth,
+  resolvePanelWidthCandidate,
+  resolveStoredPanelWidth,
+  writeMigratedPersistedPanelWidth,
+  writePersistedPanelWidth,
+} from "~/lib/persistedPanelWidth";
 
 function stepStatusIcon(status: string): React.ReactNode {
   if (status === "completed") {
@@ -77,42 +83,122 @@ const PlanSidebar = memo(function PlanSidebar({
   const PLAN_SIDEBAR_MIN_WIDTH = 260;
   const PLAN_SIDEBAR_MAX_WIDTH = 600;
   const PLAN_SIDEBAR_STORAGE_KEY = "chat_plan_sidebar_width";
-  const [sidebarWidth, setSidebarWidth] = useState(
-    () => getLocalStorageItem(PLAN_SIDEBAR_STORAGE_KEY, Schema.Number) ?? 340,
-  );
+  const PLAN_SIDEBAR_DEFAULT_WIDTH = 340;
+  const [sidebarWidth, setSidebarWidth] = useState(PLAN_SIDEBAR_DEFAULT_WIDTH);
   const isDraggingRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-  const handleResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      isDraggingRef.current = true;
-      startXRef.current = e.clientX;
-      startWidthRef.current = sidebarWidth;
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!isDraggingRef.current) return;
-        // Dragging left (negative delta) widens the panel
-        const delta = startXRef.current - ev.clientX;
-        const next = Math.max(
-          PLAN_SIDEBAR_MIN_WIDTH,
-          Math.min(PLAN_SIDEBAR_MAX_WIDTH, startWidthRef.current + delta),
-        );
-        setSidebarWidth(next);
-      };
-      const onMouseUp = () => {
-        isDraggingRef.current = false;
-        setSidebarWidth((w) => {
-          setLocalStorageItem(PLAN_SIDEBAR_STORAGE_KEY, w, Schema.Number);
-          return w;
-        });
-        window.removeEventListener("mousemove", onMouseMove);
-        window.removeEventListener("mouseup", onMouseUp);
-      };
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
-    },
-    [sidebarWidth],
-  );
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  const revalidateSidebarWidth = useCallback((options?: { migrateStoredWidth?: boolean }) => {
+    const sidebarElement = rootRef.current;
+    if (!sidebarElement) {
+      return;
+    }
+
+    const referenceWidth = getPlanSidebarReferenceWidth(sidebarElement);
+    if (!(referenceWidth > 0)) {
+      return;
+    }
+
+    const storedWidth = readPersistedPanelWidth(PLAN_SIDEBAR_STORAGE_KEY);
+    if (storedWidth) {
+      const restoredWidth = resolveStoredPanelWidth({
+        maxWidth: PLAN_SIDEBAR_MAX_WIDTH,
+        minWidth: PLAN_SIDEBAR_MIN_WIDTH,
+        referenceWidth,
+        storedWidth,
+      });
+      if (restoredWidth.width !== null) {
+        setSidebarWidth(restoredWidth.width);
+        if (options?.migrateStoredWidth && restoredWidth.migratedWidth) {
+          writeMigratedPersistedPanelWidth(PLAN_SIDEBAR_STORAGE_KEY, restoredWidth.migratedWidth);
+        }
+        return;
+      }
+    }
+
+    const nextWidth = resolvePanelWidthCandidate({
+      desiredWidth: sidebarElement.getBoundingClientRect().width || sidebarWidthRef.current,
+      maxWidth: PLAN_SIDEBAR_MAX_WIDTH,
+      minWidth: PLAN_SIDEBAR_MIN_WIDTH,
+      referenceWidth,
+    });
+
+    if (nextWidth !== null) {
+      setSidebarWidth(nextWidth);
+    }
+  }, []);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    startXRef.current = e.clientX;
+    startWidthRef.current = sidebarWidthRef.current;
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      // Dragging left (negative delta) widens the panel
+      const delta = startXRef.current - ev.clientX;
+      const referenceWidth = getPlanSidebarReferenceWidth(rootRef.current);
+      const next =
+        resolvePanelWidthCandidate({
+          desiredWidth: startWidthRef.current + delta,
+          maxWidth: PLAN_SIDEBAR_MAX_WIDTH,
+          minWidth: PLAN_SIDEBAR_MIN_WIDTH,
+          referenceWidth,
+        }) ?? sidebarWidthRef.current;
+      setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      const referenceWidth = getPlanSidebarReferenceWidth(rootRef.current);
+      if (referenceWidth > 0) {
+        writePersistedPanelWidth(PLAN_SIDEBAR_STORAGE_KEY, sidebarWidthRef.current, referenceWidth);
+      }
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, []);
+
+  useEffect(() => {
+    revalidateSidebarWidth({ migrateStoredWidth: true });
+  }, [revalidateSidebarWidth]);
+
+  useEffect(() => {
+    const sidebarElement = rootRef.current;
+    if (!sidebarElement || typeof window === "undefined") {
+      return;
+    }
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            revalidateSidebarWidth();
+          });
+    const handleWindowResize = () => {
+      revalidateSidebarWidth();
+    };
+
+    if (sidebarElement.parentElement) {
+      resizeObserver?.observe(sidebarElement.parentElement);
+    } else {
+      resizeObserver?.observe(sidebarElement);
+    }
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+    };
+  }, [revalidateSidebarWidth]);
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
@@ -163,6 +249,7 @@ const PlanSidebar = memo(function PlanSidebar({
   return (
     <div
       className="relative flex h-full shrink-0 flex-col border-l border-border/70 bg-card/50"
+      ref={rootRef}
       style={{ width: sidebarWidth }}
     >
       {/* Resize handle — left edge */}

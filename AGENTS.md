@@ -51,3 +51,17 @@ Docs:
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Internal Docs
+
+- [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
+
+These docs must be kept up to date as related code changes.
+
+## Skills (`.claude/skills/`)
+
+- `start-electron-dev` — Start the Electron dev stack (`bun run dev:desktop`).
+- `production-build` — Build a production macOS DMG via `scripts/build-desktop-artifact.ts`.
+- `test-managed-runs-mcp` — Test the managed runs MCP endpoint end-to-end using the dev bypass token.
+
+Skills must be kept up to date as related code changes. When modifying behavior covered by a skill or doc, review and update the corresponding file.

@@ -138,6 +138,7 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "../providerModels";
+import { useManagedRunCompletionToasts } from "../hooks/useManagedRunCompletionToasts";
 import { useMcpServerNames } from "../hooks/useMcpServerNames";
 import { useSkills } from "../hooks/useSkills";
 import { useRehydrateSkillContent } from "../hooks/useRehydrateSkillContent";
@@ -1903,6 +1904,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const [activeManagedRuns, setActiveManagedRuns] = useState<ReadonlyArray<ManagedRunSummary>>([]);
 
+  const { handleRunEvent } = useManagedRunCompletionToasts({
+    projectId: activeProject?.id,
+    scripts: activeProject?.scripts,
+  });
+
   useEffect(() => {
     const api = readNativeApi();
     const projectId = activeProject?.id;
@@ -1921,13 +1927,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     };
 
     return api.managedRuns.onEvent(projectId, (event) => {
+      handleRunEvent(event);
       if (event.type === "snapshot") {
         setActiveManagedRuns(event.runs);
         return;
       }
       setActiveManagedRuns((current) => upsertRun(current, event.run));
     });
-  }, [activeProject?.id]);
+  }, [activeProject?.id, handleRunEvent]);
 
   useEffect(() => {
     if (!pendingPullRequestSetupRequest || !activeProject || !activeThreadId || !activeThread) {

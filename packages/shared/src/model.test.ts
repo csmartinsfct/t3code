@@ -3,6 +3,7 @@ import { DEFAULT_MODEL_BY_PROVIDER, type ModelCapabilities } from "@t3tools/cont
 
 import {
   applyClaudePromptEffortPrefix,
+  contextWindowOptionToTokens,
   getDefaultContextWindow,
   getDefaultEffort,
   hasContextWindowOption,
@@ -194,6 +195,34 @@ describe("resolveContextWindow", () => {
   it("returns undefined for models with no context window options", () => {
     expect(resolveContextWindow(codexCaps, undefined)).toBeUndefined();
     expect(resolveContextWindow(codexCaps, "1m")).toBeUndefined();
+  });
+});
+
+describe("contextWindowOptionToTokens", () => {
+  it("converts k-suffixed values", () => {
+    expect(contextWindowOptionToTokens("200k")).toBe(200_000);
+    expect(contextWindowOptionToTokens("128k")).toBe(128_000);
+  });
+
+  it("converts m-suffixed values", () => {
+    expect(contextWindowOptionToTokens("1m")).toBe(1_000_000);
+    expect(contextWindowOptionToTokens("2m")).toBe(2_000_000);
+  });
+
+  it("handles plain numeric strings", () => {
+    expect(contextWindowOptionToTokens("100000")).toBe(100_000);
+  });
+
+  it("returns undefined for null/undefined/empty", () => {
+    expect(contextWindowOptionToTokens(null)).toBeUndefined();
+    expect(contextWindowOptionToTokens(undefined)).toBeUndefined();
+    expect(contextWindowOptionToTokens("")).toBeUndefined();
+  });
+
+  it("returns undefined for invalid values", () => {
+    expect(contextWindowOptionToTokens("abc")).toBeUndefined();
+    expect(contextWindowOptionToTokens("0k")).toBeUndefined();
+    expect(contextWindowOptionToTokens("-1m")).toBeUndefined();
   });
 });
 

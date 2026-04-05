@@ -1503,7 +1503,6 @@ const make = Effect.fn("make")(function* () {
         const emptyResults: ReadonlyArray<{ provider: ProviderKind; info: ProviderRateLimitInfo }> =
           [];
         const results = yield* providerService.probeAllRateLimits().pipe(
-          Effect.catch(() => Effect.succeed(emptyResults)),
           Effect.catchDefect(() => Effect.succeed(emptyResults)),
         );
         for (const entry of results) {

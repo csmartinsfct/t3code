@@ -55,6 +55,10 @@ function toManagedRunId(value: string) {
   return ManagedRunId.makeUnsafe(value);
 }
 
+function toTerminalKey(threadId: string, terminalId: string) {
+  return `${threadId}\u0000${terminalId}`;
+}
+
 function isActiveStatus(status: ManagedRunStatus): boolean {
   return status === "starting" || status === "running";
 }
@@ -168,7 +172,7 @@ const makeManagedRunService = Effect.gen(function* () {
   const logsDir = nodePath.join(serverConfig.logsDir, "managed-runs");
   yield* Effect.tryPromise({
     try: () => fs.mkdir(logsDir, { recursive: true }),
-    catch: (cause) => cause,
+    catch: (cause) => toManagedRunOperationError("managedRuns.createLogsDir", cause),
   }).pipe(Effect.orDie);
 
   const liveRunsRef = yield* Ref.make(new Map<string, LiveRunState>());
@@ -178,8 +182,6 @@ const makeManagedRunService = Effect.gen(function* () {
   );
   const healthPollFibersRef = yield* Ref.make(new Map<string, Fiber.Fiber<void>>());
   const eventsPubSub = yield* PubSub.unbounded<ManagedRunStreamEvent>();
-
-  const toTerminalKey = (threadId: string, terminalId: string) => `${threadId}\u0000${terminalId}`;
 
   const readRunDetail = Effect.fn("managedRuns.readRunDetail")(function* (runId: ManagedRunId) {
     const row = yield* repository
@@ -250,7 +252,7 @@ const makeManagedRunService = Effect.gen(function* () {
     // Start health polling if the run has declared services
     if (updated.serviceStatuses.length > 0) {
       yield* updateServiceStatuses(runId).pipe(Effect.catch(() => Effect.void));
-      yield* startHealthPollFiber(runId).pipe(Effect.catch(() => Effect.void));
+      yield* startHealthPollFiber(runId);
     }
 
     return updated;
@@ -271,7 +273,7 @@ const makeManagedRunService = Effect.gen(function* () {
     };
     yield* Effect.tryPromise({
       try: () => appendNdjsonLine(logsDir, live.projectId, live.runId, logLine),
-      catch: (cause) => cause,
+      catch: (cause) => toManagedRunOperationError("managedRuns.flushPartialBuffer", cause),
     }).pipe(
       Effect.catch((cause) =>
         Effect.logWarning("failed to flush managed run log line", {
@@ -311,7 +313,7 @@ const makeManagedRunService = Effect.gen(function* () {
       const fibers = yield* Ref.get(healthPollFibersRef);
       const existing = fibers.get(runId);
       if (existing) {
-        yield* Fiber.interrupt(existing).pipe(Effect.catch(() => Effect.void));
+        yield* Fiber.interrupt(existing);
         yield* Ref.update(healthPollFibersRef, (current) => {
           const next = new Map(current);
           next.delete(runId);
@@ -351,7 +353,7 @@ const makeManagedRunService = Effect.gen(function* () {
           })).pipe(Effect.catch(() => Effect.void));
           // The fiber will be interrupted by the caller after this
         }
-      }).pipe(Effect.catch(() => Effect.void)),
+      }),
     ).pipe(Effect.forkIn(workerScope));
 
     yield* Ref.update(healthPollFibersRef, (current) => {
@@ -392,10 +394,10 @@ const makeManagedRunService = Effect.gen(function* () {
         stream: "pty",
         line,
       };
-      yield* Effect.tryPromise({
-        try: () => appendNdjsonLine(logsDir, live.projectId, runId, logLine),
-        catch: (cause) => cause,
-      }).pipe(
+    yield* Effect.tryPromise({
+      try: () => appendNdjsonLine(logsDir, live.projectId, runId, logLine),
+      catch: (cause) => toManagedRunOperationError("managedRuns.appendLogLine", cause),
+    }).pipe(
         Effect.catch((cause) =>
           Effect.logWarning("failed to append managed run log line", {
             runId,
@@ -490,11 +492,11 @@ const makeManagedRunService = Effect.gen(function* () {
           yield* updateRun(runId, (current) => ({
             ...current,
             status: "running",
-            updatedAt: nowIso(),
-            lastExitCode: exitCode,
-            lastExitSignal: exitSignal,
+              updatedAt: nowIso(),
+              lastExitCode: exitCode,
+              lastExitSignal: exitSignal,
           })).pipe(Effect.catch(() => Effect.void));
-          yield* startHealthPollFiber(runId).pipe(Effect.catch(() => Effect.void));
+          yield* startHealthPollFiber(runId);
         } else {
           // Retry after 3s (services may still be starting)
           yield* Effect.sleep(3_000);
@@ -511,7 +513,7 @@ const makeManagedRunService = Effect.gen(function* () {
               lastExitCode: exitCode,
               lastExitSignal: exitSignal,
             })).pipe(Effect.catch(() => Effect.void));
-            yield* startHealthPollFiber(runId).pipe(Effect.catch(() => Effect.void));
+            yield* startHealthPollFiber(runId);
           } else {
             yield* updateRun(runId, (current) => ({
               ...current,
@@ -568,22 +570,15 @@ const makeManagedRunService = Effect.gen(function* () {
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
     if (event.type === "output") {
-      return handleTerminalOutput(event.threadId, event.terminalId, event.data).pipe(
+        return handleTerminalOutput(event.threadId, event.terminalId, event.data).pipe(
         Effect.catch(() => Effect.void),
       );
     }
     if (event.type === "exited") {
-      return handleTerminalExit(
-        event.threadId,
-        event.terminalId,
-        event.exitCode,
-        event.exitSignal,
-      ).pipe(Effect.catch(() => Effect.void));
+      return handleTerminalExit(event.threadId, event.terminalId, event.exitCode, event.exitSignal);
     }
     if (event.type === "error") {
-      return handleTerminalError(event.threadId, event.terminalId, event.message).pipe(
-        Effect.catch(() => Effect.void),
-      );
+      return handleTerminalError(event.threadId, event.terminalId, event.message);
     }
     return Effect.void;
   });
@@ -604,7 +599,7 @@ const makeManagedRunService = Effect.gen(function* () {
         }
         return Effect.tryPromise({
           try: () => deleteNdjsonLines(logsDir, row.projectId, row.runId),
-          catch: (cause) => cause,
+          catch: (cause) => toManagedRunOperationError("managedRuns.deleteExpiredLogs", cause),
         }).pipe(
           Effect.catch((cause) =>
             Effect.logWarning("failed to delete expired managed run logs", {
@@ -776,8 +771,8 @@ const makeManagedRunService = Effect.gen(function* () {
         liveRunValues,
         (live) =>
           Effect.gen(function* () {
-            yield* stopHealthPollFiber(live.runId).pipe(Effect.catch(() => Effect.void));
-            yield* flushPartialBuffer(live).pipe(Effect.catch(() => Effect.void));
+            yield* stopHealthPollFiber(live.runId);
+            yield* flushPartialBuffer(live);
             yield* terminalManager
               .close({
                 threadId: live.terminalThreadId,
@@ -964,9 +959,7 @@ const makeManagedRunService = Effect.gen(function* () {
               logsExpireAt: logsExpiryIso(),
             })
             .pipe(Effect.catch(() => Effect.void));
-          return yield* Effect.fail(
-            toManagedRunOperationError("managedRuns.launchProjectScript", cause),
-          );
+          return yield* toManagedRunOperationError("managedRuns.launchProjectScript", cause);
         }),
       ),
     );
@@ -984,7 +977,7 @@ const makeManagedRunService = Effect.gen(function* () {
     const detail = yield* readRunDetail(input.runId);
     let lines = yield* Effect.tryPromise({
       try: () => readNdjsonLines(logsDir, detail.projectId, detail.runId),
-      catch: (cause) => cause,
+      catch: (cause) => toManagedRunOperationError("managedRuns.getLogs", cause),
     }).pipe(Effect.mapError((cause) => toManagedRunOperationError("managedRuns.getLogs", cause)));
 
     if (input.stream && input.stream !== "pty") {

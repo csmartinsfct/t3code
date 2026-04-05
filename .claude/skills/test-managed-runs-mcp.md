@@ -31,14 +31,14 @@ sqlite3 ~/.t3/dev/state.sqlite "SELECT project_id, workspace_root FROM projectio
 
 ## Available Tools
 
-| Tool                     | Description                                               |
-| ------------------------ | --------------------------------------------------------- |
-| `list_managed_runs`      | List active runs (pass `includeHistorical: true` for all) |
-| `launch_project_script`  | Launch a project action as a managed run                  |
-| `get_managed_run`        | Get full run details with evidence                        |
-| `get_managed_run_logs`   | Get timestamped PTY logs                                  |
-| `stop_managed_run`       | Stop a live run                                           |
-| `propose_project_script` | Get a propose-action code block template                  |
+| Tool                     | Description                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `list_managed_runs`      | List active runs (pass `includeHistorical: true` for all)                                                         |
+| `launch_project_script`  | Launch a project action as a managed run. Optional `cwd` to override working directory.                           |
+| `get_managed_run`        | Get full run details with evidence                                                                                |
+| `get_managed_run_logs`   | Get timestamped logs. Optional `stream` filter (`pty`/`stdout`/`stderr`) and `tailLines`.                         |
+| `stop_managed_run`       | Stop a live run                                                                                                   |
+| `propose_project_script` | Propose a new action with optional `services` (health checks). Returns a `t3:propose-action` code block template. |
 
 ## Test Commands
 
@@ -74,6 +74,16 @@ curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID&t
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"launch_project_script","arguments":{"scriptId":"<SCRIPT_ID>"}},"id":3}'
 ```
 
+With optional `cwd` override:
+
+```bash
+curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer t3-dev-bypass" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"launch_project_script","arguments":{"scriptId":"<SCRIPT_ID>","cwd":"/path/to/dir"}},"id":3}'
+```
+
 ### Get run details
 
 ```bash
@@ -94,6 +104,16 @@ curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" 
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_managed_run_logs","arguments":{"runId":"<RUN_ID>","tailLines":10}},"id":5}'
 ```
 
+With optional `stream` filter (`pty`, `stdout`, or `stderr`):
+
+```bash
+curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer t3-dev-bypass" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_managed_run_logs","arguments":{"runId":"<RUN_ID>","stream":"stderr","tailLines":20}},"id":5}'
+```
+
 ### Stop a run
 
 ```bash
@@ -104,7 +124,7 @@ curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" 
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"stop_managed_run","arguments":{"runId":"<RUN_ID>"}},"id":6}'
 ```
 
-### Propose a new action
+### Propose a new action (simple)
 
 ```bash
 curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
@@ -113,6 +133,23 @@ curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" 
   -H "Authorization: Bearer t3-dev-bypass" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"propose_project_script","arguments":{"name":"Dev Server","command":"npm run dev","icon":"play"}},"id":7}'
 ```
+
+### Propose a new action (with services)
+
+```bash
+curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer t3-dev-bypass" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"propose_project_script","arguments":{"name":"Supabase","command":"npx supabase start","icon":"play","services":[{"name":"Supabase API","healthCheck":{"type":"url","url":"http://127.0.0.1:54321"}},{"name":"Supabase DB","healthCheck":{"type":"docker","container":"supabase_db"}}]}},"id":8}'
+```
+
+Health check types for services:
+
+- `url`: `{"type":"url","url":"http://localhost:PORT"}`
+- `docker`: `{"type":"docker","container":"container_name"}`
+- `port`: `{"type":"port","port":3000}` (optional `host`)
+- `command`: `{"type":"command","command":"pg_isready"}` (optional `cwd`)
 
 ## Full E2E Test Script
 
