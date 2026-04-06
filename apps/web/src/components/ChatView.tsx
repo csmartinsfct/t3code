@@ -215,6 +215,7 @@ import {
   reconcileMountedTerminalThreadIds,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
+  shouldAdvanceLiveClock,
   threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
@@ -1536,6 +1537,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!completionSummary) return null;
     return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
   }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
+  const shouldTickLiveClock = useMemo(
+    () => shouldAdvanceLiveClock({ isWorking, timelineEntries }),
+    [isWorking, timelineEntries],
+  );
+  useEffect(() => {
+    if (!shouldTickLiveClock) {
+      return;
+    }
+
+    // Keep elapsed labels moving even when the UI still considers the turn active
+    // through local-dispatch state rather than a running session phase.
+    setNowTick(Date.now());
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [shouldTickLiveClock]);
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.cwd },
@@ -2889,16 +2909,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : isLocalDraftThread
       ? (draftThread?.envMode ?? "local")
       : "local";
-
-  useEffect(() => {
-    if (phase !== "running") return;
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [phase]);
 
   useEffect(() => {
     if (!activeThreadId) return;

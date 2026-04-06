@@ -1,46 +1,51 @@
 import { randomUUID } from "node:crypto";
-import * as nodePath from "node:path";
 import { promises as fs } from "node:fs";
+import * as nodePath from "node:path";
+
+import { Effect, Exit, Fiber, Layer, Option, PubSub, Ref, Schema, Scope, Stream } from "effect";
 
 import {
   ManagedRunDetail,
+  ManagedRunGetInferenceRecordInput,
+  ManagedRunGetInput,
+  ManagedRunGetLogsInput,
   ManagedRunId,
+  ManagedRunInferenceRecordNotFoundError,
+  ManagedRunLaunchProjectScriptInput,
+  ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInferenceRecordsInput,
+  ManagedRunListInput,
   ManagedRunLogLine,
   ManagedRunNotFoundError,
   ManagedRunOperationError,
   ManagedRunProjectLookupError,
   ManagedRunScriptLookupError,
   ManagedRunStatus,
-  ManagedRunError,
-  ManagedRunStreamEvent,
+  ManagedRunStopInput,
   ManagedRunSummary,
   ProjectId,
+  type ManagedRunDeclaredServiceSnapshot,
+  type ManagedRunRuntimeService,
+  type ManagedRunStreamEvent,
   type ThreadId,
-  type ManagedRunLaunchProjectScriptInput,
-  type ManagedRunLaunchProjectScriptResult,
-  type ManagedRunListInput,
-  type ManagedRunGetInput,
-  type ManagedRunGetLogsInput,
-  type ManagedRunStopInput,
-  type ManagedRunServiceSnapshot,
 } from "@t3tools/contracts";
-import { Effect, Exit, Fiber, Layer, Option, PubSub, Ref, Scope, Stream } from "effect";
 
-import { checkAllServices } from "../healthCheck";
+import { checkService } from "../healthCheck";
 import { splitCompleteLines } from "../utils";
 
 import { ServerConfig } from "../../config";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ManagedRunRepository } from "../../persistence/Services/ManagedRuns";
 import { TerminalManager } from "../../terminal/Services/Manager";
+import { ManagedRunInference } from "../Services/Inference.ts";
 import { ManagedRunService, type ManagedRunMcpAccess } from "../Services/ManagedRuns";
 
 const MANAGED_RUN_TERMINAL_COLS = 120;
 const MANAGED_RUN_TERMINAL_ROWS = 30;
 const STARTUP_GRACE_MS = 1_500;
+const HEALTH_POLL_INTERVAL_MS = 12_000;
 const LOG_RETENTION_MS = 2 * 24 * 60 * 60 * 1_000;
 const LOG_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
-const HEALTH_POLL_INTERVAL_MS = 12_000;
 
 type LiveRunState = {
   readonly runId: ManagedRunId;
@@ -63,29 +68,12 @@ function isActiveStatus(status: ManagedRunStatus): boolean {
   return status === "starting" || status === "running";
 }
 
-function summarize(row: Omit<ManagedRunDetail, "evidence">): ManagedRunSummary {
-  return {
-    runId: row.runId,
-    projectId: row.projectId,
-    scriptId: row.scriptId,
-    createdByThreadId: row.createdByThreadId,
-    lastTouchedByThreadId: row.lastTouchedByThreadId,
-    cwd: row.cwd,
-    launchMode: row.launchMode,
-    status: row.status,
-    detectedUrl: row.detectedUrl,
-    detectedPort: row.detectedPort,
-    terminalThreadId: row.terminalThreadId,
-    terminalId: row.terminalId,
-    terminalPid: row.terminalPid,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    startedAt: row.startedAt,
-    completedAt: row.completedAt,
-    lastExitCode: row.lastExitCode,
-    lastExitSignal: row.lastExitSignal,
-    serviceStatuses: row.serviceStatuses ?? [],
-  };
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function logsExpiryIso() {
+  return new Date(Date.now() + LOG_RETENTION_MS).toISOString();
 }
 
 function lineLogPath(baseDir: string, projectId: ProjectId, runId: ManagedRunId): string {
@@ -110,11 +98,10 @@ async function readNdjsonLines(
 ): Promise<ReadonlyArray<ManagedRunLogLine>> {
   try {
     const raw = await fs.readFile(lineLogPath(baseDir, projectId, runId), "utf8");
-    const lines = raw
+    return raw
       .split("\n")
       .filter((line) => line.trim().length > 0)
       .map((line) => JSON.parse(line) as ManagedRunLogLine);
-    return lines;
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
       return [];
@@ -145,12 +132,33 @@ function projectScriptRuntimeEnv(input: {
   return input.extraEnv ? { ...env, ...input.extraEnv } : env;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function logsExpiryIso() {
-  return new Date(Date.now() + LOG_RETENTION_MS).toISOString();
+function summarize(row: ManagedRunDetail): ManagedRunSummary {
+  return {
+    runId: row.runId,
+    projectId: row.projectId,
+    scriptId: row.scriptId,
+    createdByThreadId: row.createdByThreadId,
+    lastTouchedByThreadId: row.lastTouchedByThreadId,
+    cwd: row.cwd,
+    launchMode: row.launchMode,
+    status: row.status,
+    detectedUrl: row.detectedUrl,
+    detectedPort: row.detectedPort,
+    terminalThreadId: row.terminalThreadId,
+    terminalId: row.terminalId,
+    terminalPid: row.terminalPid,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    lastExitCode: row.lastExitCode,
+    lastExitSignal: row.lastExitSignal,
+    declaredServices: row.declaredServices,
+    runtimeServices: row.runtimeServices,
+    inferenceStatus: row.inferenceStatus,
+    inferenceUpdatedAt: row.inferenceUpdatedAt,
+    inferenceError: row.inferenceError,
+  };
 }
 
 function toManagedRunOperationError(operation: string, cause: unknown): ManagedRunOperationError {
@@ -161,11 +169,42 @@ function toManagedRunOperationError(operation: string, cause: unknown): ManagedR
   });
 }
 
+function deriveDetectedUrl(services: ReadonlyArray<ManagedRunRuntimeService>): string | null {
+  for (const service of services) {
+    if (service.canonicalHealthCheck?.type === "url") {
+      return service.canonicalHealthCheck.url;
+    }
+    if (service.canonicalHealthCheck?.type === "port") {
+      return `http://${service.canonicalHealthCheck.host ?? "127.0.0.1"}:${service.canonicalHealthCheck.port}`;
+    }
+  }
+  return null;
+}
+
+function deriveDetectedPort(services: ReadonlyArray<ManagedRunRuntimeService>): number | null {
+  for (const service of services) {
+    if (service.canonicalHealthCheck?.type === "port") {
+      return service.canonicalHealthCheck.port;
+    }
+    if (service.canonicalHealthCheck?.type === "url") {
+      try {
+        const url = new URL(service.canonicalHealthCheck.url);
+        const port = url.port.length > 0 ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+        return Number.isFinite(port) ? port : null;
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
 const makeManagedRunService = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const repository = yield* ManagedRunRepository;
   const terminalManager = yield* TerminalManager;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
+  const inference = yield* ManagedRunInference;
   const workerScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
 
@@ -181,7 +220,17 @@ const makeManagedRunService = Effect.gen(function* () {
     new Map<string, { projectId: ProjectId; threadId: ThreadId }>(),
   );
   const healthPollFibersRef = yield* Ref.make(new Map<string, Fiber.Fiber<void>>());
+  const inferenceFibersRef = yield* Ref.make(new Map<string, Fiber.Fiber<void>>());
   const eventsPubSub = yield* PubSub.unbounded<ManagedRunStreamEvent>();
+
+  const resolveScript = Effect.fn("managedRuns.resolveScript")(function* (
+    projectId: ProjectId,
+    scriptId: string,
+  ) {
+    const readModel = yield* snapshotQuery.getSnapshot();
+    const project = readModel.projects.find((candidate) => candidate.id === projectId) ?? null;
+    return project?.scripts.find((candidate) => candidate.id === scriptId) ?? null;
+  });
 
   const readRunDetail = Effect.fn("managedRuns.readRunDetail")(function* (runId: ManagedRunId) {
     const row = yield* repository
@@ -192,14 +241,33 @@ const makeManagedRunService = Effect.gen(function* () {
     if (Option.isNone(row)) {
       return yield* new ManagedRunNotFoundError({ runId });
     }
-    const evidence = yield* repository
-      .listEvidence({ runId })
-      .pipe(
-        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.readEvidence", cause)),
-      );
+    const [evidence, latestInference] = yield* Effect.all([
+      repository
+        .listEvidence({ runId })
+        .pipe(
+          Effect.mapError((cause) => toManagedRunOperationError("managedRuns.readEvidence", cause)),
+        ),
+      repository
+        .getLatestInferenceRecordByRunId({ runId })
+        .pipe(
+          Effect.mapError((cause) =>
+            toManagedRunOperationError("managedRuns.readLatestInference", cause),
+          ),
+        ),
+    ]);
     return {
       ...row.value,
       evidence,
+      latestInference: Option.isSome(latestInference)
+        ? {
+            inferenceId: latestInference.value.inferenceId,
+            provider: latestInference.value.provider,
+            model: latestInference.value.model,
+            rawPayload: latestInference.value.rawPayload,
+            normalizedPayload: latestInference.value.normalizedPayload,
+            createdAt: latestInference.value.createdAt,
+          }
+        : null,
     } satisfies ManagedRunDetail;
   });
 
@@ -238,33 +306,246 @@ const makeManagedRunService = Effect.gen(function* () {
       );
   });
 
+  const stopHealthPollFiber = (runId: ManagedRunId) =>
+    Effect.gen(function* () {
+      const fibers = yield* Ref.get(healthPollFibersRef);
+      const existing = fibers.get(runId);
+      if (!existing) {
+        return;
+      }
+      yield* Fiber.interrupt(existing);
+      yield* Ref.update(healthPollFibersRef, (current) => {
+        const next = new Map(current);
+        next.delete(runId);
+        return next;
+      });
+    });
+
+  const stopInferenceFiber = (runId: ManagedRunId) =>
+    Effect.gen(function* () {
+      const fibers = yield* Ref.get(inferenceFibersRef);
+      const existing = fibers.get(runId);
+      if (!existing) {
+        return;
+      }
+      yield* Fiber.interrupt(existing);
+      yield* Ref.update(inferenceFibersRef, (current) => {
+        const next = new Map(current);
+        next.delete(runId);
+        return next;
+      });
+    });
+
+  const validateRuntimeServices = Effect.fn("managedRuns.validateRuntimeServices")(function* (
+    runId: ManagedRunId,
+  ) {
+    const detail = yield* readRunDetail(runId);
+    if (detail.runtimeServices.length === 0) {
+      return detail;
+    }
+
+    const now = nowIso();
+    const validated: ReadonlyArray<ManagedRunRuntimeService> = yield* Effect.forEach(
+      detail.runtimeServices,
+      (service) =>
+        service.canonicalHealthCheck === null
+          ? Effect.succeed<ManagedRunRuntimeService>({
+              ...service,
+              validationStatus: "unknown" as const,
+              lastCheckedAt: now,
+            })
+          : checkService(service.canonicalHealthCheck).pipe(
+              Effect.map(
+                (status): ManagedRunRuntimeService => ({
+                  ...service,
+                  validationStatus: status,
+                  lastCheckedAt: now,
+                }),
+              ),
+            ),
+      { concurrency: "unbounded" },
+    );
+
+    return yield* updateRun(runId, (current) => ({
+      ...current,
+      runtimeServices: validated,
+      detectedUrl: deriveDetectedUrl(validated),
+      detectedPort: deriveDetectedPort(validated),
+      updatedAt: now,
+    }));
+  });
+
+  const startHealthPollFiber = Effect.fn("managedRuns.startHealthPollFiber")(function* (
+    runId: ManagedRunId,
+  ) {
+    yield* stopHealthPollFiber(runId);
+
+    const fiber = yield* Effect.forever(
+      Effect.gen(function* () {
+        yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
+        const detail = yield* readRunDetail(runId).pipe(Effect.catch(() => Effect.succeed(null)));
+        if (!detail || !isActiveStatus(detail.status) || detail.runtimeServices.length === 0) {
+          return;
+        }
+
+        const updated = yield* validateRuntimeServices(runId).pipe(
+          Effect.catch(() => Effect.succeed(null)),
+        );
+        if (!updated) {
+          return;
+        }
+
+        const allUnhealthy = updated.runtimeServices.every(
+          (service) => service.validationStatus === "unhealthy",
+        );
+        if (!allUnhealthy) {
+          return;
+        }
+
+        yield* updateRun(runId, (current) => ({
+          ...current,
+          status: "stopped",
+          updatedAt: nowIso(),
+          completedAt: nowIso(),
+          logsExpireAt: logsExpiryIso(),
+        })).pipe(Effect.catch(() => Effect.void));
+      }),
+    ).pipe(Effect.forkIn(workerScope));
+
+    yield* Ref.update(healthPollFibersRef, (current) => {
+      const next = new Map(current);
+      next.set(runId, fiber);
+      return next;
+    });
+  });
+
+  const runInferenceForRun = Effect.fn("managedRuns.runInferenceForRun")(function* (
+    runId: ManagedRunId,
+  ) {
+    const detail = yield* readRunDetail(runId);
+    if (detail.inferenceStatus !== "pending") {
+      return detail;
+    }
+
+    const script = yield* resolveScript(detail.projectId, detail.scriptId);
+    const logs = yield* Effect.tryPromise({
+      try: () => readNdjsonLines(logsDir, detail.projectId, detail.runId),
+      catch: (cause) => toManagedRunOperationError("managedRuns.readLogsForInference", cause),
+    });
+
+    const builtInput = yield* inference.buildInferenceInput({
+      runId: detail.runId,
+      cwd: detail.cwd,
+      command: script?.command ?? detail.scriptId,
+      declaredServices: detail.declaredServices,
+      detectedUrl: detail.detectedUrl,
+      detectedPort: detail.detectedPort,
+      logs,
+    });
+    const inferenceResult = yield* inference.inferRunServices(builtInput);
+
+    const inferenceId = randomUUID();
+    const createdAt = nowIso();
+    yield* repository
+      .createInferenceRecord({
+        inferenceId,
+        runId: detail.runId,
+        projectId: detail.projectId,
+        scriptId: detail.scriptId,
+        scriptName: null,
+        cwd: detail.cwd,
+        provider: inferenceResult.provider,
+        model: inferenceResult.model,
+        status: inferenceResult.status,
+        createdAt,
+        runtimeServiceCount: inferenceResult.runtimeServices.length,
+        declaredServices: detail.declaredServices,
+        normalizedPayload: inferenceResult.normalizedPayload,
+        rawPayload: inferenceResult.rawPayload,
+        inferenceError: inferenceResult.inferenceError,
+        groundingFailures: [...inferenceResult.groundingFailures],
+        evidenceExcerpt: [...inferenceResult.evidenceExcerpt],
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          toManagedRunOperationError("managedRuns.createInferenceRecord", cause),
+        ),
+      );
+
+    const updated = yield* updateRun(runId, (current) => ({
+      ...current,
+      runtimeServices: [...inferenceResult.runtimeServices],
+      inferenceStatus: inferenceResult.status,
+      inferenceUpdatedAt: createdAt,
+      inferenceError: inferenceResult.inferenceError,
+      detectedUrl: deriveDetectedUrl(inferenceResult.runtimeServices),
+      detectedPort: deriveDetectedPort(inferenceResult.runtimeServices),
+      updatedAt: createdAt,
+      latestInference: {
+        inferenceId,
+        provider: inferenceResult.provider,
+        model: inferenceResult.model,
+        rawPayload: inferenceResult.rawPayload,
+        normalizedPayload: inferenceResult.normalizedPayload,
+        createdAt,
+      },
+    }));
+
+    if (updated.runtimeServices.length === 0) {
+      return updated;
+    }
+
+    const validated = yield* validateRuntimeServices(runId);
+    if (validated.status === "running" || validated.status === "starting") {
+      yield* startHealthPollFiber(runId);
+    }
+    return validated;
+  });
+
+  const scheduleInference = Effect.fn("managedRuns.scheduleInference")(function* (
+    runId: ManagedRunId,
+  ) {
+    const existing = yield* Ref.get(inferenceFibersRef).pipe(
+      Effect.map((fibers) => fibers.get(runId)),
+    );
+    if (existing) {
+      return;
+    }
+
+    const fiber = yield* Effect.gen(function* () {
+      yield* Effect.sleep(STARTUP_GRACE_MS);
+      yield* runInferenceForRun(runId).pipe(Effect.catch(() => Effect.void));
+    }).pipe(Effect.forkIn(workerScope));
+
+    yield* Ref.update(inferenceFibersRef, (current) => {
+      const next = new Map(current);
+      next.set(runId, fiber);
+      return next;
+    });
+  });
+
   const ensureRunning = Effect.fn("managedRuns.ensureRunning")(function* (runId: ManagedRunId) {
     const detail = yield* readRunDetail(runId);
     if (detail.status !== "starting") {
       return detail;
     }
+
     const updated = yield* updateRun(runId, (current) => ({
       ...current,
       status: "running",
       updatedAt: nowIso(),
     }));
-
-    // Start health polling if the run has declared services
-    if (updated.serviceStatuses.length > 0) {
-      yield* updateServiceStatuses(runId).pipe(Effect.catch(() => Effect.void));
-      yield* startHealthPollFiber(runId);
-    }
-
+    yield* scheduleInference(runId);
     return updated;
   });
 
   const flushPartialBuffer = Effect.fn("managedRuns.flushPartialBuffer")(function* (
     live: LiveRunState,
   ) {
-    const line = live.partialLineBuffer;
-    if (line.length === 0) {
+    if (live.partialLineBuffer.length === 0) {
       return;
     }
+    const line = live.partialLineBuffer;
     live.partialLineBuffer = "";
     const logLine: ManagedRunLogLine = {
       timestamp: nowIso(),
@@ -274,93 +555,7 @@ const makeManagedRunService = Effect.gen(function* () {
     yield* Effect.tryPromise({
       try: () => appendNdjsonLine(logsDir, live.projectId, live.runId, logLine),
       catch: (cause) => toManagedRunOperationError("managedRuns.flushPartialBuffer", cause),
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("failed to flush managed run log line", {
-          runId: live.runId,
-          error: cause instanceof Error ? cause.message : String(cause),
-        }),
-      ),
-    );
-  });
-
-  const updateServiceStatuses = Effect.fn("managedRuns.updateServiceStatuses")(function* (
-    runId: ManagedRunId,
-  ) {
-    const detail = yield* readRunDetail(runId);
-    if (detail.serviceStatuses.length === 0) return detail;
-
-    const results = yield* checkAllServices(detail.serviceStatuses);
-    const now = nowIso();
-    const updatedStatuses: ManagedRunServiceSnapshot[] = detail.serviceStatuses.map((s) => {
-      const result = results.find((r) => r.name === s.name);
-      return {
-        ...s,
-        status: result?.status ?? "unhealthy",
-        lastCheckedAt: now,
-      };
-    });
-
-    return yield* updateRun(runId, (current) => ({
-      ...current,
-      serviceStatuses: updatedStatuses,
-      updatedAt: now,
-    }));
-  });
-
-  const stopHealthPollFiber = (runId: ManagedRunId) =>
-    Effect.gen(function* () {
-      const fibers = yield* Ref.get(healthPollFibersRef);
-      const existing = fibers.get(runId);
-      if (existing) {
-        yield* Fiber.interrupt(existing);
-        yield* Ref.update(healthPollFibersRef, (current) => {
-          const next = new Map(current);
-          next.delete(runId);
-          return next;
-        });
-      }
-    });
-
-  const startHealthPollFiber = Effect.fn("managedRuns.startHealthPollFiber")(function* (
-    runId: ManagedRunId,
-  ) {
-    // Stop existing fiber if any
-    yield* stopHealthPollFiber(runId);
-
-    const fiber = yield* Effect.forever(
-      Effect.gen(function* () {
-        yield* Effect.sleep(HEALTH_POLL_INTERVAL_MS);
-        const detail = yield* readRunDetail(runId).pipe(Effect.catch(() => Effect.succeed(null)));
-        if (!detail || !isActiveStatus(detail.status) || detail.serviceStatuses.length === 0) {
-          return; // Will be interrupted externally
-        }
-
-        const updated = yield* updateServiceStatuses(runId).pipe(
-          Effect.catch(() => Effect.succeed(null)),
-        );
-        if (!updated) return;
-
-        // If ALL services are unhealthy, stop the run
-        const allUnhealthy = updated.serviceStatuses.every((s) => s.status === "unhealthy");
-        if (allUnhealthy) {
-          yield* updateRun(runId, (current) => ({
-            ...current,
-            status: "stopped",
-            updatedAt: nowIso(),
-            completedAt: nowIso(),
-            logsExpireAt: logsExpiryIso(),
-          })).pipe(Effect.catch(() => Effect.void));
-          // The fiber will be interrupted by the caller after this
-        }
-      }),
-    ).pipe(Effect.forkIn(workerScope));
-
-    yield* Ref.update(healthPollFibersRef, (current) => {
-      const next = new Map(current);
-      next.set(runId, fiber);
-      return next;
-    });
+    }).pipe(Effect.catch(() => Effect.void));
   });
 
   const handleTerminalOutput = Effect.fn("managedRuns.handleTerminalOutput")(function* (
@@ -383,28 +578,20 @@ const makeManagedRunService = Effect.gen(function* () {
 
     const split = splitCompleteLines(live.partialLineBuffer, data);
     live.partialLineBuffer = split.remainder;
-
     if (split.lines.length > 0) {
       yield* ensureRunning(runId);
     }
 
     for (const line of split.lines) {
-      const logLine: ManagedRunLogLine = {
-        timestamp: nowIso(),
-        stream: "pty",
-        line,
-      };
       yield* Effect.tryPromise({
-        try: () => appendNdjsonLine(logsDir, live.projectId, runId, logLine),
-        catch: (cause) => toManagedRunOperationError("managedRuns.appendLogLine", cause),
-      }).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("failed to append managed run log line", {
-            runId,
-            error: cause instanceof Error ? cause.message : String(cause),
+        try: () =>
+          appendNdjsonLine(logsDir, live.projectId, runId, {
+            timestamp: nowIso(),
+            stream: "pty",
+            line,
           }),
-        ),
-      );
+        catch: (cause) => toManagedRunOperationError("managedRuns.appendLogLine", cause),
+      }).pipe(Effect.catch(() => Effect.void));
     }
   });
 
@@ -420,6 +607,8 @@ const makeManagedRunService = Effect.gen(function* () {
         next.delete(toTerminalKey(terminalThreadId, terminalId));
         return next;
       }),
+      stopHealthPollFiber(runId),
+      stopInferenceFiber(runId),
     ]).pipe(Effect.asVoid);
 
   const handleTerminalExit = Effect.fn("managedRuns.handleTerminalExit")(function* (
@@ -442,91 +631,90 @@ const makeManagedRunService = Effect.gen(function* () {
     }
 
     yield* flushPartialBuffer(live);
+    const completedAt = nowIso();
 
     if (live.intentionalStop) {
-      // Intentional stop — mark stopped, stop health poll
-      yield* stopHealthPollFiber(runId);
       yield* updateRun(runId, (current) => ({
         ...current,
         status: "stopped",
-        updatedAt: nowIso(),
-        completedAt: nowIso(),
+        updatedAt: completedAt,
+        completedAt,
         lastExitCode: exitCode,
         lastExitSignal: exitSignal,
         logsExpireAt: logsExpiryIso(),
       })).pipe(Effect.catch(() => Effect.void));
-    } else if (exitCode !== 0) {
-      // Non-zero exit — failed
-      yield* stopHealthPollFiber(runId);
+      yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
+      return;
+    }
+
+    if (exitCode !== 0) {
       yield* updateRun(runId, (current) => ({
         ...current,
         status: "failed",
-        updatedAt: nowIso(),
-        completedAt: nowIso(),
+        updatedAt: completedAt,
+        completedAt,
         lastExitCode: exitCode,
         lastExitSignal: exitSignal,
         logsExpireAt: logsExpiryIso(),
       })).pipe(Effect.catch(() => Effect.void));
+      yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
+      return;
+    }
+
+    const detail = yield* readRunDetail(runId).pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!detail) {
+      yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
+      return;
+    }
+
+    if (detail.inferenceStatus === "pending") {
+      yield* runInferenceForRun(runId).pipe(Effect.catch(() => Effect.void));
+    }
+
+    const refreshed = yield* readRunDetail(runId).pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!refreshed) {
+      yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
+      return;
+    }
+
+    if (refreshed.runtimeServices.length === 0) {
+      yield* updateRun(runId, (current) => ({
+        ...current,
+        status: "completed",
+        updatedAt: completedAt,
+        completedAt,
+        lastExitCode: exitCode,
+        lastExitSignal: exitSignal,
+        logsExpireAt: logsExpiryIso(),
+      })).pipe(Effect.catch(() => Effect.void));
+      yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
+      return;
+    }
+
+    const validated = yield* validateRuntimeServices(runId).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    const anyHealthy =
+      validated?.runtimeServices.some((service) => service.validationStatus === "healthy") ?? false;
+    if (anyHealthy) {
+      yield* updateRun(runId, (current) => ({
+        ...current,
+        status: "running",
+        updatedAt: nowIso(),
+        lastExitCode: exitCode,
+        lastExitSignal: exitSignal,
+      })).pipe(Effect.catch(() => Effect.void));
+      yield* startHealthPollFiber(runId);
     } else {
-      // Exit code 0 — check declared services
-      const detail = yield* readRunDetail(runId).pipe(Effect.catch(() => Effect.succeed(null)));
-      if (!detail || detail.serviceStatuses.length === 0) {
-        // No declared services — completed (backward compat)
-        yield* updateRun(runId, (current) => ({
-          ...current,
-          status: "completed",
-          updatedAt: nowIso(),
-          completedAt: nowIso(),
-          lastExitCode: exitCode,
-          lastExitSignal: exitSignal,
-          logsExpireAt: logsExpiryIso(),
-        })).pipe(Effect.catch(() => Effect.void));
-      } else {
-        // Has declared services — check health
-        const updated = yield* updateServiceStatuses(runId).pipe(
-          Effect.catch(() => Effect.succeed(null)),
-        );
-        const anyHealthy = updated?.serviceStatuses.some((s) => s.status === "healthy") ?? false;
-        if (anyHealthy) {
-          // Services are up — keep running, start health poll
-          yield* updateRun(runId, (current) => ({
-            ...current,
-            status: "running",
-            updatedAt: nowIso(),
-            lastExitCode: exitCode,
-            lastExitSignal: exitSignal,
-          })).pipe(Effect.catch(() => Effect.void));
-          yield* startHealthPollFiber(runId);
-        } else {
-          // Retry after 3s (services may still be starting)
-          yield* Effect.sleep(3_000);
-          const retried = yield* updateServiceStatuses(runId).pipe(
-            Effect.catch(() => Effect.succeed(null)),
-          );
-          const anyHealthyRetry =
-            retried?.serviceStatuses.some((s) => s.status === "healthy") ?? false;
-          if (anyHealthyRetry) {
-            yield* updateRun(runId, (current) => ({
-              ...current,
-              status: "running",
-              updatedAt: nowIso(),
-              lastExitCode: exitCode,
-              lastExitSignal: exitSignal,
-            })).pipe(Effect.catch(() => Effect.void));
-            yield* startHealthPollFiber(runId);
-          } else {
-            yield* updateRun(runId, (current) => ({
-              ...current,
-              status: "stopped",
-              updatedAt: nowIso(),
-              completedAt: nowIso(),
-              lastExitCode: exitCode,
-              lastExitSignal: exitSignal,
-              logsExpireAt: logsExpiryIso(),
-            })).pipe(Effect.catch(() => Effect.void));
-          }
-        }
-      }
+      yield* updateRun(runId, (current) => ({
+        ...current,
+        status: "stopped",
+        updatedAt: completedAt,
+        completedAt,
+        lastExitCode: exitCode,
+        lastExitSignal: exitSignal,
+        logsExpireAt: logsExpiryIso(),
+      })).pipe(Effect.catch(() => Effect.void));
     }
 
     yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
@@ -546,7 +734,6 @@ const makeManagedRunService = Effect.gen(function* () {
     }
 
     const live = yield* Ref.get(liveRunsRef).pipe(Effect.map((runs) => runs.get(runId) ?? null));
-
     yield* updateRun(runId, (current) => ({
       ...current,
       status: "failed",
@@ -554,42 +741,46 @@ const makeManagedRunService = Effect.gen(function* () {
       completedAt: nowIso(),
       lastError: message,
       logsExpireAt: logsExpiryIso(),
-    })).pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("failed to record managed run terminal error", {
-          runId,
-          error: cause instanceof Error ? cause.message : String(cause),
-        }),
-      ),
-    );
+    })).pipe(Effect.catch(() => Effect.void));
 
     if (live) {
       yield* unregisterLiveRun(runId, live.terminalThreadId, live.terminalId);
     }
   });
 
-  const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) => {
+  const onTerminalEvent = (
+    event: Parameters<Parameters<typeof terminalManager.subscribe>[0]>[0],
+  ): Effect.Effect<void, never, never> => {
     if (event.type === "output") {
       return handleTerminalOutput(event.threadId, event.terminalId, event.data).pipe(
         Effect.catch(() => Effect.void),
-      );
+      ) as Effect.Effect<void, never, never>;
     }
     if (event.type === "exited") {
-      return handleTerminalExit(event.threadId, event.terminalId, event.exitCode, event.exitSignal);
+      return handleTerminalExit(
+        event.threadId,
+        event.terminalId,
+        event.exitCode,
+        event.exitSignal,
+      ) as Effect.Effect<void, never, never>;
     }
     if (event.type === "error") {
-      return handleTerminalError(event.threadId, event.terminalId, event.message);
+      return handleTerminalError(event.threadId, event.terminalId, event.message) as Effect.Effect<
+        void,
+        never,
+        never
+      >;
     }
-    return Effect.void;
-  });
+    return Effect.void as Effect.Effect<void, never, never>;
+  };
+
+  const unsubscribeTerminalEvents = yield* terminalManager.subscribe(onTerminalEvent);
   yield* Effect.addFinalizer(() => Effect.sync(unsubscribeTerminalEvents));
 
   const cleanupExpiredLogs = Effect.fn("managedRuns.cleanupExpiredLogs")(function* () {
     const rows = yield* repository
-      .listByStatuses({
-        statuses: ["completed", "failed", "stopped", "lost"],
-      })
-      .pipe(Effect.mapError((cause) => toManagedRunOperationError("managedRuns.cleanup", cause)));
+      .listByStatuses({ statuses: ["completed", "failed", "stopped", "lost"] })
+      .pipe(Effect.catch(() => Effect.succeed([] as const)));
     const now = Date.now();
     yield* Effect.forEach(
       rows,
@@ -600,14 +791,7 @@ const makeManagedRunService = Effect.gen(function* () {
         return Effect.tryPromise({
           try: () => deleteNdjsonLines(logsDir, row.projectId, row.runId),
           catch: (cause) => toManagedRunOperationError("managedRuns.deleteExpiredLogs", cause),
-        }).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("failed to delete expired managed run logs", {
-              runId: row.runId,
-              error: cause instanceof Error ? cause.message : String(cause),
-            }),
-          ),
-        );
+        }).pipe(Effect.catch(() => Effect.void));
       },
       { discard: true },
     );
@@ -618,38 +802,7 @@ const makeManagedRunService = Effect.gen(function* () {
       return;
     }
 
-    if (run.serviceStatuses.length > 0) {
-      const updated = yield* updateServiceStatuses(run.runId);
-      const anyHealthy = updated.serviceStatuses.some((s) => s.status === "healthy");
-      if (anyHealthy) {
-        // Services alive — keep running, start poll fiber
-        yield* repository
-          .update({
-            ...summarize(updated),
-            status: "running",
-            updatedAt: nowIso(),
-            lastError: run.lastError,
-            logsExpireAt: run.logsExpireAt,
-          })
-          .pipe(
-            Effect.mapError((cause) => toManagedRunOperationError("managedRuns.reconcile", cause)),
-          );
-        yield* startHealthPollFiber(run.runId);
-      } else {
-        yield* repository
-          .update({
-            ...summarize(run),
-            status: "lost",
-            updatedAt: nowIso(),
-            lastError: run.lastError,
-            logsExpireAt: run.logsExpireAt ?? logsExpiryIso(),
-          })
-          .pipe(
-            Effect.mapError((cause) => toManagedRunOperationError("managedRuns.reconcile", cause)),
-          );
-      }
-    } else {
-      // No declared services, process is gone — lost
+    if (run.runtimeServices.length === 0) {
       yield* repository
         .update({
           ...summarize(run),
@@ -658,53 +811,48 @@ const makeManagedRunService = Effect.gen(function* () {
           lastError: run.lastError,
           logsExpireAt: run.logsExpireAt ?? logsExpiryIso(),
         })
-        .pipe(
-          Effect.mapError((cause) => toManagedRunOperationError("managedRuns.reconcile", cause)),
-        );
+        .pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
+    const validated = yield* validateRuntimeServices(run.runId).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    const anyHealthy =
+      validated?.runtimeServices.some((service) => service.validationStatus === "healthy") ?? false;
+    if (!validated) {
+      return;
+    }
+
+    yield* repository
+      .update({
+        ...summarize(validated),
+        status: anyHealthy ? "running" : "lost",
+        updatedAt: nowIso(),
+        lastError: validated.lastError,
+        logsExpireAt: validated.logsExpireAt ?? (anyHealthy ? null : logsExpiryIso()),
+      })
+      .pipe(Effect.catch(() => Effect.void));
+
+    if (anyHealthy) {
+      yield* startHealthPollFiber(run.runId);
     }
   });
 
   const recoverActiveRuns = Effect.gen(function* () {
-    yield* Effect.log("managedRuns: reconciling active runs on startup");
     const recoverableRows = yield* repository
-      .listByStatuses({
-        statuses: ["starting", "running"],
-      })
-      .pipe(
-        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.recover", cause)),
-        Effect.catch((cause) =>
-          Effect.gen(function* () {
-            yield* Effect.logWarning("managedRuns: failed to query recoverable runs", {
-              error: cause instanceof Error ? cause.message : String(cause),
-            });
-            return [] as const;
-          }),
-        ),
-      );
-
-    yield* Effect.log(`managedRuns: found ${recoverableRows.length} runs to reconcile`);
+      .listByStatuses({ statuses: ["starting", "running"] })
+      .pipe(Effect.catch(() => Effect.succeed([] as const)));
 
     yield* Effect.forEach(
       recoverableRows,
       (row) =>
-        Effect.gen(function* () {
-          const detail = yield* readRunDetail(row.runId);
-          yield* Effect.log(
-            `managedRuns: reconciling run ${row.runId} (status=${detail.status}, evidence=${detail.evidence.length})`,
-          );
-          yield* reconcileRun(detail);
-        }).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("failed to reconcile managed run", {
-              runId: row.runId,
-              error: cause instanceof Error ? cause.message : String(cause),
-            }),
-          ),
+        readRunDetail(row.runId).pipe(
+          Effect.flatMap(reconcileRun),
+          Effect.catch(() => Effect.void),
         ),
       { discard: true },
     );
-
-    yield* Effect.log("managedRuns: reconciliation complete");
   });
 
   const cleanupOrphanedRuns = Effect.fn("managedRuns.cleanupOrphanedRuns")(function* () {
@@ -713,40 +861,41 @@ const makeManagedRunService = Effect.gen(function* () {
         statuses: ["starting", "running", "completed", "failed", "stopped", "lost"],
       })
       .pipe(Effect.catch(() => Effect.succeed([] as const)));
-    if (allRuns.length === 0) return;
+    if (allRuns.length === 0) {
+      return;
+    }
 
     const readModel = yield* snapshotQuery
       .getSnapshot()
       .pipe(Effect.catch(() => Effect.succeed(null)));
-    if (!readModel) return;
+    if (!readModel) {
+      return;
+    }
 
     for (const run of allRuns) {
-      const project = readModel.projects.find((p) => p.id === run.projectId);
-      const scriptExists = project?.scripts.some((s) => s.id === run.scriptId) ?? false;
-      if (!scriptExists) {
-        yield* Effect.log(
-          `managedRuns: orphaned run ${run.runId} (script ${run.scriptId} not found), deleting`,
-        );
-        // Stop if live
-        const live = yield* Ref.get(liveRunsRef).pipe(
-          Effect.map((runs) => runs.get(run.runId) ?? null),
-        );
-        if (live) {
-          live.intentionalStop = true;
-          yield* terminalManager
-            .close({ threadId: live.terminalThreadId, terminalId: live.terminalId })
-            .pipe(Effect.catch(() => Effect.void));
-          yield* unregisterLiveRun(run.runId, live.terminalThreadId, live.terminalId);
-        }
-        yield* stopHealthPollFiber(run.runId);
-        // Delete from DB
-        yield* repository.deleteById({ runId: run.runId }).pipe(Effect.catch(() => Effect.void));
-        // Delete log files
-        yield* Effect.tryPromise({
-          try: () => deleteNdjsonLines(logsDir, run.projectId, run.runId),
-          catch: () => undefined,
-        }).pipe(Effect.catch(() => Effect.void));
+      const project =
+        readModel.projects.find((candidate) => candidate.id === run.projectId) ?? null;
+      const scriptExists = project?.scripts.some((script) => script.id === run.scriptId) ?? false;
+      if (scriptExists) {
+        continue;
       }
+
+      const live = yield* Ref.get(liveRunsRef).pipe(
+        Effect.map((runs) => runs.get(run.runId) ?? null),
+      );
+      if (live) {
+        live.intentionalStop = true;
+        yield* terminalManager
+          .close({ threadId: live.terminalThreadId, terminalId: live.terminalId })
+          .pipe(Effect.catch(() => Effect.void));
+        yield* unregisterLiveRun(run.runId, live.terminalThreadId, live.terminalId);
+      }
+
+      yield* repository.deleteById({ runId: run.runId }).pipe(Effect.catch(() => Effect.void));
+      yield* Effect.tryPromise({
+        try: () => deleteNdjsonLines(logsDir, run.projectId, run.runId),
+        catch: () => undefined,
+      }).pipe(Effect.catch(() => Effect.void));
     }
   });
 
@@ -759,9 +908,6 @@ const makeManagedRunService = Effect.gen(function* () {
     Effect.forkIn(workerScope),
   );
 
-  // On shutdown: flush log buffers and close terminals, but do NOT change
-  // run statuses. Reconciliation on next startup will check service health
-  // and determine the correct status for each run.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       const liveRunValues = yield* Ref.get(liveRunsRef).pipe(
@@ -772,12 +918,10 @@ const makeManagedRunService = Effect.gen(function* () {
         (live) =>
           Effect.gen(function* () {
             yield* stopHealthPollFiber(live.runId);
+            yield* stopInferenceFiber(live.runId);
             yield* flushPartialBuffer(live);
             yield* terminalManager
-              .close({
-                threadId: live.terminalThreadId,
-                terminalId: live.terminalId,
-              })
+              .close({ threadId: live.terminalThreadId, terminalId: live.terminalId })
               .pipe(Effect.catch(() => Effect.void));
           }),
         { discard: true },
@@ -787,13 +931,14 @@ const makeManagedRunService = Effect.gen(function* () {
 
   const launchProjectScript = Effect.fn("managedRuns.launchProjectScript")(function* (
     input: ManagedRunLaunchProjectScriptInput,
-  ): Effect.fn.Return<ManagedRunLaunchProjectScriptResult, ManagedRunError> {
+  ) {
     const readModel = yield* snapshotQuery
       .getSnapshot()
       .pipe(
         Effect.mapError((cause) => toManagedRunOperationError("managedRuns.getSnapshot", cause)),
       );
-    const project = readModel.projects.find((candidate) => candidate.id === input.projectId);
+    const project =
+      readModel.projects.find((candidate) => candidate.id === input.projectId) ?? null;
     if (!project) {
       return yield* new ManagedRunProjectLookupError({
         projectId: input.projectId,
@@ -836,15 +981,21 @@ const makeManagedRunService = Effect.gen(function* () {
       completedAt: null,
       lastExitCode: null,
       lastExitSignal: null,
-      serviceStatuses: (script.services ?? []).map((s) => ({
-        name: s.name,
-        healthCheck: s.healthCheck,
-        status: "unknown" as const,
-        lastCheckedAt: null,
-      })),
+      declaredServices: (script.services ?? []).map(
+        (service) =>
+          ({
+            name: service.name,
+            healthCheck: service.healthCheck,
+          }) satisfies ManagedRunDeclaredServiceSnapshot,
+      ),
+      runtimeServices: [],
+      inferenceStatus: "pending",
+      inferenceUpdatedAt: null,
+      inferenceError: null,
       lastError: null,
       logsExpireAt: null,
       evidence: [],
+      latestInference: null,
     };
 
     yield* repository
@@ -861,113 +1012,87 @@ const makeManagedRunService = Effect.gen(function* () {
       ...(input.env ? { extraEnv: input.env } : {}),
     });
 
-    const launchTerminalAndRun = Effect.gen(function* () {
-      const terminal = yield* terminalManager
-        .open({
-          threadId: terminalThreadId,
-          terminalId,
-          cwd,
-          env: runtimeEnv,
-          cols: MANAGED_RUN_TERMINAL_COLS,
-          rows: MANAGED_RUN_TERMINAL_ROWS,
-        })
-        .pipe(
-          Effect.mapError((cause) => toManagedRunOperationError("managedRuns.openTerminal", cause)),
-        );
-
-      const live: LiveRunState = {
-        runId,
-        projectId: input.projectId,
-        terminalThreadId,
+    const terminal = yield* terminalManager
+      .open({
+        threadId: terminalThreadId,
         terminalId,
-        partialLineBuffer: "",
-        intentionalStop: false,
-      };
-
-      yield* Ref.update(liveRunsRef, (current) => {
-        const next = new Map(current);
-        next.set(runId, live);
-        return next;
-      });
-      yield* Ref.update(terminalKeyToRunIdRef, (current) => {
-        const next = new Map(current);
-        next.set(toTerminalKey(terminalThreadId, terminalId), runId);
-        return next;
-      });
-
-      if (terminal.pid !== null) {
-        yield* addEvidence(runId, {
-          type: "process",
-          source: "inferred",
-          createdAt,
-          value: {
-            pid: terminal.pid,
-            command: script.command,
-            cwd,
-            startedAt: createdAt,
-          },
-        }).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("failed to persist process evidence", {
-              runId,
-              error: cause instanceof Error ? cause.message : String(cause),
-            }),
-          ),
-        );
-      }
-
-      const detailAfterTerminal = yield* updateRun(runId, (current) => ({
-        ...current,
-        terminalPid: terminal.pid,
-        updatedAt: nowIso(),
-      }));
-
-      yield* terminalManager
-        .write({
-          threadId: terminalThreadId,
-          terminalId,
-          data: `${script.command}\r`,
-        })
-        .pipe(
-          Effect.mapError((cause) =>
-            toManagedRunOperationError("managedRuns.writeTerminal", cause),
-          ),
-        );
-
-      yield* Effect.sleep(STARTUP_GRACE_MS).pipe(
-        Effect.andThen(() => ensureRunning(runId)),
-        Effect.catch(() => Effect.void),
-        Effect.forkIn(workerScope),
+        cwd,
+        env: runtimeEnv,
+        cols: MANAGED_RUN_TERMINAL_COLS,
+        rows: MANAGED_RUN_TERMINAL_ROWS,
+      })
+      .pipe(
+        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.openTerminal", cause)),
       );
 
-      return {
-        run: summarize(detailAfterTerminal),
-        terminal,
-      };
+    const live: LiveRunState = {
+      runId,
+      projectId: input.projectId,
+      terminalThreadId,
+      terminalId,
+      partialLineBuffer: "",
+      intentionalStop: false,
+    };
+
+    yield* Ref.update(liveRunsRef, (current) => {
+      const next = new Map(current);
+      next.set(runId, live);
+      return next;
+    });
+    yield* Ref.update(terminalKeyToRunIdRef, (current) => {
+      const next = new Map(current);
+      next.set(toTerminalKey(terminalThreadId, terminalId), runId);
+      return next;
     });
 
-    return yield* launchTerminalAndRun.pipe(
-      Effect.catch((cause) =>
-        Effect.gen(function* () {
-          yield* repository
-            .update({
-              ...summarize(baseDetail),
-              status: "failed",
-              updatedAt: nowIso(),
-              completedAt: nowIso(),
-              lastError: cause instanceof Error ? cause.message : String(cause),
-              logsExpireAt: logsExpiryIso(),
-            })
-            .pipe(Effect.catch(() => Effect.void));
-          return yield* toManagedRunOperationError("managedRuns.launchProjectScript", cause);
-        }),
-      ),
+    if (terminal.pid !== null) {
+      yield* addEvidence(runId, {
+        type: "process",
+        source: "inferred",
+        createdAt,
+        value: {
+          pid: terminal.pid,
+          command: script.command,
+          cwd,
+          startedAt: createdAt,
+        },
+      }).pipe(Effect.catch(() => Effect.void));
+    }
+
+    const detailAfterTerminal = yield* updateRun(runId, (current) => ({
+      ...current,
+      terminalPid: terminal.pid,
+      updatedAt: nowIso(),
+    }));
+
+    yield* terminalManager
+      .write({
+        threadId: terminalThreadId,
+        terminalId,
+        data: `${script.command}\r`,
+      })
+      .pipe(
+        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.writeTerminal", cause)),
+      );
+
+    yield* scheduleInference(runId);
+    yield* Effect.sleep(STARTUP_GRACE_MS).pipe(
+      Effect.andThen(() => ensureRunning(runId)),
+      Effect.catch(() => Effect.void),
+      Effect.forkIn(workerScope),
     );
+
+    return {
+      run: summarize(detailAfterTerminal),
+      terminal,
+    } satisfies ManagedRunLaunchProjectScriptResult;
   });
 
   const list = (input: ManagedRunListInput) =>
     repository.listByProject(input).pipe(
-      Effect.map((rows) => rows.map(summarize)),
+      Effect.map((rows) =>
+        rows.map((row) => summarize({ ...row, evidence: [], latestInference: null })),
+      ),
       Effect.mapError((cause) => toManagedRunOperationError("managedRuns.list", cause)),
     );
 
@@ -978,8 +1103,7 @@ const makeManagedRunService = Effect.gen(function* () {
     let lines = yield* Effect.tryPromise({
       try: () => readNdjsonLines(logsDir, detail.projectId, detail.runId),
       catch: (cause) => toManagedRunOperationError("managedRuns.getLogs", cause),
-    }).pipe(Effect.mapError((cause) => toManagedRunOperationError("managedRuns.getLogs", cause)));
-
+    });
     if (input.stream && input.stream !== "pty") {
       lines = lines.filter((line) => line.stream === input.stream);
     }
@@ -988,6 +1112,31 @@ const makeManagedRunService = Effect.gen(function* () {
     }
     return lines;
   });
+
+  const listInferenceRecords = (input: ManagedRunListInferenceRecordsInput) =>
+    repository
+      .listInferenceRecords(input)
+      .pipe(
+        Effect.mapError((cause) =>
+          toManagedRunOperationError("managedRuns.listInferenceRecords", cause),
+        ),
+      );
+
+  const getInferenceRecord = (input: ManagedRunGetInferenceRecordInput) =>
+    repository.getInferenceRecordById(input).pipe(
+      Effect.flatMap((record) =>
+        Option.isSome(record)
+          ? Effect.succeed(record.value)
+          : Effect.fail(
+              new ManagedRunInferenceRecordNotFoundError({ inferenceId: input.inferenceId }),
+            ),
+      ),
+      Effect.mapError((cause) =>
+        Schema.is(ManagedRunInferenceRecordNotFoundError)(cause)
+          ? cause
+          : toManagedRunOperationError("managedRuns.getInferenceRecord", cause),
+      ),
+    );
 
   const stop = Effect.fn("managedRuns.stop")(function* (input: ManagedRunStopInput) {
     const detail = yield* readRunDetail(input.runId);
@@ -1002,10 +1151,7 @@ const makeManagedRunService = Effect.gen(function* () {
     }
     live.intentionalStop = true;
     yield* terminalManager
-      .close({
-        threadId: live.terminalThreadId,
-        terminalId: live.terminalId,
-      })
+      .close({ threadId: live.terminalThreadId, terminalId: live.terminalId })
       .pipe(Effect.mapError((cause) => toManagedRunOperationError("managedRuns.stop", cause)));
   });
 
@@ -1031,6 +1177,8 @@ const makeManagedRunService = Effect.gen(function* () {
     list,
     get,
     getLogs,
+    listInferenceRecords,
+    getInferenceRecord,
     stop,
     streamEvents,
     issueMcpAccess,

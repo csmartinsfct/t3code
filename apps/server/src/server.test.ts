@@ -285,6 +285,8 @@ const buildAppUnderTest = (options?: {
           list: () => Effect.succeed([]),
           get: () => Effect.die(new Error("not mocked")),
           getLogs: () => Effect.succeed([]),
+          listInferenceRecords: () => Effect.succeed([]),
+          getInferenceRecord: () => Effect.die(new Error("not mocked")),
           stop: () => Effect.void,
           streamEvents: () => Stream.empty,
           issueMcpAccess: () =>
@@ -1350,6 +1352,63 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           [2, 3, 4],
         );
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc subscribeOrchestrationDomainEvents from an explicit cursor", () =>
+    Effect.gen(function* () {
+      const now = new Date().toISOString();
+      const threadId = ThreadId.makeUnsafe("thread-1");
+      let replayCursor: number | null = null;
+      const makeEvent = (sequence: number): OrchestrationEvent =>
+        ({
+          sequence,
+          eventId: `event-${sequence}`,
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.reverted",
+          payload: {
+            threadId,
+            turnCount: sequence,
+          },
+        }) as OrchestrationEvent;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            getReadModel: () =>
+              Effect.succeed({
+                ...makeDefaultOrchestrationReadModel(),
+                snapshotSequence: 10,
+              }),
+            readEvents: (fromSequenceExclusive) => {
+              replayCursor = fromSequenceExclusive;
+              return Stream.make(makeEvent(5), makeEvent(6));
+            },
+            streamDomainEvents: Stream.empty,
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeOrchestrationDomainEvents]({
+            fromSequenceExclusive: 4,
+          }).pipe(Stream.runCollect),
+        ),
+      );
+
+      assert.equal(replayCursor, 4);
+      assert.deepEqual(
+        Array.from(events).map((event) => event.sequence),
+        [5, 6],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc terminal methods", () =>

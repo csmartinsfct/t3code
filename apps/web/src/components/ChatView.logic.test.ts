@@ -9,6 +9,7 @@ import {
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
+  shouldAdvanceLiveClock,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
@@ -166,6 +167,54 @@ describe("reconcileMountedTerminalThreadIds", () => {
         activeThreadTerminalOpen: false,
       }),
     ).toEqual(currentThreadIds.slice(-MAX_HIDDEN_MOUNTED_TERMINAL_THREADS));
+  });
+});
+
+describe("shouldAdvanceLiveClock", () => {
+  it("ticks while the UI still considers work active", () => {
+    expect(
+      shouldAdvanceLiveClock({
+        isWorking: true,
+        timelineEntries: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("ticks for streaming assistant output even if the session phase already drifted idle", () => {
+    expect(
+      shouldAdvanceLiveClock({
+        isWorking: false,
+        timelineEntries: [
+          {
+            kind: "message",
+            message: {
+              role: "assistant",
+              streaming: true,
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("stops ticking once no live work or streaming output remains", () => {
+    expect(
+      shouldAdvanceLiveClock({
+        isWorking: false,
+        timelineEntries: [
+          {
+            kind: "message",
+            message: {
+              role: "assistant",
+              streaming: false,
+            },
+          },
+          {
+            kind: "work",
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });
 

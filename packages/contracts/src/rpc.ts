@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { ProjectId } from "./baseSchemas";
+import { NonNegativeInt, ProjectId } from "./baseSchemas";
 import { OpenError, OpenInEditorInput } from "./editor";
 import {
   GitActionProgressEvent,
@@ -44,11 +44,15 @@ import {
 } from "./orchestration";
 import {
   ManagedRunError,
+  ManagedRunGetInferenceRecordInput,
   ManagedRunGetInput,
   ManagedRunGetLogsInput,
   ManagedRunDetail,
+  ManagedRunInferenceRecordDetail,
+  ManagedRunInferenceRecordSummary,
   ManagedRunLaunchProjectScriptInput,
   ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
   ManagedRunStopInput,
@@ -140,6 +144,8 @@ export const WS_METHODS = {
   managedRunsList: "managedRuns.list",
   managedRunsGet: "managedRuns.get",
   managedRunsGetLogs: "managedRuns.getLogs",
+  managedRunsListInferenceRecords: "managedRuns.listInferenceRecords",
+  managedRunsGetInferenceRecord: "managedRuns.getInferenceRecord",
   managedRunsStop: "managedRuns.stop",
 
   // Terminal methods
@@ -370,6 +376,24 @@ export const WsManagedRunsGetLogsRpc = Rpc.make(WS_METHODS.managedRunsGetLogs, {
   error: ManagedRunError,
 });
 
+export const WsManagedRunsListInferenceRecordsRpc = Rpc.make(
+  WS_METHODS.managedRunsListInferenceRecords,
+  {
+    payload: ManagedRunListInferenceRecordsInput,
+    success: Schema.Array(ManagedRunInferenceRecordSummary),
+    error: ManagedRunError,
+  },
+);
+
+export const WsManagedRunsGetInferenceRecordRpc = Rpc.make(
+  WS_METHODS.managedRunsGetInferenceRecord,
+  {
+    payload: ManagedRunGetInferenceRecordInput,
+    success: ManagedRunInferenceRecordDetail,
+    error: ManagedRunError,
+  },
+);
+
 export const WsManagedRunsStopRpc = Rpc.make(WS_METHODS.managedRunsStop, {
   payload: ManagedRunStopInput,
   error: ManagedRunError,
@@ -414,7 +438,9 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
 export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
   WS_METHODS.subscribeOrchestrationDomainEvents,
   {
-    payload: Schema.Struct({}),
+    payload: Schema.Struct({
+      fromSequenceExclusive: Schema.optional(NonNegativeInt),
+    }),
     success: OrchestrationEvent,
     stream: true,
   },
@@ -528,6 +554,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsManagedRunsListRpc,
   WsManagedRunsGetRpc,
   WsManagedRunsGetLogsRpc,
+  WsManagedRunsListInferenceRecordsRpc,
+  WsManagedRunsGetInferenceRecordRpc,
   WsManagedRunsStopRpc,
   WsTerminalOpenRpc,
   WsTerminalWriteRpc,

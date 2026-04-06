@@ -6,9 +6,9 @@ import { truncate } from "@t3tools/shared/String";
 
 function makeMockRun(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSummary {
   return {
-    runId: "run-1",
-    projectId: "project-1",
-    scriptId: "dev-server",
+    runId: "run-1" as ManagedRunSummary["runId"],
+    projectId: "project-1" as ManagedRunSummary["projectId"],
+    scriptId: "dev-server" as ManagedRunSummary["scriptId"],
     createdByThreadId: null,
     lastTouchedByThreadId: null,
     cwd: "/home/user/project",
@@ -25,9 +25,13 @@ function makeMockRun(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSumm
     completedAt: null,
     lastExitCode: null,
     lastExitSignal: null,
-    serviceStatuses: [],
+    declaredServices: [],
+    runtimeServices: [],
+    inferenceStatus: "pending",
+    inferenceUpdatedAt: null,
+    inferenceError: null,
     ...overrides,
-  } as ManagedRunSummary;
+  };
 }
 
 /**

@@ -488,18 +488,26 @@ function EventRouter() {
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
-    const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      const action = recovery.classifyDomainEvent(event.sequence);
-      if (action === "apply") {
-        pendingDomainEvents.push(event);
-        schedulePendingDomainEventFlush();
-        return;
-      }
-      if (action === "recover") {
-        flushPendingDomainEvents();
-        void recoverFromSequenceGap();
-      }
-    });
+    const unsubDomainEvent = getWsRpcClient().orchestration.onDomainEvent(
+      (event) => {
+        const action = recovery.classifyDomainEvent(event.sequence);
+        if (action === "apply") {
+          pendingDomainEvents.push(event);
+          schedulePendingDomainEventFlush();
+          return;
+        }
+        if (action === "recover") {
+          flushPendingDomainEvents();
+          void recoverFromSequenceGap();
+        }
+      },
+      {
+        getFromSequenceExclusive: () => {
+          const state = recovery.getState();
+          return state.bootstrapped ? state.latestSequence : undefined;
+        },
+      },
+    );
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
       if (thread && thread.archivedAt !== null) {

@@ -35,16 +35,53 @@ export type ManagedRunEvidenceType = typeof ManagedRunEvidenceType.Type;
 export const ManagedRunEvidenceSource = Schema.Literals(["declared", "inferred"]);
 export type ManagedRunEvidenceSource = typeof ManagedRunEvidenceSource.Type;
 
-export const DeclaredServiceStatus = Schema.Literals(["unknown", "healthy", "unhealthy"]);
-export type DeclaredServiceStatus = typeof DeclaredServiceStatus.Type;
+export const ManagedRunValidationStatus = Schema.Literals(["unknown", "healthy", "unhealthy"]);
+export type ManagedRunValidationStatus = typeof ManagedRunValidationStatus.Type;
 
-export const ManagedRunServiceSnapshot = Schema.Struct({
+export const ManagedRunInferenceStatus = Schema.Literals([
+  "pending",
+  "ready",
+  "failed",
+  "ungrounded",
+]);
+export type ManagedRunInferenceStatus = typeof ManagedRunInferenceStatus.Type;
+
+export const ManagedRunInferenceConfidence = Schema.Literals(["high", "medium", "low"]);
+export type ManagedRunInferenceConfidence = typeof ManagedRunInferenceConfidence.Type;
+
+export const ManagedRunInferenceGroundingSource = Schema.Literals(["log", "declared", "evidence"]);
+export type ManagedRunInferenceGroundingSource = typeof ManagedRunInferenceGroundingSource.Type;
+
+export const ManagedRunRuntimeServiceRole = Schema.Literals([
+  "frontend",
+  "backend",
+  "proxy",
+  "worker",
+  "database",
+  "devtool",
+  "unknown",
+]);
+export type ManagedRunRuntimeServiceRole = typeof ManagedRunRuntimeServiceRole.Type;
+
+export const ManagedRunDeclaredServiceSnapshot = Schema.Struct({
   name: TrimmedNonEmptyString,
   healthCheck: ServiceHealthCheck,
-  status: DeclaredServiceStatus,
+});
+export type ManagedRunDeclaredServiceSnapshot = typeof ManagedRunDeclaredServiceSnapshot.Type;
+
+export const ManagedRunRuntimeService = Schema.Struct({
+  declaredServiceName: Schema.NullOr(TrimmedNonEmptyString),
+  resolvedName: TrimmedNonEmptyString,
+  role: ManagedRunRuntimeServiceRole,
+  canonicalHealthCheck: Schema.NullOr(ServiceHealthCheck),
+  validationStatus: ManagedRunValidationStatus,
+  inferenceConfidence: ManagedRunInferenceConfidence,
+  inferenceSource: Schema.Literal("llm"),
+  groundedBy: Schema.Array(ManagedRunInferenceGroundingSource),
+  evidenceLines: Schema.Array(Schema.String),
   lastCheckedAt: Schema.NullOr(IsoDateTime),
 });
-export type ManagedRunServiceSnapshot = typeof ManagedRunServiceSnapshot.Type;
+export type ManagedRunRuntimeService = typeof ManagedRunRuntimeService.Type;
 
 const ManagedRunPort = Schema.Int.check(Schema.isGreaterThan(0)).check(
   Schema.isLessThanOrEqualTo(65_535),
@@ -120,15 +157,60 @@ export const ManagedRunSummary = Schema.Struct({
   completedAt: Schema.NullOr(IsoDateTime),
   lastExitCode: Schema.NullOr(Schema.Int),
   lastExitSignal: Schema.NullOr(Schema.Int),
-  serviceStatuses: Schema.Array(ManagedRunServiceSnapshot),
+  declaredServices: Schema.Array(ManagedRunDeclaredServiceSnapshot),
+  runtimeServices: Schema.Array(ManagedRunRuntimeService),
+  inferenceStatus: ManagedRunInferenceStatus,
+  inferenceUpdatedAt: Schema.NullOr(IsoDateTime),
+  inferenceError: Schema.NullOr(TrimmedString),
 });
 export type ManagedRunSummary = typeof ManagedRunSummary.Type;
+
+export const ManagedRunInferenceRecordBase = Schema.Struct({
+  inferenceId: TrimmedNonEmptyString,
+  runId: ManagedRunId,
+  projectId: ProjectId,
+  scriptId: TrimmedNonEmptyString,
+  scriptName: Schema.NullOr(TrimmedString),
+  cwd: TrimmedNonEmptyString,
+  provider: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+  status: Schema.Literals(["ready", "failed", "ungrounded"]),
+  createdAt: IsoDateTime,
+});
+export type ManagedRunInferenceRecordBase = typeof ManagedRunInferenceRecordBase.Type;
+
+export const ManagedRunInferenceRecordSummary = Schema.Struct({
+  ...ManagedRunInferenceRecordBase.fields,
+  runtimeServiceCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type ManagedRunInferenceRecordSummary = typeof ManagedRunInferenceRecordSummary.Type;
+
+export const ManagedRunInferenceRecordDetail = Schema.Struct({
+  ...ManagedRunInferenceRecordSummary.fields,
+  declaredServices: Schema.Array(ManagedRunDeclaredServiceSnapshot),
+  normalizedPayload: Schema.Unknown,
+  rawPayload: Schema.Unknown,
+  inferenceError: Schema.NullOr(TrimmedString),
+  groundingFailures: Schema.Array(Schema.String),
+  evidenceExcerpt: Schema.Array(Schema.String),
+});
+export type ManagedRunInferenceRecordDetail = typeof ManagedRunInferenceRecordDetail.Type;
 
 export const ManagedRunDetail = Schema.Struct({
   ...ManagedRunSummary.fields,
   lastError: Schema.NullOr(TrimmedString),
   logsExpireAt: Schema.NullOr(IsoDateTime),
   evidence: Schema.Array(ManagedRunEvidence),
+  latestInference: Schema.NullOr(
+    Schema.Struct({
+      inferenceId: TrimmedNonEmptyString,
+      provider: TrimmedNonEmptyString,
+      model: TrimmedNonEmptyString,
+      rawPayload: Schema.Unknown,
+      normalizedPayload: Schema.Unknown,
+      createdAt: IsoDateTime,
+    }),
+  ),
 });
 export type ManagedRunDetail = typeof ManagedRunDetail.Type;
 
@@ -161,6 +243,18 @@ export const ManagedRunStopInput = Schema.Struct({
   runId: ManagedRunId,
 });
 export type ManagedRunStopInput = typeof ManagedRunStopInput.Type;
+
+export const ManagedRunListInferenceRecordsInput = Schema.Struct({
+  limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  projectId: Schema.optional(ProjectId),
+  scriptId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ManagedRunListInferenceRecordsInput = typeof ManagedRunListInferenceRecordsInput.Type;
+
+export const ManagedRunGetInferenceRecordInput = Schema.Struct({
+  inferenceId: TrimmedNonEmptyString,
+});
+export type ManagedRunGetInferenceRecordInput = typeof ManagedRunGetInferenceRecordInput.Type;
 
 const ManagedRunLaunchEnvKey = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
@@ -241,10 +335,22 @@ export class ManagedRunOperationError extends Schema.TaggedErrorClass<ManagedRun
   },
 ) {}
 
+export class ManagedRunInferenceRecordNotFoundError extends Schema.TaggedErrorClass<ManagedRunInferenceRecordNotFoundError>()(
+  "ManagedRunInferenceRecordNotFoundError",
+  {
+    inferenceId: TrimmedNonEmptyString,
+  },
+) {
+  override get message() {
+    return `Unknown managed run inference record: ${this.inferenceId}`;
+  }
+}
+
 export const ManagedRunError = Schema.Union([
   ManagedRunNotFoundError,
   ManagedRunProjectLookupError,
   ManagedRunScriptLookupError,
   ManagedRunOperationError,
+  ManagedRunInferenceRecordNotFoundError,
 ]);
 export type ManagedRunError = typeof ManagedRunError.Type;

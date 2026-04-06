@@ -31,6 +31,7 @@ function makeFakeCodexBinary(
     exitCode?: number;
     stderr?: string;
     requireImage?: boolean;
+    requireSkipGitRepoCheck?: boolean;
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
     forbidReasoningEffort?: boolean;
@@ -51,9 +52,15 @@ function makeFakeCodexBinary(
         "#!/bin/sh",
         'output_path=""',
         'seen_image="0"',
+        'seen_skip_git_repo_check="0"',
         'seen_fast_service_tier="0"',
         'seen_reasoning_effort=""',
         "while [ $# -gt 0 ]; do",
+        '  if [ "$1" = "--skip-git-repo-check" ]; then',
+        '    seen_skip_git_repo_check="1"',
+        "    shift",
+        "    continue",
+        "  fi",
         '  if [ "$1" = "--image" ]; then',
         "    shift",
         '    if [ -n "$1" ]; then',
@@ -89,6 +96,14 @@ function makeFakeCodexBinary(
               'if [ "$seen_image" != "1" ]; then',
               '  printf "%s\\n" "missing --image input" >&2',
               `  exit 2`,
+              "fi",
+            ]
+          : []),
+        ...(input.requireSkipGitRepoCheck
+          ? [
+              'if [ "$seen_skip_git_repo_check" != "1" ]; then',
+              '  printf "%s\\n" "missing --skip-git-repo-check" >&2',
+              "  exit 8",
               "fi",
             ]
           : []),
@@ -155,6 +170,7 @@ function withFakeCodexEnv<A, E, R>(
     exitCode?: number;
     stderr?: string;
     requireImage?: boolean;
+    requireSkipGitRepoCheck?: boolean;
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
     forbidReasoningEffort?: boolean;
@@ -232,6 +248,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
             subject: "Add important change",
             body: "",
           }),
+          requireSkipGitRepoCheck: true,
           requireFastServiceTier: true,
           requireReasoningEffort: "xhigh",
           stdinMustNotContain: "branch must be a short semantic git branch fragment",

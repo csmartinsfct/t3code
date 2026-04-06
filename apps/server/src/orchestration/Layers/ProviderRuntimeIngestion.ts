@@ -1163,7 +1163,9 @@ const make = Effect.fn("make")(function* () {
       const nextActiveTurnId =
         event.type === "turn.started"
           ? (eventTurnId ?? null)
-          : event.type === "turn.completed" || event.type === "session.exited"
+          : event.type === "turn.completed" ||
+              event.type === "session.exited" ||
+              event.type === "session.started"
             ? null
             : activeTurnId;
       const status = (() => {
@@ -1177,8 +1179,11 @@ const make = Effect.fn("make")(function* () {
           case "turn.completed":
             return normalizeRuntimeTurnState(event.payload.state) === "failed" ? "error" : "ready";
           case "session.started":
+            // A fresh session has no active turn — always start "ready".
+            // If a turn is resuming, the adapter will emit turn.started next.
+            return "ready";
           case "thread.started":
-            // Provider thread/session start notifications can arrive during an
+            // Provider thread start notifications can arrive during an
             // active turn; preserve turn-running state in that case.
             return activeTurnId !== null ? "running" : "ready";
         }

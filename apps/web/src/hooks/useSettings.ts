@@ -148,6 +148,10 @@ export function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<s
     patch.textGenerationModelSelection = legacySettings.textGenerationModelSelection;
   }
 
+  if (Schema.is(ModelSelection)(legacySettings.managedRunInferenceModelSelection)) {
+    patch.managedRunInferenceModelSelection = legacySettings.managedRunInferenceModelSelection;
+  }
+
   if (typeof legacySettings.codexBinaryPath === "string") {
     patch.providers ??= {};
     patch.providers.codex ??= {};

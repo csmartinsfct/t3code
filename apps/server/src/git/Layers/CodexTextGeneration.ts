@@ -1,13 +1,14 @@
-import { randomUUID } from "node:crypto";
-
-import { Effect, FileSystem, Layer, Option, Path, Schema, Scope, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 
 import { CodexModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import {
+  runCodexStructuredOutput,
+  StructuredOutputRunnerError,
+} from "../../llm/structuredOutput.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import {
   type BranchNameGenerationInput,
@@ -26,64 +27,21 @@ import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
-  toJsonSchemaObject,
 } from "../Utils.ts";
 import { getCodexModelCapabilities } from "../../provider/Layers/CodexProvider.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { normalizeCodexModelOptionsWithCapabilities } from "@t3tools/shared/model";
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
-const CODEX_TIMEOUT_MS = 180_000;
 const makeCodexTextGeneration = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
   const serverSettingsService = yield* Effect.service(ServerSettingsService);
 
   type MaterializedImageAttachments = {
     readonly imagePaths: ReadonlyArray<string>;
   };
-
-  const readStreamAsString = <E>(
-    operation: string,
-    stream: Stream.Stream<Uint8Array, E>,
-  ): Effect.Effect<string, TextGenerationError> =>
-    stream.pipe(
-      Stream.decodeText(),
-      Stream.runFold(
-        () => "",
-        (acc, chunk) => acc + chunk,
-      ),
-      Effect.mapError((cause) =>
-        normalizeCliError("codex", operation, cause, "Failed to collect process output"),
-      ),
-    );
-
-  const writeTempFile = (
-    operation: string,
-    prefix: string,
-    content: string,
-  ): Effect.Effect<string, TextGenerationError, Scope.Scope> => {
-    return fileSystem
-      .makeTempFileScoped({
-        prefix: `t3code-${prefix}-${process.pid}-${randomUUID()}.tmp`,
-      })
-      .pipe(
-        Effect.tap((filePath) => fileSystem.writeFileString(filePath, content)),
-        Effect.mapError(
-          (cause) =>
-            new TextGenerationError({
-              operation,
-              detail: `Failed to write temp file`,
-              cause,
-            }),
-        ),
-      );
-  };
-
-  const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const materializeImageAttachments = Effect.fn("materializeImageAttachments")(function* (
     _operation:
@@ -127,7 +85,6 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     prompt,
     outputSchemaJson,
     imagePaths = [],
-    cleanupPaths = [],
     modelSelection,
   }: {
     operation:
@@ -139,138 +96,42 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
-    cleanupPaths?: ReadonlyArray<string>;
     modelSelection: CodexModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
-    const schemaPath = yield* writeTempFile(
-      operation,
-      "codex-schema",
-      JSON.stringify(toJsonSchemaObject(outputSchemaJson)),
-    );
-    const outputPath = yield* writeTempFile(operation, "codex-output", "");
-
     const codexSettings = yield* Effect.map(
       serverSettingsService.getSettings,
       (settings) => settings.providers.codex,
     ).pipe(Effect.catch(() => Effect.undefined));
+    const normalizedOptions = normalizeCodexModelOptionsWithCapabilities(
+      getCodexModelCapabilities(modelSelection.model),
+      modelSelection.options,
+    );
+    const reasoningEffort =
+      modelSelection.options?.reasoningEffort ?? CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
 
-    const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
-      const normalizedOptions = normalizeCodexModelOptionsWithCapabilities(
-        getCodexModelCapabilities(modelSelection.model),
-        modelSelection.options,
-      );
-      const reasoningEffort =
-        modelSelection.options?.reasoningEffort ?? CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
-      const command = ChildProcess.make(
-        codexSettings?.binaryPath || "codex",
-        [
-          "exec",
-          "--ephemeral",
-          "-s",
-          "read-only",
-          "--model",
-          modelSelection.model,
-          "--config",
-          `model_reasoning_effort="${reasoningEffort}"`,
-          ...(normalizedOptions?.fastMode ? ["--config", `service_tier="fast"`] : []),
-          "--output-schema",
-          schemaPath,
-          "--output-last-message",
-          outputPath,
-          ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
-          "-",
-        ],
-        {
-          env: {
-            ...process.env,
-            ...(codexSettings?.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
-          },
-          cwd,
-          shell: process.platform === "win32",
-          stdin: {
-            stream: Stream.encodeText(Stream.make(prompt)),
-          },
-        },
-      );
-
-      const child = yield* commandSpawner
-        .spawn(command)
-        .pipe(
-          Effect.mapError((cause) =>
-            normalizeCliError("codex", operation, cause, "Failed to spawn Codex CLI process"),
-          ),
-        );
-
-      const [stdout, stderr, exitCode] = yield* Effect.all(
-        [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
-          child.exitCode.pipe(
-            Effect.mapError((cause) =>
-              normalizeCliError("codex", operation, cause, "Failed to read Codex CLI exit code"),
-            ),
-          ),
-        ],
-        { concurrency: "unbounded" },
-      );
-
-      if (exitCode !== 0) {
-        const stderrDetail = stderr.trim();
-        const stdoutDetail = stdout.trim();
-        const detail = stderrDetail.length > 0 ? stderrDetail : stdoutDetail;
-        return yield* new TextGenerationError({
+    return yield* runCodexStructuredOutput({
+      operation,
+      cwd,
+      prompt,
+      outputSchema: outputSchemaJson,
+      imagePaths,
+      modelSelection,
+      ...(codexSettings?.binaryPath ? { binaryPath: codexSettings.binaryPath } : {}),
+      ...(codexSettings?.homePath ? { homePath: codexSettings.homePath } : {}),
+      reasoningEffort,
+      ...(typeof normalizedOptions?.fastMode === "boolean"
+        ? { fastMode: normalizedOptions.fastMode }
+        : {}),
+    }).pipe(
+      Effect.mapError((cause) =>
+        normalizeCliError(
+          "codex",
           operation,
-          detail:
-            detail.length > 0
-              ? `Codex CLI command failed: ${detail}`
-              : `Codex CLI command failed with code ${exitCode}.`,
-        });
-      }
-    });
-
-    const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
-      {
-        concurrency: "unbounded",
-      },
-    ).pipe(Effect.asVoid);
-
-    return yield* Effect.gen(function* () {
-      yield* runCodexCommand().pipe(
-        Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
-        Effect.flatMap(
-          Option.match({
-            onNone: () =>
-              Effect.fail(
-                new TextGenerationError({ operation, detail: "Codex CLI request timed out." }),
-              ),
-            onSome: () => Effect.void,
-          }),
+          cause,
+          cause instanceof StructuredOutputRunnerError ? cause.message : "Codex request failed",
         ),
-      );
-
-      return yield* fileSystem.readFileString(outputPath).pipe(
-        Effect.mapError(
-          (cause) =>
-            new TextGenerationError({
-              operation,
-              detail: "Failed to read Codex output file.",
-              cause,
-            }),
-        ),
-        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson))),
-        Effect.catchTag("SchemaError", (cause) =>
-          Effect.fail(
-            new TextGenerationError({
-              operation,
-              detail: "Codex returned invalid structured output.",
-              cause,
-            }),
-          ),
-        ),
-      );
-    }).pipe(Effect.ensuring(cleanup));
+      ),
+    );
   });
 
   const generateCommitMessage: TextGenerationShape["generateCommitMessage"] = Effect.fn(

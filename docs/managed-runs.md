@@ -156,7 +156,12 @@ Logs are retained for 48 hours (`LOG_RETENTION_MS`). A background fiber cleans u
 
 ## Service Health Checks
 
-When an action declares services, T3 monitors each one independently. This is critical for commands that exit after starting background services (e.g. `docker compose up -d`, `npx supabase start`).
+Managed runs now separate:
+
+- `declaredServices`: immutable launch-time hints copied from the project action
+- `runtimeServices`: LLM-inferred canonical targets for the live run
+
+Declared services are still important because they provide validation hints and grounding context, but they are no longer treated as the source of truth for a running process. This is what makes dynamic ports and multiple worktrees safe to track independently.
 
 ### Health check types
 
@@ -171,7 +176,17 @@ Implementation: `apps/server/src/managedRuns/healthCheck.ts`
 
 ### Polling
 
-Health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`). Status changes are stored in the database and published to connected clients via WebSocket.
+Inference runs once shortly after launch, using only that run's own logs plus declared-service context. Any inferred canonical target must be grounded in the run evidence before it is adopted.
+
+After inference succeeds, health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`) against `runtimeServices[*].canonicalHealthCheck`. Status changes are stored in the database and published to connected clients via WebSocket.
+
+The current flow is:
+
+1. Launch snapshots declared services.
+2. The run captures startup logs.
+3. `ManagedRunInference` performs one structured LLM call.
+4. Grounded runtime services become the live run view.
+5. Ongoing polling validates those runtime services only.
 
 ---
 
@@ -183,9 +198,29 @@ A menu button in the toolbar showing:
 
 - Run count badge
 - List of active runs with status badges
-- Per-service health indicators (green/red/gray dots)
-- Service summary (e.g. "2/3 services up")
-- Detected URL or truncated command as secondary text
+- Per-runtime-service validation indicators (green/red/gray dots)
+- Service summary (e.g. "2/3 services validated")
+- Inference-aware secondary text when runtime targets are still pending or ungrounded
+- Hover/focus stop affordance: the status pill swaps to a same-size stop button with confirmation before stopping the run
+
+### Settings Runs Page (`/settings/runs`)
+
+The Settings sidebar includes a new `Runs` page for inference inspection.
+
+It shows:
+
+- The latest inference attempts in a table
+- Provider/model used for each inference
+- Status (`ready`, `failed`, `ungrounded`)
+- Resolved runtime-service count
+- A detail panel with:
+  - declared services snapshot
+  - normalized payload
+  - raw payload
+  - grounding failures
+  - evidence excerpt
+
+This page is intentionally read-only in v1. It is an audit surface, not a control surface.
 
 ### Propose Action Card (`ProposeActionCard.tsx`)
 
@@ -225,28 +260,32 @@ The **"Ask AI" button** on failure toasts:
 The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 
 - `snapshot` events on initial subscribe (seeds the run list)
-- `upserted` events as runs change (status transitions, health check updates)
+- `upserted` events as runs change (status transitions, inference updates, validation updates)
 
 ---
 
 ## Key Files
 
-| Area                      | Path                                                               | Purpose                                                                |
-| ------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| **Contracts**             | `packages/contracts/src/orchestration.ts`                          | `ProjectScript`, `DeclaredService`, `ServiceHealthCheck` schemas       |
-| **Contracts**             | `packages/contracts/src/managedRuns.ts`                            | `ManagedRunSummary`, `ManagedRunDetail`, `ManagedRunStreamEvent`, etc. |
-| **MCP server**            | `apps/server/src/managedRuns/http.ts`                              | JSON-RPC endpoint with tool registrations                              |
-| **System prompt**         | `apps/server/src/managedRuns/systemPrompt.ts`                      | Prompt injected into AI sessions                                       |
-| **Health checks**         | `apps/server/src/managedRuns/healthCheck.ts`                       | URL/docker/port/command health check implementations                   |
-| **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                | Core run lifecycle: launch, track, poll, stop                          |
-| **Run service interface** | `apps/server/src/managedRuns/Services/ManagedRuns.ts`              | Effect service interface                                               |
-| **SQL layer**             | `apps/server/src/persistence/Layers/ManagedRuns.ts`                | SQLite persistence for runs, evidence, services                        |
-| **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                 | MCP config + prompt injection for Claude                               |
-| **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                  | MCP config + prompt injection for Codex                                |
-| **Runs UI**               | `apps/web/src/components/ManagedRunsControl.tsx`                   | Runs dropdown with service health                                      |
-| **Propose card**          | `apps/web/src/components/chat/ProposeActionCard.tsx`               | Interactive action proposal card                                       |
-| **Propose parser**        | `apps/web/src/lib/proposeActionParser.ts`                          | Validates `t3:propose-action` code blocks                              |
-| **Toasts**                | `apps/web/src/hooks/useManagedRunCompletionToasts.ts`              | Toast notifications + "Ask AI" on failure                              |
-| **Event subscription**    | `apps/web/src/components/ChatView.tsx`                             | WebSocket subscribe + action accept handler                            |
-| **Migrations**            | `apps/server/src/persistence/Migrations/020_ManagedRuns.ts`        | Initial managed_runs table                                             |
-| **Migrations**            | `apps/server/src/persistence/Migrations/021_ManagedRunServices.ts` | services_json column                                                   |
+| Area                      | Path                                                                | Purpose                                                                |
+| ------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Contracts**             | `packages/contracts/src/orchestration.ts`                           | `ProjectScript`, `DeclaredService`, `ServiceHealthCheck` schemas       |
+| **Contracts**             | `packages/contracts/src/managedRuns.ts`                             | `ManagedRunSummary`, `ManagedRunDetail`, `ManagedRunStreamEvent`, etc. |
+| **MCP server**            | `apps/server/src/managedRuns/http.ts`                               | JSON-RPC endpoint with tool registrations                              |
+| **System prompt**         | `apps/server/src/managedRuns/systemPrompt.ts`                       | Prompt injected into AI sessions                                       |
+| **Health checks**         | `apps/server/src/managedRuns/healthCheck.ts`                        | URL/docker/port/command health check implementations                   |
+| **Run inference**         | `apps/server/src/managedRuns/Layers/Inference.ts`                   | LLM-backed runtime-service inference + grounding                       |
+| **Inference service**     | `apps/server/src/managedRuns/Services/Inference.ts`                 | Effect service contract for inference                                  |
+| **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                 | Core run lifecycle: launch, track, poll, stop                          |
+| **Run service interface** | `apps/server/src/managedRuns/Services/ManagedRuns.ts`               | Effect service interface                                               |
+| **SQL layer**             | `apps/server/src/persistence/Layers/ManagedRuns.ts`                 | SQLite persistence for runs, evidence, and inference audit records     |
+| **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                  | MCP config + prompt injection for Claude                               |
+| **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                   | MCP config + prompt injection for Codex                                |
+| **Runs UI**               | `apps/web/src/components/ManagedRunsControl.tsx`                    | Runs dropdown with service health                                      |
+| **Runs settings UI**      | `apps/web/src/components/settings/RunsSettingsPanel.tsx`            | Read-only inference audit surface                                      |
+| **Propose card**          | `apps/web/src/components/chat/ProposeActionCard.tsx`                | Interactive action proposal card                                       |
+| **Propose parser**        | `apps/web/src/lib/proposeActionParser.ts`                           | Validates `t3:propose-action` code blocks                              |
+| **Toasts**                | `apps/web/src/hooks/useManagedRunCompletionToasts.ts`               | Toast notifications + "Ask AI" on failure                              |
+| **Event subscription**    | `apps/web/src/components/ChatView.tsx`                              | WebSocket subscribe + action accept handler                            |
+| **Migrations**            | `apps/server/src/persistence/Migrations/020_ManagedRuns.ts`         | Initial managed_runs table                                             |
+| **Migrations**            | `apps/server/src/persistence/Migrations/021_ManagedRunServices.ts`  | services_json column                                                   |
+| **Migrations**            | `apps/server/src/persistence/Migrations/024_ManagedRunInference.ts` | declared/runtime service split + managed_run_inferences table          |

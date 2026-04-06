@@ -49,10 +49,14 @@ import type {
 } from "./scheduledTasks";
 import type {
   ManagedRunDetail,
+  ManagedRunGetInferenceRecordInput,
   ManagedRunGetInput,
   ManagedRunGetLogsInput,
+  ManagedRunInferenceRecordDetail,
+  ManagedRunInferenceRecordSummary,
   ManagedRunLaunchProjectScriptInput,
   ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
   ManagedRunStreamEvent,
@@ -216,6 +220,12 @@ export interface NativeApi {
     list: (input: ManagedRunListInput) => Promise<ReadonlyArray<ManagedRunSummary>>;
     get: (input: ManagedRunGetInput) => Promise<ManagedRunDetail>;
     getLogs: (input: ManagedRunGetLogsInput) => Promise<ReadonlyArray<ManagedRunLogLine>>;
+    listInferenceRecords: (
+      input: ManagedRunListInferenceRecordsInput,
+    ) => Promise<ReadonlyArray<ManagedRunInferenceRecordSummary>>;
+    getInferenceRecord: (
+      input: ManagedRunGetInferenceRecordInput,
+    ) => Promise<ManagedRunInferenceRecordDetail>;
     stop: (input: ManagedRunStopInput) => Promise<void>;
     onEvent: (projectId: string, callback: (event: ManagedRunStreamEvent) => void) => () => void;
   };

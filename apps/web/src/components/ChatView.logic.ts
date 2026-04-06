@@ -178,6 +178,23 @@ export function deriveComposerSendState(options: {
   };
 }
 
+export function shouldAdvanceLiveClock(input: {
+  isWorking: boolean;
+  timelineEntries: ReadonlyArray<
+    | { kind: "message"; message: Pick<ChatMessage, "role" | "streaming"> }
+    | { kind: "work" | "proposed-plan" }
+  >;
+}): boolean {
+  if (input.isWorking) {
+    return true;
+  }
+
+  return input.timelineEntries.some(
+    (entry) =>
+      entry.kind === "message" && entry.message.role === "assistant" && entry.message.streaming,
+  );
+}
+
 export function buildExpiredTerminalContextToastCopy(
   expiredTerminalContextCount: number,
   variant: "omitted" | "empty",

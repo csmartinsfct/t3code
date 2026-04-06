@@ -1,10 +1,14 @@
 import {
   ManagedRunDetail,
   ManagedRunError,
+  ManagedRunGetInferenceRecordInput,
   ManagedRunGetInput,
   ManagedRunGetLogsInput,
+  ManagedRunInferenceRecordDetail,
+  ManagedRunInferenceRecordSummary,
   ManagedRunLaunchProjectScriptInput,
   ManagedRunLaunchProjectScriptResult,
+  ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
   ManagedRunStreamEvent,
@@ -38,6 +42,12 @@ export interface ManagedRunServiceShape {
   readonly getLogs: (
     input: ManagedRunGetLogsInput,
   ) => Effect.Effect<ReadonlyArray<ManagedRunLogLine>, ManagedRunError>;
+  readonly listInferenceRecords: (
+    input: ManagedRunListInferenceRecordsInput,
+  ) => Effect.Effect<ReadonlyArray<ManagedRunInferenceRecordSummary>, ManagedRunError>;
+  readonly getInferenceRecord: (
+    input: ManagedRunGetInferenceRecordInput,
+  ) => Effect.Effect<ManagedRunInferenceRecordDetail, ManagedRunError>;
   readonly stop: (input: ManagedRunStopInput) => Effect.Effect<void, ManagedRunError>;
   readonly streamEvents: (projectId: ProjectId) => Stream.Stream<ManagedRunStreamEvent, never>;
   readonly issueMcpAccess: (

@@ -3,13 +3,15 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Option, Schema } from "effect";
 
 import {
+  ManagedRunDeclaredServiceSnapshot,
   ManagedRunEvidence,
   ManagedRunEvidenceSource,
   ManagedRunEvidenceType,
-  ManagedRunServiceSnapshot,
+  ManagedRunRuntimeService,
 } from "@t3tools/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  CreateManagedRunInferenceRecordInput,
   CreateManagedRunInput,
   ManagedRunEvidenceInsert,
   ManagedRunListByProjectInput,
@@ -18,19 +20,91 @@ import {
   ManagedRunRepository,
   type ManagedRunRepositoryShape,
   PersistedManagedRun,
+  PersistedManagedRunInferenceRecordDetail,
+  PersistedManagedRunInferenceRecordSummary,
   UpdateManagedRunInput,
 } from "../Services/ManagedRuns.ts";
 
 const ManagedRunRow = Schema.Struct({
   ...PersistedManagedRun.fields,
-  serviceStatuses: Schema.Array(ManagedRunServiceSnapshot).pipe(Schema.fromJsonString),
+  declaredServices: Schema.Array(ManagedRunDeclaredServiceSnapshot).pipe(Schema.fromJsonString),
+  runtimeServices: Schema.Array(ManagedRunRuntimeService).pipe(Schema.fromJsonString),
 });
+
 const ManagedRunEvidenceRow = Schema.Struct({
   type: ManagedRunEvidenceType,
   source: ManagedRunEvidenceSource,
   value: Schema.Unknown.pipe(Schema.fromJsonString),
   createdAt: Schema.String,
 });
+
+const ManagedRunInferenceRecordSummaryRow = Schema.Struct({
+  ...PersistedManagedRunInferenceRecordSummary.fields,
+});
+
+const ManagedRunInferenceRecordDetailRow = Schema.Struct({
+  ...PersistedManagedRunInferenceRecordDetail.fields,
+  declaredServices: Schema.Array(ManagedRunDeclaredServiceSnapshot).pipe(Schema.fromJsonString),
+  normalizedPayload: Schema.Unknown.pipe(Schema.fromJsonString),
+  rawPayload: Schema.Unknown.pipe(Schema.fromJsonString),
+  groundingFailures: Schema.Array(Schema.String).pipe(Schema.fromJsonString),
+  evidenceExcerpt: Schema.Array(Schema.String).pipe(Schema.fromJsonString),
+});
+
+const MANAGED_RUN_SELECT = `
+  run_id AS "runId",
+  project_id AS "projectId",
+  script_id AS "scriptId",
+  created_by_thread_id AS "createdByThreadId",
+  last_touched_by_thread_id AS "lastTouchedByThreadId",
+  terminal_thread_id AS "terminalThreadId",
+  terminal_id AS "terminalId",
+  cwd,
+  launch_mode AS "launchMode",
+  status,
+  detected_url AS "detectedUrl",
+  detected_port AS "detectedPort",
+  terminal_pid AS "terminalPid",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt",
+  started_at AS "startedAt",
+  completed_at AS "completedAt",
+  last_exit_code AS "lastExitCode",
+  last_exit_signal AS "lastExitSignal",
+  declared_services_json AS "declaredServices",
+  runtime_services_json AS "runtimeServices",
+  inference_status AS "inferenceStatus",
+  inference_updated_at AS "inferenceUpdatedAt",
+  inference_error AS "inferenceError",
+  last_error AS "lastError",
+  logs_expire_at AS "logsExpireAt"
+`;
+
+const INFERENCE_SUMMARY_SELECT = `
+  inference_id AS "inferenceId",
+  run_id AS "runId",
+  project_id AS "projectId",
+  script_id AS "scriptId",
+  NULL AS "scriptName",
+  cwd,
+  provider,
+  model,
+  status,
+  created_at AS "createdAt",
+  json_array_length(
+    json_extract(normalized_payload_json, '$.runtimeServices')
+  ) AS "runtimeServiceCount"
+`;
+
+const INFERENCE_DETAIL_SELECT = `
+  ${INFERENCE_SUMMARY_SELECT},
+  declared_services_json AS "declaredServices",
+  normalized_payload_json AS "normalizedPayload",
+  raw_payload_json AS "rawPayload",
+  inference_error AS "inferenceError",
+  grounding_failures_json AS "groundingFailures",
+  evidence_excerpt_json AS "evidenceExcerpt"
+`;
 
 const makeManagedRunRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -61,7 +135,11 @@ const makeManagedRunRepository = Effect.gen(function* () {
           last_exit_code,
           last_exit_signal,
           logs_expire_at,
-          services_json
+          declared_services_json,
+          runtime_services_json,
+          inference_status,
+          inference_updated_at,
+          inference_error
         )
         VALUES (
           ${row.runId},
@@ -85,7 +163,11 @@ const makeManagedRunRepository = Effect.gen(function* () {
           ${row.lastExitCode},
           ${row.lastExitSignal},
           ${row.logsExpireAt},
-          ${JSON.stringify(row.serviceStatuses)}
+          ${JSON.stringify(row.declaredServices)},
+          ${JSON.stringify(row.runtimeServices)},
+          ${row.inferenceStatus},
+          ${row.inferenceUpdatedAt},
+          ${row.inferenceError}
         )
         ON CONFLICT (run_id)
         DO UPDATE SET
@@ -109,7 +191,52 @@ const makeManagedRunRepository = Effect.gen(function* () {
           last_exit_code = excluded.last_exit_code,
           last_exit_signal = excluded.last_exit_signal,
           logs_expire_at = excluded.logs_expire_at,
-          services_json = excluded.services_json
+          declared_services_json = excluded.declared_services_json,
+          runtime_services_json = excluded.runtime_services_json,
+          inference_status = excluded.inference_status,
+          inference_updated_at = excluded.inference_updated_at,
+          inference_error = excluded.inference_error
+      `,
+  });
+
+  const writeInferenceRecord = SqlSchema.void({
+    Request: CreateManagedRunInferenceRecordInput,
+    execute: (row) =>
+      sql`
+        INSERT INTO managed_run_inferences (
+          inference_id,
+          run_id,
+          project_id,
+          script_id,
+          cwd,
+          provider,
+          model,
+          status,
+          declared_services_json,
+          normalized_payload_json,
+          raw_payload_json,
+          inference_error,
+          grounding_failures_json,
+          evidence_excerpt_json,
+          created_at
+        )
+        VALUES (
+          ${row.inferenceId},
+          ${row.runId},
+          ${row.projectId},
+          ${row.scriptId},
+          ${row.cwd},
+          ${row.provider},
+          ${row.model},
+          ${row.status},
+          ${JSON.stringify(row.declaredServices)},
+          ${JSON.stringify(row.normalizedPayload)},
+          ${JSON.stringify(row.rawPayload)},
+          ${row.inferenceError},
+          ${JSON.stringify(row.groundingFailures)},
+          ${JSON.stringify(row.evidenceExcerpt)},
+          ${row.createdAt}
+        )
       `,
   });
 
@@ -118,29 +245,7 @@ const makeManagedRunRepository = Effect.gen(function* () {
     Result: ManagedRunRow,
     execute: ({ runId }) =>
       sql`
-        SELECT
-          run_id AS "runId",
-          project_id AS "projectId",
-          script_id AS "scriptId",
-          created_by_thread_id AS "createdByThreadId",
-          last_touched_by_thread_id AS "lastTouchedByThreadId",
-          terminal_thread_id AS "terminalThreadId",
-          terminal_id AS "terminalId",
-          cwd,
-          launch_mode AS "launchMode",
-          status,
-          detected_url AS "detectedUrl",
-          detected_port AS "detectedPort",
-          terminal_pid AS "terminalPid",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          started_at AS "startedAt",
-          completed_at AS "completedAt",
-          last_exit_code AS "lastExitCode",
-          last_exit_signal AS "lastExitSignal",
-          last_error AS "lastError",
-          logs_expire_at AS "logsExpireAt",
-          services_json AS "serviceStatuses"
+        SELECT ${sql.literal(MANAGED_RUN_SELECT)}
         FROM managed_runs
         WHERE run_id = ${runId}
       `,
@@ -152,57 +257,13 @@ const makeManagedRunRepository = Effect.gen(function* () {
     execute: ({ projectId, includeHistorical }) =>
       includeHistorical
         ? sql`
-            SELECT
-              run_id AS "runId",
-              project_id AS "projectId",
-              script_id AS "scriptId",
-              created_by_thread_id AS "createdByThreadId",
-              last_touched_by_thread_id AS "lastTouchedByThreadId",
-              terminal_thread_id AS "terminalThreadId",
-              terminal_id AS "terminalId",
-              cwd,
-              launch_mode AS "launchMode",
-              status,
-              detected_url AS "detectedUrl",
-              detected_port AS "detectedPort",
-              terminal_pid AS "terminalPid",
-              created_at AS "createdAt",
-              updated_at AS "updatedAt",
-              started_at AS "startedAt",
-              completed_at AS "completedAt",
-              last_exit_code AS "lastExitCode",
-              last_exit_signal AS "lastExitSignal",
-              last_error AS "lastError",
-              logs_expire_at AS "logsExpireAt",
-              services_json AS "serviceStatuses"
+            SELECT ${sql.literal(MANAGED_RUN_SELECT)}
             FROM managed_runs
             WHERE project_id = ${projectId}
             ORDER BY updated_at DESC, created_at DESC
           `
         : sql`
-            SELECT
-              run_id AS "runId",
-              project_id AS "projectId",
-              script_id AS "scriptId",
-              created_by_thread_id AS "createdByThreadId",
-              last_touched_by_thread_id AS "lastTouchedByThreadId",
-              terminal_thread_id AS "terminalThreadId",
-              terminal_id AS "terminalId",
-              cwd,
-              launch_mode AS "launchMode",
-              status,
-              detected_url AS "detectedUrl",
-              detected_port AS "detectedPort",
-              terminal_pid AS "terminalPid",
-              created_at AS "createdAt",
-              updated_at AS "updatedAt",
-              started_at AS "startedAt",
-              completed_at AS "completedAt",
-              last_exit_code AS "lastExitCode",
-              last_exit_signal AS "lastExitSignal",
-              last_error AS "lastError",
-              logs_expire_at AS "logsExpireAt",
-              services_json AS "serviceStatuses"
+            SELECT ${sql.literal(MANAGED_RUN_SELECT)}
             FROM managed_runs
             WHERE project_id = ${projectId}
               AND (status = 'starting' OR status = 'running')
@@ -214,36 +275,79 @@ const makeManagedRunRepository = Effect.gen(function* () {
     Request: ManagedRunListByStatusesInput,
     Result: ManagedRunRow,
     execute: ({ statuses }) => {
-      const statusList = statuses.map((s) => `'${s}'`).join(", ");
+      const statusList = statuses.map((status) => `'${status}'`).join(", ");
       return sql`
-        SELECT
-          run_id AS "runId",
-          project_id AS "projectId",
-          script_id AS "scriptId",
-          created_by_thread_id AS "createdByThreadId",
-          last_touched_by_thread_id AS "lastTouchedByThreadId",
-          terminal_thread_id AS "terminalThreadId",
-          terminal_id AS "terminalId",
-          cwd,
-          launch_mode AS "launchMode",
-          status,
-          detected_url AS "detectedUrl",
-          detected_port AS "detectedPort",
-          terminal_pid AS "terminalPid",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          started_at AS "startedAt",
-          completed_at AS "completedAt",
-          last_exit_code AS "lastExitCode",
-          last_exit_signal AS "lastExitSignal",
-          last_error AS "lastError",
-          logs_expire_at AS "logsExpireAt",
-          services_json AS "serviceStatuses"
+        SELECT ${sql.literal(MANAGED_RUN_SELECT)}
         FROM managed_runs
         WHERE status IN (${sql.literal(statusList)})
         ORDER BY updated_at DESC, created_at DESC
       `;
     },
+  });
+
+  const listInferenceRecordRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      limit: Schema.optional(Schema.Int),
+      projectId: Schema.optional(Schema.String),
+      scriptId: Schema.optional(Schema.String),
+    }),
+    Result: ManagedRunInferenceRecordSummaryRow,
+    execute: ({ limit, projectId, scriptId }) =>
+      projectId && scriptId
+        ? sql`
+            SELECT ${sql.literal(INFERENCE_SUMMARY_SELECT)}
+            FROM managed_run_inferences
+            WHERE project_id = ${projectId}
+              AND script_id = ${scriptId}
+            ORDER BY created_at DESC
+            LIMIT ${limit ?? 100}
+          `
+        : projectId
+          ? sql`
+              SELECT ${sql.literal(INFERENCE_SUMMARY_SELECT)}
+              FROM managed_run_inferences
+              WHERE project_id = ${projectId}
+              ORDER BY created_at DESC
+              LIMIT ${limit ?? 100}
+            `
+          : scriptId
+            ? sql`
+                SELECT ${sql.literal(INFERENCE_SUMMARY_SELECT)}
+                FROM managed_run_inferences
+                WHERE script_id = ${scriptId}
+                ORDER BY created_at DESC
+                LIMIT ${limit ?? 100}
+              `
+            : sql`
+                SELECT ${sql.literal(INFERENCE_SUMMARY_SELECT)}
+                FROM managed_run_inferences
+                ORDER BY created_at DESC
+                LIMIT ${limit ?? 100}
+              `,
+  });
+
+  const getInferenceRecord = SqlSchema.findOneOption({
+    Request: Schema.Struct({ inferenceId: Schema.String }),
+    Result: ManagedRunInferenceRecordDetailRow,
+    execute: ({ inferenceId }) =>
+      sql`
+        SELECT ${sql.literal(INFERENCE_DETAIL_SELECT)}
+        FROM managed_run_inferences
+        WHERE inference_id = ${inferenceId}
+      `,
+  });
+
+  const getLatestInferenceRecord = SqlSchema.findOneOption({
+    Request: ManagedRunLookupInput,
+    Result: ManagedRunInferenceRecordDetailRow,
+    execute: ({ runId }) =>
+      sql`
+        SELECT ${sql.literal(INFERENCE_DETAIL_SELECT)}
+        FROM managed_run_inferences
+        WHERE run_id = ${runId}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
   });
 
   const insertEvidenceRow = SqlSchema.void({
@@ -275,11 +379,20 @@ const makeManagedRunRepository = Effect.gen(function* () {
         SELECT
           type,
           source,
-          value_json AS "value",
+          value_json AS value,
           created_at AS "createdAt"
         FROM managed_run_evidence
         WHERE run_id = ${runId}
-        ORDER BY row_id ASC
+        ORDER BY created_at ASC
+      `,
+  });
+
+  const deleteManagedRun = SqlSchema.void({
+    Request: ManagedRunLookupInput,
+    execute: ({ runId }) =>
+      sql`
+        DELETE FROM managed_runs
+        WHERE run_id = ${runId}
       `,
   });
 
@@ -310,24 +423,60 @@ const makeManagedRunRepository = Effect.gen(function* () {
       ),
     listEvidence: (input) =>
       listEvidenceRows(input).pipe(
-        Effect.mapError(toPersistenceSqlError("ManagedRunRepository.listEvidence:query")),
-        Effect.map((rows) =>
-          rows.map(
-            (row) =>
-              ({
-                type: row.type,
-                source: row.source,
-                value: row.value,
-                createdAt: row.createdAt,
-              }) as ManagedRunEvidence,
-          ),
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => {
+            switch (row.type) {
+              case "process":
+                return Schema.decodeEffect(ManagedRunEvidence)({
+                  type: "process",
+                  source: row.source,
+                  value: row.value as never,
+                  createdAt: row.createdAt,
+                });
+              case "url":
+                return Schema.decodeEffect(ManagedRunEvidence)({
+                  type: "url",
+                  source: row.source,
+                  value: row.value as never,
+                  createdAt: row.createdAt,
+                });
+              case "docker":
+                return Schema.decodeEffect(ManagedRunEvidence)({
+                  type: "docker",
+                  source: row.source,
+                  value: row.value as never,
+                  createdAt: row.createdAt,
+                });
+            }
+          }),
         ),
+        Effect.mapError(toPersistenceSqlError("ManagedRunRepository.listEvidence:query")),
       ),
-    deleteById: ({ runId }) =>
-      sql`DELETE FROM managed_run_evidence WHERE run_id = ${runId}`.pipe(
-        Effect.andThen(sql`DELETE FROM managed_runs WHERE run_id = ${runId}`),
-        Effect.asVoid,
+    deleteById: (input) =>
+      deleteManagedRun(input).pipe(
         Effect.mapError(toPersistenceSqlError("ManagedRunRepository.deleteById:query")),
+      ),
+    createInferenceRecord: (input) =>
+      writeInferenceRecord(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ManagedRunRepository.createInferenceRecord:query")),
+      ),
+    listInferenceRecords: (input) =>
+      listInferenceRecordRows({
+        ...(input.limit ? { limit: input.limit } : {}),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.scriptId ? { scriptId: input.scriptId } : {}),
+      }).pipe(
+        Effect.mapError(toPersistenceSqlError("ManagedRunRepository.listInferenceRecords:query")),
+      ),
+    getInferenceRecordById: (input) =>
+      getInferenceRecord(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ManagedRunRepository.getInferenceRecordById:query")),
+      ),
+    getLatestInferenceRecordByRunId: (input) =>
+      getLatestInferenceRecord(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ManagedRunRepository.getLatestInferenceRecordByRunId:query"),
+        ),
       ),
   } satisfies ManagedRunRepositoryShape;
 });

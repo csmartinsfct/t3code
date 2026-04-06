@@ -80,12 +80,10 @@ const makeScheduledTaskService = Effect.gen(function* () {
   const create: ScheduledTaskServiceShape["create"] = (input) =>
     Effect.gen(function* () {
       if (!validateCronExpression(input.cronExpression)) {
-        return yield* Effect.fail(
-          new ScheduledTaskValidationError({
-            field: "cronExpression",
-            message: "Invalid cron expression",
-          }),
-        );
+        return yield* new ScheduledTaskValidationError({
+          field: "cronExpression",
+          message: "Invalid cron expression",
+        });
       }
 
       const now = nowIso();
@@ -115,12 +113,10 @@ const makeScheduledTaskService = Effect.gen(function* () {
       const existing = yield* requireJob(input.jobId);
 
       if (input.cronExpression !== undefined && !validateCronExpression(input.cronExpression)) {
-        return yield* Effect.fail(
-          new ScheduledTaskValidationError({
-            field: "cronExpression",
-            message: "Invalid cron expression",
-          }),
-        );
+        return yield* new ScheduledTaskValidationError({
+          field: "cronExpression",
+          message: "Invalid cron expression",
+        });
       }
 
       const cronExpr = input.cronExpression ?? existing.cronExpression;

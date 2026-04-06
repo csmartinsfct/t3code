@@ -5,6 +5,7 @@ import {
   type GitRunStackedActionResult,
   type ManagedRunStreamEvent,
   type NativeApi,
+  type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
   WS_METHODS,
@@ -37,6 +38,10 @@ interface GitRunStackedActionOptions {
   readonly onProgress?: (event: GitActionProgressEvent) => void;
 }
 
+interface OrchestrationDomainEventSubscriptionOptions {
+  readonly getFromSequenceExclusive?: () => number | undefined;
+}
+
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly terminal: {
@@ -59,6 +64,10 @@ export interface WsRpcClient {
     readonly list: RpcUnaryMethod<typeof WS_METHODS.managedRunsList>;
     readonly get: RpcUnaryMethod<typeof WS_METHODS.managedRunsGet>;
     readonly getLogs: RpcUnaryMethod<typeof WS_METHODS.managedRunsGetLogs>;
+    readonly listInferenceRecords: RpcUnaryMethod<
+      typeof WS_METHODS.managedRunsListInferenceRecords
+    >;
+    readonly getInferenceRecord: RpcUnaryMethod<typeof WS_METHODS.managedRunsGetInferenceRecord>;
     readonly stop: RpcUnaryMethod<typeof WS_METHODS.managedRunsStop>;
     readonly onEvent: (
       projectId: string,
@@ -119,7 +128,10 @@ export interface WsRpcClient {
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
-    readonly onDomainEvent: RpcStreamMethod<typeof WS_METHODS.subscribeOrchestrationDomainEvents>;
+    readonly onDomainEvent: (
+      listener: (event: OrchestrationEvent) => void,
+      options?: OrchestrationDomainEventSubscriptionOptions,
+    ) => () => void;
   };
 }
 
@@ -168,6 +180,10 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       get: (input) => transport.request((client) => client[WS_METHODS.managedRunsGet](input)),
       getLogs: (input) =>
         transport.request((client) => client[WS_METHODS.managedRunsGetLogs](input)),
+      listInferenceRecords: (input) =>
+        transport.request((client) => client[WS_METHODS.managedRunsListInferenceRecords](input)),
+      getInferenceRecord: (input) =>
+        transport.request((client) => client[WS_METHODS.managedRunsGetInferenceRecord](input)),
       stop: (input) => transport.request((client) => client[WS_METHODS.managedRunsStop](input)),
       onEvent: (projectId, listener) =>
         transport.subscribe(
@@ -268,11 +284,13 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport
           .request((client) => client[ORCHESTRATION_WS_METHODS.replayEvents](input))
           .then((events) => [...events]),
-      onDomainEvent: (listener) =>
-        transport.subscribe(
-          (client) => client[WS_METHODS.subscribeOrchestrationDomainEvents]({}),
-          listener,
-        ),
+      onDomainEvent: (listener, options) =>
+        transport.subscribe((client) => {
+          const fromSequenceExclusive = options?.getFromSequenceExclusive?.();
+          return client[WS_METHODS.subscribeOrchestrationDomainEvents](
+            fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : {},
+          );
+        }, listener),
     },
   };
 }

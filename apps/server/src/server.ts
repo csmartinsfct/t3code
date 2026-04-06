@@ -46,6 +46,7 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
+import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
 import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
 import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
 import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
@@ -147,6 +148,7 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provide(PersistenceLayerLive),
     );
     const managedRunDeps = ManagedRunServiceLive.pipe(
+      Layer.provide(ManagedRunInferenceLive),
       Layer.provide(ManagedRunRepositoryLive),
       Layer.provide(TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive))),
       Layer.provide(snapshotQueryDeps),
@@ -206,6 +208,7 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(
     ManagedRunServiceLive.pipe(
+      Layer.provide(ManagedRunInferenceLive),
       Layer.provide(ManagedRunRepositoryLive),
       Layer.provide(TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive))),
       Layer.provide(

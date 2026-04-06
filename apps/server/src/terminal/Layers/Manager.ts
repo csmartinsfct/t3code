@@ -1420,6 +1420,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     ) {
       const key = toSessionKey(threadId, terminalId);
       const session = yield* getSession(threadId, terminalId);
+      const shouldPublishExited =
+        Option.isSome(session) &&
+        (session.value.status === "starting" || session.value.status === "running");
 
       if (Option.isSome(session)) {
         yield* stopProcess(session.value);
@@ -1439,6 +1442,17 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       if (deleteHistoryOnClose) {
         yield* deleteHistory(threadId, terminalId);
+      }
+
+      if (shouldPublishExited) {
+        yield* publishEvent({
+          type: "exited",
+          threadId,
+          terminalId,
+          createdAt: new Date().toISOString(),
+          exitCode: null,
+          exitSignal: null,
+        });
       }
     });
 

@@ -13,6 +13,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
+import { Route as SettingsRunsRouteImport } from './routes/settings.runs'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
@@ -36,6 +37,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
   id: '/scheduled-tasks',
   path: '/scheduled-tasks',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsRunsRoute = SettingsRunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/runs': typeof SettingsRunsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
   '/settings/scheduled-tasks/': typeof SettingsScheduledTasksIndexRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/runs': typeof SettingsRunsRoute
   '/': typeof ChatIndexRoute
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksIndexRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/runs': typeof SettingsRunsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
   '/_chat/': typeof ChatIndexRoute
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/runs'
     | '/settings/scheduled-tasks'
     | '/settings/scheduled-tasks/$taskId'
     | '/settings/scheduled-tasks/'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/runs'
     | '/'
     | '/settings/scheduled-tasks/$taskId'
     | '/settings/scheduled-tasks'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/_chat/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/runs'
     | '/settings/scheduled-tasks'
     | '/_chat/'
     | '/settings/scheduled-tasks/$taskId'
@@ -163,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/scheduled-tasks'
       fullPath: '/settings/scheduled-tasks'
       preLoaderRoute: typeof SettingsScheduledTasksRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/runs': {
+      id: '/settings/runs'
+      path: '/runs'
+      fullPath: '/settings/runs'
+      preLoaderRoute: typeof SettingsRunsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/general': {
@@ -234,12 +253,14 @@ const SettingsScheduledTasksRouteWithChildren =
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsRunsRoute: typeof SettingsRunsRoute
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRouteWithChildren
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsRunsRoute: SettingsRunsRoute,
   SettingsScheduledTasksRoute: SettingsScheduledTasksRouteWithChildren,
 }
 

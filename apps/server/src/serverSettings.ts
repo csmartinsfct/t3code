@@ -3,7 +3,7 @@
  *
  * Owns persistence, validation, and change notification of settings that affect
  * server-side behavior (binary paths, streaming mode, env mode, custom models,
- * text generation model selection).
+ * text generation model selection, managed run inference model selection).
  *
  * Follows the same pattern as `keybindings.ts`: JSON file + Cache + PubSub +
  * Semaphore + FileSystem.watch for concurrency and external edit detection.
@@ -93,35 +93,59 @@ const ServerSettingsJson = fromLenientJson(ServerSettings);
 
 const PROVIDER_ORDER: readonly BaseProviderKind[] = ["codex", "claudeAgent"];
 
-/**
- * Ensure the `textGenerationModelSelection` points to an enabled provider.
- * If the selected provider is disabled, fall back to the first enabled
- * provider with its default model.  This is applied at read-time so the
- * persisted preference is preserved for when a provider is re-enabled.
- */
-function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const selection = settings.textGenerationModelSelection;
+function resolveModelSelectionProvider(
+  settings: ServerSettings,
+  selection: ModelSelection,
+): ModelSelection {
   if (settings.providers[selection.provider].enabled) {
-    return settings;
+    return selection;
   }
 
   const fallback = PROVIDER_ORDER.find((p) => settings.providers[p].enabled);
   if (!fallback) {
-    // No providers enabled — return as-is; callers will report the error.
+    return selection;
+  }
+
+  return {
+    provider: fallback,
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
+  } as ModelSelection;
+}
+
+/**
+ * Ensure model-selection settings point to enabled providers.
+ * If the selected provider is disabled, fall back to the first enabled
+ * provider with its default model. This is applied at read-time so the
+ * persisted preference is preserved for when a provider is re-enabled.
+ */
+function resolveModelSelectionProviders(settings: ServerSettings): ServerSettings {
+  const nextTextGeneration = resolveModelSelectionProvider(
+    settings,
+    settings.textGenerationModelSelection,
+  );
+  const nextManagedRunInference = resolveModelSelectionProvider(
+    settings,
+    settings.managedRunInferenceModelSelection,
+  );
+  if (
+    Equal.equals(nextTextGeneration, settings.textGenerationModelSelection) &&
+    Equal.equals(nextManagedRunInference, settings.managedRunInferenceModelSelection)
+  ) {
     return settings;
   }
 
   return {
     ...settings,
-    textGenerationModelSelection: {
-      provider: fallback,
-      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
-    } as ModelSelection,
+    textGenerationModelSelection: nextTextGeneration,
+    managedRunInferenceModelSelection: nextManagedRunInference,
   };
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
-const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set(["textGenerationModelSelection"]);
+const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
+  "textGenerationModelSelection",
+  "managedRunInferenceModelSelection",
+]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
   if (Array.isArray(current) || Array.isArray(defaults)) {
@@ -309,7 +333,7 @@ const makeServerSettings = Effect.gen(function* () {
   return {
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getSettingsFromCache.pipe(Effect.map(resolveTextGenerationProvider)),
+    getSettings: getSettingsFromCache.pipe(Effect.map(resolveModelSelectionProviders)),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
@@ -327,11 +351,11 @@ const makeServerSettings = Effect.gen(function* () {
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          return resolveTextGenerationProvider(next);
+          return resolveModelSelectionProviders(next);
         }),
       ),
     get streamChanges() {
-      return Stream.fromPubSub(changesPubSub).pipe(Stream.map(resolveTextGenerationProvider));
+      return Stream.fromPubSub(changesPubSub).pipe(Stream.map(resolveModelSelectionProviders));
     },
   } satisfies ServerSettingsShape;
 });

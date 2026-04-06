@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArchiveX,
+  Trash2Icon,
   ChevronDownIcon,
   InfoIcon,
   LoaderIcon,
@@ -600,6 +601,26 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const managedRunInferenceModelSelection = resolveAppModelSelectionState(
+    {
+      ...settings,
+      textGenerationModelSelection: settings.managedRunInferenceModelSelection,
+    },
+    serverProviders,
+  );
+  const managedRunInferenceProvider = managedRunInferenceModelSelection.provider;
+  const managedRunInferenceModel = managedRunInferenceModelSelection.model;
+  const managedRunInferenceModelOptions = managedRunInferenceModelSelection.options;
+  const managedRunInferenceOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    managedRunInferenceProvider,
+    managedRunInferenceModel,
+  );
+  const isManagedRunInferenceModelDirty = !Equal.equals(
+    settings.managedRunInferenceModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.managedRunInferenceModelSelection ?? null,
+  );
 
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
@@ -1097,6 +1118,81 @@ export function GeneralSettingsPanel() {
             </div>
           }
         />
+
+        <SettingsRow
+          title="Run inference model"
+          description="Configure the model used to infer runtime services for managed runs before health validation begins."
+          resetAction={
+            isManagedRunInferenceModelDirty ? (
+              <SettingResetButton
+                label="run inference model"
+                onClick={() =>
+                  updateSettings({
+                    managedRunInferenceModelSelection:
+                      DEFAULT_UNIFIED_SETTINGS.managedRunInferenceModelSelection,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                provider={managedRunInferenceProvider}
+                model={managedRunInferenceModel}
+                lockedProvider={null}
+                providers={serverProviders}
+                modelOptionsByProvider={managedRunInferenceOptionsByProvider}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onProviderModelChange={(provider, model) => {
+                  updateSettings({
+                    managedRunInferenceModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: baseProviderKind(provider),
+                          model,
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={managedRunInferenceProvider}
+                models={
+                  serverProviders.find(
+                    (provider) => provider.provider === managedRunInferenceProvider,
+                  )?.models ?? []
+                }
+                model={managedRunInferenceModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={managedRunInferenceModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    managedRunInferenceModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: managedRunInferenceProvider,
+                          model: managedRunInferenceModel,
+                          ...(nextOptions ? { options: nextOptions } : {}),
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -1509,7 +1605,8 @@ export function GeneralSettingsPanel() {
 export function ArchivedThreadsPanel() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
+  const { unarchiveThread, deleteThread, confirmAndDeleteThread } = useThreadActions();
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const archivedGroups = useMemo(() => {
     const projectById = new Map(projects.map((project) => [project.id, project] as const));
     return [...projectById.values()]
@@ -1525,6 +1622,42 @@ export function ArchivedThreadsPanel() {
       }))
       .filter((group) => group.threads.length > 0);
   }, [projects, threads]);
+
+  const allArchivedThreadIds = useMemo(
+    () => archivedGroups.flatMap(({ threads: t }) => t.map((thread) => thread.id)),
+    [archivedGroups],
+  );
+
+  const handleDeleteAllArchived = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) return;
+    const count = allArchivedThreadIds.length;
+    if (count === 0) return;
+
+    const confirmed = await api.dialogs.confirm(
+      [
+        `Delete ${count} archived thread${count === 1 ? "" : "s"}?`,
+        "This permanently clears conversation history for these threads.",
+      ].join("\n"),
+    );
+    if (!confirmed) return;
+
+    setIsDeletingAll(true);
+    try {
+      const deletedIds = new Set<ThreadId>(allArchivedThreadIds);
+      for (const id of allArchivedThreadIds) {
+        await deleteThread(id, { deletedThreadIds: deletedIds });
+      }
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Failed to delete archived threads",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    } finally {
+      setIsDeletingAll(false);
+    }
+  }, [allArchivedThreadIds, deleteThread]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {
@@ -1573,54 +1706,80 @@ export function ArchivedThreadsPanel() {
           </Empty>
         </SettingsSection>
       ) : (
-        archivedGroups.map(({ project, threads: projectThreads }) => (
+        <>
           <SettingsSection
-            key={project.id}
-            title={project.name}
-            icon={<ProjectFavicon cwd={project.cwd} />}
-          >
-            {projectThreads.map((thread) => (
-              <div
-                key={thread.id}
-                className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void handleArchivedThreadContextMenu(thread.id, {
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
-                }}
+            title="Archived threads"
+            headerAction={
+              <Button
+                type="button"
+                variant="destructive-outline"
+                size="sm"
+                className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                disabled={isDeletingAll}
+                onClick={() => void handleDeleteAllArchived()}
               >
-                <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                  onClick={() =>
-                    void unarchiveThread(thread.id).catch((error) => {
-                      toastManager.add({
-                        type: "error",
-                        title: "Failed to unarchive thread",
-                        description: error instanceof Error ? error.message : "An error occurred.",
-                      });
-                    })
-                  }
-                >
-                  <ArchiveX className="size-3.5" />
-                  <span>Unarchive</span>
-                </Button>
-              </div>
-            ))}
+                {isDeletingAll ? (
+                  <LoaderIcon className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2Icon className="size-3.5" />
+                )}
+                <span>{isDeletingAll ? "Deleting..." : "Delete all"}</span>
+              </Button>
+            }
+          >
+            <div />
           </SettingsSection>
-        ))
+          {archivedGroups.map(({ project, threads: projectThreads }) => (
+            <SettingsSection
+              key={project.id}
+              title={project.name}
+              icon={<ProjectFavicon cwd={project.cwd} />}
+            >
+              {projectThreads.map((thread) => (
+                <div
+                  key={thread.id}
+                  className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    void handleArchivedThreadContextMenu(thread.id, {
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                      {" \u00b7 Created "}
+                      {formatRelativeTimeLabel(thread.createdAt)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                    disabled={isDeletingAll}
+                    onClick={() =>
+                      void unarchiveThread(thread.id).catch((error) => {
+                        toastManager.add({
+                          type: "error",
+                          title: "Failed to unarchive thread",
+                          description:
+                            error instanceof Error ? error.message : "An error occurred.",
+                        });
+                      })
+                    }
+                  >
+                    <ArchiveX className="size-3.5" />
+                    <span>Unarchive</span>
+                  </Button>
+                </div>
+              ))}
+            </SettingsSection>
+          ))}
+        </>
       )}
     </SettingsPageContainer>
   );

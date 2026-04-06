@@ -1,7 +1,11 @@
 import {
   ManagedRunDetail,
+  ManagedRunInferenceRecordDetail,
+  ManagedRunInferenceRecordSummary,
   ManagedRunEvidence,
+  ManagedRunGetInferenceRecordInput,
   ManagedRunId,
+  ManagedRunListInferenceRecordsInput,
   ManagedRunStatus,
   ManagedRunSummary,
   ProjectId,
@@ -46,6 +50,17 @@ export const ManagedRunEvidenceInsert = Schema.Struct({
 });
 export type ManagedRunEvidenceInsert = typeof ManagedRunEvidenceInsert.Type;
 
+export const PersistedManagedRunInferenceRecordSummary = ManagedRunInferenceRecordSummary;
+export type PersistedManagedRunInferenceRecordSummary =
+  typeof PersistedManagedRunInferenceRecordSummary.Type;
+
+export const PersistedManagedRunInferenceRecordDetail = ManagedRunInferenceRecordDetail;
+export type PersistedManagedRunInferenceRecordDetail =
+  typeof PersistedManagedRunInferenceRecordDetail.Type;
+
+export const CreateManagedRunInferenceRecordInput = ManagedRunInferenceRecordDetail;
+export type CreateManagedRunInferenceRecordInput = typeof CreateManagedRunInferenceRecordInput.Type;
+
 export interface ManagedRunRepositoryShape {
   readonly create: (input: CreateManagedRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly update: (input: UpdateManagedRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
@@ -67,6 +82,27 @@ export interface ManagedRunRepositoryShape {
   readonly deleteById: (
     input: ManagedRunLookupInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly createInferenceRecord: (
+    input: CreateManagedRunInferenceRecordInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly listInferenceRecords: (
+    input: ManagedRunListInferenceRecordsInput,
+  ) => Effect.Effect<
+    ReadonlyArray<PersistedManagedRunInferenceRecordSummary>,
+    ProjectionRepositoryError
+  >;
+  readonly getInferenceRecordById: (
+    input: ManagedRunGetInferenceRecordInput,
+  ) => Effect.Effect<
+    Option.Option<PersistedManagedRunInferenceRecordDetail>,
+    ProjectionRepositoryError
+  >;
+  readonly getLatestInferenceRecordByRunId: (
+    input: ManagedRunLookupInput,
+  ) => Effect.Effect<
+    Option.Option<PersistedManagedRunInferenceRecordDetail>,
+    ProjectionRepositoryError
+  >;
 }
 
 export class ManagedRunRepository extends ServiceMap.Service<

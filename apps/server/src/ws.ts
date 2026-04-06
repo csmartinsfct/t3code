@@ -250,12 +250,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           ),
           { "rpc.aggregate": "orchestration" },
         ),
-      [WS_METHODS.subscribeOrchestrationDomainEvents]: (_input) =>
+      [WS_METHODS.subscribeOrchestrationDomainEvents]: (input) =>
         observeRpcStreamEffect(
           WS_METHODS.subscribeOrchestrationDomainEvents,
           Effect.gen(function* () {
             const snapshot = yield* orchestrationEngine.getReadModel();
-            const fromSequenceExclusive = snapshot.snapshotSequence;
+            const fromSequenceExclusive = input.fromSequenceExclusive ?? snapshot.snapshotSequence;
             const replayEvents: Array<OrchestrationEvent> = yield* Stream.runCollect(
               orchestrationEngine.readEvents(fromSequenceExclusive),
             ).pipe(
@@ -535,6 +535,18 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.managedRunsGetLogs, managedRuns.getLogs(input), {
           "rpc.aggregate": "managed-runs",
         }),
+      [WS_METHODS.managedRunsListInferenceRecords]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.managedRunsListInferenceRecords,
+          managedRuns.listInferenceRecords(input),
+          { "rpc.aggregate": "managed-runs" },
+        ),
+      [WS_METHODS.managedRunsGetInferenceRecord]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.managedRunsGetInferenceRecord,
+          managedRuns.getInferenceRecord(input),
+          { "rpc.aggregate": "managed-runs" },
+        ),
       [WS_METHODS.managedRunsStop]: (input) =>
         observeRpcEffect(WS_METHODS.managedRunsStop, managedRuns.stop(input), {
           "rpc.aggregate": "managed-runs",

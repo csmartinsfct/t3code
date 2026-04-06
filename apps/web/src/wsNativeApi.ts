@@ -52,6 +52,8 @@ export function createWsNativeApi(): NativeApi {
       list: rpcClient.managedRuns.list,
       get: rpcClient.managedRuns.get,
       getLogs: rpcClient.managedRuns.getLogs,
+      listInferenceRecords: rpcClient.managedRuns.listInferenceRecords,
+      getInferenceRecord: rpcClient.managedRuns.getInferenceRecord,
       stop: rpcClient.managedRuns.stop,
       onEvent: (projectId, callback) => rpcClient.managedRuns.onEvent(projectId, callback),
     },

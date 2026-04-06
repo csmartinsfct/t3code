@@ -669,6 +669,26 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
+  it.effect("emits exited event when closing a running terminal", () =>
+    Effect.gen(function* () {
+      const { manager, getEvents } = yield* createManager();
+
+      yield* manager.open(openInput());
+      yield* manager.close({ threadId: "thread-1" });
+
+      const exitedEvents = (yield* getEvents).filter((event) => event.type === "exited");
+      expect(exitedEvents).toEqual([
+        expect.objectContaining({
+          type: "exited",
+          threadId: "thread-1",
+          terminalId: "default",
+          exitCode: null,
+          exitSignal: null,
+        }),
+      ]);
+    }),
+  );
+
   it.effect("escalates terminal shutdown to SIGKILL when process does not exit in time", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager(5, { processKillGraceMs: 10 });
