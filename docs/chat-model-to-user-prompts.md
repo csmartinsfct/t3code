@@ -37,31 +37,31 @@ MCP tool: propose_project_script (managedRuns/http.ts)
 - MCP tool: `apps/server/src/managedRuns/http.ts` → `propose_project_script`
 - Handler: `apps/web/src/components/ChatView.tsx` → `handleProposeAction`
 
-### Propose Cron Job (`t3:propose-cron`)
+### Propose Scheduled Task (`t3:propose-scheduled-task`)
 
-Lets the model propose a scheduled cron job for the user to review.
+Lets the model propose a scheduled task for the user to review.
 
 **Data flow:**
 
 ````
-MCP tool: propose_cron_job (cronJobs/http.ts)
-  → model outputs ```t3:propose-cron ... ``` code block
-  → ChatMarkdown.tsx detects via isProposeCronJobBlock() (lib/proposeCronJobParser.ts)
-  → renders ProposeCronJobCard (components/chat/ProposeCronJobCard.tsx)
+MCP tool: propose_scheduled_task (scheduledTasks/http.ts)
+  → model outputs ```t3:propose-scheduled-task ... ``` code block
+  → ChatMarkdown.tsx detects via isProposeScheduledTaskBlock() (lib/proposeScheduledTaskParser.ts)
+  → renders ProposeScheduledTaskCard (components/chat/ProposeScheduledTaskCard.tsx)
   → user clicks Accept/Reject
-  → ChatMarkdown fires onProposeCronJob callback
+  → ChatMarkdown fires onProposeScheduledTask callback
   → MessagesTimeline.tsx passes it up
-  → ChatView.tsx handleProposeCronJob():
-      accept: calls api.cronJobs.create() + thread.turn.start with "Cron job added: ..."
-      reject: dispatches thread.turn.start with "User rejected the proposed cron job."
+  → ChatView.tsx handleProposeScheduledTask():
+      accept: calls api.scheduledTasks.create() + thread.turn.start with "Scheduled task added: ..."
+      reject: dispatches thread.turn.start with "User rejected the proposed scheduled task."
 ````
 
 **Key files:**
 
-- Parser: `apps/web/src/lib/proposeCronJobParser.ts`
-- Card: `apps/web/src/components/chat/ProposeCronJobCard.tsx`
-- MCP tool: `apps/server/src/cronJobs/http.ts` → `propose_cron_job`
-- Handler: `apps/web/src/components/ChatView.tsx` → `handleProposeCronJob`
+- Parser: `apps/web/src/lib/proposeScheduledTaskParser.ts`
+- Card: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx`
+- MCP tool: `apps/server/src/scheduledTasks/http.ts` → `propose_scheduled_task`
+- Handler: `apps/web/src/components/ChatView.tsx` → `handleProposeScheduledTask`
 
 ### Adding a new code block card
 
@@ -145,7 +145,7 @@ ChatView.tsx
 ├── MessagesTimeline.tsx
 │   ├── ChatMarkdown.tsx
 │   │   ├── ProposeActionCard.tsx      (t3:propose-action)
-│   │   └── ProposeCronJobCard.tsx     (t3:propose-cron)
+│   │   └── ProposeScheduledTaskCard.tsx (t3:propose-scheduled-task)
 │   └── ProposedPlanCard.tsx           (proposed-plan timeline entry)
 ├── PlanSidebar.tsx
 └── Composer Footer

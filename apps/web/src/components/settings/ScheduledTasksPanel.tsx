@@ -1,4 +1,4 @@
-import type { CronJob, CronJobId } from "@t3tools/contracts";
+import type { ScheduledTask, ScheduledTaskId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -7,7 +7,7 @@ import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
-import { CronJobDialog } from "./CronJobDialog";
+import { ScheduledTaskDialog } from "./ScheduledTaskDialog";
 
 function cronHumanReadable(cron: string): string {
   const parts = cron.trim().split(/\s+/);
@@ -46,9 +46,9 @@ function formatRelativeDate(iso: string | null): string {
   return date.toLocaleDateString();
 }
 
-export function CronJobsPanel() {
+export function ScheduledTasksPanel() {
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<ReadonlyArray<CronJob>>([]);
+  const [jobs, setJobs] = useState<ReadonlyArray<ScheduledTask>>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [projects, setProjects] = useState<
@@ -59,7 +59,7 @@ export function CronJobsPanel() {
     try {
       const api = ensureNativeApi();
       const [jobsList, snapshot] = await Promise.all([
-        api.cronJobs.list(),
+        api.scheduledTasks.list(),
         api.orchestration.getSnapshot(),
       ]);
       setJobs(jobsList);
@@ -71,7 +71,7 @@ export function CronJobsPanel() {
         })),
       );
     } catch (error) {
-      console.error("Failed to fetch cron jobs:", error);
+      console.error("Failed to fetch scheduled tasks:", error);
     } finally {
       setLoading(false);
     }
@@ -81,17 +81,17 @@ export function CronJobsPanel() {
     void fetchJobs();
   }, [fetchJobs]);
 
-  const handleToggle = useCallback(async (jobId: CronJobId, enabled: boolean) => {
+  const handleToggle = useCallback(async (jobId: ScheduledTaskId, enabled: boolean) => {
     try {
       const api = ensureNativeApi();
-      const updated = await api.cronJobs.toggle({ jobId, enabled });
+      const updated = await api.scheduledTasks.toggle({ jobId, enabled });
       setJobs((current) => current.map((j) => (j.jobId === updated.jobId ? updated : j)));
     } catch (error) {
-      console.error("Failed to toggle cron job:", error);
+      console.error("Failed to toggle scheduled task:", error);
     }
   }, []);
 
-  const handleJobSaved = useCallback((job: CronJob) => {
+  const handleJobSaved = useCallback((job: ScheduledTask) => {
     setJobs((current) => {
       const existing = current.findIndex((j) => j.jobId === job.jobId);
       if (existing >= 0) {
@@ -108,14 +108,14 @@ export function CronJobsPanel() {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-5 py-8">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-foreground">Cron Jobs</h2>
+            <h2 className="text-sm font-medium text-foreground">Scheduled Tasks</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Schedule recurring tasks that create new threads automatically.
             </p>
           </div>
           <Button size="xs" variant="outline" onClick={() => setDialogOpen(true)}>
             <PlusIcon className="size-3.5" />
-            Add job
+            Add task
           </Button>
         </div>
 
@@ -124,7 +124,7 @@ export function CronJobsPanel() {
         ) : jobs.length === 0 ? (
           <div className="rounded-md border border-dashed border-border px-6 py-10 text-center">
             <p className="text-xs text-muted-foreground">
-              No cron jobs configured. Create one to automate thread creation.
+              No scheduled tasks configured. Create one to automate thread creation.
             </p>
           </div>
         ) : (
@@ -136,8 +136,8 @@ export function CronJobsPanel() {
                 className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
                 onClick={() =>
                   void navigate({
-                    to: "/settings/cron/$jobId",
-                    params: { jobId: job.jobId },
+                    to: "/settings/scheduled-tasks/$taskId",
+                    params: { taskId: job.jobId },
                   })
                 }
               >
@@ -167,14 +167,14 @@ export function CronJobsPanel() {
         )}
       </div>
 
-      <CronJobDialog
+      <ScheduledTaskDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editingJob={null}
         projects={projects}
         onSave={handleJobSaved}
-        onCreateJob={(input) => ensureNativeApi().cronJobs.create(input)}
-        onUpdateJob={(input) => ensureNativeApi().cronJobs.update(input)}
+        onCreateJob={(input) => ensureNativeApi().scheduledTasks.create(input)}
+        onUpdateJob={(input) => ensureNativeApi().scheduledTasks.update(input)}
       />
     </div>
   );

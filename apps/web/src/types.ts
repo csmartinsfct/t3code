@@ -88,6 +88,12 @@ export interface Project {
   scripts: ProjectScript[];
 }
 
+export interface ThreadInitialDraft {
+  prompt?: string | undefined;
+  skillIds?: readonly string[] | undefined;
+  autoSend?: boolean | undefined;
+}
+
 export interface Thread {
   id: ThreadId;
   codexThreadId: string | null;
@@ -109,6 +115,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  initialDraft?: ThreadInitialDraft | undefined;
 }
 
 export interface SidebarThreadSummary {

@@ -12,7 +12,10 @@ import {
   SidebarSeparator,
 } from "../ui/sidebar";
 
-export type SettingsSectionPath = "/settings/general" | "/settings/archived" | "/settings/cron";
+export type SettingsSectionPath =
+  | "/settings/general"
+  | "/settings/archived"
+  | "/settings/scheduled-tasks";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
@@ -20,7 +23,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
 }> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
-  { label: "Cron Jobs", to: "/settings/cron", icon: ClockIcon },
+  { label: "Scheduled Tasks", to: "/settings/scheduled-tasks", icon: ClockIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 

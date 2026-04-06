@@ -4,12 +4,12 @@ import { Cause, Effect, Exit, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { z } from "zod";
 
-import type { CronJobError, ProjectId, ThreadId } from "@t3tools/contracts";
-import { CronJobId } from "@t3tools/contracts";
+import type { ScheduledTaskError, ProjectId, ThreadId } from "@t3tools/contracts";
+import { ScheduledTaskId } from "@t3tools/contracts";
 import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
-import { CronJobService, type CronJobServiceShape } from "./Services/CronJobs";
+import { ScheduledTaskService, type ScheduledTaskServiceShape } from "./Services/ScheduledTasks";
 
-const MCP_ROUTE = "/mcp/cron-jobs";
+const MCP_ROUTE = "/mcp/scheduled-tasks";
 
 const DEV_BYPASS_TOKEN = process.env.NODE_ENV === "production" ? null : "t3-dev-bypass";
 
@@ -18,7 +18,7 @@ function responseHeaders(response: Response): Record<string, string> {
 }
 
 type WorkItem = {
-  effect: Effect.Effect<unknown, CronJobError, never>;
+  effect: Effect.Effect<unknown, ScheduledTaskError, never>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 };
@@ -28,7 +28,7 @@ function createEffectBridge() {
   let waitResolve: (() => void) | null = null;
 
   return {
-    run: <A>(effect: Effect.Effect<A, CronJobError, never>): Promise<A> =>
+    run: <A>(effect: Effect.Effect<A, ScheduledTaskError, never>): Promise<A> =>
       new Promise<A>((resolve, reject) => {
         queue.push({ effect, resolve: resolve as (v: unknown) => void, reject });
         waitResolve?.();
@@ -69,74 +69,76 @@ function mcpError(message: string) {
   };
 }
 
-function createCronJobsMcpServer(
-  cronJobs: CronJobServiceShape,
+function createScheduledTasksMcpServer(
+  scheduledTasks: ScheduledTaskServiceShape,
   bridge: ReturnType<typeof createEffectBridge>,
 ) {
   const server = new McpServer(
-    { name: "t3-cron-jobs", version: "0.0.1" },
+    { name: "t3-scheduled-tasks", version: "0.0.1" },
     { capabilities: { tools: {} } },
   );
 
   server.registerTool(
-    "list_cron_jobs",
+    "list_scheduled_tasks",
     {
-      title: "List Cron Jobs",
-      description: "List all scheduled cron jobs.",
+      title: "List Scheduled Tasks",
+      description: "List all scheduled tasks.",
       inputSchema: {},
     },
     async () => {
       try {
-        const jobs = await bridge.run(cronJobs.list());
+        const jobs = await bridge.run(scheduledTasks.list());
         return { content: [{ type: "text" as const, text: JSON.stringify(jobs, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to list cron jobs: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to list scheduled tasks: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "get_cron_job",
+    "get_scheduled_task",
     {
-      title: "Get Cron Job",
-      description: "Get details of a specific cron job by ID.",
-      inputSchema: { jobId: z.string().describe("The cron job ID.") },
+      title: "Get Scheduled Task",
+      description: "Get details of a specific scheduled task by ID.",
+      inputSchema: { jobId: z.string().describe("The scheduled task ID.") },
     },
     async ({ jobId }) => {
       try {
-        const job = await bridge.run(cronJobs.get({ jobId: CronJobId.makeUnsafe(jobId) }));
+        const job = await bridge.run(
+          scheduledTasks.get({ jobId: ScheduledTaskId.makeUnsafe(jobId) }),
+        );
         return { content: [{ type: "text" as const, text: JSON.stringify(job, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to get cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to get scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "create_cron_job",
+    "create_scheduled_task",
     {
-      title: "Create Cron Job",
+      title: "Create Scheduled Task",
       description:
-        "Create a new scheduled cron job directly. For proposing a job to the user for review, " +
-        "use propose_cron_job instead.",
+        "Create a new scheduled task directly. For proposing a task to the user for review, " +
+        "use propose_scheduled_task instead.",
       inputSchema: {
-        name: z.string().describe("Human-readable name for the cron job."),
+        name: z.string().describe("Human-readable name for the scheduled task."),
         description: z.string().optional().describe("Optional description."),
         cronExpression: z.string().describe("Standard 5-field cron expression."),
         projectId: z.string().describe("The project ID for thread creation."),
-        skillId: z.string().optional().describe("Optional skill ID to attach."),
+        skillIds: z.array(z.string()).optional().describe("Optional skill IDs to attach."),
         prompt: z.string().optional().describe("Optional prompt to preload."),
         autoSend: z.boolean().optional().describe("Auto-send the prompt. Default: false."),
       },
     },
-    async ({ name, description, cronExpression, projectId, skillId, prompt, autoSend }) => {
+    async ({ name, description, cronExpression, projectId, skillIds, prompt, autoSend }) => {
       try {
         const job = await bridge.run(
-          cronJobs.create({
+          scheduledTasks.create({
             name,
             description: description ?? null,
             cronExpression,
@@ -144,7 +146,7 @@ function createCronJobsMcpServer(
             jobType: "new_thread",
             newThreadConfig: {
               projectId: projectId as ProjectId,
-              ...(skillId ? { skillId } : {}),
+              ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
               ...(prompt ? { prompt } : {}),
               autoSend: autoSend ?? false,
             },
@@ -153,25 +155,25 @@ function createCronJobsMcpServer(
         return { content: [{ type: "text" as const, text: JSON.stringify(job, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to create cron job: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to create scheduled task: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "update_cron_job",
+    "update_scheduled_task",
     {
-      title: "Update Cron Job",
-      description: "Update an existing cron job.",
+      title: "Update Scheduled Task",
+      description: "Update an existing scheduled task.",
       inputSchema: {
-        jobId: z.string().describe("The cron job ID to update."),
+        jobId: z.string().describe("The scheduled task ID to update."),
         name: z.string().optional().describe("New name."),
         description: z.string().optional().nullable().describe("New description."),
         cronExpression: z.string().optional().describe("New cron expression."),
         enabled: z.boolean().optional().describe("Enable or disable."),
         projectId: z.string().optional().describe("New project ID."),
-        skillId: z.string().optional().describe("New skill ID."),
+        skillIds: z.array(z.string()).optional().describe("New skill IDs."),
         prompt: z.string().optional().describe("New prompt."),
         autoSend: z.boolean().optional().describe("New auto-send setting."),
       },
@@ -183,26 +185,26 @@ function createCronJobsMcpServer(
       cronExpression,
       enabled,
       projectId,
-      skillId,
+      skillIds,
       prompt,
       autoSend,
     }) => {
       try {
         const newThreadConfig =
           projectId !== undefined ||
-          skillId !== undefined ||
+          skillIds !== undefined ||
           prompt !== undefined ||
           autoSend !== undefined
             ? {
                 ...(projectId ? { projectId: projectId as ProjectId } : {}),
-                ...(skillId ? { skillId } : {}),
+                ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
                 ...(prompt ? { prompt } : {}),
                 ...(autoSend !== undefined ? { autoSend } : {}),
               }
             : undefined;
         const job = await bridge.run(
-          cronJobs.update({
-            jobId: CronJobId.makeUnsafe(jobId),
+          scheduledTasks.update({
+            jobId: ScheduledTaskId.makeUnsafe(jobId),
             ...(name ? { name } : {}),
             ...(description !== undefined ? { description } : {}),
             ...(cronExpression ? { cronExpression } : {}),
@@ -213,130 +215,132 @@ function createCronJobsMcpServer(
         return { content: [{ type: "text" as const, text: JSON.stringify(job, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to update cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to update scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "delete_cron_job",
+    "delete_scheduled_task",
     {
-      title: "Delete Cron Job",
-      description: "Delete a cron job and all its run history.",
-      inputSchema: { jobId: z.string().describe("The cron job ID to delete.") },
+      title: "Delete Scheduled Task",
+      description: "Delete a scheduled task and all its run history.",
+      inputSchema: { jobId: z.string().describe("The scheduled task ID to delete.") },
     },
     async ({ jobId }) => {
       try {
-        await bridge.run(cronJobs.delete({ jobId: CronJobId.makeUnsafe(jobId) }));
+        await bridge.run(scheduledTasks.delete({ jobId: ScheduledTaskId.makeUnsafe(jobId) }));
         return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
       } catch (error) {
         return mcpError(
-          `Failed to delete cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to delete scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "toggle_cron_job",
+    "toggle_scheduled_task",
     {
-      title: "Toggle Cron Job",
-      description: "Enable or disable a cron job.",
+      title: "Toggle Scheduled Task",
+      description: "Enable or disable a scheduled task.",
       inputSchema: {
-        jobId: z.string().describe("The cron job ID."),
-        enabled: z.boolean().describe("Whether to enable or disable the job."),
+        jobId: z.string().describe("The scheduled task ID."),
+        enabled: z.boolean().describe("Whether to enable or disable the task."),
       },
     },
     async ({ jobId, enabled }) => {
       try {
         const job = await bridge.run(
-          cronJobs.toggle({ jobId: CronJobId.makeUnsafe(jobId), enabled }),
+          scheduledTasks.toggle({ jobId: ScheduledTaskId.makeUnsafe(jobId), enabled }),
         );
         return { content: [{ type: "text" as const, text: JSON.stringify(job, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to toggle cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to toggle scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "run_cron_job_now",
+    "run_scheduled_task_now",
     {
-      title: "Run Cron Job Now",
-      description: "Manually trigger a cron job to run immediately.",
-      inputSchema: { jobId: z.string().describe("The cron job ID to run.") },
+      title: "Run Scheduled Task Now",
+      description: "Manually trigger a scheduled task to run immediately.",
+      inputSchema: { jobId: z.string().describe("The scheduled task ID to run.") },
     },
     async ({ jobId }) => {
       try {
-        const run = await bridge.run(cronJobs.runNow({ jobId: CronJobId.makeUnsafe(jobId) }));
+        const run = await bridge.run(
+          scheduledTasks.runNow({ jobId: ScheduledTaskId.makeUnsafe(jobId) }),
+        );
         return { content: [{ type: "text" as const, text: JSON.stringify(run, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to run cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to run scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "list_cron_job_runs",
+    "list_scheduled_task_runs",
     {
-      title: "List Cron Job Runs",
-      description: "List run history for a cron job.",
+      title: "List Scheduled Task Runs",
+      description: "List run history for a scheduled task.",
       inputSchema: {
-        jobId: z.string().describe("The cron job ID."),
+        jobId: z.string().describe("The scheduled task ID."),
         limit: z.number().int().positive().optional().describe("Max runs to return."),
       },
     },
     async ({ jobId, limit }) => {
       try {
         const runs = await bridge.run(
-          cronJobs.listRuns({
-            jobId: CronJobId.makeUnsafe(jobId),
+          scheduledTasks.listRuns({
+            jobId: ScheduledTaskId.makeUnsafe(jobId),
             ...(limit ? { limit } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: JSON.stringify(runs, null, 2) }] };
       } catch (error) {
         return mcpError(
-          `Failed to list runs for cron job '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to list runs for scheduled task '${jobId}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },
   );
 
   server.registerTool(
-    "propose_cron_job",
+    "propose_scheduled_task",
     {
-      title: "Propose Cron Job",
+      title: "Propose Scheduled Task",
       description:
-        "Propose a new cron job to the user. The user will see an interactive card in the chat " +
+        "Propose a new scheduled task to the user. The user will see an interactive card in the chat " +
         "where they can review, edit, and accept or reject the proposal. " +
         "IMPORTANT: After calling this tool, you MUST include a code block in your response " +
-        "with the language tag `t3:propose-cron` containing the JSON payload returned by this tool. " +
+        "with the language tag `t3:propose-scheduled-task` containing the JSON payload returned by this tool. " +
         "The user will see this as an interactive card they can edit and accept. " +
         "Wait for the user's response before taking further action. " +
-        "If accepted, you'll see 'Cron job added: <name> (schedule: <expression>)'.",
+        "If accepted, you'll see 'Scheduled task added: <name> (schedule: <expression>)'.",
       inputSchema: {
-        name: z.string().describe("Human-readable name for the cron job."),
+        name: z.string().describe("Human-readable name for the scheduled task."),
         description: z.string().optional().describe("Optional description."),
         cronExpression: z.string().describe("Standard 5-field cron expression."),
         projectId: z.string().describe("The project ID for thread creation."),
-        skillId: z.string().optional().describe("Optional skill ID to attach."),
+        skillIds: z.array(z.string()).optional().describe("Optional skill IDs to attach."),
         prompt: z.string().optional().describe("Optional prompt to preload."),
         autoSend: z.boolean().optional().describe("Auto-send the prompt. Default: false."),
       },
     },
-    async ({ name, description, cronExpression, projectId, skillId, prompt, autoSend }) => {
+    async ({ name, description, cronExpression, projectId, skillIds, prompt, autoSend }) => {
       const payload = JSON.stringify({
         name,
         description: description ?? null,
         cronExpression,
         projectId,
-        ...(skillId ? { skillId } : {}),
+        ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
         ...(prompt ? { prompt } : {}),
         autoSend: autoSend ?? false,
       });
@@ -345,8 +349,8 @@ function createCronJobsMcpServer(
           {
             type: "text" as const,
             text:
-              "To propose this cron job to the user, include the following code block in your response:\n\n" +
-              "```t3:propose-cron\n" +
+              "To propose this scheduled task to the user, include the following code block in your response:\n\n" +
+              "```t3:propose-scheduled-task\n" +
               payload +
               "\n" +
               "```\n\n" +
@@ -361,10 +365,10 @@ function createCronJobsMcpServer(
   return server;
 }
 
-const handleCronJobsMcpRequest = Effect.gen(function* () {
+const handleScheduledTasksMcpRequest = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const managedRuns = yield* ManagedRunService;
-  const cronJobs = yield* CronJobService;
+  const scheduledTasks = yield* ScheduledTaskService;
   const webRequest = yield* HttpServerRequest.toWeb(request);
   const authorization = webRequest.headers.get("authorization");
 
@@ -390,7 +394,7 @@ const handleCronJobsMcpRequest = Effect.gen(function* () {
   }
 
   const bridge = createEffectBridge();
-  const server = createCronJobsMcpServer(cronJobs, bridge);
+  const server = createScheduledTasksMcpServer(scheduledTasks, bridge);
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 
   const mcp: { done: boolean; response: Response | null; error: unknown } = {
@@ -422,7 +426,9 @@ const handleCronJobsMcpRequest = Effect.gen(function* () {
 
   if (mcp.error || !mcp.response) {
     return HttpServerResponse.text(
-      mcp.error instanceof Error ? mcp.error.message : "Failed to serve cron jobs MCP request.",
+      mcp.error instanceof Error
+        ? mcp.error.message
+        : "Failed to serve scheduled tasks MCP request.",
       { status: 500 },
     );
   }
@@ -439,8 +445,8 @@ const handleCronJobsMcpRequest = Effect.gen(function* () {
   }).pipe(Effect.catch((errorResp) => Effect.succeed(errorResp)));
 });
 
-export const cronJobsMcpRouteLayer = Layer.mergeAll(
-  HttpRouter.add("POST", MCP_ROUTE, handleCronJobsMcpRequest),
-  HttpRouter.add("GET", MCP_ROUTE, handleCronJobsMcpRequest),
-  HttpRouter.add("DELETE", MCP_ROUTE, handleCronJobsMcpRequest),
+export const scheduledTasksMcpRouteLayer = Layer.mergeAll(
+  HttpRouter.add("POST", MCP_ROUTE, handleScheduledTasksMcpRequest),
+  HttpRouter.add("GET", MCP_ROUTE, handleScheduledTasksMcpRequest),
+  HttpRouter.add("DELETE", MCP_ROUTE, handleScheduledTasksMcpRequest),
 );

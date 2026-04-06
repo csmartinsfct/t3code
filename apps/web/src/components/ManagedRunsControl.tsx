@@ -2,10 +2,14 @@ import type {
   ManagedRunServiceSnapshot,
   ManagedRunSummary,
   ProjectScript,
+  ServiceHealthCheck,
 } from "@t3tools/contracts";
-import { ActivitySquareIcon } from "lucide-react";
+import { ActivitySquareIcon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { truncate } from "@t3tools/shared/String";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -27,6 +31,97 @@ function serviceStatusDot(status: ManagedRunServiceSnapshot["status"]) {
   if (status === "healthy") return "bg-green-500";
   if (status === "unhealthy") return "bg-red-500";
   return "bg-muted-foreground/40";
+}
+
+function deriveUrl(healthCheck: ServiceHealthCheck): string | null {
+  if (healthCheck.type === "url") return healthCheck.url;
+  if (healthCheck.type === "port")
+    return `http://${healthCheck.host ?? "localhost"}:${healthCheck.port}`;
+  return null;
+}
+
+function ServiceRow({ service }: { service: ManagedRunServiceSnapshot }) {
+  const url = deriveUrl(service.healthCheck);
+  const { copyToClipboard, isCopied } = useCopyToClipboard();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const show = useCallback(() => {
+    clearTimeout(closeTimer.current);
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPos({ top: rect.top + rect.height / 2, left: rect.left - 30 });
+    }
+    setOpen(true);
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  }, []);
+
+  const cancelClose = useCallback(() => {
+    clearTimeout(closeTimer.current);
+  }, []);
+
+  return (
+    <div
+      ref={triggerRef}
+      className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+      onMouseEnter={show}
+      onMouseLeave={scheduleClose}
+    >
+      <span className={`size-1.5 shrink-0 rounded-full ${serviceStatusDot(service.status)}`} />
+      <span className="min-w-0 truncate">{service.name}</span>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            className="fixed z-[200] rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-md animate-in fade-in zoom-in-95 duration-100"
+            style={{ top: pos.top, left: pos.left, transform: "translate(-100%, -50%)" }}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
+          >
+            {url ? (
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  URL
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 font-mono text-[11px] text-foreground">{url}</div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => copyToClipboard(url)}
+                      title="Copy URL"
+                    >
+                      {isCopied ? (
+                        <CheckIcon className="size-3 text-success" />
+                      ) : (
+                        <CopyIcon className="size-3" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                      title="Open in browser"
+                    >
+                      <ExternalLinkIcon className="size-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <span className="text-muted-foreground">No metadata</span>
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
 }
 
 function serviceSummary(run: ManagedRunSummary) {
@@ -91,15 +186,7 @@ export default function ManagedRunsControl({ runs, scripts }: ManagedRunsControl
                     {run.serviceStatuses.length > 0 ? (
                       <div className="mt-1.5 space-y-0.5">
                         {run.serviceStatuses.map((service, i) => (
-                          <div
-                            key={i}
-                            className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
-                          >
-                            <span
-                              className={`size-1.5 shrink-0 rounded-full ${serviceStatusDot(service.status)}`}
-                            />
-                            <span className="truncate">{service.name}</span>
-                          </div>
+                          <ServiceRow key={i} service={service} />
                         ))}
                       </div>
                     ) : (

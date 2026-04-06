@@ -55,7 +55,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
-import { CronJobService } from "./cronJobs/Services/CronJobs";
+import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
@@ -81,7 +81,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
     const managedRuns = yield* ManagedRunService;
-    const cronJobs = yield* CronJobService;
+    const scheduledTasks = yield* ScheduledTaskService;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
 
@@ -539,41 +539,41 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.managedRunsStop, managedRuns.stop(input), {
           "rpc.aggregate": "managed-runs",
         }),
-      [WS_METHODS.cronJobsList]: () =>
-        observeRpcEffect(WS_METHODS.cronJobsList, cronJobs.list(), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksList]: () =>
+        observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsGet]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsGet, cronJobs.get(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksGet]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksGet, scheduledTasks.get(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsCreate]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsCreate, cronJobs.create(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksCreate]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksCreate, scheduledTasks.create(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsUpdate]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsUpdate, cronJobs.update(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksUpdate]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksUpdate, scheduledTasks.update(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsDelete]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsDelete, cronJobs.delete(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksDelete]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksDelete, scheduledTasks.delete(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsToggle]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsToggle, cronJobs.toggle(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksToggle]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksToggle, scheduledTasks.toggle(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsRunNow]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsRunNow, cronJobs.runNow(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksRunNow]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksRunNow, scheduledTasks.runNow(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.cronJobsListRuns]: (input) =>
-        observeRpcEffect(WS_METHODS.cronJobsListRuns, cronJobs.listRuns(input), {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.scheduledTasksListRuns]: (input) =>
+        observeRpcEffect(WS_METHODS.scheduledTasksListRuns, scheduledTasks.listRuns(input), {
+          "rpc.aggregate": "scheduled-tasks",
         }),
-      [WS_METHODS.subscribeCronJobEvents]: () =>
-        observeRpcStream(WS_METHODS.subscribeCronJobEvents, cronJobs.streamEvents, {
-          "rpc.aggregate": "cron-jobs",
+      [WS_METHODS.subscribeScheduledTaskEvents]: () =>
+        observeRpcStream(WS_METHODS.subscribeScheduledTaskEvents, scheduledTasks.streamEvents, {
+          "rpc.aggregate": "scheduled-tasks",
         }),
       [WS_METHODS.terminalOpen]: (input) =>
         observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {

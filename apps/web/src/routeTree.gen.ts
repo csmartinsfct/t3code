@@ -12,12 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
-import { Route as SettingsCronRouteImport } from './routes/settings.cron'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
-import { Route as SettingsCronIndexRouteImport } from './routes/settings.cron.index'
-import { Route as SettingsCronJobIdRouteImport } from './routes/settings.cron.$jobId'
+import { Route as SettingsScheduledTasksIndexRouteImport } from './routes/settings.scheduled-tasks.index'
+import { Route as SettingsScheduledTasksTaskIdRouteImport } from './routes/settings.scheduled-tasks.$taskId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -33,14 +33,14 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ChatRoute,
 } as any)
+const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
+  id: '/scheduled-tasks',
+  path: '/scheduled-tasks',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsCronRoute = SettingsCronRouteImport.update({
-  id: '/cron',
-  path: '/cron',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
@@ -53,26 +53,28 @@ const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => ChatRoute,
 } as any)
-const SettingsCronIndexRoute = SettingsCronIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => SettingsCronRoute,
-} as any)
-const SettingsCronJobIdRoute = SettingsCronJobIdRouteImport.update({
-  id: '/$jobId',
-  path: '/$jobId',
-  getParentRoute: () => SettingsCronRoute,
-} as any)
+const SettingsScheduledTasksIndexRoute =
+  SettingsScheduledTasksIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => SettingsScheduledTasksRoute,
+  } as any)
+const SettingsScheduledTasksTaskIdRoute =
+  SettingsScheduledTasksTaskIdRouteImport.update({
+    id: '/$taskId',
+    path: '/$taskId',
+    getParentRoute: () => SettingsScheduledTasksRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/cron': typeof SettingsCronRouteWithChildren
   '/settings/general': typeof SettingsGeneralRoute
-  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
-  '/settings/cron/': typeof SettingsCronIndexRoute
+  '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
+  '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
+  '/settings/scheduled-tasks/': typeof SettingsScheduledTasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
@@ -80,8 +82,8 @@ export interface FileRoutesByTo {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/': typeof ChatIndexRoute
-  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
-  '/settings/cron': typeof SettingsCronIndexRoute
+  '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
+  '/settings/scheduled-tasks': typeof SettingsScheduledTasksIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,11 +91,11 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/cron': typeof SettingsCronRouteWithChildren
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
   '/_chat/': typeof ChatIndexRoute
-  '/settings/cron/$jobId': typeof SettingsCronJobIdRoute
-  '/settings/cron/': typeof SettingsCronIndexRoute
+  '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
+  '/settings/scheduled-tasks/': typeof SettingsScheduledTasksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -102,10 +104,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
-    | '/settings/cron'
     | '/settings/general'
-    | '/settings/cron/$jobId'
-    | '/settings/cron/'
+    | '/settings/scheduled-tasks'
+    | '/settings/scheduled-tasks/$taskId'
+    | '/settings/scheduled-tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/settings'
@@ -113,19 +115,19 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/general'
     | '/'
-    | '/settings/cron/$jobId'
-    | '/settings/cron'
+    | '/settings/scheduled-tasks/$taskId'
+    | '/settings/scheduled-tasks'
   id:
     | '__root__'
     | '/_chat'
     | '/settings'
     | '/_chat/$threadId'
     | '/settings/archived'
-    | '/settings/cron'
     | '/settings/general'
+    | '/settings/scheduled-tasks'
     | '/_chat/'
-    | '/settings/cron/$jobId'
-    | '/settings/cron/'
+    | '/settings/scheduled-tasks/$taskId'
+    | '/settings/scheduled-tasks/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -156,18 +158,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/settings/scheduled-tasks': {
+      id: '/settings/scheduled-tasks'
+      path: '/scheduled-tasks'
+      fullPath: '/settings/scheduled-tasks'
+      preLoaderRoute: typeof SettingsScheduledTasksRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/general': {
       id: '/settings/general'
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/cron': {
-      id: '/settings/cron'
-      path: '/cron'
-      fullPath: '/settings/cron'
-      preLoaderRoute: typeof SettingsCronRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/archived': {
@@ -184,19 +186,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
-    '/settings/cron/': {
-      id: '/settings/cron/'
+    '/settings/scheduled-tasks/': {
+      id: '/settings/scheduled-tasks/'
       path: '/'
-      fullPath: '/settings/cron/'
-      preLoaderRoute: typeof SettingsCronIndexRouteImport
-      parentRoute: typeof SettingsCronRoute
+      fullPath: '/settings/scheduled-tasks/'
+      preLoaderRoute: typeof SettingsScheduledTasksIndexRouteImport
+      parentRoute: typeof SettingsScheduledTasksRoute
     }
-    '/settings/cron/$jobId': {
-      id: '/settings/cron/$jobId'
-      path: '/$jobId'
-      fullPath: '/settings/cron/$jobId'
-      preLoaderRoute: typeof SettingsCronJobIdRouteImport
-      parentRoute: typeof SettingsCronRoute
+    '/settings/scheduled-tasks/$taskId': {
+      id: '/settings/scheduled-tasks/$taskId'
+      path: '/$taskId'
+      fullPath: '/settings/scheduled-tasks/$taskId'
+      preLoaderRoute: typeof SettingsScheduledTasksTaskIdRouteImport
+      parentRoute: typeof SettingsScheduledTasksRoute
     }
   }
 }
@@ -213,30 +215,32 @@ const ChatRouteChildren: ChatRouteChildren = {
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
-interface SettingsCronRouteChildren {
-  SettingsCronJobIdRoute: typeof SettingsCronJobIdRoute
-  SettingsCronIndexRoute: typeof SettingsCronIndexRoute
+interface SettingsScheduledTasksRouteChildren {
+  SettingsScheduledTasksTaskIdRoute: typeof SettingsScheduledTasksTaskIdRoute
+  SettingsScheduledTasksIndexRoute: typeof SettingsScheduledTasksIndexRoute
 }
 
-const SettingsCronRouteChildren: SettingsCronRouteChildren = {
-  SettingsCronJobIdRoute: SettingsCronJobIdRoute,
-  SettingsCronIndexRoute: SettingsCronIndexRoute,
-}
+const SettingsScheduledTasksRouteChildren: SettingsScheduledTasksRouteChildren =
+  {
+    SettingsScheduledTasksTaskIdRoute: SettingsScheduledTasksTaskIdRoute,
+    SettingsScheduledTasksIndexRoute: SettingsScheduledTasksIndexRoute,
+  }
 
-const SettingsCronRouteWithChildren = SettingsCronRoute._addFileChildren(
-  SettingsCronRouteChildren,
-)
+const SettingsScheduledTasksRouteWithChildren =
+  SettingsScheduledTasksRoute._addFileChildren(
+    SettingsScheduledTasksRouteChildren,
+  )
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
-  SettingsCronRoute: typeof SettingsCronRouteWithChildren
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRouteWithChildren
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
-  SettingsCronRoute: SettingsCronRouteWithChildren,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsScheduledTasksRoute: SettingsScheduledTasksRouteWithChildren,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

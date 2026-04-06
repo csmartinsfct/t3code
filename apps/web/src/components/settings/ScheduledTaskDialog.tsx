@@ -1,11 +1,12 @@
 import {
-  type CronJob,
-  type CronJobCreateInput,
-  type CronJobUpdateInput,
+  type ScheduledTask,
+  type ScheduledTaskCreateInput,
+  type ScheduledTaskUpdateInput,
   type ProjectId,
   type SkillEntry,
 } from "@t3tools/contracts";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { BookOpenIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { Button } from "../ui/button";
@@ -19,25 +20,61 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 
 const isDev = import.meta.env.DEV;
 
-const CRON_JOB_TYPES = [{ value: "new_thread" as const, label: "New Thread" }];
+const SCHEDULED_TASK_TYPES = [{ value: "new_thread" as const, label: "New Thread" }];
 
-interface CronJobDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  editingJob: CronJob | null;
-  projects: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>;
-  onSave: (job: CronJob) => void;
-  onCreateJob: (input: CronJobCreateInput) => Promise<CronJob>;
-  onUpdateJob: (input: CronJobUpdateInput) => Promise<CronJob>;
+interface SkillGroup {
+  label: string | null;
+  skills: SkillEntry[];
 }
 
-export function CronJobDialog({
+/** Group skills: top-level first (`group: null`), then by sub-package name. */
+function groupSkills(skills: readonly SkillEntry[]): SkillGroup[] {
+  const groups = new Map<string | null, SkillEntry[]>();
+
+  for (const skill of skills) {
+    const key = skill.group ?? null;
+    let list = groups.get(key);
+    if (!list) {
+      list = [];
+      groups.set(key, list);
+    }
+    list.push(skill);
+  }
+
+  const result: SkillGroup[] = [];
+
+  const topLevel = groups.get(null);
+  if (topLevel && topLevel.length > 0) {
+    result.push({ label: null, skills: topLevel });
+  }
+
+  const subKeys = [...groups.keys()].filter((k): k is string => k !== null).sort();
+  for (const key of subKeys) {
+    const list = groups.get(key)!;
+    result.push({ label: key, skills: list });
+  }
+
+  return result;
+}
+
+interface ScheduledTaskDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editingJob: ScheduledTask | null;
+  projects: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>;
+  onSave: (job: ScheduledTask) => void;
+  onCreateJob: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
+  onUpdateJob: (input: ScheduledTaskUpdateInput) => Promise<ScheduledTask>;
+}
+
+export function ScheduledTaskDialog({
   open,
   onOpenChange,
   editingJob,
@@ -45,13 +82,13 @@ export function CronJobDialog({
   onSave,
   onCreateJob,
   onUpdateJob,
-}: CronJobDialogProps) {
+}: ScheduledTaskDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [cronExpression, setCronExpression] = useState("");
   const [jobType, setJobType] = useState<"new_thread">("new_thread");
   const [projectId, setProjectId] = useState("");
-  const [skillId, setSkillId] = useState("");
+  const [skillIds, setSkillIds] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [autoSend, setAutoSend] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -85,19 +122,21 @@ export function CronJobDialog({
         setCronExpression(editingJob.cronExpression);
         setJobType(editingJob.jobType);
         setProjectId(editingJob.newThreadConfig?.projectId ?? "");
-        setSkillId(editingJob.newThreadConfig?.skillId ?? "");
+        setSkillIds([...(editingJob.newThreadConfig?.skillIds ?? [])]);
         setPrompt(editingJob.newThreadConfig?.prompt ?? "");
         setAutoSend(editingJob.newThreadConfig?.autoSend ?? false);
       } else {
-        setName(isDev ? "Test Cron Jobs" : "");
+        setName(isDev ? "Test Scheduled Tasks" : "");
         setDescription(
-          isDev ? "This cron job is a mere test of the Cron Jobs feature. Good luck!" : "",
+          isDev
+            ? "This scheduled task is a mere test of the Scheduled Tasks feature. Good luck!"
+            : "",
         );
         setCronExpression(isDev ? "* * * * *" : "");
         setJobType("new_thread");
         setProjectId(projects[0]?.id ?? "");
-        setSkillId("");
-        setPrompt(isDev ? "Hello from a scheduled cron job!" : "");
+        setSkillIds([]);
+        setPrompt(isDev ? "Hello from a scheduled task!" : "");
         setAutoSend(false);
       }
       setValidationError(null);
@@ -130,13 +169,13 @@ export function CronJobDialog({
           jobType === "new_thread"
             ? {
                 projectId: projectId as ProjectId,
-                ...(skillId ? { skillId } : {}),
+                ...(skillIds.length > 0 ? { skillIds } : {}),
                 ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
                 autoSend,
               }
             : undefined;
 
-        let job: CronJob;
+        let job: ScheduledTask;
         if (isEditing) {
           job = await onUpdateJob({
             jobId: editingJob.jobId,
@@ -158,7 +197,9 @@ export function CronJobDialog({
         onSave(job);
         onOpenChange(false);
       } catch (error) {
-        setValidationError(error instanceof Error ? error.message : "Failed to save cron job.");
+        setValidationError(
+          error instanceof Error ? error.message : "Failed to save scheduled task.",
+        );
       } finally {
         setSaving(false);
       }
@@ -169,7 +210,7 @@ export function CronJobDialog({
       cronExpression,
       jobType,
       projectId,
-      skillId,
+      skillIds,
       prompt,
       autoSend,
       isEditing,
@@ -181,13 +222,13 @@ export function CronJobDialog({
     ],
   );
 
-  const formId = "cron-job-dialog-form";
+  const formId = "scheduled-task-dialog-form";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="w-full max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Cron Job" : "Add Cron Job"}</DialogTitle>
+          <DialogTitle>{isEditing ? "Edit Scheduled Task" : "Add Scheduled Task"}</DialogTitle>
         </DialogHeader>
 
         <DialogPanel>
@@ -197,11 +238,11 @@ export function CronJobDialog({
             onSubmit={(event) => void handleSubmit(event)}
           >
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cron-name" className="text-xs font-medium">
+              <Label htmlFor="task-name" className="text-xs font-medium">
                 Name
               </Label>
               <Input
-                id="cron-name"
+                id="task-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="e.g. Update Fork vs Remote"
@@ -210,11 +251,11 @@ export function CronJobDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cron-description" className="text-xs font-medium">
+              <Label htmlFor="task-description" className="text-xs font-medium">
                 Description
               </Label>
               <Input
-                id="cron-description"
+                id="task-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Optional description"
@@ -222,11 +263,11 @@ export function CronJobDialog({
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cron-expression" className="text-xs font-medium">
+              <Label htmlFor="task-expression" className="text-xs font-medium">
                 Schedule
               </Label>
               <Input
-                id="cron-expression"
+                id="task-expression"
                 value={cronExpression}
                 onChange={(event) => setCronExpression(event.target.value)}
                 placeholder="0 9 * * * (every day at 9am)"
@@ -242,11 +283,11 @@ export function CronJobDialog({
               <Select value={jobType} onValueChange={(val) => setJobType(val as "new_thread")}>
                 <SelectTrigger size="sm" className="w-full">
                   <SelectValue>
-                    {CRON_JOB_TYPES.find((t) => t.value === jobType)?.label}
+                    {SCHEDULED_TASK_TYPES.find((t) => t.value === jobType)?.label}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup alignItemWithTrigger={false}>
-                  {CRON_JOB_TYPES.map((type) => (
+                  {SCHEDULED_TASK_TYPES.map((type) => (
                     <SelectItem hideIndicator key={type.value} value={type.value}>
                       {type.label}
                     </SelectItem>
@@ -263,7 +304,7 @@ export function CronJobDialog({
                     value={projectId}
                     onValueChange={(val) => {
                       setProjectId(val ?? "");
-                      setSkillId("");
+                      setSkillIds([]);
                     }}
                   >
                     <SelectTrigger size="sm" className="w-full">
@@ -282,37 +323,19 @@ export function CronJobDialog({
                 </div>
 
                 {skills.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs font-medium">Skill</Label>
-                    <Select value={skillId} onValueChange={(val) => setSkillId(val ?? "")}>
-                      <SelectTrigger size="sm" className="w-full">
-                        <SelectValue>
-                          {skillId
-                            ? (skills.find((s) => s.id === skillId)?.name ?? "Select skill")
-                            : "None"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup alignItemWithTrigger={false}>
-                        <SelectItem hideIndicator value="">
-                          None
-                        </SelectItem>
-                        {skills.map((skill) => (
-                          <SelectItem hideIndicator key={skill.id} value={skill.id}>
-                            {skill.name}
-                            {skill.group ? ` (${skill.group})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectPopup>
-                    </Select>
-                  </div>
+                  <SkillsMultiSelect
+                    skills={skills}
+                    selectedIds={skillIds}
+                    onChange={setSkillIds}
+                  />
                 )}
 
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="cron-prompt" className="text-xs font-medium">
+                  <Label htmlFor="task-prompt" className="text-xs font-medium">
                     Prompt
                   </Label>
                   <Textarea
-                    id="cron-prompt"
+                    id="task-prompt"
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     placeholder="Optional prompt to preload into the thread"
@@ -322,10 +345,10 @@ export function CronJobDialog({
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="cron-auto-send" className="text-xs font-medium">
+                  <Label htmlFor="task-auto-send" className="text-xs font-medium">
                     Auto send
                   </Label>
-                  <Switch id="cron-auto-send" checked={autoSend} onCheckedChange={setAutoSend} />
+                  <Switch id="task-auto-send" checked={autoSend} onCheckedChange={setAutoSend} />
                 </div>
               </>
             )}
@@ -339,10 +362,145 @@ export function CronJobDialog({
             Cancel
           </Button>
           <Button form={formId} type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving..." : isEditing ? "Save changes" : "Create job"}
+            {saving ? "Saving..." : isEditing ? "Save changes" : "Create task"}
           </Button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Skills multi-select with menu dropdown + chips
+// ---------------------------------------------------------------------------
+
+function SkillsMultiSelect({
+  skills,
+  selectedIds,
+  onChange,
+}: {
+  skills: readonly SkillEntry[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const groups = useMemo(() => groupSkills(skills), [skills]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const selectedSkills = useMemo(
+    () => skills.filter((s) => selectedSet.has(s.id)),
+    [skills, selectedSet],
+  );
+
+  const toggleSkill = useCallback(
+    (skillId: string) => {
+      if (selectedSet.has(skillId)) {
+        onChange(selectedIds.filter((id) => id !== skillId));
+      } else {
+        onChange([...selectedIds, skillId]);
+      }
+    },
+    [selectedIds, selectedSet, onChange],
+  );
+
+  const removeSkill = useCallback(
+    (skillId: string) => {
+      onChange(selectedIds.filter((id) => id !== skillId));
+    },
+    [selectedIds, onChange],
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label className="text-xs font-medium">Skills</Label>
+
+      {/* Selected skills chips */}
+      {selectedSkills.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedSkills.map((skill) => (
+            <div
+              key={skill.id}
+              className="flex items-center gap-1 rounded-md border border-border/70 bg-accent/30 px-2 py-1 text-xs transition-colors"
+              title={skill.relativePath}
+            >
+              <BookOpenIcon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-foreground">{skill.name}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${skill.name}`}
+                className="ml-0.5 flex size-3.5 items-center justify-center rounded-sm text-muted-foreground/72 transition-colors hover:bg-foreground/8 hover:text-foreground"
+                onClick={() => removeSkill(skill.id)}
+              >
+                <XIcon className="size-2.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Dropdown trigger */}
+      <Menu>
+        <MenuTrigger
+          render={
+            <button
+              type="button"
+              className="flex h-8 w-full items-center justify-between rounded-lg border border-input bg-background px-2.5 text-xs shadow-xs/5 transition-shadow hover:border-ring/50 dark:bg-input/32"
+            />
+          }
+        >
+          <span className="text-muted-foreground">
+            {selectedIds.length > 0
+              ? `${selectedIds.length} skill${selectedIds.length > 1 ? "s" : ""} selected`
+              : "Select skills..."}
+          </span>
+          <ChevronsUpDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+        </MenuTrigger>
+        <MenuPopup align="start" className="max-h-[300px]">
+          {groups.map((group, groupIdx) => (
+            <div key={group.label ?? "__top__"}>
+              {groupIdx > 0 && (
+                <div className="mx-2 my-1 border-t border-border/50" role="separator" />
+              )}
+              {group.label !== null && (
+                <div className="px-2 pb-0.5 pt-1.5 font-medium text-muted-foreground text-xs">
+                  {group.label}
+                </div>
+              )}
+              {group.skills.map((skill) => {
+                const isSelected = selectedSet.has(skill.id);
+                return (
+                  <MenuItem
+                    key={skill.id}
+                    className="flex items-center gap-2"
+                    closeOnClick={false}
+                    onClick={() => toggleSkill(skill.id)}
+                  >
+                    <span
+                      className={`flex size-3.5 shrink-0 items-center justify-center rounded border ${
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input"
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg
+                          className="size-2.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={3}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="min-w-0 truncate text-sm">{skill.name}</span>
+                  </MenuItem>
+                );
+              })}
+            </div>
+          ))}
+        </MenuPopup>
+      </Menu>
+    </div>
   );
 }

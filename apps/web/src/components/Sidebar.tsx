@@ -727,6 +727,10 @@ export default function Sidebar() {
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
+  const [renamingProjectId, setRenamingProjectId] = useState<ProjectId | null>(null);
+  const [renamingProjectTitle, setRenamingProjectTitle] = useState("");
+  const renamingProjectCommittedRef = useRef(false);
+  const renamingProjectInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<ThreadId, HTMLButtonElement>());
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
@@ -985,6 +989,11 @@ export default function Sidebar() {
     renamingInputRef.current = null;
   }, []);
 
+  const cancelProjectRename = useCallback(() => {
+    setRenamingProjectId(null);
+    renamingProjectInputRef.current = null;
+  }, []);
+
   const commitRename = useCallback(
     async (threadId: ThreadId, newTitle: string, originalTitle: string) => {
       const finishRename = () => {
@@ -1030,6 +1039,61 @@ export default function Sidebar() {
       finishRename();
     },
     [],
+  );
+
+  const commitProjectRename = useCallback(
+    async (projectId: ProjectId, newTitle: string, originalName: string) => {
+      const finishRename = () => {
+        setRenamingProjectId((current) => {
+          if (current !== projectId) return current;
+          renamingProjectInputRef.current = null;
+          return null;
+        });
+      };
+
+      const trimmed = newTitle.trim();
+      if (trimmed.length === 0) {
+        toastManager.add({
+          type: "warning",
+          title: "Project name cannot be empty",
+        });
+        finishRename();
+        return;
+      }
+      if (trimmed === originalName) {
+        finishRename();
+        return;
+      }
+      if (projects.some((p) => p.id !== projectId && p.name === trimmed)) {
+        toastManager.add({
+          type: "warning",
+          title: "A project with that name already exists",
+        });
+        finishRename();
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        finishRename();
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "project.meta.update",
+          commandId: newCommandId(),
+          projectId,
+          title: trimmed,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to rename project",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      }
+      finishRename();
+    },
+    [projects],
   );
 
   const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
@@ -1360,11 +1424,18 @@ export default function Sidebar() {
 
       const clicked = await api.contextMenu.show(
         [
+          { id: "rename", label: "Rename project" },
           { id: "copy-path", label: "Copy Project Path" },
           { id: "delete", label: "Remove project", destructive: true },
         ],
         position,
       );
+      if (clicked === "rename") {
+        setRenamingProjectId(projectId);
+        setRenamingProjectTitle(project.name);
+        renamingProjectCommittedRef.current = false;
+        return;
+      }
       if (clicked === "copy-path") {
         copyPathToClipboard(project.cwd, { path: project.cwd });
         return;
@@ -1756,9 +1827,42 @@ export default function Sidebar() {
               />
             )}
             <ProjectFavicon cwd={project.cwd} />
-            <span className="flex-1 truncate text-xs font-medium text-foreground/90">
-              {project.name}
-            </span>
+            {renamingProjectId === project.id ? (
+              <input
+                ref={(element) => {
+                  if (element && renamingProjectInputRef.current !== element) {
+                    renamingProjectInputRef.current = element;
+                    element.focus();
+                    element.select();
+                  }
+                }}
+                className="min-w-0 flex-1 truncate text-xs font-medium bg-transparent outline-none border border-ring rounded px-0.5"
+                value={renamingProjectTitle}
+                onChange={(event) => setRenamingProjectTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    renamingProjectCommittedRef.current = true;
+                    void commitProjectRename(project.id, renamingProjectTitle, project.name);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    renamingProjectCommittedRef.current = true;
+                    cancelProjectRename();
+                  }
+                }}
+                onBlur={() => {
+                  if (!renamingProjectCommittedRef.current) {
+                    void commitProjectRename(project.id, renamingProjectTitle, project.name);
+                  }
+                }}
+                onClick={(event) => event.stopPropagation()}
+              />
+            ) : (
+              <span className="flex-1 truncate text-xs font-medium text-foreground/90">
+                {project.name}
+              </span>
+            )}
           </SidebarMenuButton>
           <Tooltip>
             <TooltipTrigger

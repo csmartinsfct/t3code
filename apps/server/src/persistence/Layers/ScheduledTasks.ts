@@ -4,20 +4,20 @@ import { Effect, Layer, Option, Schema } from "effect";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
-  CronJobListEnabledDueInput,
-  CronJobLookupInput,
-  CronJobRepository,
-  type CronJobRepositoryShape,
-  CronJobRow,
-  CronThreadRunListInput,
-  CronThreadRunRow,
-  PersistedCronJob,
-  PersistedCronThreadRun,
-} from "../Services/CronJobs.ts";
-import type { PersistedCronJob as PersistedCronJobType } from "../Services/CronJobs.ts";
+  ScheduledTaskListEnabledDueInput,
+  ScheduledTaskLookupInput,
+  ScheduledTaskRepository,
+  type ScheduledTaskRepositoryShape,
+  ScheduledTaskRow,
+  ScheduledTaskRunListInput,
+  ScheduledTaskRunRow,
+  PersistedScheduledTask,
+  PersistedScheduledTaskRun,
+} from "../Services/ScheduledTasks.ts";
+import type { PersistedScheduledTask as PersistedScheduledTaskType } from "../Services/ScheduledTasks.ts";
 
-/** Convert a CronJobRow (with numeric enabled) to PersistedCronJob (with boolean enabled). */
-const toPersistedJob = (row: typeof CronJobRow.Type): PersistedCronJobType => ({
+/** Convert a ScheduledTaskRow (with numeric enabled) to PersistedScheduledTask (with boolean enabled). */
+const toPersistedTask = (row: typeof ScheduledTaskRow.Type): PersistedScheduledTaskType => ({
   ...row,
   enabled: row.enabled === 1,
 });
@@ -46,11 +46,11 @@ const RUN_SELECT = `
   executed_at AS "executedAt"
 `;
 
-const makeCronJobRepository = Effect.gen(function* () {
+const makeScheduledTaskRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const writeCronJob = SqlSchema.void({
-    Request: PersistedCronJob,
+  const writeScheduledTask = SqlSchema.void({
+    Request: PersistedScheduledTask,
     execute: (row) =>
       sql`
         INSERT INTO crons_jobs (
@@ -77,22 +77,22 @@ const makeCronJobRepository = Effect.gen(function* () {
       `,
   });
 
-  const getCronJob = SqlSchema.findOneOption({
-    Request: CronJobLookupInput,
-    Result: CronJobRow,
+  const getScheduledTask = SqlSchema.findOneOption({
+    Request: ScheduledTaskLookupInput,
+    Result: ScheduledTaskRow,
     execute: ({ jobId }) =>
       sql`SELECT ${sql.literal(JOB_SELECT)} FROM crons_jobs WHERE job_id = ${jobId}`,
   });
 
   const listAllJobs = SqlSchema.findAll({
     Request: Schema.Struct({}),
-    Result: CronJobRow,
+    Result: ScheduledTaskRow,
     execute: () => sql`SELECT ${sql.literal(JOB_SELECT)} FROM crons_jobs ORDER BY created_at DESC`,
   });
 
   const listDueJobs = SqlSchema.findAll({
-    Request: CronJobListEnabledDueInput,
-    Result: CronJobRow,
+    Request: ScheduledTaskListEnabledDueInput,
+    Result: ScheduledTaskRow,
     execute: ({ beforeOrAt }) =>
       sql`
         SELECT ${sql.literal(JOB_SELECT)}
@@ -104,8 +104,8 @@ const makeCronJobRepository = Effect.gen(function* () {
       `,
   });
 
-  const writeCronThreadRun = SqlSchema.void({
-    Request: PersistedCronThreadRun,
+  const writeScheduledTaskRun = SqlSchema.void({
+    Request: PersistedScheduledTaskRun,
     execute: (row) =>
       sql`
         INSERT INTO crons_thread_runs (
@@ -120,8 +120,8 @@ const makeCronJobRepository = Effect.gen(function* () {
   });
 
   const listRuns = SqlSchema.findAll({
-    Request: CronThreadRunListInput,
-    Result: CronThreadRunRow,
+    Request: ScheduledTaskRunListInput,
+    Result: ScheduledTaskRunRow,
     execute: ({ jobId, limit, offset }) =>
       sql`
         SELECT ${sql.literal(RUN_SELECT)}
@@ -133,8 +133,8 @@ const makeCronJobRepository = Effect.gen(function* () {
   });
 
   const latestRun = SqlSchema.findOneOption({
-    Request: CronJobLookupInput,
-    Result: CronThreadRunRow,
+    Request: ScheduledTaskLookupInput,
+    Result: ScheduledTaskRunRow,
     execute: ({ jobId }) =>
       sql`
         SELECT ${sql.literal(RUN_SELECT)}
@@ -147,47 +147,50 @@ const makeCronJobRepository = Effect.gen(function* () {
 
   return {
     createJob: (input) =>
-      writeCronJob(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.createJob:query")),
+      writeScheduledTask(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.createJob:query")),
       ),
     updateJob: (input) =>
-      writeCronJob(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.updateJob:query")),
+      writeScheduledTask(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.updateJob:query")),
       ),
     getJobById: (input) =>
-      getCronJob(input).pipe(
-        Effect.map((opt) => opt.pipe(Option.map(toPersistedJob))),
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.getJobById:query")),
+      getScheduledTask(input).pipe(
+        Effect.map((opt) => opt.pipe(Option.map(toPersistedTask))),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.getJobById:query")),
       ),
     listJobs: () =>
       listAllJobs({}).pipe(
-        Effect.map((rows) => rows.map(toPersistedJob)),
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.listJobs:query")),
+        Effect.map((rows) => rows.map(toPersistedTask)),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.listJobs:query")),
       ),
     listEnabledDueJobs: (input) =>
       listDueJobs(input).pipe(
-        Effect.map((rows) => rows.map(toPersistedJob)),
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.listEnabledDueJobs:query")),
+        Effect.map((rows) => rows.map(toPersistedTask)),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.listEnabledDueJobs:query")),
       ),
     deleteJob: ({ jobId }) =>
       sql`DELETE FROM crons_thread_runs WHERE job_id = ${jobId}`.pipe(
         Effect.andThen(sql`DELETE FROM crons_jobs WHERE job_id = ${jobId}`),
         Effect.asVoid,
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.deleteJob:query")),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.deleteJob:query")),
       ),
     createRun: (input) =>
-      writeCronThreadRun(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.createRun:query")),
+      writeScheduledTaskRun(input).pipe(
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.createRun:query")),
       ),
     listRunsByJob: (input) =>
       listRuns(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.listRunsByJob:query")),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.listRunsByJob:query")),
       ),
     getLatestRunByJob: (input) =>
       latestRun(input).pipe(
-        Effect.mapError(toPersistenceSqlError("CronJobRepository.getLatestRunByJob:query")),
+        Effect.mapError(toPersistenceSqlError("ScheduledTaskRepository.getLatestRunByJob:query")),
       ),
-  } satisfies CronJobRepositoryShape;
+  } satisfies ScheduledTaskRepositoryShape;
 });
 
-export const CronJobRepositoryLive = Layer.effect(CronJobRepository, makeCronJobRepository);
+export const ScheduledTaskRepositoryLive = Layer.effect(
+  ScheduledTaskRepository,
+  makeScheduledTaskRepository,
+);

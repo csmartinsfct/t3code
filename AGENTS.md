@@ -55,6 +55,7 @@ Use these as implementation references when designing protocol handling, UX flow
 ## Internal Docs
 
 - [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
+- [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
 
 These docs must be kept up to date as related code changes.
 

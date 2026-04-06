@@ -262,6 +262,7 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            ...(payload.initialDraft ? { initialDraft: payload.initialDraft } : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,

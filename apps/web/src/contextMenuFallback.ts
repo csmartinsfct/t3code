@@ -42,17 +42,8 @@ function buildMenuButton<T extends string>(
   }
 
   if (hasChildren && item.children && openSubmenu && closeSubmenu) {
-    let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
-
     btn.addEventListener("mouseenter", () => {
-      if (hoverTimeout) clearTimeout(hoverTimeout);
       openSubmenu(btn, item.children!);
-    });
-
-    btn.addEventListener("mouseleave", () => {
-      hoverTimeout = setTimeout(() => {
-        closeSubmenu();
-      }, 150);
     });
   }
 

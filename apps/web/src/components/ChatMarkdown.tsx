@@ -23,14 +23,14 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { isProposeActionBlock, parseProposeActionPayload } from "../lib/proposeActionParser";
 import {
-  isProposeCronJobBlock,
-  parseProposeCronJobPayload,
-  type ProposeCronJobPayload,
-} from "../lib/proposeCronJobParser";
+  isProposeScheduledTaskBlock,
+  parseProposeScheduledTaskPayload,
+  type ProposeScheduledTaskPayload,
+} from "../lib/proposeScheduledTaskParser";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import ProposeActionCard from "./chat/ProposeActionCard";
-import ProposeCronJobCard from "./chat/ProposeCronJobCard";
+import ProposeScheduledTaskCard from "./chat/ProposeScheduledTaskCard";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -63,13 +63,13 @@ export interface ProposeActionEvent {
   services?: DeclaredService[];
 }
 
-export interface ProposeCronJobEvent {
+export interface ProposeScheduledTaskEvent {
   action: "accept" | "reject";
   name: string;
   description: string | null;
   cronExpression: string;
   projectId: string;
-  skillId?: string;
+  skillIds?: string[];
   prompt?: string;
   autoSend: boolean;
 }
@@ -79,7 +79,7 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   isStreaming?: boolean;
   onProposeAction?: (event: ProposeActionEvent) => void;
-  onProposeCronJob?: (event: ProposeCronJobEvent) => void;
+  onProposeScheduledTask?: (event: ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
 }
 
@@ -272,7 +272,7 @@ function ChatMarkdown({
   cwd,
   isStreaming = false,
   onProposeAction,
-  onProposeCronJob,
+  onProposeScheduledTask,
   resolveProjectName,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
@@ -334,16 +334,16 @@ function ChatMarkdown({
           return <pre {...props}>{children}</pre>;
         }
 
-        if (isProposeCronJobBlock(codeBlock.className)) {
-          const payload = parseProposeCronJobPayload(codeBlock.code);
-          if (payload && onProposeCronJob) {
+        if (isProposeScheduledTaskBlock(codeBlock.className)) {
+          const payload = parseProposeScheduledTaskPayload(codeBlock.code);
+          if (payload && onProposeScheduledTask) {
             return (
-              <ProposeCronJobCard
+              <ProposeScheduledTaskCard
                 {...payload}
                 projectName={resolveProjectName?.(payload.projectId) ?? payload.projectId}
                 isStreaming={isStreaming}
-                onAccept={(data) => onProposeCronJob({ action: "accept", ...data })}
-                onReject={() => onProposeCronJob({ action: "reject", ...payload })}
+                onAccept={(data) => onProposeScheduledTask({ action: "accept", ...data })}
+                onReject={() => onProposeScheduledTask({ action: "reject", ...payload })}
               />
             );
           }
@@ -366,7 +366,7 @@ function ChatMarkdown({
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming, onProposeAction, onProposeCronJob, resolveProjectName],
+    [cwd, diffThemeName, isStreaming, onProposeAction, onProposeScheduledTask, resolveProjectName],
   );
 
   return (

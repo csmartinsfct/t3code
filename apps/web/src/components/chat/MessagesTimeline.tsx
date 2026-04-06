@@ -100,7 +100,7 @@ interface MessagesTimelineProps {
     }>;
   }) => void;
   onProposeAction?: (event: import("../ChatMarkdown").ProposeActionEvent) => void;
-  onProposeCronJob?: (event: import("../ChatMarkdown").ProposeCronJobEvent) => void;
+  onProposeScheduledTask?: (event: import("../ChatMarkdown").ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
   onMessageContextMenu?: (
     messageId: MessageId,
@@ -133,7 +133,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   onProposeAction,
-  onProposeCronJob,
+  onProposeScheduledTask,
   resolveProjectName,
   onVirtualizerSnapshot,
   onMessageContextMenu,
@@ -531,7 +531,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     cwd={markdownCwd}
                     isStreaming={Boolean(row.message.streaming)}
                     {...(onProposeAction ? { onProposeAction } : {})}
-                    {...(onProposeCronJob ? { onProposeCronJob } : {})}
+                    {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
                     {...(resolveProjectName ? { resolveProjectName } : {})}
                   />
                   {(() => {

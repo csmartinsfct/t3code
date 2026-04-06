@@ -1097,6 +1097,52 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => new Set(composerSkills.map((s) => s.id)),
     [composerSkills],
   );
+
+  // Populate composer from thread initialDraft (e.g. scheduled task created threads)
+  const initialDraftAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const draft = activeThread?.initialDraft;
+    const tid = activeThread?.id;
+    if (!draft || !tid) return;
+    // Only apply once per thread
+    if (initialDraftAppliedRef.current === tid) return;
+    // Only apply if composer is empty (no user edits yet)
+    if (prompt || composerSkills.length > 0) return;
+
+    initialDraftAppliedRef.current = tid;
+
+    // Pre-fill prompt
+    if (draft.prompt) {
+      setComposerDraftPrompt(tid, draft.prompt);
+    }
+
+    // Pre-attach skills by matching IDs against resolved skills
+    if (draft.skillIds && draft.skillIds.length > 0 && availableSkills.length > 0) {
+      for (const skillId of draft.skillIds) {
+        const skill = availableSkills.find((s) => s.id === skillId);
+        if (skill) {
+          addComposerDraftSkill(tid, {
+            id: skill.id,
+            name: skill.name,
+            source: skill.source,
+            absolutePath: skill.absolutePath,
+            relativePath: skill.relativePath,
+            content: skill.content,
+            group: skill.group,
+          });
+        }
+      }
+    }
+  }, [
+    activeThread?.id,
+    activeThread?.initialDraft,
+    prompt,
+    composerSkills.length,
+    availableSkills,
+    setComposerDraftPrompt,
+    addComposerDraftSkill,
+  ]);
+
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
     providers: providerStatuses,
@@ -2126,14 +2172,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeProject, activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
   );
 
-  const handleProposeCronJob = useCallback(
+  const handleProposeScheduledTask = useCallback(
     async (event: {
       action: "accept" | "reject";
       name: string;
       description: string | null;
       cronExpression: string;
       projectId: string;
-      skillId?: string;
+      skillIds?: string[];
       prompt?: string;
       autoSend: boolean;
     }) => {
@@ -2143,7 +2189,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (event.action === "accept") {
         let created = false;
         try {
-          await api.cronJobs.create({
+          await api.scheduledTasks.create({
             name: event.name,
             description: event.description,
             cronExpression: event.cronExpression,
@@ -2151,20 +2197,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
             jobType: "new_thread",
             newThreadConfig: {
               projectId: event.projectId as never,
-              ...(event.skillId ? { skillId: event.skillId } : {}),
+              ...(event.skillIds && event.skillIds.length > 0 ? { skillIds: event.skillIds } : {}),
               ...(event.prompt ? { prompt: event.prompt } : {}),
               autoSend: event.autoSend,
             },
           });
           created = true;
         } catch (error) {
-          console.error("Failed to create cron job from proposal:", error);
+          console.error("Failed to create scheduled task from proposal:", error);
         }
 
         const messageIdForSend = newMessageId();
         const messageText = created
-          ? `Cron job added: ${event.name} (schedule: ${event.cronExpression})`
-          : `Failed to create cron job "${event.name}".`;
+          ? `Scheduled task added: ${event.name} (schedule: ${event.cronExpression})`
+          : `Failed to create scheduled task "${event.name}".`;
         const createdAt = new Date().toISOString();
 
         setOptimisticUserMessages((existing) => [
@@ -2189,7 +2235,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       } else {
         const messageIdForSend = newMessageId();
-        const messageText = "User rejected the proposed cron job.";
+        const messageText = "User rejected the proposed scheduled task.";
         const createdAt = new Date().toISOString();
 
         setOptimisticUserMessages((existing) => [
@@ -2241,6 +2287,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        services: input.services,
       };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
@@ -4606,7 +4653,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
                 onProposeAction={handleProposeAction}
-                onProposeCronJob={handleProposeCronJob}
+                onProposeScheduledTask={handleProposeScheduledTask}
                 resolveProjectName={resolveProjectName}
                 onMessageContextMenu={onMessageContextMenu}
                 onMessageSelectionClick={onMessageSelectionClick}

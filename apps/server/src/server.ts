@@ -46,9 +46,9 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
-import { CronJobRepositoryLive } from "./persistence/Layers/CronJobs";
-import { CronJobServiceLive } from "./cronJobs/Layers/CronJobs";
-import { cronJobsMcpRouteLayer } from "./cronJobs/http";
+import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
+import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
+import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -215,8 +215,8 @@ const RuntimeServicesLive = Layer.empty.pipe(
     ),
   ),
   Layer.provideMerge(
-    CronJobServiceLive.pipe(
-      Layer.provide(CronJobRepositoryLive),
+    ScheduledTaskServiceLive.pipe(
+      Layer.provide(ScheduledTaskRepositoryLive),
       Layer.provide(
         OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provide(PersistenceLayerLive)),
       ),
@@ -243,7 +243,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   projectFaviconRouteLayer,
   managedRunsMcpRouteLayer,
-  cronJobsMcpRouteLayer,
+  scheduledTasksMcpRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );

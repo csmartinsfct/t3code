@@ -56,18 +56,18 @@ import {
   ManagedRunSummary,
 } from "./managedRuns";
 import {
-  CronJob,
-  CronJobCreateInput,
-  CronJobDeleteInput,
-  CronJobError,
-  CronJobGetInput,
-  CronJobListRunsInput,
-  CronJobRunNowInput,
-  CronJobStreamEvent,
-  CronJobToggleInput,
-  CronJobUpdateInput,
-  CronThreadRun,
-} from "./cronJobs";
+  ScheduledTask,
+  ScheduledTaskCreateInput,
+  ScheduledTaskDeleteInput,
+  ScheduledTaskError,
+  ScheduledTaskGetInput,
+  ScheduledTaskListRunsInput,
+  ScheduledTaskRunNowInput,
+  ScheduledTaskStreamEvent,
+  ScheduledTaskToggleInput,
+  ScheduledTaskUpdateInput,
+  ScheduledTaskRun,
+} from "./scheduledTasks";
 import {
   ProjectListDirectoryError,
   ProjectListDirectoryInput,
@@ -159,21 +159,21 @@ export const WS_METHODS = {
   serverResolveMcpServers: "server.resolveMcpServers",
   serverResolveSkills: "server.resolveSkills",
 
-  // Cron job methods
-  cronJobsList: "cronJobs.list",
-  cronJobsGet: "cronJobs.get",
-  cronJobsCreate: "cronJobs.create",
-  cronJobsUpdate: "cronJobs.update",
-  cronJobsDelete: "cronJobs.delete",
-  cronJobsToggle: "cronJobs.toggle",
-  cronJobsRunNow: "cronJobs.runNow",
-  cronJobsListRuns: "cronJobs.listRuns",
+  // Scheduled task methods
+  scheduledTasksList: "scheduledTasks.list",
+  scheduledTasksGet: "scheduledTasks.get",
+  scheduledTasksCreate: "scheduledTasks.create",
+  scheduledTasksUpdate: "scheduledTasks.update",
+  scheduledTasksDelete: "scheduledTasks.delete",
+  scheduledTasksToggle: "scheduledTasks.toggle",
+  scheduledTasksRunNow: "scheduledTasks.runNow",
+  scheduledTasksListRuns: "scheduledTasks.listRuns",
 
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeManagedRunEvents: "subscribeManagedRunEvents",
-  subscribeCronJobEvents: "subscribeCronJobEvents",
+  subscribeScheduledTaskEvents: "subscribeScheduledTaskEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
 } as const;
@@ -447,56 +447,56 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
-export const WsCronJobsListRpc = Rpc.make(WS_METHODS.cronJobsList, {
+export const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: Schema.Struct({}),
-  success: Schema.Array(CronJob),
-  error: CronJobError,
+  success: Schema.Array(ScheduledTask),
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsGetRpc = Rpc.make(WS_METHODS.cronJobsGet, {
-  payload: CronJobGetInput,
-  success: CronJob,
-  error: CronJobError,
+export const WsScheduledTasksGetRpc = Rpc.make(WS_METHODS.scheduledTasksGet, {
+  payload: ScheduledTaskGetInput,
+  success: ScheduledTask,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsCreateRpc = Rpc.make(WS_METHODS.cronJobsCreate, {
-  payload: CronJobCreateInput,
-  success: CronJob,
-  error: CronJobError,
+export const WsScheduledTasksCreateRpc = Rpc.make(WS_METHODS.scheduledTasksCreate, {
+  payload: ScheduledTaskCreateInput,
+  success: ScheduledTask,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsUpdateRpc = Rpc.make(WS_METHODS.cronJobsUpdate, {
-  payload: CronJobUpdateInput,
-  success: CronJob,
-  error: CronJobError,
+export const WsScheduledTasksUpdateRpc = Rpc.make(WS_METHODS.scheduledTasksUpdate, {
+  payload: ScheduledTaskUpdateInput,
+  success: ScheduledTask,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsDeleteRpc = Rpc.make(WS_METHODS.cronJobsDelete, {
-  payload: CronJobDeleteInput,
-  error: CronJobError,
+export const WsScheduledTasksDeleteRpc = Rpc.make(WS_METHODS.scheduledTasksDelete, {
+  payload: ScheduledTaskDeleteInput,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsToggleRpc = Rpc.make(WS_METHODS.cronJobsToggle, {
-  payload: CronJobToggleInput,
-  success: CronJob,
-  error: CronJobError,
+export const WsScheduledTasksToggleRpc = Rpc.make(WS_METHODS.scheduledTasksToggle, {
+  payload: ScheduledTaskToggleInput,
+  success: ScheduledTask,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsRunNowRpc = Rpc.make(WS_METHODS.cronJobsRunNow, {
-  payload: CronJobRunNowInput,
-  success: CronThreadRun,
-  error: CronJobError,
+export const WsScheduledTasksRunNowRpc = Rpc.make(WS_METHODS.scheduledTasksRunNow, {
+  payload: ScheduledTaskRunNowInput,
+  success: ScheduledTaskRun,
+  error: ScheduledTaskError,
 });
 
-export const WsCronJobsListRunsRpc = Rpc.make(WS_METHODS.cronJobsListRuns, {
-  payload: CronJobListRunsInput,
-  success: Schema.Array(CronThreadRun),
-  error: CronJobError,
+export const WsScheduledTasksListRunsRpc = Rpc.make(WS_METHODS.scheduledTasksListRuns, {
+  payload: ScheduledTaskListRunsInput,
+  success: Schema.Array(ScheduledTaskRun),
+  error: ScheduledTaskError,
 });
 
-export const WsSubscribeCronJobEventsRpc = Rpc.make(WS_METHODS.subscribeCronJobEvents, {
+export const WsSubscribeScheduledTaskEventsRpc = Rpc.make(WS_METHODS.subscribeScheduledTaskEvents, {
   payload: Schema.Struct({}),
-  success: CronJobStreamEvent,
+  success: ScheduledTaskStreamEvent,
   stream: true,
 });
 
@@ -540,15 +540,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeManagedRunEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
-  WsCronJobsListRpc,
-  WsCronJobsGetRpc,
-  WsCronJobsCreateRpc,
-  WsCronJobsUpdateRpc,
-  WsCronJobsDeleteRpc,
-  WsCronJobsToggleRpc,
-  WsCronJobsRunNowRpc,
-  WsCronJobsListRunsRpc,
-  WsSubscribeCronJobEventsRpc,
+  WsScheduledTasksListRpc,
+  WsScheduledTasksGetRpc,
+  WsScheduledTasksCreateRpc,
+  WsScheduledTasksUpdateRpc,
+  WsScheduledTasksDeleteRpc,
+  WsScheduledTasksToggleRpc,
+  WsScheduledTasksRunNowRpc,
+  WsScheduledTasksListRunsRpc,
+  WsSubscribeScheduledTaskEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

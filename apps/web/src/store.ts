@@ -175,6 +175,7 @@ function mapThread(thread: OrchestrationThread): Thread {
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    initialDraft: thread.initialDraft,
   };
 }
 

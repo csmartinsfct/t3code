@@ -1,27 +1,27 @@
-const PROPOSE_CRON_JOB_LANGUAGE = "language-t3:propose-cron";
+const PROPOSE_SCHEDULED_TASK_LANGUAGE = "language-t3:propose-scheduled-task";
 
-export interface ProposeCronJobPayload {
+export interface ProposeScheduledTaskPayload {
   name: string;
   description: string | null;
   cronExpression: string;
   projectId: string;
-  skillId?: string;
+  skillIds?: string[];
   prompt?: string;
   autoSend: boolean;
 }
 
 /**
- * Check whether a code block's className indicates a `t3:propose-cron` block.
+ * Check whether a code block's className indicates a `t3:propose-scheduled-task` block.
  */
-export function isProposeCronJobBlock(className: string | undefined): boolean {
-  return className?.includes(PROPOSE_CRON_JOB_LANGUAGE) === true;
+export function isProposeScheduledTaskBlock(className: string | undefined): boolean {
+  return className?.includes(PROPOSE_SCHEDULED_TASK_LANGUAGE) === true;
 }
 
 /**
- * Safely parse a propose-cron JSON payload from a code block.
+ * Safely parse a propose-scheduled-task JSON payload from a code block.
  * Returns null for incomplete (streaming), empty, or malformed content.
  */
-export function parseProposeCronJobPayload(code: string): ProposeCronJobPayload | null {
+export function parseProposeScheduledTaskPayload(code: string): ProposeScheduledTaskPayload | null {
   const trimmed = code.trim();
   if (trimmed.length === 0) {
     return null;
@@ -45,10 +45,16 @@ export function parseProposeCronJobPayload(code: string): ProposeCronJobPayload 
 
     const description =
       typeof record.description === "string" ? record.description.trim() || null : null;
-    const skillId =
-      typeof record.skillId === "string" && record.skillId.trim()
-        ? record.skillId.trim()
-        : undefined;
+    // Accept both skillIds (array) and legacy skillId (string → wrap in array)
+    let skillIds: string[] | undefined;
+    if (Array.isArray(record.skillIds)) {
+      const filtered = record.skillIds.filter(
+        (v): v is string => typeof v === "string" && v.trim().length > 0,
+      );
+      if (filtered.length > 0) skillIds = filtered;
+    } else if (typeof record.skillId === "string" && record.skillId.trim()) {
+      skillIds = [record.skillId.trim()];
+    }
     const prompt =
       typeof record.prompt === "string" && record.prompt.trim() ? record.prompt.trim() : undefined;
     const autoSend = typeof record.autoSend === "boolean" ? record.autoSend : false;
@@ -58,7 +64,7 @@ export function parseProposeCronJobPayload(code: string): ProposeCronJobPayload 
       description,
       cronExpression,
       projectId,
-      ...(skillId !== undefined ? { skillId } : {}),
+      ...(skillIds !== undefined ? { skillIds } : {}),
       ...(prompt !== undefined ? { prompt } : {}),
       autoSend,
     };

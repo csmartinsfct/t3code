@@ -36,17 +36,17 @@ import type {
   ResolveSkillsResult,
 } from "./server";
 import type {
-  CronJob,
-  CronJobCreateInput,
-  CronJobDeleteInput,
-  CronJobGetInput,
-  CronJobListRunsInput,
-  CronJobRunNowInput,
-  CronJobStreamEvent,
-  CronJobToggleInput,
-  CronJobUpdateInput,
-  CronThreadRun,
-} from "./cronJobs";
+  ScheduledTask,
+  ScheduledTaskCreateInput,
+  ScheduledTaskDeleteInput,
+  ScheduledTaskGetInput,
+  ScheduledTaskListRunsInput,
+  ScheduledTaskRunNowInput,
+  ScheduledTaskStreamEvent,
+  ScheduledTaskToggleInput,
+  ScheduledTaskUpdateInput,
+  ScheduledTaskRun,
+} from "./scheduledTasks";
 import type {
   ManagedRunDetail,
   ManagedRunGetInput,
@@ -219,16 +219,16 @@ export interface NativeApi {
     stop: (input: ManagedRunStopInput) => Promise<void>;
     onEvent: (projectId: string, callback: (event: ManagedRunStreamEvent) => void) => () => void;
   };
-  cronJobs: {
-    list: () => Promise<ReadonlyArray<CronJob>>;
-    get: (input: CronJobGetInput) => Promise<CronJob>;
-    create: (input: CronJobCreateInput) => Promise<CronJob>;
-    update: (input: CronJobUpdateInput) => Promise<CronJob>;
-    delete: (input: CronJobDeleteInput) => Promise<void>;
-    toggle: (input: CronJobToggleInput) => Promise<CronJob>;
-    runNow: (input: CronJobRunNowInput) => Promise<CronThreadRun>;
-    listRuns: (input: CronJobListRunsInput) => Promise<ReadonlyArray<CronThreadRun>>;
-    onEvent: (callback: (event: CronJobStreamEvent) => void) => () => void;
+  scheduledTasks: {
+    list: () => Promise<ReadonlyArray<ScheduledTask>>;
+    get: (input: ScheduledTaskGetInput) => Promise<ScheduledTask>;
+    create: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
+    update: (input: ScheduledTaskUpdateInput) => Promise<ScheduledTask>;
+    delete: (input: ScheduledTaskDeleteInput) => Promise<void>;
+    toggle: (input: ScheduledTaskToggleInput) => Promise<ScheduledTask>;
+    runNow: (input: ScheduledTaskRunNowInput) => Promise<ScheduledTaskRun>;
+    listRuns: (input: ScheduledTaskListRunsInput) => Promise<ReadonlyArray<ScheduledTaskRun>>;
+    onEvent: (callback: (event: ScheduledTaskStreamEvent) => void) => () => void;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

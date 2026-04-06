@@ -349,6 +349,13 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ThreadInitialDraft = Schema.Struct({
+  prompt: Schema.optional(Schema.String),
+  skillIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  autoSend: Schema.optional(Schema.Boolean),
+});
+export type ThreadInitialDraft = typeof ThreadInitialDraft.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -361,6 +368,7 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
@@ -420,6 +428,7 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
 });
 
@@ -766,6 +775,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   sourceThreadId: Schema.optional(ThreadId),
+  initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

@@ -1,5 +1,5 @@
 import {
-  type CronJobStreamEvent,
+  type ScheduledTaskStreamEvent,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -65,16 +65,16 @@ export interface WsRpcClient {
       listener: (event: ManagedRunStreamEvent) => void,
     ) => () => void;
   };
-  readonly cronJobs: {
-    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.cronJobsList>;
-    readonly get: RpcUnaryMethod<typeof WS_METHODS.cronJobsGet>;
-    readonly create: RpcUnaryMethod<typeof WS_METHODS.cronJobsCreate>;
-    readonly update: RpcUnaryMethod<typeof WS_METHODS.cronJobsUpdate>;
-    readonly delete: RpcUnaryMethod<typeof WS_METHODS.cronJobsDelete>;
-    readonly toggle: RpcUnaryMethod<typeof WS_METHODS.cronJobsToggle>;
-    readonly runNow: RpcUnaryMethod<typeof WS_METHODS.cronJobsRunNow>;
-    readonly listRuns: RpcUnaryMethod<typeof WS_METHODS.cronJobsListRuns>;
-    readonly onEvent: (listener: (event: CronJobStreamEvent) => void) => () => void;
+  readonly scheduledTasks: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.scheduledTasksList>;
+    readonly get: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksGet>;
+    readonly create: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksCreate>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksUpdate>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksDelete>;
+    readonly toggle: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksToggle>;
+    readonly runNow: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksRunNow>;
+    readonly listRuns: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksListRuns>;
+    readonly onEvent: (listener: (event: ScheduledTaskStreamEvent) => void) => () => void;
   };
   readonly shell: {
     readonly openInEditor: (input: {
@@ -175,18 +175,26 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           listener,
         ),
     },
-    cronJobs: {
-      list: () => transport.request((client) => client[WS_METHODS.cronJobsList]({})),
-      get: (input) => transport.request((client) => client[WS_METHODS.cronJobsGet](input)),
-      create: (input) => transport.request((client) => client[WS_METHODS.cronJobsCreate](input)),
-      update: (input) => transport.request((client) => client[WS_METHODS.cronJobsUpdate](input)),
-      delete: (input) => transport.request((client) => client[WS_METHODS.cronJobsDelete](input)),
-      toggle: (input) => transport.request((client) => client[WS_METHODS.cronJobsToggle](input)),
-      runNow: (input) => transport.request((client) => client[WS_METHODS.cronJobsRunNow](input)),
+    scheduledTasks: {
+      list: () => transport.request((client) => client[WS_METHODS.scheduledTasksList]({})),
+      get: (input) => transport.request((client) => client[WS_METHODS.scheduledTasksGet](input)),
+      create: (input) =>
+        transport.request((client) => client[WS_METHODS.scheduledTasksCreate](input)),
+      update: (input) =>
+        transport.request((client) => client[WS_METHODS.scheduledTasksUpdate](input)),
+      delete: (input) =>
+        transport.request((client) => client[WS_METHODS.scheduledTasksDelete](input)),
+      toggle: (input) =>
+        transport.request((client) => client[WS_METHODS.scheduledTasksToggle](input)),
+      runNow: (input) =>
+        transport.request((client) => client[WS_METHODS.scheduledTasksRunNow](input)),
       listRuns: (input) =>
-        transport.request((client) => client[WS_METHODS.cronJobsListRuns](input)),
+        transport.request((client) => client[WS_METHODS.scheduledTasksListRuns](input)),
       onEvent: (listener) =>
-        transport.subscribe((client) => client[WS_METHODS.subscribeCronJobEvents]({}), listener),
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeScheduledTaskEvents]({}),
+          listener,
+        ),
     },
     shell: {
       openInEditor: (input) =>

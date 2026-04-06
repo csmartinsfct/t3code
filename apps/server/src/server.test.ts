@@ -45,7 +45,7 @@ import {
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
-import { CronJobService } from "./cronJobs/Services/CronJobs.ts";
+import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -297,7 +297,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.succeed(CronJobService, {
+        Layer.succeed(ScheduledTaskService, {
           list: () => Effect.succeed([]),
           get: () => Effect.die(new Error("not mocked")),
           create: () => Effect.die(new Error("not mocked")),

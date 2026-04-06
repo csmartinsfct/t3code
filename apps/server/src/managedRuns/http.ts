@@ -182,8 +182,11 @@ function createMcpServer(
     {
       title: "List Managed Runs",
       description:
-        "List active managed runs for the current project. Check this before launching a new " +
-        "service to avoid duplicates. Use includeHistorical to also see completed/failed/stopped runs.",
+        "List active managed runs and all available project actions for the current project. " +
+        "Check this before launching or proposing a new action to avoid duplicates. " +
+        "The response includes `availableActions` (configured scripts you can launch via " +
+        "launch_project_script using the scriptId) and `runs` (active/historical managed runs). " +
+        "Use includeHistorical to also see completed/failed/stopped runs.",
       inputSchema: { includeHistorical: z.boolean().optional() },
     },
     async ({ includeHistorical }) => {
@@ -201,7 +204,20 @@ function createMcpServer(
           command: script?.command ?? "unknown",
         };
       });
-      return { content: [{ type: "text" as const, text: JSON.stringify(enriched, null, 2) }] };
+      const availableActions = scripts.map((s) => ({
+        scriptId: s.id,
+        name: s.name,
+        command: s.command,
+        services: s.services,
+      }));
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ runs: enriched, availableActions }, null, 2),
+          },
+        ],
+      };
     },
   );
 

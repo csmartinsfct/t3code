@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, memo } from "react";
 import { CheckIcon, ClockIcon, XIcon } from "lucide-react";
 
-import type { ProposeCronJobPayload } from "../../lib/proposeCronJobParser";
+import type { ProposeScheduledTaskPayload } from "../../lib/proposeScheduledTaskParser";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -9,33 +9,33 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 
-export interface ProposeCronJobCardProps {
+export interface ProposeScheduledTaskCardProps {
   name: string;
   description: string | null;
   cronExpression: string;
   projectId: string;
-  skillId?: string;
+  skillIds?: string[];
   prompt?: string;
   autoSend: boolean;
   projectName: string;
   isStreaming: boolean;
-  onAccept: (data: ProposeCronJobPayload) => void;
+  onAccept: (data: ProposeScheduledTaskPayload) => void;
   onReject: () => void;
 }
 
-function ProposeCronJobCard({
+function ProposeScheduledTaskCard({
   name: initialName,
   description: initialDescription,
   cronExpression: initialCron,
   projectId: initialProjectId,
-  skillId,
+  skillIds,
   prompt: initialPrompt,
   autoSend,
   projectName: initialProjectName,
   isStreaming,
   onAccept,
   onReject,
-}: ProposeCronJobCardProps) {
+}: ProposeScheduledTaskCardProps) {
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? "");
   const [cronExpression, setCronExpression] = useState(initialCron);
@@ -68,7 +68,7 @@ function ProposeCronJobCard({
       description: description.trim() || null,
       cronExpression: cronExpression.trim(),
       projectId,
-      ...(skillId ? { skillId } : {}),
+      ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
       ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
       autoSend,
     });
@@ -79,7 +79,7 @@ function ProposeCronJobCard({
     description,
     cronExpression,
     projectId,
-    skillId,
+    skillIds,
     prompt,
     autoSend,
     onAccept,
@@ -98,7 +98,7 @@ function ProposeCronJobCard({
     >
       <div className="mb-3 flex items-center gap-2 text-xs font-medium text-muted-foreground">
         <ClockIcon className="size-3.5" />
-        <span>Proposed Cron Job</span>
+        <span>Proposed Scheduled Task</span>
         {status === "accepted" && (
           <Badge variant="outline" className="ml-auto text-[10px] text-green-600">
             Added
@@ -163,10 +163,10 @@ function ProposeCronJobCard({
         </div>
 
         {/* Metadata row */}
-        {(skillId || autoSend) && (
+        {((skillIds && skillIds.length > 0) || autoSend) && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            {skillId && <span>Skill: {skillId}</span>}
-            {skillId && autoSend && <span className="text-border">|</span>}
+            {skillIds && skillIds.length > 0 && <span>Skills: {skillIds.join(", ")}</span>}
+            {skillIds && skillIds.length > 0 && autoSend && <span className="text-border">|</span>}
             {autoSend && <span>Auto send enabled</span>}
           </div>
         )}
@@ -210,4 +210,4 @@ function ProposeCronJobCard({
   );
 }
 
-export default memo(ProposeCronJobCard);
+export default memo(ProposeScheduledTaskCard);
