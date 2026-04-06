@@ -17,6 +17,7 @@ import {
   type ProviderRateLimitInfo,
   type AccountRateLimitsUpdatedPayload,
 } from "@t3tools/contracts";
+import { buildPlanImplementationPrompt } from "@t3tools/shared/proposedPlan";
 import { Cache, Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -1093,6 +1094,78 @@ const make = Effect.fn("make")(function* () {
     },
   );
 
+  /**
+   * Server-side auto-accept for "plan-accept" mode.
+   *
+   * When a turn completes successfully and the thread is in "plan-accept" mode,
+   * automatically dispatch an implementation turn for the actionable proposed
+   * plan — without requiring the client to be focused on the thread.
+   */
+  const maybeAutoAcceptPlan = Effect.fn("maybeAutoAcceptPlan")(function* (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    turnId: TurnId;
+  }) {
+    // Re-read the read model after session.set and plan finalization dispatches
+    // have been processed. The engine processes commands synchronously, so the
+    // read model already reflects all preceding dispatches in this event cycle.
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+    if (!thread || thread.interactionMode !== "plan-accept") return;
+
+    // Find the latest actionable proposed plan for the completed turn.
+    const actionablePlan = thread.proposedPlans
+      .filter(
+        (plan) =>
+          plan.turnId === input.turnId &&
+          plan.implementedAt === null &&
+          plan.planMarkdown.trim().length > 0,
+      )
+      .toSorted(
+        (left, right) =>
+          left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
+      )
+      .at(-1);
+
+    if (!actionablePlan) return;
+
+    const now = new Date().toISOString();
+    const messageId = MessageId.makeUnsafe(
+      `auto-accept:${input.threadId}:${actionablePlan.id}:${crypto.randomUUID()}`,
+    );
+
+    // Step 1: Switch to default mode. This MUST happen before thread.turn.start
+    // because the decider reads targetThread.interactionMode for the event payload.
+    yield* orchestrationEngine.dispatch({
+      type: "thread.interaction-mode.set",
+      commandId: providerCommandId(input.event, "auto-accept-mode-set"),
+      threadId: input.threadId,
+      interactionMode: "default",
+      createdAt: now,
+    });
+
+    // Step 2: Start the implementation turn.
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId: providerCommandId(input.event, "auto-accept-turn-start"),
+      threadId: input.threadId,
+      message: {
+        messageId,
+        role: "user",
+        text: buildPlanImplementationPrompt(actionablePlan.planMarkdown),
+        attachments: [],
+      },
+      sourceProposedPlan: {
+        threadId: input.threadId,
+        planId: actionablePlan.id,
+      },
+      runtimeMode: thread.runtimeMode,
+      interactionMode: "default",
+      titleSeed: thread.title,
+      createdAt: now,
+    });
+  });
+
   const processRuntimeEvent = Effect.fn("processRuntimeEvent")(function* (
     event: ProviderRuntimeEvent,
   ) {
@@ -1373,6 +1446,23 @@ const make = Effect.fn("make")(function* () {
           turnId,
           updatedAt: now,
         });
+
+        // Server-side auto-accept for plan-accept mode. Only after a successful
+        // turn completion and when all plan finalization has been dispatched.
+        const turnState = normalizeRuntimeTurnState(event.payload.state);
+        if (turnState === "completed" && shouldApplyThreadLifecycle) {
+          yield* maybeAutoAcceptPlan({ event, threadId: thread.id, turnId }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("server auto-accept plan failed", {
+                eventId: event.eventId,
+                eventType: event.type,
+                threadId: thread.id,
+                turnId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
       }
     }
 

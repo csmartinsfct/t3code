@@ -722,9 +722,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  // Tracks the last plan id that was auto-accepted in "plan-accept" mode
-  // to prevent double-triggering for the same plan.
-  const planAutoAcceptedIdRef = useRef<string | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
@@ -4028,28 +4025,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModel,
     ],
   );
-
-  // Auto-accept: when in "plan-accept" mode and a plan is ready, automatically
-  // submit it for implementation without requiring user interaction.
-  // Uses the same resolvePlanFollowUpSubmission path as the manual "Implement" button.
-  useEffect(() => {
-    if (interactionMode !== "plan-accept" || !showPlanFollowUpPrompt || !activeProposedPlan) {
-      return;
-    }
-    // Guard against double-triggering for the same plan.
-    if (planAutoAcceptedIdRef.current === activeProposedPlan.id) {
-      return;
-    }
-    planAutoAcceptedIdRef.current = activeProposedPlan.id;
-    const followUp = resolvePlanFollowUpSubmission({
-      draftText: "",
-      planMarkdown: activeProposedPlan.planMarkdown,
-    });
-    void onSubmitPlanFollowUp({
-      text: followUp.text,
-      interactionMode: followUp.interactionMode,
-    });
-  }, [activeProposedPlan, interactionMode, onSubmitPlanFollowUp, showPlanFollowUpPrompt]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();

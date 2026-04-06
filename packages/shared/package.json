@@ -47,6 +47,10 @@
     "./String": {
       "types": "./src/String.ts",
       "import": "./src/String.ts"
+    },
+    "./proposedPlan": {
+      "types": "./src/proposedPlan.ts",
+      "import": "./src/proposedPlan.ts"
     }
   },
   "scripts": {

@@ -2387,4 +2387,201 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("runtime still processed");
   });
+
+  describe("server-side plan auto-accept", () => {
+    async function createPlanAcceptHarness() {
+      const harness = await createHarness();
+      const threadId = asThreadId("thread-1");
+      const createdAt = new Date().toISOString();
+
+      // Set interaction mode to plan-accept.
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.makeUnsafe("cmd-interaction-mode-plan-accept"),
+          threadId,
+          interactionMode: "plan-accept",
+          createdAt,
+        }),
+      );
+
+      return { ...harness, threadId, createdAt };
+    }
+
+    function emitPlanTurnLifecycle(
+      harness: Awaited<ReturnType<typeof createPlanAcceptHarness>>,
+      options: {
+        turnId: string;
+        planMarkdown: string;
+        completionState?: string;
+      },
+    ) {
+      const turnId = asTurnId(options.turnId);
+      const now = new Date().toISOString();
+
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-auto-accept-started-${options.turnId}`),
+        provider: "codex",
+        createdAt: now,
+        threadId: harness.threadId,
+        turnId,
+      });
+
+      harness.emit({
+        type: "turn.proposed.completed",
+        eventId: asEventId(`evt-auto-accept-plan-${options.turnId}`),
+        provider: "codex",
+        createdAt: now,
+        threadId: harness.threadId,
+        turnId,
+        payload: {
+          planMarkdown: options.planMarkdown,
+        },
+      });
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-auto-accept-completed-${options.turnId}`),
+        provider: "codex",
+        createdAt: now,
+        threadId: harness.threadId,
+        turnId,
+        status: (options.completionState ?? "completed") as "completed",
+      });
+    }
+
+    it("auto-accepts plan when turn completes in plan-accept mode", async () => {
+      const harness = await createPlanAcceptHarness();
+
+      emitPlanTurnLifecycle(harness, {
+        turnId: "turn-auto-accept",
+        planMarkdown: "## Auto plan\n\n- do the thing",
+      });
+
+      // Wait for the auto-accept user message to appear.
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.messages.some(
+          (msg: ProviderRuntimeTestMessage) =>
+            msg.role === "user" &&
+            msg.text.includes("PLEASE IMPLEMENT THIS PLAN:") &&
+            msg.text.includes("## Auto plan"),
+        ),
+      );
+
+      // Interaction mode should have been switched to default.
+      expect(thread.interactionMode).toBe("default");
+
+      // The auto-accept message should contain the plan markdown.
+      const autoAcceptMessage = thread.messages.find(
+        (msg: ProviderRuntimeTestMessage) =>
+          msg.role === "user" && msg.text.includes("PLEASE IMPLEMENT THIS PLAN:"),
+      );
+      expect(autoAcceptMessage?.text).toBe(
+        "PLEASE IMPLEMENT THIS PLAN:\n## Auto plan\n\n- do the thing",
+      );
+    });
+
+    it("does not auto-accept when turn fails in plan-accept mode", async () => {
+      const harness = await createPlanAcceptHarness();
+
+      emitPlanTurnLifecycle(harness, {
+        turnId: "turn-fail",
+        planMarkdown: "## Failed plan",
+        completionState: "failed",
+      });
+
+      // Wait for the session to settle with error status.
+      const thread = await waitForThread(
+        harness.engine,
+        (entry) => entry.session?.status === "error",
+      );
+
+      // Mode should still be plan-accept (not changed to default).
+      expect(thread.interactionMode).toBe("plan-accept");
+
+      // No auto-accept message should have been sent.
+      const autoAcceptMessage = thread.messages.find(
+        (msg: ProviderRuntimeTestMessage) =>
+          msg.role === "user" && msg.text.includes("PLEASE IMPLEMENT THIS PLAN:"),
+      );
+      expect(autoAcceptMessage).toBeUndefined();
+    });
+
+    it("does not auto-accept when turn is interrupted in plan-accept mode", async () => {
+      const harness = await createPlanAcceptHarness();
+
+      emitPlanTurnLifecycle(harness, {
+        turnId: "turn-interrupted",
+        planMarkdown: "## Interrupted plan",
+        completionState: "interrupted",
+      });
+
+      // Wait for session to settle.
+      const thread = await waitForThread(
+        harness.engine,
+        (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+      );
+
+      expect(thread.interactionMode).toBe("plan-accept");
+      const autoAcceptMessage = thread.messages.find(
+        (msg: ProviderRuntimeTestMessage) =>
+          msg.role === "user" && msg.text.includes("PLEASE IMPLEMENT THIS PLAN:"),
+      );
+      expect(autoAcceptMessage).toBeUndefined();
+    });
+
+    it("does not auto-accept when thread is in default mode", async () => {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+
+      // Thread is in default mode (the harness default).
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("evt-default-mode-started"),
+        provider: "codex",
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-default-mode"),
+      });
+
+      harness.emit({
+        type: "turn.proposed.completed",
+        eventId: asEventId("evt-default-mode-plan"),
+        provider: "codex",
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-default-mode"),
+        payload: {
+          planMarkdown: "## Default mode plan",
+        },
+      });
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId("evt-default-mode-completed"),
+        provider: "codex",
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-default-mode"),
+        status: "completed",
+      });
+
+      // Wait for the plan to be projected.
+      const thread = await waitForThread(harness.engine, (entry) =>
+        entry.proposedPlans.some(
+          (plan: ProviderRuntimeTestProposedPlan) =>
+            plan.id === "plan:thread-1:turn:turn-default-mode",
+        ),
+      );
+
+      // No auto-accept should have occurred.
+      expect(thread.interactionMode).toBe("default");
+      const autoAcceptMessage = thread.messages.find(
+        (msg: ProviderRuntimeTestMessage) =>
+          msg.role === "user" && msg.text.includes("PLEASE IMPLEMENT THIS PLAN:"),
+      );
+      expect(autoAcceptMessage).toBeUndefined();
+    });
+  });
 });
