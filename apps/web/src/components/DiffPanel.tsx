@@ -18,7 +18,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { copyClipboardSnippet } from "../clipboardSnippetRegistry";
 import { openInPreferredEditor } from "../editorPreferences";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
@@ -156,113 +155,6 @@ function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
 
 function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
-}
-
-// ── Enriched copy helpers: extract file path & line numbers from @pierre/diffs shadow DOM ──
-
-/** Walk up from a node to find `[data-diff-file-path]`, crossing shadow root → host boundaries. */
-function findFileDiffWrapper(node: Node): HTMLElement | null {
-  let current: Node | null = node;
-  while (current) {
-    if (current instanceof HTMLElement && current.hasAttribute("data-diff-file-path")) {
-      return current;
-    }
-    if (current instanceof ShadowRoot) {
-      current = current.host;
-      continue;
-    }
-    current = current.parentNode;
-  }
-  return null;
-}
-
-/** Walk up from a node to find the nearest ancestor with `data-line` (within shadow DOM). */
-function findAncestorLineElement(node: Node): HTMLElement | null {
-  let current: Node | null = node;
-  while (current) {
-    if (current instanceof HTMLElement && current.hasAttribute("data-line")) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
-
-/**
- * Read the most appropriate line number from a diff line element.
- * Uses `data-line` (new file) for additions/context, `data-alt-line` (old file) for deletions.
- */
-function resolveLineNumber(el: HTMLElement): number | undefined {
-  const lineType = el.getAttribute("data-line-type");
-  const attr = lineType === "change-deletion" ? "data-alt-line" : "data-line";
-  const raw = el.getAttribute(attr);
-  if (raw == null) return undefined;
-  const num = Number(raw);
-  return Number.isFinite(num) && num > 0 ? num : undefined;
-}
-
-function resolveSelectedDiffClipboardSnippet(
-  viewport: HTMLDivElement,
-  cwd: string,
-): {
-  text: string;
-  cwd: string;
-  relativePath: string;
-  startLine: number;
-  endLine: number;
-} | null {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-
-  const selectedText = selection.toString();
-  if (selectedText.trim().length === 0) return null;
-  const range = selection.getRangeAt(0);
-  const startNode = range.startContainer;
-  const endNode = range.endContainer;
-  if (!startNode || !endNode) return null;
-
-  // Determine which file the selection belongs to
-  const startFileWrapper = findFileDiffWrapper(startNode);
-  if (!startFileWrapper || !viewport.contains(startFileWrapper)) return null;
-  const endFileWrapper = findFileDiffWrapper(endNode);
-  // Skip multi-file selections — degrade to plain paste
-  if (endFileWrapper && startFileWrapper !== endFileWrapper) return null;
-
-  const relativePath = startFileWrapper.getAttribute("data-diff-file-path");
-  if (!relativePath) return null;
-
-  let startLine: number | undefined;
-  let endLine: number | undefined;
-  const diffsContainer = startFileWrapper.querySelector("diffs-container");
-  const shadowRoot = diffsContainer?.shadowRoot;
-  if (shadowRoot) {
-    const intersectedLines = Array.from(shadowRoot.querySelectorAll<HTMLElement>("[data-line]"))
-      .filter((line) => range.intersectsNode(line))
-      .map((line) => resolveLineNumber(line))
-      .filter((line): line is number => line !== undefined);
-    if (intersectedLines.length > 0) {
-      startLine = intersectedLines[0];
-      endLine = intersectedLines[intersectedLines.length - 1];
-    }
-  }
-
-  if (startLine === undefined || endLine === undefined) {
-    const startLineEl = findAncestorLineElement(startNode);
-    const endLineEl = findAncestorLineElement(endNode);
-    startLine = startLine ?? (startLineEl ? resolveLineNumber(startLineEl) : undefined);
-    endLine = endLine ?? (endLineEl ? resolveLineNumber(endLineEl) : undefined);
-  }
-
-  if (startLine === undefined || endLine === undefined) return null;
-
-  // Normalize direction (user may select bottom-to-top)
-  return {
-    text: selectedText,
-    cwd,
-    relativePath,
-    startLine: Math.min(startLine, endLine),
-    endLine: Math.max(startLine, endLine),
-  };
 }
 
 interface DiffPanelProps {
@@ -521,43 +413,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     const selectedChip = element.querySelector<HTMLElement>("[data-turn-chip-selected='true']");
     selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [selectedTurn?.turnId, selectedTurnId]);
-
-  // ── Enriched copy: register clipboard snippet metadata on Cmd+C ──────────
-  useEffect(() => {
-    const viewport = patchViewportRef.current;
-    if (!viewport) return;
-    const cwd = activeCwd;
-    if (!cwd) return;
-
-    const handleCopy = (event: ClipboardEvent) => {
-      const snippet = resolveSelectedDiffClipboardSnippet(viewport, cwd);
-      if (!snippet) return;
-      copyClipboardSnippet(snippet, event.clipboardData);
-      if (event.clipboardData) {
-        event.preventDefault();
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.altKey || event.shiftKey) return;
-      if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key.toLowerCase() !== "c") return;
-
-      const snippet = resolveSelectedDiffClipboardSnippet(viewport, cwd);
-      if (!snippet) return;
-
-      copyClipboardSnippet(snippet);
-      event.preventDefault();
-    };
-
-    document.addEventListener("copy", handleCopy, true);
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      document.removeEventListener("copy", handleCopy, true);
-      document.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [activeCwd]);
 
   const headerRow = (
     <>
