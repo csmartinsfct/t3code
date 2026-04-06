@@ -1208,6 +1208,26 @@ export default function Sidebar() {
             modelSelection,
             createdAt: new Date().toISOString(),
           });
+          // Wait for the forked thread to appear in the store before
+          // navigating — the thread.created event may not have been
+          // applied yet when the dispatch promise resolves.
+          await new Promise<void>((resolve) => {
+            if (forkThreadId in useStore.getState().threadsById) {
+              resolve();
+              return;
+            }
+            const unsubscribe = useStore.subscribe((state) => {
+              if (forkThreadId in state.threadsById) {
+                unsubscribe();
+                resolve();
+              }
+            });
+            // Safety timeout so we don't hang forever
+            setTimeout(() => {
+              unsubscribe();
+              resolve();
+            }, 2_000);
+          });
           void navigate({
             to: "/$threadId",
             params: { threadId: forkThreadId },

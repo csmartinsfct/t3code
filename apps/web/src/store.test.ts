@@ -64,6 +64,7 @@ function makeState(thread: Thread): AppState {
       },
     ],
     threads: [thread],
+    threadsById: { [thread.id]: thread },
     sidebarThreadsById: {},
     threadIdsByProjectId,
     bootstrapComplete: true,
@@ -276,6 +277,7 @@ describe("store read model sync", () => {
         },
       ],
       threads: [],
+      threadsById: {},
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
       bootstrapComplete: true,
@@ -368,6 +370,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      threadsById: {},
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
       bootstrapComplete: true,
@@ -427,6 +430,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [thread],
+      threadsById: { [thread.id]: thread },
       sidebarThreadsById: {},
       threadIdsByProjectId: {
         [originalProjectId]: [threadId],
@@ -478,6 +482,7 @@ describe("incremental orchestration updates", () => {
     const state: AppState = {
       ...makeState(thread1),
       threads: [thread1, thread2],
+      threadsById: { [thread1.id]: thread1, [thread2.id]: thread2 },
     };
 
     const next = applyOrchestrationEvent(

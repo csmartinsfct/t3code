@@ -26,6 +26,7 @@ import { type ChatMessage, type Project, type SidebarThreadSummary, type Thread 
 export interface AppState {
   projects: Project[];
   threads: Thread[];
+  threadsById: Record<string, Thread>;
   sidebarThreadsById: Record<string, SidebarThreadSummary>;
   threadIdsByProjectId: Record<string, ThreadId[]>;
   bootstrapComplete: boolean;
@@ -34,6 +35,7 @@ export interface AppState {
 const initialState: AppState = {
   projects: [],
   threads: [],
+  threadsById: {},
   sidebarThreadsById: {},
   threadIdsByProjectId: {},
   bootstrapComplete: false,
@@ -306,6 +308,14 @@ function buildThreadIdsByProjectId(threads: ReadonlyArray<Thread>): Record<strin
   return threadIdsByProjectId;
 }
 
+function buildThreadsById(threads: ReadonlyArray<Thread>): Record<string, Thread> {
+  const record: Record<string, Thread> = {};
+  for (const thread of threads) {
+    record[thread.id] = thread;
+  }
+  return record;
+}
+
 function buildSidebarThreadsById(
   threads: ReadonlyArray<Thread>,
 ): Record<string, SidebarThreadSummary> {
@@ -549,6 +559,8 @@ function updateThreadState(
     return state;
   }
 
+  const threadsById = { ...state.threadsById, [threadId]: updatedThread };
+
   const nextSummary = buildSidebarThreadSummary(updatedThread);
   const previousSummary = state.sidebarThreadsById[threadId];
   const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
@@ -562,12 +574,14 @@ function updateThreadState(
     return {
       ...state,
       threads,
+      threadsById,
     };
   }
 
   return {
     ...state,
     threads,
+    threadsById,
     sidebarThreadsById,
   };
 }
@@ -579,12 +593,14 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     .filter((project) => project.deletedAt === null)
     .map(mapProject);
   const threads = readModel.threads.filter((thread) => thread.deletedAt === null).map(mapThread);
+  const threadsById = buildThreadsById(threads);
   const sidebarThreadsById = buildSidebarThreadsById(threads);
   const threadIdsByProjectId = buildThreadIdsByProjectId(threads);
   return {
     ...state,
     projects,
     threads,
+    threadsById,
     sidebarThreadsById,
     threadIdsByProjectId,
     bootstrapComplete: true,
@@ -643,7 +659,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.created": {
-      const existing = state.threads.find((thread) => thread.id === event.payload.threadId);
+      const existing = state.threadsById[event.payload.threadId] as Thread | undefined;
       const nextThread = mapThread({
         id: event.payload.threadId,
         projectId: event.payload.projectId,
@@ -687,6 +703,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return {
         ...state,
         threads,
+        threadsById: { ...state.threadsById, [nextThread.id]: nextThread },
         sidebarThreadsById,
         threadIdsByProjectId,
       };
@@ -697,9 +714,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       if (threads.length === state.threads.length) {
         return state;
       }
-      const deletedThread = state.threads.find((thread) => thread.id === event.payload.threadId);
-      const sidebarThreadsById = { ...state.sidebarThreadsById };
-      delete sidebarThreadsById[event.payload.threadId];
+      const deletedThread = state.threadsById[event.payload.threadId] as Thread | undefined;
+      const { [event.payload.threadId]: _, ...nextThreadsById } = state.threadsById;
+      const { [event.payload.threadId]: __, ...nextSidebarThreadsById } = state.sidebarThreadsById;
       const threadIdsByProjectId = deletedThread
         ? removeThreadIdByProjectId(
             state.threadIdsByProjectId,
@@ -710,7 +727,8 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return {
         ...state,
         threads,
-        sidebarThreadsById,
+        threadsById: nextThreadsById,
+        sidebarThreadsById: nextSidebarThreadsById,
         threadIdsByProjectId,
       };
     }
@@ -751,25 +769,28 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       const sourceProjectId = event.payload.sourceProjectId;
       const targetProjectId = event.payload.targetProjectId;
 
-      const threads = updateThread(state.threads, threadId, (thread) => ({
-        ...thread,
-        projectId: targetProjectId,
-        branch: null,
-        worktreePath: null,
-        updatedAt: event.payload.updatedAt,
-      }));
+      let movedThread: Thread | null = null;
+      const threads = updateThread(state.threads, threadId, (thread) => {
+        const updated = {
+          ...thread,
+          projectId: targetProjectId,
+          branch: null,
+          worktreePath: null,
+          updatedAt: event.payload.updatedAt,
+        };
+        movedThread = updated;
+        return updated;
+      });
 
-      if (threads === state.threads) {
+      if (threads === state.threads || movedThread === null) {
         return state;
       }
 
-      const movedThread = threads.find((t) => t.id === threadId);
-      const sidebarThreadsById = movedThread
-        ? {
-            ...state.sidebarThreadsById,
-            [threadId]: buildSidebarThreadSummary(movedThread),
-          }
-        : state.sidebarThreadsById;
+      const threadsById = { ...state.threadsById, [threadId]: movedThread };
+      const sidebarThreadsById = {
+        ...state.sidebarThreadsById,
+        [threadId]: buildSidebarThreadSummary(movedThread),
+      };
 
       let threadIdsByProjectId = removeThreadIdByProjectId(
         state.threadIdsByProjectId,
@@ -785,6 +806,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return {
         ...state,
         threads,
+        threadsById,
         sidebarThreadsById,
         threadIdsByProjectId,
       };
@@ -1156,7 +1178,7 @@ export const selectProjectById =
 export const selectThreadById =
   (threadId: ThreadId | null | undefined) =>
   (state: AppState): Thread | undefined =>
-    threadId ? state.threads.find((thread) => thread.id === threadId) : undefined;
+    threadId ? state.threadsById[threadId] : undefined;
 
 export const selectSidebarThreadSummaryById =
   (threadId: ThreadId | null | undefined) =>

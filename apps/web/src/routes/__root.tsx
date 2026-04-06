@@ -312,6 +312,7 @@ function EventRouter() {
     let needsProviderInvalidation = false;
     const pendingDomainEvents: OrchestrationEvent[] = [];
     let flushPendingDomainEventsScheduled = false;
+    let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
@@ -407,6 +408,7 @@ function EventRouter() {
     };
     const flushPendingDomainEvents = () => {
       flushPendingDomainEventsScheduled = false;
+      pendingFlushTimer = null;
       if (disposed || pendingDomainEvents.length === 0) {
         return;
       }
@@ -420,7 +422,7 @@ function EventRouter() {
       }
 
       flushPendingDomainEventsScheduled = true;
-      queueMicrotask(flushPendingDomainEvents);
+      pendingFlushTimer = setTimeout(flushPendingDomainEvents, 16);
     };
 
     const recoverFromSequenceGap = async (): Promise<void> => {
@@ -509,7 +511,7 @@ function EventRouter() {
       },
     );
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
-      const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
+      const thread = useStore.getState().threadsById[event.threadId];
       if (thread && thread.archivedAt !== null) {
         return;
       }
@@ -532,6 +534,10 @@ function EventRouter() {
       needsProviderInvalidation = false;
       flushPendingDomainEventsScheduled = false;
       pendingDomainEvents.length = 0;
+      if (pendingFlushTimer !== null) {
+        clearTimeout(pendingFlushTimer);
+        pendingFlushTimer = null;
+      }
       queryInvalidationThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();

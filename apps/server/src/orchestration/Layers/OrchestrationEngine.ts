@@ -50,6 +50,9 @@ interface CommandEnvelope {
   startedAtMs: number;
 }
 
+const isHighPriorityCommand = (command: OrchestrationCommand): boolean =>
+  command.type === "thread.turn.interrupt" || command.type === "thread.session.stop";
+
 function commandToAggregateRef(command: OrchestrationCommand): {
   readonly aggregateKind: "project" | "thread";
   readonly aggregateId: ProjectId | ThreadId;
@@ -80,6 +83,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   let readModel = createEmptyReadModel(new Date().toISOString());
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const priorityQueue = yield* Queue.unbounded<CommandEnvelope>();
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
@@ -272,7 +276,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   yield* projectionPipeline.bootstrap;
   readModel = yield* projectionSnapshotQuery.getSnapshot();
 
-  const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
+  const takeNextCommand = Effect.gen(function* () {
+    // Always drain priority items first (non-blocking poll)
+    const maybePriority = yield* Queue.poll(priorityQueue);
+    if (Option.isSome(maybePriority)) {
+      return maybePriority.value;
+    }
+    // Block until either queue has work; priority wins the race
+    return yield* Effect.raceFirst(Queue.take(priorityQueue), Queue.take(commandQueue));
+  });
+  const worker = Effect.forever(takeNextCommand.pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);
   yield* Effect.logDebug("orchestration engine started").pipe(
     Effect.annotateLogs({ sequence: readModel.snapshotSequence }),
@@ -287,7 +300,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
-      yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      const envelope = { command, result, startedAtMs: Date.now() };
+      const targetQueue = isHighPriorityCommand(command) ? priorityQueue : commandQueue;
+      yield* Queue.offer(targetQueue, envelope);
       return yield* Deferred.await(result);
     });
 

@@ -1,6 +1,7 @@
 import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
+import type { Thread } from "../types";
 
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -254,13 +255,19 @@ const makeThread = (input?: {
   activities: [],
 });
 
+function threadState(threads: Thread[]) {
+  const threadsById: Record<string, Thread> = {};
+  for (const t of threads) threadsById[t.id] = t;
+  return { threads, threadsById };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   useStore.setState((state) => ({
     ...state,
     projects: [],
-    threads: [],
+    ...threadState([]),
     bootstrapComplete: true,
   }));
 });
@@ -270,7 +277,7 @@ describe("waitForStartedServerThread", () => {
     const threadId = ThreadId.makeUnsafe("thread-started");
     useStore.setState((state) => ({
       ...state,
-      threads: [
+      ...threadState([
         makeThread({
           id: threadId,
           latestTurn: {
@@ -281,7 +288,7 @@ describe("waitForStartedServerThread", () => {
             completedAt: null,
           },
         }),
-      ],
+      ]),
     }));
 
     await expect(waitForStartedServerThread(threadId)).resolves.toBe(true);
@@ -291,14 +298,14 @@ describe("waitForStartedServerThread", () => {
     const threadId = ThreadId.makeUnsafe("thread-wait");
     useStore.setState((state) => ({
       ...state,
-      threads: [makeThread({ id: threadId })],
+      ...threadState([makeThread({ id: threadId })]),
     }));
 
     const promise = waitForStartedServerThread(threadId, 500);
 
     useStore.setState((state) => ({
       ...state,
-      threads: [
+      ...threadState([
         makeThread({
           id: threadId,
           latestTurn: {
@@ -309,7 +316,7 @@ describe("waitForStartedServerThread", () => {
             completedAt: null,
           },
         }),
-      ],
+      ]),
     }));
 
     await expect(promise).resolves.toBe(true);
@@ -319,7 +326,7 @@ describe("waitForStartedServerThread", () => {
     const threadId = ThreadId.makeUnsafe("thread-race");
     useStore.setState((state) => ({
       ...state,
-      threads: [makeThread({ id: threadId })],
+      ...threadState([makeThread({ id: threadId })]),
     }));
 
     const originalSubscribe = useStore.subscribe.bind(useStore);
@@ -329,7 +336,7 @@ describe("waitForStartedServerThread", () => {
         raced = true;
         useStore.setState((state) => ({
           ...state,
-          threads: [
+          ...threadState([
             makeThread({
               id: threadId,
               latestTurn: {
@@ -340,7 +347,7 @@ describe("waitForStartedServerThread", () => {
                 completedAt: null,
               },
             }),
-          ],
+          ]),
         }));
       }
       return originalSubscribe(listener);
@@ -355,7 +362,7 @@ describe("waitForStartedServerThread", () => {
     const threadId = ThreadId.makeUnsafe("thread-timeout");
     useStore.setState((state) => ({
       ...state,
-      threads: [makeThread({ id: threadId })],
+      ...threadState([makeThread({ id: threadId })]),
     }));
     const promise = waitForStartedServerThread(threadId, 500);
 

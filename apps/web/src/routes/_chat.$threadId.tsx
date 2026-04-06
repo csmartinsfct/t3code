@@ -260,7 +260,7 @@ function ChatThreadRouteView() {
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
   const search = Route.useSearch();
-  const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
+  const threadExists = useStore((store) => threadId in store.threadsById);
   const draftThreadExists = useComposerDraftStore((store) =>
     Object.hasOwn(store.draftThreadsByThreadId, threadId),
   );
@@ -318,11 +318,9 @@ function ChatThreadRouteView() {
   // Effective workspace cwd for the file explorer (accounts for worktrees).
   // Must check both server threads and draft threads (new/unsent threads live
   // only in composerDraftStore until the first message is sent).
-  const serverThreadProjectId = useStore(
-    (store) => store.threads.find((t) => t.id === threadId)?.projectId ?? null,
-  );
+  const serverThreadProjectId = useStore((store) => store.threadsById[threadId]?.projectId ?? null);
   const serverThreadWorktreePath = useStore(
-    (store) => store.threads.find((t) => t.id === threadId)?.worktreePath ?? null,
+    (store) => store.threadsById[threadId]?.worktreePath ?? null,
   );
   const draftThreadProjectId = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId]?.projectId ?? null,

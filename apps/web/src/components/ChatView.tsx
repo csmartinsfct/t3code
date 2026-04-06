@@ -307,10 +307,8 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
     let previousThreads: Array<Thread | undefined> | null = null;
     let previousEntries: ThreadPlanCatalogEntry[] = [];
 
-    return (state: { threads: Thread[] }): ThreadPlanCatalogEntry[] => {
-      const nextThreads = threadIds.map((threadId) =>
-        state.threads.find((thread) => thread.id === threadId),
-      );
+    return (state: { threadsById: Record<string, Thread> }): ThreadPlanCatalogEntry[] => {
+      const nextThreads = threadIds.map((threadId) => state.threadsById[threadId]);
       const cachedThreads = previousThreads;
       if (
         cachedThreads &&
@@ -2424,6 +2422,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      const updates: Promise<unknown>[] = [];
+
       if (
         input.modelSelection !== undefined &&
         (input.modelSelection.model !== serverThread.modelSelection.model ||
@@ -2431,33 +2431,41 @@ export default function ChatView({ threadId }: ChatViewProps) {
           JSON.stringify(input.modelSelection.options ?? null) !==
             JSON.stringify(serverThread.modelSelection.options ?? null))
       ) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: input.threadId,
-          modelSelection: input.modelSelection,
-        });
+        updates.push(
+          api.orchestration.dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId: input.threadId,
+            modelSelection: input.modelSelection,
+          }),
+        );
       }
 
       if (input.runtimeMode !== serverThread.runtimeMode) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.runtime-mode.set",
-          commandId: newCommandId(),
-          threadId: input.threadId,
-          runtimeMode: input.runtimeMode,
-          createdAt: input.createdAt,
-        });
+        updates.push(
+          api.orchestration.dispatchCommand({
+            type: "thread.runtime-mode.set",
+            commandId: newCommandId(),
+            threadId: input.threadId,
+            runtimeMode: input.runtimeMode,
+            createdAt: input.createdAt,
+          }),
+        );
       }
 
       if (input.interactionMode !== serverThread.interactionMode) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.interaction-mode.set",
-          commandId: newCommandId(),
-          threadId: input.threadId,
-          interactionMode: input.interactionMode,
-          createdAt: input.createdAt,
-        });
+        updates.push(
+          api.orchestration.dispatchCommand({
+            type: "thread.interaction-mode.set",
+            commandId: newCommandId(),
+            threadId: input.threadId,
+            interactionMode: input.interactionMode,
+            createdAt: input.createdAt,
+          }),
+        );
       }
+
+      await Promise.all(updates);
     },
     [serverThread],
   );
@@ -3664,45 +3672,57 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
 
-      // Auto-title from first message
-      if (isFirstMessage && isServerThread) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: threadIdForSend,
-          title,
-        });
-      }
-
-      if (isServerThread) {
-        await persistThreadSettingsForNextTurn({
-          threadId: threadIdForSend,
-          createdAt: messageCreatedAt,
-          ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
-          runtimeMode,
-          interactionMode,
-        });
-      }
-
       beginLocalDispatch({ preparingWorktree: false });
-      const turnAttachments = await turnAttachmentsPromise;
-      await api.orchestration.dispatchCommand({
-        type: "thread.turn.start",
-        commandId: newCommandId(),
-        threadId: threadIdForSend,
-        message: {
-          messageId: messageIdForSend,
-          role: "user",
-          text: outgoingMessageText,
-          attachments: turnAttachments,
-        },
-        modelSelection: selectedModelSelection,
-        titleSeed: title,
-        runtimeMode,
-        interactionMode,
-        createdAt: messageCreatedAt,
-      });
-      turnStartSucceeded = true;
+
+      // Fire auto-title, settings persistence, and turn.start in parallel.
+      // turn.start carries its own modelSelection/runtimeMode/interactionMode,
+      // so it does not depend on settings persistence completing first.
+      await Promise.all([
+        // Auto-title (non-critical)
+        isFirstMessage && isServerThread
+          ? api.orchestration
+              .dispatchCommand({
+                type: "thread.meta.update",
+                commandId: newCommandId(),
+                threadId: threadIdForSend,
+                title,
+              })
+              .catch(() => undefined)
+          : undefined,
+
+        // Persist settings for future UI state (non-critical)
+        isServerThread
+          ? persistThreadSettingsForNextTurn({
+              threadId: threadIdForSend,
+              createdAt: messageCreatedAt,
+              ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
+              runtimeMode,
+              interactionMode,
+            }).catch(() => undefined)
+          : undefined,
+
+        // turn.start (critical)
+        (async () => {
+          const turnAttachments = await turnAttachmentsPromise;
+          await api.orchestration.dispatchCommand({
+            type: "thread.turn.start",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            message: {
+              messageId: messageIdForSend,
+              role: "user",
+              text: outgoingMessageText,
+              attachments: turnAttachments,
+            },
+            modelSelection: selectedModelSelection,
+            titleSeed: title,
+            runtimeMode,
+            interactionMode,
+            createdAt: messageCreatedAt,
+          });
+          turnStartSucceeded = true;
+        })(),
+      ]);
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
         await api.orchestration
@@ -3956,42 +3976,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
       forceStickToBottom();
 
       try {
-        await persistThreadSettingsForNextTurn({
-          threadId: threadIdForSend,
-          createdAt: messageCreatedAt,
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode: nextInteractionMode,
-        });
-
         // Keep the mode toggle and plan-follow-up banner in sync immediately
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
 
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: newCommandId(),
-          threadId: threadIdForSend,
-          message: {
-            messageId: messageIdForSend,
-            role: "user",
-            text: outgoingMessageText,
-            attachments: [],
-          },
-          modelSelection: selectedModelSelection,
-          titleSeed: activeThread.title,
-          runtimeMode,
-          interactionMode: nextInteractionMode,
-          ...(nextInteractionMode === "default" && activeProposedPlan
-            ? {
-                sourceProposedPlan: {
-                  threadId: activeThread.id,
-                  planId: activeProposedPlan.id,
-                },
-              }
-            : {}),
-          createdAt: messageCreatedAt,
-        });
+        await Promise.all([
+          // Persist settings (non-critical)
+          persistThreadSettingsForNextTurn({
+            threadId: threadIdForSend,
+            createdAt: messageCreatedAt,
+            modelSelection: selectedModelSelection,
+            runtimeMode,
+            interactionMode: nextInteractionMode,
+          }).catch(() => undefined),
+
+          // turn.start (critical)
+          api.orchestration.dispatchCommand({
+            type: "thread.turn.start",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            message: {
+              messageId: messageIdForSend,
+              role: "user",
+              text: outgoingMessageText,
+              attachments: [],
+            },
+            modelSelection: selectedModelSelection,
+            titleSeed: activeThread.title,
+            runtimeMode,
+            interactionMode: nextInteractionMode,
+            ...(nextInteractionMode === "default" && activeProposedPlan
+              ? {
+                  sourceProposedPlan: {
+                    threadId: activeThread.id,
+                    planId: activeProposedPlan.id,
+                  },
+                }
+              : {}),
+            createdAt: messageCreatedAt,
+          }),
+        ]);
         sendInFlightRef.current = false;
       } catch (err) {
         setOptimisticUserMessages((existing) =>

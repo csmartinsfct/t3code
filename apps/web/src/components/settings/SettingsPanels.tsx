@@ -1605,7 +1605,7 @@ export function GeneralSettingsPanel() {
 export function ArchivedThreadsPanel() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
-  const { unarchiveThread, deleteThread, confirmAndDeleteThread } = useThreadActions();
+  const { unarchiveThread, deleteThreadBatch, confirmAndDeleteThread } = useThreadActions();
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const archivedGroups = useMemo(() => {
     const projectById = new Map(projects.map((project) => [project.id, project] as const));
@@ -1644,10 +1644,7 @@ export function ArchivedThreadsPanel() {
 
     setIsDeletingAll(true);
     try {
-      const deletedIds = new Set<ThreadId>(allArchivedThreadIds);
-      for (const id of allArchivedThreadIds) {
-        await deleteThread(id, { deletedThreadIds: deletedIds });
-      }
+      await deleteThreadBatch(allArchivedThreadIds);
     } catch (error) {
       toastManager.add({
         type: "error",
@@ -1657,7 +1654,7 @@ export function ArchivedThreadsPanel() {
     } finally {
       setIsDeletingAll(false);
     }
-  }, [allArchivedThreadIds, deleteThread]);
+  }, [allArchivedThreadIds, deleteThreadBatch]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {

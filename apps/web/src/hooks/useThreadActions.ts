@@ -35,7 +35,7 @@ export function useThreadActions() {
     async (threadId: ThreadId) => {
       const api = readNativeApi();
       if (!api) return;
-      const thread = useStore.getState().threads.find((entry) => entry.id === threadId);
+      const thread = useStore.getState().threadsById[threadId];
       if (!thread) return;
       if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
         throw new Error("Cannot archive a running thread.");
@@ -68,8 +68,8 @@ export function useThreadActions() {
     async (threadId: ThreadId, opts: { deletedThreadIds?: ReadonlySet<ThreadId> } = {}) => {
       const api = readNativeApi();
       if (!api) return;
-      const { projects, threads } = useStore.getState();
-      const thread = threads.find((entry) => entry.id === threadId);
+      const { projects, threads, threadsById } = useStore.getState();
+      const thread = threadsById[threadId];
       if (!thread) return;
       const threadProject = projects.find((project) => project.id === thread.projectId);
       const deletedIds = opts.deletedThreadIds;
@@ -179,7 +179,7 @@ export function useThreadActions() {
     async (threadId: ThreadId) => {
       const api = readNativeApi();
       if (!api) return;
-      const thread = useStore.getState().threads.find((entry) => entry.id === threadId);
+      const thread = useStore.getState().threadsById[threadId];
       if (!thread) return;
 
       if (appSettings.confirmThreadDelete) {
@@ -199,10 +199,148 @@ export function useThreadActions() {
     [appSettings.confirmThreadDelete, deleteThread],
   );
 
+  const deleteThreadBatch = useCallback(
+    async (threadIds: ReadonlyArray<ThreadId>) => {
+      const api = readNativeApi();
+      if (!api || threadIds.length === 0) return;
+
+      const { projects, threads, threadsById } = useStore.getState();
+      const deletedIdSet = new Set<ThreadId>(threadIds);
+      const survivingThreads = threads.filter((entry) => !deletedIdSet.has(entry.id));
+
+      // Pre-compute orphaned worktrees and ask once
+      const orphanedWorktrees: Array<{
+        threadId: ThreadId;
+        path: string;
+        projectCwd: string;
+      }> = [];
+      for (const id of threadIds) {
+        const thread = threadsById[id];
+        if (!thread) continue;
+        const orphanedPath = getOrphanedWorktreePathForThread(survivingThreads, id);
+        if (!orphanedPath) continue;
+        const project = projects.find((p) => p.id === thread.projectId);
+        if (project) {
+          orphanedWorktrees.push({
+            threadId: id,
+            path: orphanedPath,
+            projectCwd: project.cwd,
+          });
+        }
+      }
+
+      let shouldDeleteWorktrees = false;
+      if (orphanedWorktrees.length > 0) {
+        const paths = orphanedWorktrees.map((w) => formatWorktreePathForDisplay(w.path) ?? w.path);
+        shouldDeleteWorktrees = await api.dialogs.confirm(
+          [
+            `${orphanedWorktrees.length} orphaned worktree${orphanedWorktrees.length === 1 ? "" : "s"} will be left behind:`,
+            ...paths.map((p) => `  ${p}`),
+            "",
+            "Delete them too?",
+          ].join("\n"),
+        );
+      }
+
+      // Fire all thread deletions in parallel
+      await Promise.allSettled(
+        threadIds.map(async (id) => {
+          const thread = threadsById[id];
+          if (!thread) return;
+
+          if (thread.session && thread.session.status !== "closed") {
+            await api.orchestration
+              .dispatchCommand({
+                type: "thread.session.stop",
+                commandId: newCommandId(),
+                threadId: id,
+                createdAt: new Date().toISOString(),
+              })
+              .catch(() => undefined);
+          }
+
+          try {
+            await api.terminal.close({ threadId: id, deleteHistory: true });
+          } catch {
+            // Terminal may already be closed.
+          }
+
+          await api.orchestration.dispatchCommand({
+            type: "thread.delete",
+            commandId: newCommandId(),
+            threadId: id,
+          });
+
+          clearComposerDraftForThread(id);
+          clearProjectDraftThreadById(thread.projectId, id);
+          clearTerminalState(id);
+        }),
+      );
+
+      // Navigate once if the current route thread was among deleted
+      if (routeThreadId && deletedIdSet.has(routeThreadId)) {
+        const remainingThreads = useStore.getState().threads;
+        const fallbackThreadId = getFallbackThreadIdAfterDelete({
+          threads: remainingThreads,
+          deletedThreadId: routeThreadId,
+          deletedThreadIds: deletedIdSet,
+          sortOrder: appSettings.sidebarThreadSortOrder,
+        });
+        if (fallbackThreadId) {
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: fallbackThreadId },
+            replace: true,
+          });
+        } else {
+          await navigate({ to: "/", replace: true });
+        }
+      }
+
+      // Batch worktree removal
+      if (shouldDeleteWorktrees && orphanedWorktrees.length > 0) {
+        await Promise.allSettled(
+          orphanedWorktrees.map(async ({ path, projectCwd }) => {
+            try {
+              await removeWorktreeMutation.mutateAsync({
+                cwd: projectCwd,
+                path,
+                force: true,
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : "Unknown error removing worktree.";
+              console.error("Failed to remove orphaned worktree after batch deletion", {
+                path,
+                projectCwd,
+                error,
+              });
+              toastManager.add({
+                type: "error",
+                title: "Worktree removal failed",
+                description: `Could not remove ${formatWorktreePathForDisplay(path) ?? path}. ${message}`,
+              });
+            }
+          }),
+        );
+      }
+    },
+    [
+      clearComposerDraftForThread,
+      clearProjectDraftThreadById,
+      clearTerminalState,
+      appSettings.sidebarThreadSortOrder,
+      navigate,
+      removeWorktreeMutation,
+      routeThreadId,
+    ],
+  );
+
   return {
     archiveThread,
     unarchiveThread,
     deleteThread,
+    deleteThreadBatch,
     confirmAndDeleteThread,
   };
 }
