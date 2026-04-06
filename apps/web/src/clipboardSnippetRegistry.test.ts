@@ -47,4 +47,16 @@ describe("copyClipboardSnippet", () => {
     expect(writeText).toHaveBeenCalledWith(ENTRY.text);
     expect(consumeClipboardSnippet(ENTRY.text)).toEqual(ENTRY);
   });
+
+  it("matches pasted text after clipboard line-ending normalization", () => {
+    copyClipboardSnippet({
+      ...ENTRY,
+      text: "const answer = 42;\nconst second = true;\n",
+    });
+
+    expect(consumeClipboardSnippet("const answer = 42;\r\nconst second = true;\r\n")).toEqual({
+      ...ENTRY,
+      text: "const answer = 42;\nconst second = true;\n",
+    });
+  });
 });

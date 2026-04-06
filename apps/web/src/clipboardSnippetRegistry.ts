@@ -30,6 +30,10 @@ const TTL_MS = 30_000; // entries expire after 30 seconds
 let _pending: PendingEntry | null = null;
 let _expireTimer: ReturnType<typeof setTimeout> | null = null;
 
+function normalizeClipboardText(text: string): string {
+  return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim();
+}
+
 /**
  * Register an enriched clipboard entry. Called by CodeEditorView on Cmd+C.
  * Replaces any previously pending entry.
@@ -70,10 +74,10 @@ export function copyClipboardSnippet(
 export function consumeClipboardSnippet(pastedText: string): ClipboardSnippetEntry | null {
   if (!_pending) return null;
 
-  // Trim both sides to handle trailing newlines/whitespace that editors may add or strip.
-  // Also allow paste to match if it starts with the registered text (some editors append a newline).
-  const registeredTrimmed = _pending.text.trim();
-  const pastedTrimmed = pastedText.trim();
+  // Normalize browser clipboard serialization differences such as CRLF vs LF,
+  // then allow a trailing newline on either side.
+  const registeredTrimmed = normalizeClipboardText(_pending.text);
+  const pastedTrimmed = normalizeClipboardText(pastedText);
   const matches =
     registeredTrimmed === pastedTrimmed ||
     pastedTrimmed.startsWith(registeredTrimmed) ||

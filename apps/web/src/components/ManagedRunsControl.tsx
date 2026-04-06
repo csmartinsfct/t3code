@@ -120,8 +120,8 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
               ) : (
                 <span className="text-muted-foreground">No open URL</span>
               )}
-              <div className="text-[10px] text-muted-foreground">
-                {service.inferenceConfidence} confidence · {service.validationStatus}
+              <div className="text-[10px] capitalize text-muted-foreground">
+                {service.validationStatus}
               </div>
             </div>
           </div>,

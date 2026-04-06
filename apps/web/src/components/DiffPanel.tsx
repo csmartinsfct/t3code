@@ -201,6 +201,70 @@ function resolveLineNumber(el: HTMLElement): number | undefined {
   return Number.isFinite(num) && num > 0 ? num : undefined;
 }
 
+function resolveSelectedDiffClipboardSnippet(
+  viewport: HTMLDivElement,
+  cwd: string,
+): {
+  text: string;
+  cwd: string;
+  relativePath: string;
+  startLine: number;
+  endLine: number;
+} | null {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const selectedText = selection.toString();
+  if (selectedText.trim().length === 0) return null;
+  const range = selection.getRangeAt(0);
+  const startNode = range.startContainer;
+  const endNode = range.endContainer;
+  if (!startNode || !endNode) return null;
+
+  // Determine which file the selection belongs to
+  const startFileWrapper = findFileDiffWrapper(startNode);
+  if (!startFileWrapper || !viewport.contains(startFileWrapper)) return null;
+  const endFileWrapper = findFileDiffWrapper(endNode);
+  // Skip multi-file selections — degrade to plain paste
+  if (endFileWrapper && startFileWrapper !== endFileWrapper) return null;
+
+  const relativePath = startFileWrapper.getAttribute("data-diff-file-path");
+  if (!relativePath) return null;
+
+  let startLine: number | undefined;
+  let endLine: number | undefined;
+  const diffsContainer = startFileWrapper.querySelector("diffs-container");
+  const shadowRoot = diffsContainer?.shadowRoot;
+  if (shadowRoot) {
+    const intersectedLines = Array.from(shadowRoot.querySelectorAll<HTMLElement>("[data-line]"))
+      .filter((line) => range.intersectsNode(line))
+      .map((line) => resolveLineNumber(line))
+      .filter((line): line is number => line !== undefined);
+    if (intersectedLines.length > 0) {
+      startLine = intersectedLines[0];
+      endLine = intersectedLines[intersectedLines.length - 1];
+    }
+  }
+
+  if (startLine === undefined || endLine === undefined) {
+    const startLineEl = findAncestorLineElement(startNode);
+    const endLineEl = findAncestorLineElement(endNode);
+    startLine = startLine ?? (startLineEl ? resolveLineNumber(startLineEl) : undefined);
+    endLine = endLine ?? (endLineEl ? resolveLineNumber(endLineEl) : undefined);
+  }
+
+  if (startLine === undefined || endLine === undefined) return null;
+
+  // Normalize direction (user may select bottom-to-top)
+  return {
+    text: selectedText,
+    cwd,
+    relativePath,
+    startLine: Math.min(startLine, endLine),
+    endLine: Math.max(startLine, endLine),
+  };
+}
+
 interface DiffPanelProps {
   mode?: DiffPanelMode;
 }
@@ -462,97 +526,37 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   useEffect(() => {
     const viewport = patchViewportRef.current;
     if (!viewport) return;
+    const cwd = activeCwd;
+    if (!cwd) return;
 
     const handleCopy = (event: ClipboardEvent) => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) return;
-
-      const selectedText = selection.toString();
-      if (selectedText.trim().length === 0) return;
-
-      const cwd = activeCwd;
-      if (!cwd) return;
-
-      // Collect open shadow roots so getComposedRanges can pierce them
-      const shadowRoots: ShadowRoot[] = [];
-      for (const container of viewport.querySelectorAll("diffs-container")) {
-        if (container.shadowRoot) shadowRoots.push(container.shadowRoot);
-      }
-
-      let startNode: Node | null = null;
-      let endNode: Node | null = null;
-
-      const getComposedRanges = (selection as unknown as Record<string, unknown>)
-        .getComposedRanges as ((...roots: ShadowRoot[]) => StaticRange[]) | undefined;
-      if (typeof getComposedRanges === "function" && shadowRoots.length > 0) {
-        const composedRanges = getComposedRanges.call(selection, ...shadowRoots);
-        const first = composedRanges[0];
-        if (!first) return;
-        startNode = first.startContainer;
-        endNode = first.endContainer;
-      } else {
-        // Fallback: anchorNode/focusNode (clamped at shadow host boundary)
-        startNode = selection.anchorNode;
-        endNode = selection.focusNode;
-      }
-
-      if (!startNode || !endNode) return;
-
-      // Determine which file the selection belongs to
-      const startFileWrapper = findFileDiffWrapper(startNode);
-      if (!startFileWrapper) return;
-      const endFileWrapper = findFileDiffWrapper(endNode);
-      // Skip multi-file selections — degrade to plain paste
-      if (endFileWrapper && startFileWrapper !== endFileWrapper) return;
-
-      const relativePath = startFileWrapper.getAttribute("data-diff-file-path");
-      if (!relativePath) return;
-
-      // Extract line numbers from the nearest [data-line] ancestors
-      const startLineEl = findAncestorLineElement(startNode);
-      const endLineEl = findAncestorLineElement(endNode);
-
-      let startLine = startLineEl ? resolveLineNumber(startLineEl) : undefined;
-      let endLine = endLineEl ? resolveLineNumber(endLineEl) : undefined;
-
-      // Fallback: scan all lines in the file's shadow root for a coarse range
-      if (startLine === undefined || endLine === undefined) {
-        const diffsContainer = startFileWrapper.querySelector("diffs-container");
-        const shadowRoot = diffsContainer?.shadowRoot;
-        if (shadowRoot) {
-          const allLines = shadowRoot.querySelectorAll<HTMLElement>("[data-line]");
-          if (allLines.length > 0) {
-            const first = resolveLineNumber(allLines[0]!);
-            const last = resolveLineNumber(allLines[allLines.length - 1]!);
-            if (startLine === undefined) startLine = first;
-            if (endLine === undefined) endLine = last;
-          }
-        }
-      }
-
-      if (startLine === undefined || endLine === undefined) return;
-
-      // Normalize direction (user may select bottom-to-top)
-      const finalStartLine = Math.min(startLine, endLine);
-      const finalEndLine = Math.max(startLine, endLine);
-
-      copyClipboardSnippet(
-        {
-          text: selectedText,
-          cwd,
-          relativePath,
-          startLine: finalStartLine,
-          endLine: finalEndLine,
-        },
-        event.clipboardData,
-      );
+      const snippet = resolveSelectedDiffClipboardSnippet(viewport, cwd);
+      if (!snippet) return;
+      copyClipboardSnippet(snippet, event.clipboardData);
       if (event.clipboardData) {
         event.preventDefault();
       }
     };
 
-    viewport.addEventListener("copy", handleCopy);
-    return () => viewport.removeEventListener("copy", handleCopy);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.altKey || event.shiftKey) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() !== "c") return;
+
+      const snippet = resolveSelectedDiffClipboardSnippet(viewport, cwd);
+      if (!snippet) return;
+
+      copyClipboardSnippet(snippet);
+      event.preventDefault();
+    };
+
+    document.addEventListener("copy", handleCopy, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("copy", handleCopy, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
   }, [activeCwd]);
 
   const headerRow = (
