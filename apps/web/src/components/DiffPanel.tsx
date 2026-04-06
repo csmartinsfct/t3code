@@ -18,7 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { registerClipboardSnippet } from "../clipboardSnippetRegistry";
+import { copyClipboardSnippet } from "../clipboardSnippetRegistry";
 import { openInPreferredEditor } from "../editorPreferences";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
@@ -463,7 +463,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     const viewport = patchViewportRef.current;
     if (!viewport) return;
 
-    const handleCopy = () => {
+    const handleCopy = (event: ClipboardEvent) => {
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) return;
 
@@ -536,13 +536,19 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       const finalStartLine = Math.min(startLine, endLine);
       const finalEndLine = Math.max(startLine, endLine);
 
-      registerClipboardSnippet({
-        text: selectedText,
-        cwd,
-        relativePath,
-        startLine: finalStartLine,
-        endLine: finalEndLine,
-      });
+      copyClipboardSnippet(
+        {
+          text: selectedText,
+          cwd,
+          relativePath,
+          startLine: finalStartLine,
+          endLine: finalEndLine,
+        },
+        event.clipboardData,
+      );
+      if (event.clipboardData) {
+        event.preventDefault();
+      }
     };
 
     viewport.addEventListener("copy", handleCopy);

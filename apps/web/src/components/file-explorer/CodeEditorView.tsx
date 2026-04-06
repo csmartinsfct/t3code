@@ -27,7 +27,7 @@ import { vscodeDark, vscodeLight } from "@uiw/codemirror-theme-vscode";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef } from "react";
-import { registerClipboardSnippet } from "~/clipboardSnippetRegistry";
+import { copyClipboardSnippet } from "~/clipboardSnippetRegistry";
 import type { FileExplorerEditorSettings } from "~/fileExplorerEditorSettingsStore";
 import { FONT_FAMILY_CSS } from "~/fileExplorerEditorSettingsStore";
 
@@ -171,8 +171,7 @@ export function CodeEditorView({
             const selectedText = view.state.doc.sliceString(selection.from, selection.to);
             const startLine = view.state.doc.lineAt(selection.from).number;
             const endLine = view.state.doc.lineAt(selection.to).number;
-            void navigator.clipboard.writeText(selectedText);
-            registerClipboardSnippet({
+            copyClipboardSnippet({
               text: selectedText,
               cwd: cwdAtMount,
               relativePath: relativePathAtMount,

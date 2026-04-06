@@ -47,6 +47,23 @@ export function registerClipboardSnippet(entry: ClipboardSnippetEntry): void {
 }
 
 /**
+ * Write the exact snippet text to the clipboard when possible, then register
+ * the corresponding metadata so composer paste can turn it into an attachment.
+ */
+export function copyClipboardSnippet(
+  entry: ClipboardSnippetEntry,
+  clipboardData?: DataTransfer | null,
+): void {
+  if (clipboardData) {
+    clipboardData.setData("text/plain", entry.text);
+  } else if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(entry.text);
+  }
+
+  registerClipboardSnippet(entry);
+}
+
+/**
  * Consume the pending entry if its `text` matches the pasted text.
  * Returns the entry and clears it, or returns null if no match.
  */
