@@ -1,6 +1,8 @@
 import type {
   GitCheckoutInput,
   GitCreateBranchInput,
+  GitDiscoverReposInput,
+  GitDiscoverReposResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
@@ -197,6 +199,7 @@ export interface NativeApi {
     // Stacked action API
     pull: (input: GitPullInput) => Promise<GitPullResult>;
     status: (input: GitStatusInput) => Promise<GitStatusResult>;
+    discoverRepos: (input: GitDiscoverReposInput) => Promise<GitDiscoverReposResult>;
   };
   contextMenu: {
     show: <T extends string>(

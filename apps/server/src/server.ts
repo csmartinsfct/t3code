@@ -40,6 +40,7 @@ import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { ProviderRateLimitsCacheLive } from "./provider/Layers/ProviderRateLimitsCache";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
+import { RepoDiscoveryLive } from "./workspace/Layers/RepoDiscovery";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
@@ -193,6 +194,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
     Layer.provide(WorkspacePathsLive),
     Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   ),
+  RepoDiscoveryLive,
 );
 
 const RuntimeServicesLive = Layer.empty.pipe(

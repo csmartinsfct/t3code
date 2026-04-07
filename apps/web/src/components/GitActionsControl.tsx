@@ -5,13 +5,14 @@ import type {
   GitStatusResult,
   ThreadId,
 } from "@t3tools/contracts";
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, CloudUploadIcon, GitCommitIcon, InfoIcon } from "lucide-react";
 import { GitHubIcon } from "./Icons";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  buildMultiRepoMenuItems,
   type GitActionIconName,
   type GitActionMenuItem,
   type GitQuickAction,
@@ -19,9 +20,11 @@ import {
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
+  resolveMultiRepoQuickAction,
   resolveQuickAction,
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
+import type { MultiRepoGitStatus } from "~/lib/multiRepoTypes";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
@@ -34,7 +37,7 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { Group, GroupSeparator } from "~/components/ui/group";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
@@ -45,7 +48,6 @@ import {
   gitMutationKeys,
   gitPullMutationOptions,
   gitRunStackedActionMutationOptions,
-  gitStatusQueryOptions,
   invalidateGitStatusQuery,
 } from "~/lib/gitReactQuery";
 import { newCommandId, randomUUID } from "~/lib/utils";
@@ -55,6 +57,7 @@ import { useStore } from "~/store";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
+  multiRepoStatus: MultiRepoGitStatus;
   activeThreadId: ThreadId | null;
 }
 
@@ -205,7 +208,11 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
   return <InfoIcon className={iconClassName} />;
 }
 
-export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
+export default function GitActionsControl({
+  gitCwd,
+  multiRepoStatus,
+  activeThreadId,
+}: GitActionsControlProps) {
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],
@@ -275,9 +282,16 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     [persistThreadBranchSync],
   );
 
-  const { data: gitStatus = null, error: gitStatusError } = useQuery(gitStatusQueryOptions(gitCwd));
+  const { repos, statusByRepoCwd } = multiRepoStatus;
+  const isMultiRepo = repos.length > 1;
+  // For single-repo, use the first repo's status; for no repos, fallback to query
+  const gitStatus = isMultiRepo
+    ? null
+    : repos.length === 1
+      ? (statusByRepoCwd.get(repos[0]!.cwd) ?? null)
+      : null;
   // Default to true while loading so we don't flash init controls.
-  const isRepo = gitStatus?.isRepo ?? true;
+  const isRepo = multiRepoStatus.isLoading ? true : multiRepoStatus.hasAnyRepo;
   const hasOriginRemote = gitStatus?.hasOriginRemote ?? false;
   const gitStatusForActions = gitStatus;
 
@@ -326,14 +340,37 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     return gitStatusForActions?.isDefaultBranch ?? false;
   }, [gitStatusForActions?.isDefaultBranch]);
 
+  const multiRepoMenu = useMemo(
+    () =>
+      isMultiRepo ? buildMultiRepoMenuItems(repos, statusByRepoCwd, isGitActionRunning) : null,
+    [isMultiRepo, repos, statusByRepoCwd, isGitActionRunning],
+  );
   const gitActionMenuItems = useMemo(
-    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasOriginRemote),
-    [gitStatusForActions, hasOriginRemote, isGitActionRunning],
+    () =>
+      isMultiRepo
+        ? (multiRepoMenu?.bulkItems ?? [])
+        : buildMenuItems(gitStatusForActions, isGitActionRunning, hasOriginRemote),
+    [isMultiRepo, multiRepoMenu, gitStatusForActions, hasOriginRemote, isGitActionRunning],
   );
   const quickAction = useMemo(
     () =>
-      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultBranch, hasOriginRemote),
-    [gitStatusForActions, hasOriginRemote, isDefaultBranch, isGitActionRunning],
+      isMultiRepo
+        ? resolveMultiRepoQuickAction(repos, statusByRepoCwd, isGitActionRunning)
+        : resolveQuickAction(
+            gitStatusForActions,
+            isGitActionRunning,
+            isDefaultBranch,
+            hasOriginRemote,
+          ),
+    [
+      isMultiRepo,
+      repos,
+      statusByRepoCwd,
+      gitStatusForActions,
+      hasOriginRemote,
+      isDefaultBranch,
+      isGitActionRunning,
+    ],
   );
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
@@ -810,7 +847,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />
             </MenuTrigger>
-            <MenuPopup align="end" className="w-full">
+            <MenuPopup align="end" className="w-full max-h-80 overflow-y-auto">
               {gitActionMenuItems.map((item) => {
                 const disabledReason = getMenuActionDisabledReason({
                   item,
@@ -851,12 +888,13 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                   </MenuItem>
                 );
               })}
-              {gitStatusForActions?.branch === null && (
+              {!isMultiRepo && gitStatusForActions?.branch === null && (
                 <p className="px-2 py-1.5 text-xs text-warning">
                   Detached HEAD: create and checkout a branch to enable push and PR actions.
                 </p>
               )}
-              {gitStatusForActions &&
+              {!isMultiRepo &&
+                gitStatusForActions &&
                 gitStatusForActions.branch !== null &&
                 !gitStatusForActions.hasWorkingTreeChanges &&
                 gitStatusForActions.behindCount > 0 &&
@@ -865,8 +903,39 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                     Behind upstream. Pull/rebase first.
                   </p>
                 )}
-              {gitStatusError && (
-                <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError.message}</p>
+              {isMultiRepo && multiRepoMenu && multiRepoMenu.repoSections.length > 0 && (
+                <>
+                  <MenuSeparator />
+                  {multiRepoMenu.repoSections.map((section) => {
+                    const repoStatus = statusByRepoCwd.get(section.repo.cwd) ?? null;
+                    const hasChanges = repoStatus?.hasWorkingTreeChanges ?? false;
+                    return (
+                      <div key={section.repo.cwd}>
+                        <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5">
+                          {hasChanges && (
+                            <span className="inline-block size-1.5 shrink-0 rounded-full bg-amber-500" />
+                          )}
+                          <span className="truncate text-[11px] font-medium text-muted-foreground">
+                            {section.repo.label}
+                          </span>
+                        </div>
+                        {section.items.map((item) => (
+                          <MenuItem
+                            key={`${section.repo.cwd}-${item.id}`}
+                            disabled={item.disabled}
+                            className="pl-5 text-xs"
+                            onClick={() => {
+                              openDialogForMenuItem(item);
+                            }}
+                          >
+                            <GitActionItemIcon icon={item.icon} />
+                            {item.label}
+                          </MenuItem>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </MenuPopup>
           </Menu>

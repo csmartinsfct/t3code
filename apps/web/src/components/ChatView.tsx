@@ -34,7 +34,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { gitCreateWorktreeMutationOptions, gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import { gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
+import { useMultiRepoGitStatus } from "../hooks/useMultiRepoGitStatus";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
@@ -1566,7 +1567,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
-  const gitStatusQuery = useQuery(gitStatusQueryOptions(gitCwd));
+  const multiRepoStatus = useMultiRepoGitStatus(gitCwd);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   const modelOptionsByProvider: Record<
@@ -1695,7 +1696,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedProvider, providerStatuses],
   );
   // Default true while loading to avoid toolbar flicker.
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const isGitRepo = multiRepoStatus.isLoading ? true : multiRepoStatus.hasAnyRepo;
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -4595,6 +4596,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
+          multiRepoStatus={multiRepoStatus}
           diffOpen={diffOpen}
           fileExplorerOpen={fileExplorerOpen}
           fileExplorerAvailable={activeProject !== undefined}

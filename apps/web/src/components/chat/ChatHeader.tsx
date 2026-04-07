@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { memo } from "react";
+import type { MultiRepoGitStatus } from "../../lib/multiRepoTypes";
 import GitActionsControl from "../GitActionsControl";
 import { DiffIcon, FolderOpenIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -35,6 +36,7 @@ interface ChatHeaderProps {
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
+  multiRepoStatus: MultiRepoGitStatus;
   diffOpen: boolean;
   fileExplorerOpen: boolean;
   fileExplorerAvailable: boolean;
@@ -66,6 +68,7 @@ export const ChatHeader = memo(function ChatHeader({
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
   gitCwd,
+  multiRepoStatus,
   diffOpen,
   fileExplorerOpen,
   fileExplorerAvailable,
@@ -145,7 +148,13 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
+        {activeProjectName && (
+          <GitActionsControl
+            gitCwd={gitCwd}
+            multiRepoStatus={multiRepoStatus}
+            activeThreadId={activeThreadId}
+          />
+        )}
         <Tooltip>
           <TooltipTrigger
             render={

@@ -6,6 +6,7 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionThreadCheckpointContext,
 } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { RepoDiscovery } from "../../workspace/Services/RepoDiscovery.ts";
 import { checkpointRefForThreadTurn } from "../Utils.ts";
 import { CheckpointDiffQueryLive } from "./CheckpointDiffQuery.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
@@ -79,6 +80,13 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
+        Layer.succeed(RepoDiscovery, {
+          start: () => Effect.void,
+          getRepos: () => Effect.succeed([]),
+          changes: Effect.never as never,
+        }),
+      ),
+      Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () =>
             Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
@@ -132,6 +140,13 @@ describe("CheckpointDiffQueryLive", () => {
 
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
+      Layer.provideMerge(
+        Layer.succeed(RepoDiscovery, {
+          start: () => Effect.void,
+          getRepos: () => Effect.succeed([]),
+          changes: Effect.never as never,
+        }),
+      ),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () =>

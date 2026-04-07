@@ -59,6 +59,7 @@ import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRu
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
+import { RepoDiscoveryLive } from "./workspace/Layers/RepoDiscovery.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
@@ -119,6 +120,7 @@ const workspaceAndProjectServicesLayer = Layer.mergeAll(
     Layer.provide(WorkspacePathsLive),
     Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   ),
+  RepoDiscoveryLive,
   ProjectFaviconResolverLive,
 );
 

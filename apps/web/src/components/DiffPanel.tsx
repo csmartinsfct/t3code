@@ -19,7 +19,7 @@ import {
   useState,
 } from "react";
 import { openInPreferredEditor } from "../editorPreferences";
-import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import { useMultiRepoGitStatus } from "../hooks/useMultiRepoGitStatus";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../nativeApi";
@@ -189,8 +189,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     activeProjectId ? store.projects.find((project) => project.id === activeProjectId) : undefined,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd;
-  const gitStatusQuery = useQuery(gitStatusQueryOptions(activeCwd ?? null));
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const multiRepoStatus = useMultiRepoGitStatus(activeCwd ?? null);
+  const repos = multiRepoStatus.repos;
+  const isGitRepo = multiRepoStatus.isLoading ? true : multiRepoStatus.hasAnyRepo;
+  const [selectedRepoCwd, setSelectedRepoCwd] = useState<string | null>(null);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -283,7 +285,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         ? "Failed to load checkpoint diff."
         : null;
 
-  const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const repoDiffs = activeCheckpointDiffQuery.data?.repoDiffs;
+  const fullPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const selectedPatch = useMemo(() => {
+    if (!selectedRepoCwd || !repoDiffs) return fullPatch;
+    const match = repoDiffs.find((rd) => rd.repoRoot === selectedRepoCwd);
+    return match?.diff ?? "";
+  }, [selectedRepoCwd, repoDiffs, fullPatch]);
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -323,12 +331,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     (filePath: string) => {
       const api = readNativeApi();
       if (!api) return;
-      const targetPath = activeCwd ? resolvePathLinkTarget(filePath, activeCwd) : filePath;
+      const resolvedCwd = selectedRepoCwd ?? activeCwd;
+      const targetPath = resolvedCwd ? resolvePathLinkTarget(filePath, resolvedCwd) : filePath;
       void openInPreferredEditor(api, targetPath).catch((error) => {
         console.warn("Failed to open diff file in editor.", error);
       });
     },
-    [activeCwd],
+    [activeCwd, selectedRepoCwd],
   );
 
   const selectTurn = (turnId: TurnId) => {
@@ -414,8 +423,49 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   }, [selectedTurn?.turnId, selectedTurnId]);
 
+  const repoTabStrip =
+    repos.length > 1 ? (
+      <div className="flex gap-1 border-b border-border px-4 py-1 [-webkit-app-region:no-drag]">
+        <button
+          type="button"
+          className={cn(
+            "shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors",
+            selectedRepoCwd === null
+              ? "border-border bg-accent text-accent-foreground"
+              : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+          )}
+          onClick={() => setSelectedRepoCwd(null)}
+        >
+          All repos
+        </button>
+        {repos.map((repo) => {
+          const status = multiRepoStatus.statusByRepoCwd.get(repo.cwd);
+          const hasChanges = status?.hasWorkingTreeChanges ?? false;
+          return (
+            <button
+              key={repo.cwd}
+              type="button"
+              className={cn(
+                "shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors",
+                selectedRepoCwd === repo.cwd
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+              )}
+              onClick={() => setSelectedRepoCwd(repo.cwd)}
+            >
+              <span className="flex items-center gap-1">
+                {hasChanges && <span className="inline-block size-1 rounded-full bg-amber-500" />}
+                {repo.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    ) : null;
+
   const headerRow = (
     <>
+      {repoTabStrip}
       <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
         {canScrollTurnStripLeft && (
           <div className="pointer-events-none absolute inset-y-0 left-8 z-10 w-7 bg-linear-to-r from-card to-transparent" />

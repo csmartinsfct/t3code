@@ -168,7 +168,17 @@ function Harness() {
       <button type="button" onClick={() => setActiveThreadId(THREAD_B)}>
         Switch thread
       </button>
-      <GitActionsControl gitCwd={GIT_CWD} activeThreadId={activeThreadId} />
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        multiRepoStatus={{
+          repos: [{ cwd: GIT_CWD, relativePath: ".", label: "project" }],
+          statusByRepoCwd: new Map(),
+          hasAnyRepo: true,
+          hasAnyChanges: false,
+          isLoading: false,
+        }}
+        activeThreadId={activeThreadId}
+      />
     </>
   );
 }

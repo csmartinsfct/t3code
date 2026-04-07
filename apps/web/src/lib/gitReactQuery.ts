@@ -14,12 +14,15 @@ const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
 const GIT_BRANCHES_PAGE_SIZE = 100;
 
+const GIT_DISCOVER_REPOS_STALE_TIME_MS = 60_000;
+
 export const gitQueryKeys = {
   all: ["git"] as const,
   status: (cwd: string | null) => ["git", "status", cwd] as const,
   branches: (cwd: string | null) => ["git", "branches", cwd] as const,
   branchSearch: (cwd: string | null, query: string) =>
     ["git", "branches", cwd, "search", query] as const,
+  discoverRepos: (projectCwd: string | null) => ["git", "discoverRepos", projectCwd] as const,
 };
 
 export const gitMutationKeys = {
@@ -254,6 +257,63 @@ export function gitPreparePullRequestThreadMutationOptions(input: {
       });
     },
     mutationKey: gitMutationKeys.preparePullRequestThread(input.cwd),
+    onSettled: async () => {
+      await invalidateGitQueries(input.queryClient);
+    },
+  });
+}
+
+export function gitDiscoverReposQueryOptions(projectCwd: string | null) {
+  return queryOptions({
+    queryKey: gitQueryKeys.discoverRepos(projectCwd),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      if (!projectCwd) throw new Error("Repo discovery is unavailable.");
+      return api.git.discoverRepos({ cwd: projectCwd });
+    },
+    enabled: projectCwd !== null,
+    staleTime: GIT_DISCOVER_REPOS_STALE_TIME_MS,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Mutation variant that accepts `cwd` per invocation rather than binding it at
+ * construction time. Used for multi-repo "commit all" / "push all" flows where
+ * each repo is committed independently.
+ */
+export function gitRunStackedActionPerRepoMutationOptions(input: { queryClient: QueryClient }) {
+  return mutationOptions({
+    mutationKey: ["git", "mutation", "run-stacked-action-per-repo"] as const,
+    mutationFn: async ({
+      cwd,
+      actionId,
+      action,
+      commitMessage,
+      featureBranch,
+      filePaths,
+      onProgress,
+    }: {
+      cwd: string;
+      actionId: string;
+      action: GitStackedAction;
+      commitMessage?: string;
+      featureBranch?: boolean;
+      filePaths?: string[];
+      onProgress?: (event: GitActionProgressEvent) => void;
+    }) => {
+      return getWsRpcClient().git.runStackedAction(
+        {
+          actionId,
+          cwd,
+          action,
+          ...(commitMessage ? { commitMessage } : {}),
+          ...(featureBranch ? { featureBranch } : {}),
+          ...(filePaths ? { filePaths } : {}),
+        },
+        ...(onProgress ? [{ onProgress }] : []),
+      );
+    },
     onSettled: async () => {
       await invalidateGitQueries(input.queryClient);
     },

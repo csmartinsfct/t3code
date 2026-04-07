@@ -293,6 +293,7 @@ export const OrchestrationCheckpointFile = Schema.Struct({
   kind: TrimmedNonEmptyString,
   additions: NonNegativeInt,
   deletions: NonNegativeInt,
+  repoRelativePath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type OrchestrationCheckpointFile = typeof OrchestrationCheckpointFile.Type;
 
@@ -1081,10 +1082,19 @@ export const TurnCountRange = Schema.Struct({
   ),
 );
 
+export const RepoTurnDiff = Schema.Struct({
+  repoRoot: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  diff: Schema.String,
+});
+export type RepoTurnDiff = typeof RepoTurnDiff.Type;
+
 export const ThreadTurnDiff = TurnCountRange.mapFields(
   Struct.assign({
     threadId: ThreadId,
     diff: Schema.String,
+    repoDiffs: Schema.optionalKey(Schema.Array(RepoTurnDiff)),
   }),
   { unsafePreserveChecks: true },
 );

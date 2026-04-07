@@ -93,6 +93,7 @@ export function createWsNativeApi(): NativeApi {
       init: rpcClient.git.init,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
+      discoverRepos: rpcClient.git.discoverRepos,
     },
     contextMenu: {
       show: async <T extends string>(

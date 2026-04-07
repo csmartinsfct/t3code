@@ -70,6 +70,7 @@ import {
 } from "./TestProviderAdapter.integration.ts";
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
 import { ManagedRunService } from "../src/managedRuns/Services/ManagedRuns.ts";
+import { RepoDiscoveryLive } from "../src/workspace/Layers/RepoDiscovery.ts";
 import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
 
@@ -344,6 +345,7 @@ export const makeOrchestrationIntegrationHarness = (
           Layer.provide(NodeServices.layer),
         ),
       ),
+      Layer.provideMerge(RepoDiscoveryLive),
       Layer.provideMerge(WorkspacePathsLive),
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(

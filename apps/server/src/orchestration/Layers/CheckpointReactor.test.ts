@@ -40,6 +40,7 @@ import {
 } from "../../provider/Services/ProviderService.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
+import { RepoDiscoveryLive } from "../../workspace/Layers/RepoDiscovery.ts";
 import { WorkspaceEntriesLive } from "../../workspace/Layers/WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 
@@ -269,6 +270,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(CheckpointStoreLive),
       Layer.provideMerge(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
+      Layer.provideMerge(RepoDiscoveryLive),
       Layer.provideMerge(WorkspacePathsLive),
       Layer.provideMerge(GitCoreLive),
       Layer.provideMerge(ServerConfigLayer),

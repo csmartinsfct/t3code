@@ -11,6 +11,8 @@ import {
   GitCreateBranchInput,
   GitCreateWorktreeInput,
   GitCreateWorktreeResult,
+  GitDiscoverReposInput,
+  GitDiscoverReposResult,
   GitInitInput,
   GitListBranchesInput,
   GitListBranchesResult,
@@ -138,6 +140,7 @@ export const WS_METHODS = {
   gitInit: "git.init",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+  gitDiscoverRepos: "git.discoverRepos",
 
   // Managed run methods
   managedRunsLaunchProjectScript: "managedRuns.launchProjectScript",
@@ -314,6 +317,12 @@ export const WsGitCheckoutRpc = Rpc.make(WS_METHODS.gitCheckout, {
 
 export const WsGitInitRpc = Rpc.make(WS_METHODS.gitInit, {
   payload: GitInitInput,
+  error: GitCommandError,
+});
+
+export const WsGitDiscoverReposRpc = Rpc.make(WS_METHODS.gitDiscoverRepos, {
+  payload: GitDiscoverReposInput,
+  success: GitDiscoverReposResult,
   error: GitCommandError,
 });
 
@@ -557,6 +566,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsManagedRunsListInferenceRecordsRpc,
   WsManagedRunsGetInferenceRecordRpc,
   WsManagedRunsStopRpc,
+  WsGitDiscoverReposRpc,
   WsTerminalOpenRpc,
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,

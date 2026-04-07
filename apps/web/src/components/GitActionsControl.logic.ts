@@ -1,4 +1,5 @@
 import type {
+  GitDiscoveredRepo,
   GitRunStackedActionResult,
   GitStackedAction,
   GitStatusResult,
@@ -361,3 +362,112 @@ export function resolveLiveThreadBranchUpdate(input: {
 
 // Re-export from shared for backwards compatibility in this module's exports
 export { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
+
+// ── Multi-repo helpers ──
+
+export function resolveMultiRepoQuickAction(
+  repos: readonly GitDiscoveredRepo[],
+  statusByRepoCwd: Map<string, GitStatusResult>,
+  isBusy: boolean,
+): GitQuickAction {
+  if (isBusy) {
+    return {
+      label: "Commit all",
+      disabled: true,
+      kind: "show_hint",
+      hint: "Git action in progress.",
+    };
+  }
+
+  const reposWithChanges = repos.filter((r) => {
+    const s = statusByRepoCwd.get(r.cwd);
+    return s?.hasWorkingTreeChanges;
+  });
+  if (reposWithChanges.length > 0) {
+    return {
+      label: `Commit all (${reposWithChanges.length})`,
+      disabled: false,
+      kind: "run_action",
+      action: "commit",
+    };
+  }
+
+  const reposAhead = repos.filter((r) => {
+    const s = statusByRepoCwd.get(r.cwd);
+    return s && s.aheadCount > 0 && !s.hasWorkingTreeChanges;
+  });
+  if (reposAhead.length > 0) {
+    return {
+      label: `Push all (${reposAhead.length})`,
+      disabled: false,
+      kind: "run_action",
+      action: "push",
+    };
+  }
+
+  return {
+    label: "Commit all",
+    disabled: true,
+    kind: "show_hint",
+    hint: "All repos are up to date.",
+  };
+}
+
+export interface MultiRepoMenuSection {
+  repo: GitDiscoveredRepo;
+  items: GitActionMenuItem[];
+}
+
+export interface MultiRepoMenuResult {
+  bulkItems: GitActionMenuItem[];
+  repoSections: MultiRepoMenuSection[];
+}
+
+export function buildMultiRepoMenuItems(
+  repos: readonly GitDiscoveredRepo[],
+  statusByRepoCwd: Map<string, GitStatusResult>,
+  isBusy: boolean,
+): MultiRepoMenuResult {
+  const reposWithChanges = repos.filter((r) => statusByRepoCwd.get(r.cwd)?.hasWorkingTreeChanges);
+  const reposAhead = repos.filter((r) => {
+    const s = statusByRepoCwd.get(r.cwd);
+    return s && s.aheadCount > 0 && !s.hasWorkingTreeChanges;
+  });
+
+  const bulkItems: GitActionMenuItem[] = [
+    {
+      id: "commit",
+      label: reposWithChanges.length > 0 ? `Commit all (${reposWithChanges.length})` : "Commit all",
+      disabled: isBusy || reposWithChanges.length === 0,
+      icon: "commit",
+      kind: "open_dialog",
+      dialogAction: "commit",
+    },
+    {
+      id: "push",
+      label: reposAhead.length > 0 ? `Push all (${reposAhead.length})` : "Push all",
+      disabled: isBusy || reposAhead.length === 0,
+      icon: "push",
+      kind: "open_dialog",
+      dialogAction: "push",
+    },
+  ];
+
+  const repoSections: MultiRepoMenuSection[] = repos
+    .map((repo) => ({
+      repo,
+      items: buildMenuItems(statusByRepoCwd.get(repo.cwd) ?? null, isBusy),
+    }))
+    .toSorted((a, b) => {
+      const aStatus = statusByRepoCwd.get(a.repo.cwd);
+      const bStatus = statusByRepoCwd.get(b.repo.cwd);
+      const aActionable =
+        (aStatus?.hasWorkingTreeChanges ? 1 : 0) + (aStatus && aStatus.aheadCount > 0 ? 1 : 0);
+      const bActionable =
+        (bStatus?.hasWorkingTreeChanges ? 1 : 0) + (bStatus && bStatus.aheadCount > 0 ? 1 : 0);
+      if (aActionable !== bActionable) return bActionable - aActionable;
+      return a.repo.label.localeCompare(b.repo.label);
+    });
+
+  return { bulkItems, repoSections };
+}

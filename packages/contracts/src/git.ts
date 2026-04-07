@@ -174,6 +174,23 @@ export const GitInitInput = Schema.Struct({
 });
 export type GitInitInput = typeof GitInitInput.Type;
 
+export const GitDiscoverReposInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitDiscoverReposInput = typeof GitDiscoverReposInput.Type;
+
+export const GitDiscoveredRepo = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  relativePath: TrimmedNonEmptyStringSchema,
+  label: TrimmedNonEmptyStringSchema,
+});
+export type GitDiscoveredRepo = typeof GitDiscoveredRepo.Type;
+
+export const GitDiscoverReposResult = Schema.Struct({
+  repos: Schema.Array(GitDiscoveredRepo),
+});
+export type GitDiscoverReposResult = typeof GitDiscoverReposResult.Type;
+
 // RPC Results
 
 const GitStatusPr = Schema.Struct({

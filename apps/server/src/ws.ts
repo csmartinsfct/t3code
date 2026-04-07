@@ -12,6 +12,7 @@ import {
 } from "effect";
 import {
   type GitActionProgressEvent,
+  GitCommandError,
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
@@ -57,6 +58,7 @@ import { ServerSettingsService } from "./serverSettings";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks";
 import { TerminalManager } from "./terminal/Services/Manager";
+import { RepoDiscovery } from "./workspace/Services/RepoDiscovery";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
@@ -82,6 +84,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const startup = yield* ServerRuntimeStartup;
     const managedRuns = yield* ManagedRunService;
     const scheduledTasks = yield* ScheduledTaskService;
+    const repoDiscovery = yield* RepoDiscovery;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
 
@@ -587,6 +590,23 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcStream(WS_METHODS.subscribeScheduledTaskEvents, scheduledTasks.streamEvents, {
           "rpc.aggregate": "scheduled-tasks",
         }),
+      [WS_METHODS.gitDiscoverRepos]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.gitDiscoverRepos,
+          repoDiscovery.getRepos(input.cwd).pipe(
+            Effect.map((repos) => ({ repos: [...repos] })),
+            Effect.mapError(
+              (cause) =>
+                new GitCommandError({
+                  operation: "discoverRepos",
+                  command: "scan",
+                  cwd: input.cwd,
+                  detail: cause.detail,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "git" },
+        ),
       [WS_METHODS.terminalOpen]: (input) =>
         observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
           "rpc.aggregate": "terminal",
