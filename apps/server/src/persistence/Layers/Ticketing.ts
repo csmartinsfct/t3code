@@ -42,7 +42,11 @@ import type { PersistedTicket as PersistedTicketType } from "../Services/Ticketi
 const toPersistedTicket = (row: typeof TicketRow.Type): PersistedTicketType => ({
   ...row,
   isArchived: row.isArchived === 1,
-  acceptanceCriteria: row.acceptanceCriteria ? JSON.parse(row.acceptanceCriteria) : null,
+  acceptanceCriteria: (() => {
+    if (!row.acceptanceCriteria) return null;
+    const parsed = JSON.parse(row.acceptanceCriteria);
+    return Array.isArray(parsed) ? parsed : null;
+  })(),
 });
 
 const TICKET_SELECT = `
