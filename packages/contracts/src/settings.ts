@@ -44,6 +44,9 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 
+export const McpDeliveryMode = Schema.Literals(["tools", "prompt"]);
+export type McpDeliveryMode = typeof McpDeliveryMode.Type;
+
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
     Schema.decodeTo(
@@ -92,6 +95,9 @@ export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
+  ),
+  mcpDeliveryMode: McpDeliveryMode.pipe(
+    Schema.withDecodingDefault(() => "tools" as const satisfies McpDeliveryMode),
   ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
@@ -183,6 +189,7 @@ const ClaudeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  mcpDeliveryMode: Schema.optionalKey(McpDeliveryMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   managedRunInferenceModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(

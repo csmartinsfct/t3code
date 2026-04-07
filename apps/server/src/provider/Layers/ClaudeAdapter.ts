@@ -76,6 +76,8 @@ import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
+import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
+import { buildMcpPromptModeSystemPrompt } from "../mcpPromptModeSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
@@ -2875,30 +2877,59 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
       };
 
-      // Inject T3 managed runs MCP server when a project is active
+      // Inject T3 MCP services when a project is active
+      const mcpDeliveryMode = allSettings.mcpDeliveryMode;
       const checkpointContext = yield* projectionSnapshotQuery
         .getThreadCheckpointContext(input.threadId)
         .pipe(Effect.catch(() => Effect.succeed(Option.none())));
       let mcpServersConfig:
         | Record<string, { type: "http"; url: string; headers: Record<string, string> }>
         | undefined;
+      let mcpAllowedTools: string[] | undefined;
+      let mcpSystemPromptAppend: string | undefined;
       if (Option.isSome(checkpointContext) && serverConfig.port > 0) {
         const access = yield* managedRunService.issueMcpAccess(
           checkpointContext.value.projectId,
           input.threadId,
         );
-        mcpServersConfig = {
-          t3_managed_runs: {
-            type: "http",
-            url: `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`,
-            headers: { Authorization: `Bearer ${access.token}` },
-          },
-          t3_scheduled_tasks: {
-            type: "http",
-            url: `http://127.0.0.1:${serverConfig.port}/mcp/scheduled-tasks`,
-            headers: { Authorization: `Bearer ${access.token}` },
-          },
-        };
+
+        if (mcpDeliveryMode === "tools") {
+          // Native MCP tool registration — all three services
+          mcpServersConfig = {
+            t3_managed_runs: {
+              type: "http",
+              url: `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`,
+              headers: { Authorization: `Bearer ${access.token}` },
+            },
+            t3_scheduled_tasks: {
+              type: "http",
+              url: `http://127.0.0.1:${serverConfig.port}/mcp/scheduled-tasks`,
+              headers: { Authorization: `Bearer ${access.token}` },
+            },
+            t3_ticketing: {
+              type: "http",
+              url: `http://127.0.0.1:${serverConfig.port}/mcp/ticketing`,
+              headers: { Authorization: `Bearer ${access.token}` },
+            },
+          };
+          mcpAllowedTools = [
+            "mcp__t3_managed_runs__*",
+            "mcp__t3_scheduled_tasks__*",
+            "mcp__t3_ticketing__*",
+          ];
+          mcpSystemPromptAppend =
+            MANAGED_RUNS_SYSTEM_PROMPT +
+            "\n\n" +
+            SCHEDULED_TASKS_SYSTEM_PROMPT +
+            "\n\n" +
+            TICKETING_SYSTEM_PROMPT;
+        } else {
+          // Prompt mode — no MCP server config, just system prompt with endpoints
+          mcpSystemPromptAppend = buildMcpPromptModeSystemPrompt({
+            port: serverConfig.port,
+            token: access.token,
+          });
+        }
       }
 
       const queryOptions: ClaudeQueryOptions = {
@@ -2924,15 +2955,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(mcpServersConfig ? { mcpServers: mcpServersConfig } : {}),
-        ...(mcpServersConfig
-          ? { allowedTools: ["mcp__t3_managed_runs__*", "mcp__t3_scheduled_tasks__*"] }
-          : {}),
-        ...(mcpServersConfig
+        ...(mcpAllowedTools ? { allowedTools: mcpAllowedTools } : {}),
+        ...(mcpSystemPromptAppend
           ? {
               systemPrompt: {
                 type: "preset" as const,
                 preset: "claude_code" as const,
-                append: MANAGED_RUNS_SYSTEM_PROMPT + "\n\n" + SCHEDULED_TASKS_SYSTEM_PROMPT,
+                append: mcpSystemPromptAppend,
               },
             }
           : {}),

@@ -47,22 +47,22 @@ The system has five main moving parts:
 
 ### Tables
 
-| Table | Purpose |
-|-------|---------|
-| `tickets` | Core ticket data — title, description, status, priority, sort order, parent reference |
-| `labels` | Project-scoped labels with name + color |
-| `ticket_labels` | Many-to-many ticket ↔ label associations |
-| `ticket_dependencies` | Directed dependency edges between tickets (with self-reference CHECK) |
-| `comments` | Threaded comments — top-level and single-depth replies |
-| `artifacts` | Polymorphic attachments (figma_url, mermaid, image) on tickets or comments |
-| `ticket_history` | Audit log — every mutation recorded with action, changes JSON, and performer |
+| Table                 | Purpose                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `tickets`             | Core ticket data — title, description, status, priority, sort order, parent reference |
+| `labels`              | Project-scoped labels with name + color                                               |
+| `ticket_labels`       | Many-to-many ticket ↔ label associations                                              |
+| `ticket_dependencies` | Directed dependency edges between tickets (with self-reference CHECK)                 |
+| `comments`            | Threaded comments — top-level and single-depth replies                                |
+| `artifacts`           | Polymorphic attachments (figma_url, mermaid, image) on tickets or comments            |
+| `ticket_history`      | Audit log — every mutation recorded with action, changes JSON, and performer          |
 
 ### Key Columns on `projection_projects`
 
-| Column | Purpose |
-|--------|---------|
-| `next_ticket_number` | Auto-incrementing counter for ticket numbering (atomic allocation) |
-| `ticket_prefix` | Optional custom prefix; if null, derived from first 4 chars of project title |
+| Column               | Purpose                                                                      |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `next_ticket_number` | Auto-incrementing counter for ticket numbering (atomic allocation)           |
+| `ticket_prefix`      | Optional custom prefix; if null, derived from first 4 chars of project title |
 
 ### Ticket Identifiers
 
@@ -127,6 +127,7 @@ Each criterion tracks `status` (pending/met/not_met), optional `reason`, and `ve
 ### History Recording
 
 Every mutation records a `TicketHistoryEntry` with:
+
 - `action` — one of 12 action types (created, updated, status_changed, dependency_added, label_added, comment_added, etc.)
 - `changes` — JSON diff with `{ field: { old, new } }` for updates
 - `performedBy` — caller identity ("user", "system", or author name for comments)
@@ -151,6 +152,13 @@ Every mutation records a `TicketHistoryEntry` with:
 
 All tools are authenticated via the managed run token system (same as scheduled tasks). Dev bypass token `t3-dev-bypass` works with `?projectId=` query param.
 
+### MCP Delivery Modes
+
+The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) controls how these tools reach the AI model:
+
+- **`"tools"` (Native tools)**: All three MCP servers (managed-runs, scheduled-tasks, ticketing) are registered as native tool sets. Each tool appears individually in the model's tool list. System prompts explain usage.
+- **`"prompt"` (HTTP endpoints)**: No MCP tools are registered. Instead, the system prompt provides the HTTP endpoint URLs, a Bearer auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover tools via `tools/list` and call them via `tools/call` on demand.
+
 ---
 
 ## WebSocket RPC (28 methods)
@@ -159,14 +167,14 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 
 ### Stream Events
 
-| Event | Payload |
-|-------|---------|
-| `ticket_upserted` | `{ projectId, ticket: TicketSummary }` |
-| `ticket_deleted` | `{ projectId, ticketId }` |
-| `label_upserted` | `{ label }` |
-| `label_deleted` | `{ labelId }` |
-| `comment_upserted` | `{ ticketId, comment }` |
-| `comment_deleted` | `{ ticketId, commentId }` |
+| Event              | Payload                                |
+| ------------------ | -------------------------------------- |
+| `ticket_upserted`  | `{ projectId, ticket: TicketSummary }` |
+| `ticket_deleted`   | `{ projectId, ticketId }`              |
+| `label_upserted`   | `{ label }`                            |
+| `label_deleted`    | `{ labelId }`                          |
+| `comment_upserted` | `{ ticketId, comment }`                |
+| `comment_deleted`  | `{ ticketId, commentId }`              |
 
 ---
 
@@ -174,23 +182,23 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 
 ### Routes
 
-| Route | Component | Purpose |
-|-------|-----------|---------|
-| `/settings/tickets` | `TicketsPanel` | List view with project selector |
-| `/settings/tickets/$ticketId` | `TicketDetailPanel` | Full ticket detail |
+| Route                         | Component           | Purpose                         |
+| ----------------------------- | ------------------- | ------------------------------- |
+| `/settings/tickets`           | `TicketsPanel`      | List view with project selector |
+| `/settings/tickets/$ticketId` | `TicketDetailPanel` | Full ticket detail              |
 
 ### Key Components
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| `TicketsPanel` | `TicketsPanel.tsx` | List view with project filter, real-time subscription |
-| `TicketCard` | `TicketCard.tsx` | Compact card with status/priority dots, labels, identifier |
-| `TicketDetailPanel` | `TicketDetailPanel.tsx` | Full detail with inline status/priority dropdowns |
-| `CreateTicketDialog` | `CreateTicketDialog.tsx` | New ticket form with dynamic acceptance criteria |
-| `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata |
-| `TicketComments` | `TicketComments.tsx` | Threaded comments with human/AI distinction |
-| `TicketHistory` | `TicketHistory.tsx` | Lazy-loaded collapsible audit timeline |
-| `ticketUtils` | `ticketUtils.ts` | Status/priority color maps, date formatters |
+| Component                  | File                           | Purpose                                                    |
+| -------------------------- | ------------------------------ | ---------------------------------------------------------- |
+| `TicketsPanel`             | `TicketsPanel.tsx`             | List view with project filter, real-time subscription      |
+| `TicketCard`               | `TicketCard.tsx`               | Compact card with status/priority dots, labels, identifier |
+| `TicketDetailPanel`        | `TicketDetailPanel.tsx`        | Full detail with inline status/priority dropdowns          |
+| `CreateTicketDialog`       | `CreateTicketDialog.tsx`       | New ticket form with dynamic acceptance criteria           |
+| `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata              |
+| `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                |
+| `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                     |
+| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                |
 
 ### Data Hook
 
