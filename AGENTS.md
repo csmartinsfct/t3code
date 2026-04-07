@@ -58,6 +58,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
 - [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, MCP tools, and Settings UI.
 - [Agent Tools](docs/t3-agent-tools.md) — How MCP services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
+- [Multi-Layout](docs/multi-layout.md) — Board view with Kanban ticket management, drag-and-drop reordering/status changes, nested sidebar layout, and ticket composer attachments.
 
 These docs must be kept up to date as related code changes.
 
