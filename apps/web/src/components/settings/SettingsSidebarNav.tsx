@@ -1,5 +1,12 @@
 import type { ComponentType } from "react";
-import { ActivityIcon, ArchiveIcon, ArrowLeftIcon, ClockIcon, Settings2Icon } from "lucide-react";
+import {
+  ActivityIcon,
+  ArchiveIcon,
+  ArrowLeftIcon,
+  CheckSquareIcon,
+  ClockIcon,
+  Settings2Icon,
+} from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
 import {
@@ -16,6 +23,7 @@ export type SettingsSectionPath =
   | "/settings/general"
   | "/settings/archived"
   | "/settings/scheduled-tasks"
+  | "/settings/tasks"
   | "/settings/runs";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
@@ -26,6 +34,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "General", to: "/settings/general", icon: Settings2Icon },
   { label: "Runs", to: "/settings/runs", icon: ActivityIcon },
   { label: "Scheduled Tasks", to: "/settings/scheduled-tasks", icon: ClockIcon },
+  { label: "Tasks", to: "/settings/tasks", icon: CheckSquareIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
@@ -39,7 +48,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           <SidebarMenu>
             {SETTINGS_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.to;
+              const isActive = pathname === item.to || pathname.startsWith(item.to + "/");
               return (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton
