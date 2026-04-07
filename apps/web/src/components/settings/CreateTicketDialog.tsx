@@ -16,7 +16,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { ALL_PRIORITIES, ALL_STATUSES, PRIORITY_CONFIG, STATUS_CONFIG } from "./taskUtils";
+import { ALL_PRIORITIES, ALL_STATUSES, PRIORITY_CONFIG, STATUS_CONFIG } from "./ticketUtils";
 
 interface CreateTicketDialogProps {
   open: boolean;

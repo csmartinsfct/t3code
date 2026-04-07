@@ -6,9 +6,9 @@ import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import { formatRelativeDate } from "./taskUtils";
+import { formatRelativeDate } from "./ticketUtils";
 
-interface TaskCommentsProps {
+interface TicketCommentsProps {
   ticketId: TicketId;
   comments: ReadonlyArray<Comment>;
   onUpdated: () => void;
@@ -142,7 +142,7 @@ function CommentBubble({
   );
 }
 
-export function TaskComments({ ticketId, comments, onUpdated }: TaskCommentsProps) {
+export function TicketComments({ ticketId, comments, onUpdated }: TicketCommentsProps) {
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
 

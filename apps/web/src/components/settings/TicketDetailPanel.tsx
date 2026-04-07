@@ -21,19 +21,19 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { TaskAcceptanceCriteria } from "./TaskAcceptanceCriteria";
-import { TaskComments } from "./TaskComments";
-import { TaskHistory } from "./TaskHistory";
+import { TicketAcceptanceCriteria } from "./TicketAcceptanceCriteria";
+import { TicketComments } from "./TicketComments";
+import { TicketHistory } from "./TicketHistory";
 import {
   ALL_PRIORITIES,
   ALL_STATUSES,
   PRIORITY_CONFIG,
   STATUS_CONFIG,
   formatRelativeDate,
-} from "./taskUtils";
+} from "./ticketUtils";
 
-export function TaskDetailPanel() {
-  const { ticketId: rawTicketId } = useParams({ from: "/settings/tasks/$ticketId" });
+export function TicketDetailPanel() {
+  const { ticketId: rawTicketId } = useParams({ from: "/settings/tickets/$ticketId" });
   const ticketId = rawTicketId as TicketId;
   const navigate = useNavigate();
 
@@ -63,7 +63,7 @@ export function TaskDetailPanel() {
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
       if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
         void navigate({
-          to: "/settings/tasks",
+          to: "/settings/tickets",
           ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
           replace: true,
         });
@@ -110,7 +110,7 @@ export function TaskDetailPanel() {
       const api = ensureNativeApi();
       await api.ticketing.delete({ id: ticketId });
       void navigate({
-        to: "/settings/tasks",
+        to: "/settings/tickets",
         ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
         replace: true,
       });
@@ -147,14 +147,14 @@ export function TaskDetailPanel() {
           className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           onClick={() =>
             void navigate({
-              to: "/settings/tasks",
+              to: "/settings/tickets",
               ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
               replace: true,
             })
           }
         >
           <ArrowLeftIcon className="size-3" />
-          Back to Tasks
+          Back to Tickets
         </button>
 
         {/* Header */}
@@ -240,7 +240,7 @@ export function TaskDetailPanel() {
 
         {/* Acceptance Criteria */}
         {ticket.acceptanceCriteria && ticket.acceptanceCriteria.length > 0 && (
-          <TaskAcceptanceCriteria
+          <TicketAcceptanceCriteria
             ticketId={ticketId}
             criteria={ticket.acceptanceCriteria}
             onUpdated={() => void fetchTicket()}
@@ -282,7 +282,7 @@ export function TaskDetailPanel() {
                   className="flex w-fit items-center gap-1.5 text-xs text-blue-500 hover:underline"
                   onClick={() =>
                     void navigate({
-                      to: "/settings/tasks/$ticketId",
+                      to: "/settings/tickets/$ticketId",
                       params: { ticketId: dep.dependsOnTicketId },
                     })
                   }
@@ -298,7 +298,7 @@ export function TaskDetailPanel() {
         {ticket.subTickets.length > 0 && (
           <div className="flex flex-col gap-2">
             <h3 className="text-xs font-medium text-muted-foreground">
-              Sub-tasks ({ticket.subTickets.length})
+              Sub-tickets ({ticket.subTickets.length})
             </h3>
             <div className="flex flex-col gap-1">
               {ticket.subTickets.map((sub) => {
@@ -310,7 +310,7 @@ export function TaskDetailPanel() {
                     className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
                     onClick={() =>
                       void navigate({
-                        to: "/settings/tasks/$ticketId",
+                        to: "/settings/tickets/$ticketId",
                         params: { ticketId: sub.id },
                       })
                     }
@@ -328,21 +328,21 @@ export function TaskDetailPanel() {
         )}
 
         {/* Comments */}
-        <TaskComments
+        <TicketComments
           ticketId={ticketId}
           comments={ticket.comments}
           onUpdated={() => void fetchTicket()}
         />
 
         {/* History */}
-        <TaskHistory ticketId={ticketId} />
+        <TicketHistory ticketId={ticketId} />
       </div>
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete task?</AlertDialogTitle>
+            <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
               This action cannot be undone.

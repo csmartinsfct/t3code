@@ -4,13 +4,13 @@ import { useCallback, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { formatFullDate, historyActionLabel } from "./taskUtils";
+import { formatFullDate, historyActionLabel } from "./ticketUtils";
 
-interface TaskHistoryProps {
+interface TicketHistoryProps {
   ticketId: TicketId;
 }
 
-export function TaskHistory({ ticketId }: TaskHistoryProps) {
+export function TicketHistory({ ticketId }: TicketHistoryProps) {
   const [entries, setEntries] = useState<ReadonlyArray<TicketHistoryEntry> | null>(null);
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);

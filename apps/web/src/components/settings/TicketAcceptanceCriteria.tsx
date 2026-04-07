@@ -3,19 +3,19 @@ import { CheckIcon, XIcon } from "lucide-react";
 import { useCallback } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
-import { formatRelativeDate } from "./taskUtils";
+import { formatRelativeDate } from "./ticketUtils";
 
-interface TaskAcceptanceCriteriaProps {
+interface TicketAcceptanceCriteriaProps {
   ticketId: TicketId;
   criteria: ReadonlyArray<AcceptanceCriterion>;
   onUpdated: () => void;
 }
 
-export function TaskAcceptanceCriteria({
+export function TicketAcceptanceCriteria({
   ticketId,
   criteria,
   onUpdated,
-}: TaskAcceptanceCriteriaProps) {
+}: TicketAcceptanceCriteriaProps) {
   const metCount = criteria.filter((c) => c.status === "met").length;
 
   const handleToggle = useCallback(

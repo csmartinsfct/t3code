@@ -1,13 +1,13 @@
 import type { TicketSummary } from "@t3tools/contracts";
 
-import { PRIORITY_CONFIG, STATUS_CONFIG, formatRelativeDate } from "./taskUtils";
+import { PRIORITY_CONFIG, STATUS_CONFIG, formatRelativeDate } from "./ticketUtils";
 
-interface TaskCardProps {
+interface TicketCardProps {
   ticket: TicketSummary;
   onClick: () => void;
 }
 
-export function TaskCard({ ticket, onClick }: TaskCardProps) {
+export function TicketCard({ ticket, onClick }: TicketCardProps) {
   const statusCfg = STATUS_CONFIG[ticket.status];
   const priorityCfg = PRIORITY_CONFIG[ticket.priority];
 
@@ -41,7 +41,7 @@ export function TaskCard({ ticket, onClick }: TaskCardProps) {
           {ticket.subTicketCount > 0 && (
             <>
               <span>
-                {ticket.subTicketCount} sub-task{ticket.subTicketCount !== 1 ? "s" : ""}
+                {ticket.subTicketCount} sub-ticket{ticket.subTicketCount !== 1 ? "s" : ""}
               </span>
               <span className="text-border">|</span>
             </>

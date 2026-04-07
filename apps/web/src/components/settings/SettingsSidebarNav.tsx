@@ -23,7 +23,7 @@ export type SettingsSectionPath =
   | "/settings/general"
   | "/settings/archived"
   | "/settings/scheduled-tasks"
-  | "/settings/tasks"
+  | "/settings/tickets"
   | "/settings/runs";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
@@ -34,7 +34,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "General", to: "/settings/general", icon: Settings2Icon },
   { label: "Runs", to: "/settings/runs", icon: ActivityIcon },
   { label: "Scheduled Tasks", to: "/settings/scheduled-tasks", icon: ClockIcon },
-  { label: "Tasks", to: "/settings/tasks", icon: CheckSquareIcon },
+  { label: "Tickets", to: "/settings/tickets", icon: CheckSquareIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
