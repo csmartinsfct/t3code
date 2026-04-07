@@ -2445,6 +2445,18 @@ export default function Sidebar() {
           <SidebarSeparator />
           <SidebarFooter className="p-2">
             <SidebarUpdatePill />
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  size="sm"
+                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                  onClick={() => void navigate({ to: "/settings" })}
+                >
+                  <SettingsIcon className="size-3.5" />
+                  <span className="text-xs">Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
             {/* View mode toggle */}
             <div className="flex rounded-md border border-border bg-muted/30 p-0.5">
               <button
@@ -2470,18 +2482,6 @@ export default function Sidebar() {
                 Board
               </button>
             </div>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  size="sm"
-                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-                  onClick={() => void navigate({ to: "/settings" })}
-                >
-                  <SettingsIcon className="size-3.5" />
-                  <span className="text-xs">Settings</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
           </SidebarFooter>
         </>
       )}
