@@ -64,6 +64,7 @@ import { RepoDiscoveryLive } from "./workspace/Layers/RepoDiscovery.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
 
 const defaultProjectId = ProjectId.makeUnsafe("project-default");
 const defaultThreadId = ThreadId.makeUnsafe("thread-default");
@@ -83,6 +84,7 @@ const makeDefaultOrchestrationReadModel = () => {
         title: "Default Project",
         workspaceRoot: "/tmp/default-project",
         defaultModelSelection,
+        systemPrompt: null,
         scripts: [],
         createdAt: now,
         updatedAt: now,
@@ -347,6 +349,15 @@ const buildAppUnderTest = (options?: {
           createArtifact: () => Effect.die(new Error("not mocked")),
           deleteArtifact: () => Effect.void,
           streamEvents: Stream.empty,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TextGeneration)({
+          generateCommitMessage: () => Effect.die(new Error("not mocked")),
+          generatePrContent: () => Effect.die(new Error("not mocked")),
+          generateBranchName: () => Effect.die(new Error("not mocked")),
+          generateThreadTitle: () => Effect.die(new Error("not mocked")),
+          enhanceSystemPrompt: () => Effect.die(new Error("not mocked")),
         }),
       ),
       Layer.provide(workspaceAndProjectServicesLayer),
@@ -1188,6 +1199,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             title: "Project A",
             workspaceRoot: "/tmp/project-a",
             defaultModelSelection,
+            systemPrompt: null,
             scripts: [],
             createdAt: now,
             updatedAt: now,

@@ -6,13 +6,20 @@ How T3 Code exposes project services (managed runs, scheduled tasks, ticketing) 
 
 T3 Code runs three internal MCP servers that AI models can use during conversations:
 
-| Service | Endpoint | Tools | Purpose |
-|---------|----------|-------|---------|
-| Managed Runs | `/mcp/managed-runs` | ~8 | Start/stop/monitor dev servers, build watchers, docker compose |
-| Scheduled Tasks | `/mcp/scheduled-tasks` | ~9 | Recurring cron-based task automation |
-| Ticketing | `/mcp/ticketing` | 26 | Project tickets, labels, comments, dependencies, artifacts |
+| Service         | Endpoint               | Tools | Purpose                                                        |
+| --------------- | ---------------------- | ----- | -------------------------------------------------------------- |
+| Managed Runs    | `/mcp/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose |
+| Scheduled Tasks | `/mcp/scheduled-tasks` | ~9    | Recurring cron-based task automation                           |
+| Ticketing       | `/mcp/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts     |
 
 Each endpoint speaks the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) over HTTP using JSON-RPC 2.0. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
+
+The chat composer's MCP picker also mirrors provider-side config on disk so the UI reflects what a session should be able to use:
+
+- Codex: global `~/.codex/config.toml` plus project-scoped `.codex/config.toml`
+- Claude: profile/global `.claude.json` plus project-local `.mcp.json`
+
+For Codex, project-scoped config is still gated by Codex project trust. T3 Code now auto-trusts the active project path by writing the matching `[projects."<cwd>"] trust_level = "trusted"` entry into `~/.codex/config.toml` before resolving Codex MCP servers and before starting Codex sessions, so repo-local MCP config works without any manual terminal setup.
 
 ---
 
@@ -25,11 +32,13 @@ The `mcpDeliveryMode` server setting (Settings > General > "MCP delivery") contr
 All three MCP servers are registered as native tool sets in the provider session. Each tool appears individually in the model's tool list.
 
 **How it works:**
+
 - **Codex**: MCP servers added via `configOverrides` (e.g. `mcp_servers.t3_managed_runs.url="..."`)
 - **Claude**: MCP servers added via `mcpServers` option + `allowedTools` glob patterns (`mcp__t3_managed_runs__*`, etc.)
 - **System prompt**: Per-service prompts appended explaining tool usage (`MANAGED_RUNS_SYSTEM_PROMPT`, `SCHEDULED_TASKS_SYSTEM_PROMPT`, `TICKETING_SYSTEM_PROMPT`)
 
 **Trade-offs:**
+
 - (+) Model has direct tool access — no extra round-trip
 - (+) Tool schemas visible in context — model knows exact inputs
 - (-) 43+ tools injected upfront — context overhead even when unused
@@ -40,11 +49,13 @@ All three MCP servers are registered as native tool sets in the provider session
 No MCP tools are registered. Instead, the system prompt provides endpoint URLs, the auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover and call tools on demand.
 
 **How it works:**
+
 - **Codex**: No `configOverrides` for MCP servers. System prompt injected via `appendDeveloperInstructions`
 - **Claude**: No `mcpServers` or `allowedTools`. System prompt injected via `systemPrompt.append`
 - **System prompt**: Unified prompt from `buildMcpPromptModeSystemPrompt()` with endpoint table, token, and `tools/list` / `tools/call` curl examples
 
 **Trade-offs:**
+
 - (+) Zero tool bloat — model context stays clean
 - (+) On-demand discovery — model only loads tools it needs via `tools/list`
 - (+) Adding new services just requires a prompt update, not adapter changes
@@ -86,6 +97,7 @@ Thread start (with active project)
 ### Condition Gate
 
 MCP injection (in either mode) only happens when:
+
 - Thread has an active project context (checkpoint context exists)
 - Server is listening (`serverConfig.port > 0`)
 

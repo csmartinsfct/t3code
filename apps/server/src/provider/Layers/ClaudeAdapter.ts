@@ -2931,6 +2931,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           });
         }
       }
+      // Inject project-specific system prompt (independent of MCP services / port)
+      if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {
+        mcpSystemPromptAppend =
+          (mcpSystemPromptAppend ?? "") +
+          (mcpSystemPromptAppend ? "\n\n" : "") +
+          checkpointContext.value.systemPrompt;
+      }
 
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),

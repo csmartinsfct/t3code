@@ -55,6 +55,7 @@ export interface WsRpcClient {
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
   readonly projects: {
+    readonly enhanceSystemPrompt: RpcUnaryMethod<typeof WS_METHODS.projectsEnhanceSystemPrompt>;
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
     readonly listDirectory: RpcUnaryMethod<typeof WS_METHODS.projectsListDirectory>;
@@ -152,6 +153,10 @@ export interface WsRpcClient {
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
     readonly resolveMcpServers: RpcUnaryMethod<typeof WS_METHODS.serverResolveMcpServers>;
+    readonly resolveCodexProjectTrust: RpcUnaryMethod<
+      typeof WS_METHODS.serverResolveCodexProjectTrust
+    >;
+    readonly trustCodexProject: RpcUnaryMethod<typeof WS_METHODS.serverTrustCodexProject>;
     readonly resolveSkills: RpcUnaryMethod<typeof WS_METHODS.serverResolveSkills>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
@@ -198,6 +203,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.subscribe((client) => client[WS_METHODS.subscribeTerminalEvents]({}), listener),
     },
     projects: {
+      enhanceSystemPrompt: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsEnhanceSystemPrompt](input)),
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
@@ -351,6 +358,10 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
       resolveMcpServers: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveMcpServers](input)),
+      resolveCodexProjectTrust: (input) =>
+        transport.request((client) => client[WS_METHODS.serverResolveCodexProjectTrust](input)),
+      trustCodexProject: (input) =>
+        transport.request((client) => client[WS_METHODS.serverTrustCodexProject](input)),
       resolveSkills: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveSkills](input)),
       subscribeConfig: (listener) =>

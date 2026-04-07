@@ -384,6 +384,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             workspaceRoot: event.payload.workspaceRoot,
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
+            systemPrompt: event.payload.systemPrompt ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -407,6 +408,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
+            ...(event.payload.systemPrompt !== undefined
+              ? { systemPrompt: event.payload.systemPrompt }
+              : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;

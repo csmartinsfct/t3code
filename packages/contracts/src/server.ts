@@ -272,6 +272,36 @@ export class ResolveMcpServersError extends Schema.TaggedErrorClass<ResolveMcpSe
   { message: TrimmedNonEmptyString },
 ) {}
 
+export const ResolveCodexProjectTrustInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ResolveCodexProjectTrustInput = typeof ResolveCodexProjectTrustInput.Type;
+
+export const ResolveCodexProjectTrustResult = Schema.Struct({
+  trusted: Schema.Boolean,
+});
+export type ResolveCodexProjectTrustResult = typeof ResolveCodexProjectTrustResult.Type;
+
+export class ResolveCodexProjectTrustError extends Schema.TaggedErrorClass<ResolveCodexProjectTrustError>()(
+  "ResolveCodexProjectTrustError",
+  { message: TrimmedNonEmptyString },
+) {}
+
+export const TrustCodexProjectInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type TrustCodexProjectInput = typeof TrustCodexProjectInput.Type;
+
+export const TrustCodexProjectResult = Schema.Struct({
+  trusted: Schema.Boolean,
+});
+export type TrustCodexProjectResult = typeof TrustCodexProjectResult.Type;
+
+export class TrustCodexProjectError extends Schema.TaggedErrorClass<TrustCodexProjectError>()(
+  "TrustCodexProjectError",
+  { message: TrimmedNonEmptyString },
+) {}
+
 // ---------------------------------------------------------------------------
 // Skills resolution
 // ---------------------------------------------------------------------------

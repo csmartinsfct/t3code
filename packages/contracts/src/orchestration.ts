@@ -226,6 +226,7 @@ export const OrchestrationProject = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  systemPrompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -408,6 +409,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  systemPrompt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -746,6 +748,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  systemPrompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -756,6 +759,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  systemPrompt: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: IsoDateTime,
 });
 

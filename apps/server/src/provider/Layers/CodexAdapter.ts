@@ -39,6 +39,7 @@ import {
 } from "../../codexAppServerManager.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { trustCodexProject } from "../../mcpConfigReader.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
@@ -47,6 +48,8 @@ import { buildMcpPromptModeSystemPrompt } from "../mcpPromptModeSystemPrompt.ts"
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import * as os from "node:os";
+import * as path from "node:path";
 
 const PROVIDER = "codex" as const;
 
@@ -1412,6 +1415,21 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       const mcpDeliveryMode = allCodexSettings.mcpDeliveryMode;
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
+      const codexHomePath = homePath || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+      if (input.cwd) {
+        yield* trustCodexProject(codexHomePath, input.cwd).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: `Failed to trust Codex project '${input.cwd}'.`,
+                cause,
+              }),
+          ),
+        );
+      }
       const checkpointContext = yield* projectionSnapshotQuery
         .getThreadCheckpointContext(input.threadId)
         .pipe(Effect.catch(() => Effect.succeed(Option.none())));
@@ -1453,6 +1471,13 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             token: access.token,
           });
         }
+      }
+      // Inject project-specific system prompt (independent of MCP services / port)
+      if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {
+        appendDeveloperInstructions =
+          (appendDeveloperInstructions ?? "") +
+          (appendDeveloperInstructions ? "\n\n" : "") +
+          checkpointContext.value.systemPrompt;
       }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,

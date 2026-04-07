@@ -38,6 +38,7 @@ import Migration0022 from "./Migrations/022_ManagedRunsDropLabelCommand.ts";
 import Migration0023 from "./Migrations/023_CronJobs.ts";
 import Migration0024 from "./Migrations/024_ManagedRunInference.ts";
 import Migration0025 from "./Migrations/025_Ticketing.ts";
+import Migration0026 from "./Migrations/026_ProjectSystemPrompt.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -75,6 +76,7 @@ export const migrationEntries = [
   [23, "CronJobs", Migration0023],
   [24, "ManagedRunInference", Migration0024],
   [25, "Ticketing", Migration0025],
+  [26, "ProjectSystemPrompt", Migration0026],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

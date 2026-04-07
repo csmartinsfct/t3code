@@ -200,3 +200,30 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Enhance system prompt
+// ---------------------------------------------------------------------------
+
+export function buildEnhanceSystemPromptPrompt(input: { currentPrompt: string }) {
+  const prompt = [
+    "You improve system prompts for AI coding assistants.",
+    "Return a JSON object with key: enhancedPrompt.",
+    "Rules:",
+    "- Improve the clarity, specificity, and structure of the given system prompt.",
+    "- Preserve the user's original intent and domain-specific requirements.",
+    "- Add useful structure (sections, bullet points) where beneficial.",
+    "- Keep the tone professional and directive.",
+    "- Do not add fictional constraints the user didn't mention.",
+    "- The prompt should instruct an AI coding assistant about how to behave for this specific project.",
+    "",
+    "Current system prompt:",
+    limitSection(input.currentPrompt, 8_000),
+  ].join("\n");
+
+  const outputSchema = Schema.Struct({
+    enhancedPrompt: Schema.String,
+  });
+
+  return { prompt, outputSchema };
+}

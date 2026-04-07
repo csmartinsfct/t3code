@@ -111,6 +111,7 @@ const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   projectId: ProjectId,
   workspaceRoot: Schema.String,
   worktreePath: Schema.NullOr(Schema.String),
+  systemPrompt: Schema.NullOr(Schema.String),
 });
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
@@ -175,6 +176,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          system_prompt AS "systemPrompt",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -367,6 +369,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          system_prompt AS "systemPrompt",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -402,7 +405,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
           projects.workspace_root AS "workspaceRoot",
-          threads.worktree_path AS "worktreePath"
+          threads.worktree_path AS "worktreePath",
+          projects.system_prompt AS "systemPrompt"
         FROM projection_threads AS threads
         INNER JOIN projection_projects AS projects
           ON projects.project_id = threads.project_id
@@ -657,6 +661,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             title: row.title,
             workspaceRoot: row.workspaceRoot,
             defaultModelSelection: row.defaultModelSelection,
+            systemPrompt: row.systemPrompt,
             scripts: row.scripts,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
@@ -740,6 +745,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               workspaceRoot: row.workspaceRoot,
               defaultModelSelection: row.defaultModelSelection,
               scripts: row.scripts,
+              systemPrompt: row.systemPrompt,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
               deletedAt: row.deletedAt,
@@ -790,6 +796,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         projectId: threadRow.value.projectId,
         workspaceRoot: threadRow.value.workspaceRoot,
         worktreePath: threadRow.value.worktreePath,
+        systemPrompt: threadRow.value.systemPrompt,
         checkpoints: checkpointRows.map(
           (row): OrchestrationCheckpointSummary => ({
             turnId: row.turnId,

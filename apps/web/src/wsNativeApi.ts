@@ -42,6 +42,7 @@ export function createWsNativeApi(): NativeApi {
       onEvent: (callback) => rpcClient.terminal.onEvent(callback),
     },
     projects: {
+      enhanceSystemPrompt: rpcClient.projects.enhanceSystemPrompt,
       searchEntries: rpcClient.projects.searchEntries,
       writeFile: rpcClient.projects.writeFile,
       listDirectory: rpcClient.projects.listDirectory,
@@ -143,6 +144,8 @@ export function createWsNativeApi(): NativeApi {
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
       resolveMcpServers: rpcClient.server.resolveMcpServers,
+      resolveCodexProjectTrust: rpcClient.server.resolveCodexProjectTrust,
+      trustCodexProject: rpcClient.server.trustCodexProject,
       resolveSkills: rpcClient.server.resolveSkills,
     },
     orchestration: {

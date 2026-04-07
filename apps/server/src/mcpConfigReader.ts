@@ -66,32 +66,77 @@ export const resolveClaudeMcpServerNames = Effect.fn("resolveClaudeMcpServerName
 /**
  * Resolve MCP server names from `<codexHome>/config.toml`.
  *
+ * Codex supports both a global config (`<codexHome>/config.toml`) and
+ * project-scoped config files (`.codex/config.toml`). This resolver mirrors
+ * that by merging the global config with any project configs discovered while
+ * walking from the filesystem root down to `cwd`.
+ *
  * Uses the same manual line-by-line TOML parsing pattern as
  * `readCodexConfigModelProvider` in `CodexProvider.ts`.
  */
 export const resolveCodexMcpServerNames = Effect.fn("resolveCodexMcpServerNames")(function* (
   codexHome: string,
+  cwd?: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const names = new Set<string>();
+
+  for (const configPath of resolveCodexConfigPaths(codexHome, cwd)) {
+    const content = yield* fileSystem
+      .readFileString(configPath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (content === undefined) continue;
+
+    collectCodexMcpServerNames(content, names);
+  }
+
+  return [...names].toSorted();
+});
+
+/**
+ * Resolve whether Codex trusts the exact project cwd.
+ *
+ * Codex stores project trust in the global config file under sections like:
+ *
+ * `[projects."/absolute/path"]`
+ * `trust_level = "trusted"`
+ */
+export const resolveCodexProjectTrusted = Effect.fn("resolveCodexProjectTrusted")(function* (
+  codexHome: string,
+  cwd: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const configPath = path.join(codexHome, "config.toml");
-
   const content = yield* fileSystem
     .readFileString(configPath)
     .pipe(Effect.orElseSucceed(() => undefined));
+
   if (content === undefined) {
-    return [] as string[];
+    return false;
   }
 
-  const names = new Set<string>();
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    // Match [mcp_servers.name] but skip sub-sections like [mcp_servers.name.env]
-    const match = trimmed.match(/^\[mcp_servers\.([^\].]+)\]$/);
-    if (match?.[1]) {
-      names.add(match[1].trim());
-    }
+  return readCodexProjectTrustLevel(content, cwd) === "trusted";
+});
+
+/** Ensure the exact project cwd is marked as `trusted` in Codex global config. */
+export const trustCodexProject = Effect.fn("trustCodexProject")(function* (
+  codexHome: string,
+  cwd: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const configPath = path.join(codexHome, "config.toml");
+  const existingContent = yield* fileSystem
+    .readFileString(configPath)
+    .pipe(Effect.orElseSucceed(() => ""));
+  if (readCodexProjectTrustLevel(existingContent, cwd) === "trusted") {
+    return { trusted: true as const };
   }
-  return [...names].toSorted();
+  const nextContent = upsertCodexProjectTrustLevel(existingContent, cwd, "trusted");
+
+  yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
+  yield* fileSystem.writeFileString(configPath, nextContent);
+
+  return { trusted: true as const };
 });
 
 // ---------------------------------------------------------------------------
@@ -100,6 +145,21 @@ export const resolveCodexMcpServerNames = Effect.fn("resolveCodexMcpServerNames"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function resolveCodexProjectConfigPaths(cwd: string): readonly string[] {
+  const directories: string[] = [];
+  let current = path.resolve(cwd);
+
+  while (true) {
+    directories.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  directories.reverse();
+  return directories.map((dir) => path.join(dir, ".codex", "config.toml"));
 }
 
 /** Extract the keys of a nested `mcpServers` record and add them to `out`. */
@@ -129,4 +189,106 @@ function readJsonFile(
     }),
     Effect.orElseSucceed(() => undefined),
   );
+}
+
+function resolveCodexConfigPaths(codexHome: string, cwd?: string): readonly string[] {
+  const configPaths = new Set<string>([path.join(codexHome, "config.toml")]);
+
+  if (cwd) {
+    for (const configPath of resolveCodexProjectConfigPaths(cwd)) {
+      configPaths.add(configPath);
+    }
+  }
+
+  return [...configPaths];
+}
+
+function collectCodexMcpServerNames(content: string, out: Set<string>): void {
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    // Match [mcp_servers.name] but skip sub-sections like [mcp_servers.name.env]
+    const match = trimmed.match(/^\[mcp_servers\.([^\].]+)\]$/);
+    if (match?.[1]) {
+      out.add(match[1].trim());
+    }
+  }
+}
+
+function readCodexProjectTrustLevel(content: string, cwd: string): string | undefined {
+  const sectionHeader = formatCodexProjectSectionHeader(cwd);
+  let inProjectSection = false;
+
+  for (const line of content.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      if (trimmed === sectionHeader) {
+        inProjectSection = true;
+        continue;
+      }
+      if (inProjectSection) {
+        break;
+      }
+    }
+
+    if (!inProjectSection) continue;
+
+    const trustLevelMatch = trimmed.match(/^trust_level\s*=\s*"([^"]+)"$/u);
+    if (trustLevelMatch?.[1]) {
+      return trustLevelMatch[1];
+    }
+  }
+
+  return undefined;
+}
+
+function upsertCodexProjectTrustLevel(content: string, cwd: string, trustLevel: string): string {
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const sectionHeader = formatCodexProjectSectionHeader(cwd);
+  const trustLevelLine = `trust_level = ${JSON.stringify(trustLevel)}`;
+  const lines = content.length > 0 ? content.split(/\r?\n/u) : [];
+  const sectionStartIndex = lines.findIndex((line) => line.trim() === sectionHeader);
+
+  if (sectionStartIndex === -1) {
+    const baseLines = trimTrailingBlankLines(lines);
+    const nextLines =
+      baseLines.length === 0
+        ? [sectionHeader, trustLevelLine]
+        : [...baseLines, "", sectionHeader, trustLevelLine];
+    return `${nextLines.join(newline)}${newline}`;
+  }
+
+  let sectionEndIndex = lines.length;
+  for (let index = sectionStartIndex + 1; index < lines.length; index += 1) {
+    const trimmed = lines[index]?.trim();
+    if (trimmed?.startsWith("[") && trimmed.endsWith("]")) {
+      sectionEndIndex = index;
+      break;
+    }
+  }
+
+  const trustLevelIndex = lines.findIndex(
+    (line, index) =>
+      index > sectionStartIndex && index < sectionEndIndex && /^trust_level\s*=/.test(line.trim()),
+  );
+
+  const nextLines = [...lines];
+  if (trustLevelIndex >= 0) {
+    nextLines[trustLevelIndex] = trustLevelLine;
+  } else {
+    nextLines.splice(sectionEndIndex, 0, trustLevelLine);
+  }
+
+  return `${nextLines.join(newline).replace(/(?:\r?\n)*$/u, "")}${newline}`;
+}
+
+function trimTrailingBlankLines(lines: readonly string[]): readonly string[] {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1]?.trim() === "") {
+    end -= 1;
+  }
+  return lines.slice(0, end);
+}
+
+function formatCodexProjectSectionHeader(cwd: string): string {
+  return `[projects.${JSON.stringify(path.resolve(cwd))}]`;
 }

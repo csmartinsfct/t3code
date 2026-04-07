@@ -19,6 +19,7 @@ import {
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildEnhanceSystemPromptPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "../Prompts.ts";
@@ -91,7 +92,8 @@ const makeCodexTextGeneration = Effect.gen(function* () {
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "enhanceSystemPrompt";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -266,11 +268,38 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const enhanceSystemPrompt: TextGenerationShape["enhanceSystemPrompt"] = Effect.fn(
+    "CodexTextGeneration.enhanceSystemPrompt",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildEnhanceSystemPromptPrompt({
+      currentPrompt: input.currentPrompt,
+    });
+
+    if (input.modelSelection.provider !== "codex") {
+      return yield* new TextGenerationError({
+        operation: "enhanceSystemPrompt",
+        detail: "Invalid model selection.",
+      });
+    }
+
+    const generated = yield* runCodexJson({
+      operation: "enhanceSystemPrompt",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      imagePaths: [],
+      modelSelection: input.modelSelection,
+    });
+
+    return { enhancedPrompt: generated.enhancedPrompt };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    enhanceSystemPrompt,
   } satisfies TextGenerationShape;
 });
 

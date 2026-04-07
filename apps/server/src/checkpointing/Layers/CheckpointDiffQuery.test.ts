@@ -25,6 +25,7 @@ function makeThreadCheckpointContext(input: {
     projectId: input.projectId,
     workspaceRoot: input.workspaceRoot,
     worktreePath: input.worktreePath,
+    systemPrompt: null,
     checkpoints: [
       {
         turnId: TurnId.makeUnsafe("turn-1"),

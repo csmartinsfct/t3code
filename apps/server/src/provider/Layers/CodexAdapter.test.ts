@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as path from "node:path";
 import {
   ApprovalRequestId,
   EventId,
@@ -234,6 +235,59 @@ validationLayer("CodexAdapterLive validation", (it) => {
         serviceTier: "fast",
         runtimeMode: "full-access",
       });
+    }),
+  );
+  it.effect("auto-trusts the project cwd before starting a Codex session", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const tempDir = yield* Effect.promise(() =>
+        import("node:fs/promises").then((fs) => fs.mkdtemp(path.join(process.cwd(), "tmp-codex-"))),
+      );
+      const codexHome = path.join(tempDir, ".codex-home");
+      const projectCwd = path.join(tempDir, "project");
+      yield* Effect.promise(() =>
+        import("node:fs/promises").then((fs) => fs.mkdir(projectCwd, { recursive: true })),
+      );
+
+      const testLayer = makeCodexAdapterLive({ manager: validationManager }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerSettingsService.layerTest({
+            providers: {
+              codex: {
+                homePath: codexHome,
+              },
+            },
+          }),
+        ),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(managedRunServiceTestLayer),
+        Layer.provideMerge(projectionSnapshotQueryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const result = yield* Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        yield* adapter.startSession({
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          cwd: projectCwd,
+          runtimeMode: "full-access",
+        });
+
+        const config = yield* Effect.promise(() =>
+          import("node:fs/promises").then((fs) =>
+            fs.readFile(path.join(codexHome, "config.toml"), "utf8"),
+          ),
+        );
+        return config;
+      }).pipe(Effect.provide(testLayer));
+
+      assert.match(result, /\[projects\.".*project"\]\ntrust_level = "trusted"/);
+      assert.equal(validationManager.startSessionImpl.mock.calls[0]?.[0]?.cwd, projectCwd);
+      yield* Effect.promise(() =>
+        import("node:fs/promises").then((fs) => fs.rm(tempDir, { recursive: true, force: true })),
+      );
     }),
   );
 });

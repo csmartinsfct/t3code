@@ -134,6 +134,12 @@ describe("ProviderCommandReactor", () => {
             ? input.runtimeMode
             : "full-access",
         ...(modelSelection.model !== undefined ? { model: modelSelection.model } : {}),
+        ...(typeof input === "object" &&
+        input !== null &&
+        "cwd" in input &&
+        typeof input.cwd === "string"
+          ? { cwd: input.cwd }
+          : {}),
         threadId,
         resumeCursor: resumeCursor ?? { opaque: `resume-${sessionIndex}` },
         createdAt: now,
@@ -862,6 +868,68 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.startSession.mock.calls.length).toBe(1);
+    expect(harness.stopSession.mock.calls.length).toBe(0);
+  });
+
+  it("restarts the provider session when the thread cwd changes", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-cwd-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-cwd-1"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-meta-update-cwd"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        branch: "t3code/repo-local-config",
+        worktreePath: "/tmp/provider-project-worktree",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-cwd-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-cwd-2"),
+          role: "user",
+          text: "second",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      cwd: "/tmp/provider-project-worktree",
+      resumeCursor: { opaque: "resume-1" },
+      runtimeMode: "approval-required",
+    });
     expect(harness.stopSession.mock.calls.length).toBe(0);
   });
 

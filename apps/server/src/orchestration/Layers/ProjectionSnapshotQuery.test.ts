@@ -247,6 +247,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               runOnWorktreeCreate: false,
             },
           ],
+          systemPrompt: null,
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
@@ -600,6 +601,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           projectId: asProjectId("project-context"),
           workspaceRoot: "/tmp/context-workspace",
           worktreePath: "/tmp/context-worktree",
+          systemPrompt: null,
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),

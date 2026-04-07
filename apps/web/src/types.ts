@@ -83,6 +83,7 @@ export interface Project {
   name: string;
   cwd: string;
   defaultModelSelection: ModelSelection | null;
+  systemPrompt: string | null;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];

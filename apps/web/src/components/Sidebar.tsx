@@ -137,6 +137,7 @@ import {
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SystemPromptDialog } from "./SystemPromptDialog";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
@@ -730,6 +731,9 @@ export default function Sidebar() {
   const [renamingProjectId, setRenamingProjectId] = useState<ProjectId | null>(null);
   const [renamingProjectTitle, setRenamingProjectTitle] = useState("");
   const renamingProjectCommittedRef = useRef(false);
+  const [systemPromptDialogProjectId, setSystemPromptDialogProjectId] = useState<ProjectId | null>(
+    null,
+  );
   const renamingProjectInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<ThreadId, HTMLButtonElement>());
   const dragInProgressRef = useRef(false);
@@ -1445,6 +1449,7 @@ export default function Sidebar() {
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename project" },
+          { id: "system-prompt", label: "Manage system prompt" },
           { id: "copy-path", label: "Copy Project Path" },
           { id: "delete", label: "Remove project", destructive: true },
         ],
@@ -1454,6 +1459,10 @@ export default function Sidebar() {
         setRenamingProjectId(projectId);
         setRenamingProjectTitle(project.name);
         renamingProjectCommittedRef.current = false;
+        return;
+      }
+      if (clicked === "system-prompt") {
+        setSystemPromptDialogProjectId(projectId);
         return;
       }
       if (clicked === "copy-path") {
@@ -2431,6 +2440,17 @@ export default function Sidebar() {
           </SidebarFooter>
         </>
       )}
+      <SystemPromptDialog
+        open={systemPromptDialogProjectId !== null}
+        onOpenChange={(open) => {
+          if (!open) setSystemPromptDialogProjectId(null);
+        }}
+        project={
+          systemPromptDialogProjectId
+            ? (projects.find((p) => p.id === systemPromptDialogProjectId) ?? null)
+            : null
+        }
+      />
     </>
   );
 }

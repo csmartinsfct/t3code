@@ -27,6 +27,7 @@ import {
   GitRunStackedActionInput,
   GitStatusInput,
   GitStatusResult,
+  TextGenerationError,
 } from "./git";
 import { KeybindingsConfigError } from "./keybindings";
 import {
@@ -144,9 +145,15 @@ import {
   ResolveMcpServersInput,
   ResolveMcpServersResult,
   ResolveMcpServersError,
+  ResolveCodexProjectTrustInput,
+  ResolveCodexProjectTrustResult,
+  ResolveCodexProjectTrustError,
   ResolveSkillsInput,
   ResolveSkillsResult,
   ResolveSkillsError,
+  TrustCodexProjectInput,
+  TrustCodexProjectResult,
+  TrustCodexProjectError,
 } from "./server";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
 
@@ -155,6 +162,7 @@ export const WS_METHODS = {
   projectsList: "projects.list",
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
+  projectsEnhanceSystemPrompt: "projects.enhanceSystemPrompt",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
   projectsListDirectory: "projects.listDirectory",
@@ -201,6 +209,8 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverResolveMcpServers: "server.resolveMcpServers",
+  serverResolveCodexProjectTrust: "server.resolveCodexProjectTrust",
+  serverTrustCodexProject: "server.trustCodexProject",
   serverResolveSkills: "server.resolveSkills",
 
   // Scheduled task methods
@@ -287,10 +297,42 @@ export const WsServerResolveMcpServersRpc = Rpc.make(WS_METHODS.serverResolveMcp
   error: ResolveMcpServersError,
 });
 
+export const WsServerResolveCodexProjectTrustRpc = Rpc.make(
+  WS_METHODS.serverResolveCodexProjectTrust,
+  {
+    payload: ResolveCodexProjectTrustInput,
+    success: ResolveCodexProjectTrustResult,
+    error: ResolveCodexProjectTrustError,
+  },
+);
+
+export const WsServerTrustCodexProjectRpc = Rpc.make(WS_METHODS.serverTrustCodexProject, {
+  payload: TrustCodexProjectInput,
+  success: TrustCodexProjectResult,
+  error: TrustCodexProjectError,
+});
+
 export const WsServerResolveSkillsRpc = Rpc.make(WS_METHODS.serverResolveSkills, {
   payload: ResolveSkillsInput,
   success: ResolveSkillsResult,
   error: ResolveSkillsError,
+});
+
+export const EnhanceSystemPromptInput = Schema.Struct({
+  projectId: ProjectId,
+  currentPrompt: Schema.String,
+});
+export type EnhanceSystemPromptInput = typeof EnhanceSystemPromptInput.Type;
+
+export const EnhanceSystemPromptResult = Schema.Struct({
+  enhancedPrompt: Schema.String,
+});
+export type EnhanceSystemPromptResult = typeof EnhanceSystemPromptResult.Type;
+
+export const WsProjectsEnhanceSystemPromptRpc = Rpc.make(WS_METHODS.projectsEnhanceSystemPrompt, {
+  payload: EnhanceSystemPromptInput,
+  success: EnhanceSystemPromptResult,
+  error: TextGenerationError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -770,7 +812,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerResolveMcpServersRpc,
+  WsServerResolveCodexProjectTrustRpc,
+  WsServerTrustCodexProjectRpc,
   WsServerResolveSkillsRpc,
+  WsProjectsEnhanceSystemPromptRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsProjectsListDirectoryRpc,

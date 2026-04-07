@@ -48,6 +48,59 @@ const rpcClientMock = {
   projects: {
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
+    listDirectory: vi.fn(),
+    readFile: vi.fn(),
+  },
+  managedRuns: {
+    launchProjectScript: vi.fn(),
+    list: vi.fn(),
+    get: vi.fn(),
+    getLogs: vi.fn(),
+    listInferenceRecords: vi.fn(),
+    getInferenceRecord: vi.fn(),
+    stop: vi.fn(),
+    onEvent: vi.fn(),
+  },
+  scheduledTasks: {
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    toggle: vi.fn(),
+    runNow: vi.fn(),
+    listRuns: vi.fn(),
+    onEvent: vi.fn(),
+  },
+  ticketing: {
+    list: vi.fn(),
+    getById: vi.fn(),
+    getByIdentifier: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    reorder: vi.fn(),
+    search: vi.fn(),
+    getTree: vi.fn(),
+    setDependencies: vi.fn(),
+    addDependency: vi.fn(),
+    removeDependency: vi.fn(),
+    updateCriterionStatus: vi.fn(),
+    getHistory: vi.fn(),
+    listLabels: vi.fn(),
+    createLabel: vi.fn(),
+    updateLabel: vi.fn(),
+    deleteLabel: vi.fn(),
+    addTicketLabel: vi.fn(),
+    removeTicketLabel: vi.fn(),
+    listComments: vi.fn(),
+    createComment: vi.fn(),
+    updateComment: vi.fn(),
+    deleteComment: vi.fn(),
+    listArtifacts: vi.fn(),
+    createArtifact: vi.fn(),
+    deleteArtifact: vi.fn(),
+    onEvent: vi.fn(),
   },
   shell: {
     openInEditor: vi.fn(),
@@ -64,6 +117,7 @@ const rpcClientMock = {
     init: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
+    discoverRepos: vi.fn(),
   },
   server: {
     getConfig: vi.fn(),
@@ -71,6 +125,10 @@ const rpcClientMock = {
     upsertKeybinding: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    resolveMcpServers: vi.fn(),
+    resolveCodexProjectTrust: vi.fn(),
+    trustCodexProject: vi.fn(),
+    resolveSkills: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
   },
@@ -232,6 +290,7 @@ describe("wsNativeApi", () => {
           provider: "codex",
           model: "gpt-5-codex",
         },
+        systemPrompt: null,
         scripts: [],
         createdAt: "2026-02-24T00:00:00.000Z",
         updatedAt: "2026-02-24T00:00:00.000Z",
@@ -330,6 +389,34 @@ describe("wsNativeApi", () => {
     );
     expect(rpcClientMock.server.updateSettings).toHaveBeenCalledWith({
       enableAssistantStreaming: true,
+    });
+  });
+
+  it("forwards Codex project trust reads directly to the RPC client", async () => {
+    rpcClientMock.server.resolveCodexProjectTrust.mockResolvedValue({ trusted: false });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(api.server.resolveCodexProjectTrust({ cwd: "/tmp/project" })).resolves.toEqual({
+      trusted: false,
+    });
+    expect(rpcClientMock.server.resolveCodexProjectTrust).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+    });
+  });
+
+  it("forwards Codex project trust writes directly to the RPC client", async () => {
+    rpcClientMock.server.trustCodexProject.mockResolvedValue({ trusted: true });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(api.server.trustCodexProject({ cwd: "/tmp/project" })).resolves.toEqual({
+      trusted: true,
+    });
+    expect(rpcClientMock.server.trustCodexProject).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
     });
   });
 

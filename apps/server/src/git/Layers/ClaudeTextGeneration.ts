@@ -21,6 +21,7 @@ import { type TextGenerationShape, TextGeneration } from "../Services/TextGenera
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
+  buildEnhanceSystemPromptPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "../Prompts.ts";
@@ -47,7 +48,8 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "enhanceSystemPrompt";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -220,11 +222,37 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
     };
   });
 
+  const enhanceSystemPrompt: TextGenerationShape["enhanceSystemPrompt"] = Effect.fn(
+    "ClaudeTextGeneration.enhanceSystemPrompt",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildEnhanceSystemPromptPrompt({
+      currentPrompt: input.currentPrompt,
+    });
+
+    if (input.modelSelection.provider !== "claudeAgent") {
+      return yield* new TextGenerationError({
+        operation: "enhanceSystemPrompt",
+        detail: "Invalid model selection.",
+      });
+    }
+
+    const generated = yield* runClaudeJson({
+      operation: "enhanceSystemPrompt",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return { enhancedPrompt: generated.enhancedPrompt };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    enhanceSystemPrompt,
   } satisfies TextGenerationShape;
 });
 

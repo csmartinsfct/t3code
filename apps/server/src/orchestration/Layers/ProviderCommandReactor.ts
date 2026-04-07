@@ -359,6 +359,9 @@ const make = Effect.gen(function* () {
         currentProvider !== undefined &&
         baseProviderKind(requestedModelSelection.provider) !== baseProviderKind(currentProvider);
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
+      const activeSessionMissing = activeSession === undefined;
+      const currentSessionCwd = activeSession?.cwd ?? undefined;
+      const cwdChanged = currentSessionCwd !== effectiveCwd;
       const sessionModelSwitch =
         currentProvider === undefined
           ? "in-session"
@@ -379,7 +382,9 @@ const make = Effect.gen(function* () {
         !runtimeModeChanged &&
         !providerChanged &&
         !shouldRestartForModelChange &&
-        !shouldRestartForModelSelectionChange
+        !shouldRestartForModelSelectionChange &&
+        !cwdChanged &&
+        !activeSessionMissing
       ) {
         return existingSessionThreadId;
       }
@@ -397,6 +402,10 @@ const make = Effect.gen(function* () {
         desiredRuntimeMode: thread.runtimeMode,
         runtimeModeChanged,
         providerChanged,
+        activeSessionMissing,
+        currentSessionCwd: currentSessionCwd ?? null,
+        desiredSessionCwd: effectiveCwd ?? null,
+        cwdChanged,
         modelChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,

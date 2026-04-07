@@ -73,6 +73,16 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface EnhanceSystemPromptInput {
+  cwd: string;
+  currentPrompt: string;
+  modelSelection: ModelSelection;
+}
+
+export interface EnhanceSystemPromptResult {
+  enhancedPrompt: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -113,6 +123,13 @@ export interface TextGenerationShape {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  /**
+   * Enhance a project system prompt using an LLM.
+   */
+  readonly enhanceSystemPrompt: (
+    input: EnhanceSystemPromptInput,
+  ) => Effect.Effect<EnhanceSystemPromptResult, TextGenerationError>;
 }
 
 /**

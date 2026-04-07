@@ -24,9 +24,12 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ResolveCodexProjectTrustError,
   ResolveMcpServersError,
   ResolveSkillsError,
+  TextGenerationError,
   type TerminalEvent,
+  TrustCodexProjectError,
   WS_METHODS,
   WsRpcGroup,
   baseProviderKind,
@@ -60,10 +63,17 @@ import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks";
 import { TicketingService } from "./ticketing/Services/Ticketing";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { RepoDiscovery } from "./workspace/Services/RepoDiscovery";
+import { TextGeneration } from "./git/Services/TextGeneration";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
-import { resolveClaudeMcpServerNames, resolveCodexMcpServerNames } from "./mcpConfigReader";
+import {
+  resolveClaudeMcpServerNames,
+  resolveCodexMcpServerNames,
+  resolveCodexProjectTrusted,
+  resolveCodexProjectConfigPaths,
+  trustCodexProject,
+} from "./mcpConfigReader";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -87,6 +97,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const scheduledTasks = yield* ScheduledTaskService;
     const ticketing = yield* TicketingService;
     const repoDiscovery = yield* RepoDiscovery;
+    const textGeneration = yield* TextGeneration;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
 
@@ -119,11 +130,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     // -----------------------------------------------------------------------
     const fs = yield* FileSystem.FileSystem;
     const mcpConfigChangedPubSub = yield* PubSub.unbounded<void>();
+    const watchedMcpConfigTargets = new Set<string>();
 
     const watchDirForFile = (dir: string, targetFile: string) =>
       Effect.gen(function* () {
         const dirExists = yield* fs.exists(dir);
-        if (!dirExists) return;
+        if (!dirExists) return false;
 
         yield* fs.watch(dir).pipe(
           Stream.filter(
@@ -136,13 +148,30 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           Stream.runForEach(() => PubSub.publish(mcpConfigChangedPubSub, undefined)),
           Effect.ignoreCause({ log: true }),
           Effect.forkScoped,
-          Effect.asVoid,
+          Effect.as(true),
         );
-      }).pipe(Effect.ignoreCause({ log: true }));
+      }).pipe(Effect.catchCause(() => Effect.succeed(false)));
+
+    const ensureWatchDirForFile = (dir: string, targetFile: string) => {
+      const watchKey = nodePath.join(dir, targetFile);
+      if (watchedMcpConfigTargets.has(watchKey)) {
+        return Effect.void;
+      }
+      return watchDirForFile(dir, targetFile).pipe(
+        Effect.tap((started) =>
+          started
+            ? Effect.sync(() => {
+                watchedMcpConfigTargets.add(watchKey);
+              })
+            : Effect.void,
+        ),
+        Effect.asVoid,
+      );
+    };
 
     // Watch ~/.claude/ for .claude.json
     const home = os.homedir();
-    yield* watchDirForFile(nodePath.join(home, ".claude"), ".claude.json");
+    yield* ensureWatchDirForFile(nodePath.join(home, ".claude"), ".claude.json");
 
     // Watch ~/.codex/ for config.toml
     const currentSettings = yield* serverSettings.getSettings;
@@ -150,7 +179,15 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       currentSettings.providers.codex.homePath ||
       process.env.CODEX_HOME ||
       nodePath.join(home, ".codex");
-    yield* watchDirForFile(codexHome, "config.toml");
+    const resolveCodexHome = serverSettings.getSettings.pipe(
+      Effect.map(
+        (settings) =>
+          settings.providers.codex.homePath ||
+          process.env.CODEX_HOME ||
+          nodePath.join(os.homedir(), ".codex"),
+      ),
+    );
+    yield* ensureWatchDirForFile(codexHome, "config.toml");
 
     // Watch each ~/.claude-{profile}/ dir for .claude.json
     const homeEntries = yield* fs
@@ -161,7 +198,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       const profileDir = nodePath.join(home, entry);
       const stat = yield* fs.stat(profileDir).pipe(Effect.orElseSucceed(() => undefined));
       if (stat?.type === "Directory") {
-        yield* watchDirForFile(profileDir, ".claude.json");
+        yield* ensureWatchDirForFile(profileDir, ".claude.json");
       }
     }
 
@@ -347,12 +384,14 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           Effect.gen(function* () {
             const base = baseProviderKind(input.provider);
             if (base === "codex") {
-              const settings = yield* serverSettings.getSettings;
-              const codexHome =
-                settings.providers.codex.homePath ||
-                process.env.CODEX_HOME ||
-                nodePath.join(os.homedir(), ".codex");
-              const serverNames = yield* resolveCodexMcpServerNames(codexHome);
+              const codexHome = yield* resolveCodexHome;
+              if (input.cwd) {
+                yield* trustCodexProject(codexHome, input.cwd);
+                for (const configPath of resolveCodexProjectConfigPaths(input.cwd)) {
+                  yield* ensureWatchDirForFile(nodePath.dirname(configPath), "config.toml");
+                }
+              }
+              const serverNames = yield* resolveCodexMcpServerNames(codexHome, input.cwd);
               return { serverNames };
             }
             // Claude (default or profile)
@@ -373,6 +412,9 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             if (!configDir) {
               configDir = nodePath.join(os.homedir(), ".claude");
             }
+            if (input.cwd) {
+              yield* ensureWatchDirForFile(input.cwd, ".mcp.json");
+            }
             const serverNames = yield* resolveClaudeMcpServerNames(configDir, input.cwd);
             return { serverNames };
           }).pipe(
@@ -380,6 +422,42 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ResolveMcpServersError({
                   message: `Failed to resolve MCP servers: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverResolveCodexProjectTrust]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverResolveCodexProjectTrust,
+          Effect.gen(function* () {
+            const codexHome = yield* resolveCodexHome;
+            const trusted = yield* resolveCodexProjectTrusted(codexHome, input.cwd);
+            return { trusted };
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResolveCodexProjectTrustError({
+                  message: `Failed to resolve Codex project trust: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverTrustCodexProject]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverTrustCodexProject,
+          Effect.gen(function* () {
+            const codexHome = yield* resolveCodexHome;
+            const result = yield* trustCodexProject(codexHome, input.cwd);
+            yield* ensureWatchDirForFile(codexHome, "config.toml");
+            yield* PubSub.publish(mcpConfigChangedPubSub, undefined);
+            return result;
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TrustCodexProjectError({
+                  message: `Failed to trust Codex project: ${String(cause)}`,
                 }),
             ),
           ),
@@ -398,6 +476,44 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             ),
           ),
           { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.projectsEnhanceSystemPrompt]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsEnhanceSystemPrompt,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TextGenerationError({
+                    operation: "enhanceSystemPrompt",
+                    detail: `Failed to read settings: ${cause.message}`,
+                  }),
+              ),
+            );
+            const modelSelection = settings.textGenerationModelSelection;
+            const readModel = yield* orchestrationEngine.getReadModel().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TextGenerationError({
+                    operation: "enhanceSystemPrompt",
+                    detail: `Failed to read project: ${String(cause)}`,
+                  }),
+              ),
+            );
+            const project = readModel.projects.find((p) => p.id === input.projectId);
+            if (!project) {
+              return yield* new TextGenerationError({
+                operation: "enhanceSystemPrompt",
+                detail: "Project not found.",
+              });
+            }
+            return yield* textGeneration.enhanceSystemPrompt({
+              cwd: project.workspaceRoot,
+              currentPrompt: input.currentPrompt,
+              modelSelection,
+            });
+          }),
+          { "rpc.aggregate": "projects" },
         ),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         observeRpcEffect(

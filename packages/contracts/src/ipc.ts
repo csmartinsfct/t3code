@@ -28,14 +28,19 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type { EnhanceSystemPromptInput, EnhanceSystemPromptResult } from "./rpc";
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
   ResolveMcpServersInput,
   ResolveMcpServersResult,
+  ResolveCodexProjectTrustInput,
+  ResolveCodexProjectTrustResult,
   ResolveSkillsInput,
   ResolveSkillsResult,
+  TrustCodexProjectInput,
+  TrustCodexProjectResult,
 } from "./server";
 import type {
   ScheduledTask,
@@ -210,6 +215,7 @@ export interface NativeApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
+    enhanceSystemPrompt: (input: EnhanceSystemPromptInput) => Promise<EnhanceSystemPromptResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
     listDirectory: (input: ProjectListDirectoryInput) => Promise<ProjectListDirectoryResult>;
@@ -249,6 +255,10 @@ export interface NativeApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     resolveMcpServers: (input: ResolveMcpServersInput) => Promise<ResolveMcpServersResult>;
+    resolveCodexProjectTrust: (
+      input: ResolveCodexProjectTrustInput,
+    ) => Promise<ResolveCodexProjectTrustResult>;
+    trustCodexProject: (input: TrustCodexProjectInput) => Promise<TrustCodexProjectResult>;
     resolveSkills: (input: ResolveSkillsInput) => Promise<ResolveSkillsResult>;
   };
   managedRuns: {

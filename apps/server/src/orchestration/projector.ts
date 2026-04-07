@@ -186,6 +186,7 @@ export function projectEvent(
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
+            systemPrompt: payload.systemPrompt,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -219,6 +220,9 @@ export function projectEvent(
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.systemPrompt !== undefined
+                    ? { systemPrompt: payload.systemPrompt }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
