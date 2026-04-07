@@ -29,6 +29,7 @@ import {
 } from "../lib/proposeScheduledTaskParser";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import { splitPathAndPosition } from "../terminal-links";
 import ProposeActionCard from "./chat/ProposeActionCard";
 import ProposeScheduledTaskCard from "./chat/ProposeScheduledTaskCard";
 
@@ -81,6 +82,7 @@ interface ChatMarkdownProps {
   onProposeAction?: (event: ProposeActionEvent) => void;
   onProposeScheduledTask?: (event: ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
+  onOpenFileLink?: (absolutePath: string, line?: number, column?: number) => void;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -274,6 +276,7 @@ function ChatMarkdown({
   onProposeAction,
   onProposeScheduledTask,
   resolveProjectName,
+  onOpenFileLink,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -292,11 +295,20 @@ function ChatMarkdown({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              const api = readNativeApi();
-              if (api) {
-                void openInPreferredEditor(api, targetPath);
+              if (onOpenFileLink) {
+                const { path, line, column } = splitPathAndPosition(targetPath);
+                onOpenFileLink(
+                  path,
+                  line ? Number(line) : undefined,
+                  column ? Number(column) : undefined,
+                );
               } else {
-                console.warn("Native API not found. Unable to open file in editor.");
+                const api = readNativeApi();
+                if (api) {
+                  void openInPreferredEditor(api, targetPath);
+                } else {
+                  console.warn("Native API not found. Unable to open file in editor.");
+                }
               }
             }}
           />
@@ -366,7 +378,15 @@ function ChatMarkdown({
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming, onProposeAction, onProposeScheduledTask, resolveProjectName],
+    [
+      cwd,
+      diffThemeName,
+      isStreaming,
+      onOpenFileLink,
+      onProposeAction,
+      onProposeScheduledTask,
+      resolveProjectName,
+    ],
   );
 
   return (

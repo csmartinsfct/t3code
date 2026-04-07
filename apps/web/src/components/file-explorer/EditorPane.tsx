@@ -52,7 +52,10 @@ export function EditorPane({
   const runtime = useFileExplorerStore((s) =>
     activeTab ? s.runtimeTabStateByTabId[activeTab.id] : undefined,
   );
-  const { initTabContent, setTabCurrentContent } = useFileExplorerStore();
+  const { initTabContent, setTabCurrentContent, clearPendingScrollTarget } = useFileExplorerStore();
+  const pendingScroll = useFileExplorerStore((s) =>
+    activeTab ? s.pendingScrollTargetByTabId[activeTab.id] : undefined,
+  );
   const editorSettings = useFileExplorerEditorSettingsStore((s) => s.settings);
 
   // Load file content
@@ -84,6 +87,18 @@ export function EditorPane({
     },
     [tabId, setTabCurrentContent],
   );
+
+  // Consume and clear the pending scroll target after a frame
+  const scrollLine = pendingScroll?.line;
+  const scrollColumn = pendingScroll?.column;
+  useEffect(() => {
+    if (pendingScroll && activeTab) {
+      const raf = requestAnimationFrame(() => {
+        clearPendingScrollTarget(activeTab.id);
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [pendingScroll, activeTab, clearPendingScrollTarget]);
 
   const isMd = activeTab ? isMarkdownFile(activeTab.relativePath) : false;
   const currentContent = runtime?.currentContent ?? fetchedContent ?? "";
@@ -127,6 +142,8 @@ export function EditorPane({
             currentContent={currentContent}
             settings={editorSettings}
             onContentChange={handleContentChange}
+            initialLine={scrollLine}
+            initialColumn={scrollColumn}
           />
         ) : (
           <CodeEditorView
@@ -136,6 +153,8 @@ export function EditorPane({
             initialContent={initialContent}
             settings={editorSettings}
             onContentChange={handleContentChange}
+            initialLine={scrollLine}
+            initialColumn={scrollColumn}
           />
         )}
       </div>

@@ -102,6 +102,7 @@ interface MessagesTimelineProps {
   onProposeAction?: (event: import("../ChatMarkdown").ProposeActionEvent) => void;
   onProposeScheduledTask?: (event: import("../ChatMarkdown").ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
+  onOpenFileLink?: (absolutePath: string, line?: number, column?: number) => void;
   onMessageContextMenu?: (
     messageId: MessageId,
     messageRole: string,
@@ -135,6 +136,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onProposeAction,
   onProposeScheduledTask,
   resolveProjectName,
+  onOpenFileLink,
   onVirtualizerSnapshot,
   onMessageContextMenu,
   onMessageSelectionClick,
@@ -533,6 +535,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     {...(onProposeAction ? { onProposeAction } : {})}
                     {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
                     {...(resolveProjectName ? { resolveProjectName } : {})}
+                    {...(onOpenFileLink ? { onOpenFileLink } : {})}
                   />
                   {(() => {
                     const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);

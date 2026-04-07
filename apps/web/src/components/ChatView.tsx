@@ -44,6 +44,7 @@ import {
   stripFileExplorerSearchParams,
 } from "../fileExplorerRouteSearch";
 import { useFileExplorerStore } from "../fileExplorerStore";
+import { openInPreferredEditor } from "../editorPreferences";
 import { consumeClipboardSnippet } from "../clipboardSnippetRegistry";
 import { snippetLanguage } from "../lib/snippetUtils";
 import type { ComposerCodeSnippetAttachment, ComposerSkillAttachment } from "../composerDraftStore";
@@ -1762,6 +1763,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [fileExplorerOpen, navigate, threadId]);
 
   const openFileInExplorerAction = useFileExplorerStore((s) => s.openFile);
+  const openFileAtLineAction = useFileExplorerStore((s) => s.openFileAtLine);
   const openFileInExplorer = useCallback(
     (cwd: string, relativePath: string) => {
       openFileInExplorerAction(cwd, relativePath, "primary");
@@ -1777,6 +1779,41 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     },
     [fileExplorerOpen, navigate, openFileInExplorerAction, threadId],
+  );
+
+  const handleOpenFileLink = useCallback(
+    (absolutePath: string, line?: number, column?: number) => {
+      const projectCwd = gitCwd;
+      if (!projectCwd) return;
+
+      const prefix = projectCwd.endsWith("/") ? projectCwd : projectCwd + "/";
+      if (!absolutePath.startsWith(prefix)) {
+        // File outside workspace — fall back to external editor
+        const api = readNativeApi();
+        if (api) {
+          const target = line
+            ? `${absolutePath}:${line}${column ? `:${column}` : ""}`
+            : absolutePath;
+          void openInPreferredEditor(api, target);
+        }
+        return;
+      }
+
+      const relativePath = absolutePath.slice(prefix.length);
+      openFileAtLineAction(projectCwd, relativePath, line, column, "primary");
+
+      if (!fileExplorerOpen) {
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+          search: (previous) => ({
+            ...stripFileExplorerSearchParams(previous),
+            fileExplorer: "1" as const,
+          }),
+        });
+      }
+    },
+    [gitCwd, openFileAtLineAction, fileExplorerOpen, navigate, threadId],
   );
 
   const envLocked = Boolean(
@@ -4666,6 +4703,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onProposeAction={handleProposeAction}
                 onProposeScheduledTask={handleProposeScheduledTask}
                 resolveProjectName={resolveProjectName}
+                onOpenFileLink={handleOpenFileLink}
                 onMessageContextMenu={onMessageContextMenu}
                 onMessageSelectionClick={onMessageSelectionClick}
               />

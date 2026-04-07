@@ -98,6 +98,7 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
                     <button
                       type="button"
                       className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => copyToClipboard(url)}
                       title="Copy URL"
                     >
@@ -110,6 +111,7 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
                     <button
                       type="button"
                       className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
                       title="Open in browser"
                     >

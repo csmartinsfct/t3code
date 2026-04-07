@@ -11,6 +11,8 @@ interface MarkdownEditorViewProps {
   currentContent: string;
   settings: FileExplorerEditorSettings;
   onContentChange: (content: string) => void;
+  initialLine?: number | undefined;
+  initialColumn?: number | undefined;
 }
 
 export function MarkdownEditorView({
@@ -22,6 +24,8 @@ export function MarkdownEditorView({
   currentContent,
   settings,
   onContentChange,
+  initialLine,
+  initialColumn,
 }: MarkdownEditorViewProps) {
   if (viewMode === "preview") {
     return <MarkdownPreview content={currentContent} />;
@@ -35,6 +39,8 @@ export function MarkdownEditorView({
       initialContent={initialContent}
       settings={settings}
       onContentChange={onContentChange}
+      initialLine={initialLine}
+      initialColumn={initialColumn}
     />
   );
 }

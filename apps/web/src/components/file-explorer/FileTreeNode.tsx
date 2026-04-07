@@ -42,6 +42,7 @@ export const FileTreeNode = memo(function FileTreeNode({
     <div
       ref={node.kind === "file" ? setNodeRef : undefined}
       {...(node.kind === "file" ? { ...attributes, ...listeners } : {})}
+      data-tree-path={node.id}
       role="button"
       tabIndex={0}
       aria-selected={isActive}

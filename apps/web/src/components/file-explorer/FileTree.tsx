@@ -1,5 +1,5 @@
 import { useQueries } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { fileExplorerDirQueryOptions } from "~/lib/fileExplorerReactQuery";
 import { useFileExplorerStore, selectWorkspaceState, type PaneId } from "~/fileExplorerStore";
@@ -20,7 +20,19 @@ interface FileTreeProps {
 export function FileTree({ cwd, activePaneId, activeTabPath, modifiedPaths }: FileTreeProps) {
   const ws = useFileExplorerStore((s) => selectWorkspaceState(s, cwd));
   const { expandedDirs, treeWidth } = ws;
-  const { toggleDirectory, openFile, setTreeWidth } = useFileExplorerStore();
+  const { toggleDirectory, openFile, setTreeWidth, clearPendingRevealPath } =
+    useFileExplorerStore();
+  const pendingRevealPath = useFileExplorerStore((s) => s.pendingRevealPathByCwd[cwd] ?? null);
+
+  // Clear pending reveal after passing it to the list
+  useEffect(() => {
+    if (pendingRevealPath) {
+      const raf = requestAnimationFrame(() => {
+        clearPendingRevealPath(cwd);
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [pendingRevealPath, cwd, clearPendingRevealPath]);
 
   // ── Subscribe to root dir + all expanded dirs reactively ─────────────────
   // useQueries makes the component re-render whenever any directory data
@@ -140,6 +152,7 @@ export function FileTree({ cwd, activePaneId, activeTabPath, modifiedPaths }: Fi
         activeTabPath={activeTabPath}
         cwd={cwd}
         onNodeClick={handleNodeClick}
+        revealPath={pendingRevealPath}
       />
 
       {/* Resize handle */}

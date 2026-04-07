@@ -122,6 +122,8 @@ interface CodeEditorViewProps {
   isReadOnly?: boolean;
   settings: FileExplorerEditorSettings;
   onContentChange: (content: string) => void;
+  initialLine?: number | undefined;
+  initialColumn?: number | undefined;
 }
 
 export function CodeEditorView({
@@ -132,6 +134,8 @@ export function CodeEditorView({
   isReadOnly = false,
   settings,
   onContentChange,
+  initialLine,
+  initialColumn,
 }: CodeEditorViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -214,6 +218,21 @@ export function CodeEditorView({
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
 
+    // Scroll to initial line if specified
+    if (initialLine != null && initialLine > 0) {
+      const lineCount = view.state.doc.lines;
+      const targetLine = Math.min(initialLine, lineCount);
+      const lineInfo = view.state.doc.line(targetLine);
+      const pos =
+        initialColumn != null && initialColumn > 0
+          ? Math.min(lineInfo.from + initialColumn - 1, lineInfo.to)
+          : lineInfo.from;
+      view.dispatch({
+        effects: EditorView.scrollIntoView(pos, { y: "center" }),
+        selection: { anchor: pos },
+      });
+    }
+
     return () => {
       view.destroy();
       viewRef.current = null;
@@ -222,6 +241,29 @@ export function CodeEditorView({
     // excluded to avoid cursor jumps when content updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, relativePath, isReadOnly, settings.theme, settings.fontSize, settings.fontFamily]);
+
+  // Scroll to line for already-open tabs (no remount, just prop change)
+  const scrollLineRef = useRef<number | undefined>(initialLine);
+  const scrollColumnRef = useRef<number | undefined>(initialColumn);
+  useEffect(() => {
+    // Skip on initial mount — the mount effect already handled it
+    if (initialLine === scrollLineRef.current && initialColumn === scrollColumnRef.current) return;
+    scrollLineRef.current = initialLine;
+    scrollColumnRef.current = initialColumn;
+    if (!viewRef.current || initialLine == null || initialLine <= 0) return;
+    const view = viewRef.current;
+    const lineCount = view.state.doc.lines;
+    const targetLine = Math.min(initialLine, lineCount);
+    const lineInfo = view.state.doc.line(targetLine);
+    const pos =
+      initialColumn != null && initialColumn > 0
+        ? Math.min(lineInfo.from + initialColumn - 1, lineInfo.to)
+        : lineInfo.from;
+    view.dispatch({
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+      selection: { anchor: pos },
+    });
+  }, [initialLine, initialColumn]);
 
   // Background color for the container — vscode themes use their own bg,
   // so we make it transparent and let the theme handle it.

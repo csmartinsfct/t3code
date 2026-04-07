@@ -43,6 +43,11 @@ export interface RuntimeTabState {
   isDirty: boolean;
 }
 
+export interface ScrollTarget {
+  line: number;
+  column?: number | undefined;
+}
+
 // ─── Store Interface ─────────────────────────────────────────────────────────
 
 interface FileExplorerStoreState {
@@ -51,6 +56,8 @@ interface FileExplorerStoreState {
 
   // Runtime only (not persisted)
   runtimeTabStateByTabId: Record<string, RuntimeTabState>;
+  pendingScrollTargetByTabId: Record<string, ScrollTarget>;
+  pendingRevealPathByCwd: Record<string, string>;
 
   // ── Persisted actions ──
   openFile: (cwd: string, relativePath: string, targetPane?: PaneId) => void;
@@ -73,6 +80,24 @@ interface FileExplorerStoreState {
   setActivePaneId: (paneId: PaneId, cwd: string) => void;
   toggleDirectory: (cwd: string, dirPath: string) => void;
   setTreeWidth: (cwd: string, width: number) => void;
+
+  // ── Combined actions ──
+  openFileAtLine: (
+    cwd: string,
+    relativePath: string,
+    line?: number,
+    column?: number,
+    targetPane?: PaneId,
+  ) => void;
+
+  // ── Tree reveal ──
+  revealFileInTree: (cwd: string, relativePath: string) => void;
+  setPendingRevealPath: (cwd: string, relativePath: string) => void;
+  clearPendingRevealPath: (cwd: string) => void;
+
+  // ── Scroll target ──
+  setPendingScrollTarget: (tabId: string, target: ScrollTarget) => void;
+  clearPendingScrollTarget: (tabId: string) => void;
 
   // ── Runtime-only actions ──
   initTabContent: (tabId: string, content: string) => void;
@@ -131,6 +156,8 @@ export const useFileExplorerStore = create<FileExplorerStoreState>()(
     (set, get) => ({
       workspaceStatesByCwd: {},
       runtimeTabStateByTabId: {},
+      pendingScrollTargetByTabId: {},
+      pendingRevealPathByCwd: {},
 
       openFile: (cwd, relativePath, targetPane) => {
         const tabId = makeTabId(cwd, relativePath);
@@ -599,6 +626,77 @@ export const useFileExplorerStore = create<FileExplorerStoreState>()(
               [cwd]: { ...ws, treeWidth: width },
             },
           };
+        });
+      },
+
+      // ── Combined actions ─────────────────────────────────────────────────
+
+      openFileAtLine: (cwd, relativePath, line, column, targetPane) => {
+        const { openFile, revealFileInTree, setPendingRevealPath, setPendingScrollTarget } = get();
+        openFile(cwd, relativePath, targetPane);
+        revealFileInTree(cwd, relativePath);
+        setPendingRevealPath(cwd, relativePath);
+        if (line != null && line > 0) {
+          const tabId = makeTabId(cwd, relativePath);
+          setPendingScrollTarget(tabId, { line, column });
+        }
+      },
+
+      // ── Tree reveal ─────────────────────────────────────────────────────
+
+      revealFileInTree: (cwd, relativePath) => {
+        set((state) => {
+          const ws = getOrCreateWorkspaceState(state.workspaceStatesByCwd, cwd);
+          const parts = relativePath.split("/");
+          const ancestorDirs: string[] = [];
+          for (let i = 1; i < parts.length; i++) {
+            ancestorDirs.push(parts.slice(0, i).join("/"));
+          }
+          const currentSet = new Set(ws.expandedDirs);
+          let changed = false;
+          for (const dir of ancestorDirs) {
+            if (!currentSet.has(dir)) {
+              currentSet.add(dir);
+              changed = true;
+            }
+          }
+          if (!changed) return state;
+          return {
+            workspaceStatesByCwd: {
+              ...state.workspaceStatesByCwd,
+              [cwd]: { ...ws, expandedDirs: Array.from(currentSet) },
+            },
+          };
+        });
+      },
+
+      setPendingRevealPath: (cwd, relativePath) => {
+        set((state) => ({
+          pendingRevealPathByCwd: { ...state.pendingRevealPathByCwd, [cwd]: relativePath },
+        }));
+      },
+
+      clearPendingRevealPath: (cwd) => {
+        set((state) => {
+          const next = { ...state.pendingRevealPathByCwd };
+          delete next[cwd];
+          return { pendingRevealPathByCwd: next };
+        });
+      },
+
+      // ── Scroll target ──────────────────────────────────────────────────
+
+      setPendingScrollTarget: (tabId, target) => {
+        set((state) => ({
+          pendingScrollTargetByTabId: { ...state.pendingScrollTargetByTabId, [tabId]: target },
+        }));
+      },
+
+      clearPendingScrollTarget: (tabId) => {
+        set((state) => {
+          const next = { ...state.pendingScrollTargetByTabId };
+          delete next[tabId];
+          return { pendingScrollTargetByTabId: next };
         });
       },
 
