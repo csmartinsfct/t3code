@@ -11,10 +11,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  // Add project_id column if missing. Wrapped in a catch so databases where
-  // migration 025 already created the column with project_id don't fail.
+  // Add project_id column if missing. The SQLite driver throws a synchronous
+  // error during statement preparation for duplicate columns, which surfaces
+  // as a defect (not a typed error), so catchDefect is required here.
   yield* sql`ALTER TABLE labels ADD COLUMN project_id TEXT DEFAULT NULL`.pipe(
-    Effect.catch(() => Effect.void),
+    Effect.catchDefect(() => Effect.void),
   );
 
   // Backfill project_id from the first project if any labels already exist.
@@ -26,7 +27,7 @@ export default Effect.gen(function* () {
 
   // Create the project-scoped unique index (idempotent).
   yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_labels_project_name ON labels(project_id, name)`.pipe(
-    Effect.catch(() => Effect.void),
+    Effect.catchDefect(() => Effect.void),
   );
 
   // Ensure ticket_labels label index exists.

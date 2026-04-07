@@ -4,7 +4,9 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { ArrowLeftIcon, PlusIcon } from "lucide-react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
 
+import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
+import { cn } from "~/lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { Button } from "../ui/button";
 import { CreateTicketDialog } from "../settings/CreateTicketDialog";
@@ -135,7 +137,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Board header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+      <div
+        className={cn(
+          "flex items-center justify-between border-b border-border px-3 sm:px-5",
+          isElectron ? "drag-region h-[52px]" : "py-2 sm:py-3",
+        )}
+      >
         {selectedTicketId ? (
           <button
             type="button"
