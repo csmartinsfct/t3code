@@ -476,6 +476,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.mcpDeliveryMode !== DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode
+        ? ["MCP delivery"]
+        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -493,6 +496,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.mcpDeliveryMode,
       settings.timestampFormat,
       theme,
     ],
@@ -987,6 +991,47 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="worktree">
                   New worktree
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="MCP delivery"
+          description="How AI sessions discover T3 project services (runs, tasks, tickets). Native tools registers each tool directly. HTTP endpoints provides URLs for on-demand discovery."
+          resetAction={
+            settings.mcpDeliveryMode !== DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode ? (
+              <SettingResetButton
+                label="MCP delivery"
+                onClick={() =>
+                  updateSettings({
+                    mcpDeliveryMode: DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.mcpDeliveryMode}
+              onValueChange={(value) => {
+                if (value === "tools" || value === "prompt") {
+                  updateSettings({ mcpDeliveryMode: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-44" aria-label="MCP delivery mode">
+                <SelectValue>
+                  {settings.mcpDeliveryMode === "tools" ? "Native tools" : "HTTP endpoints"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="tools">
+                  Native tools
+                </SelectItem>
+                <SelectItem hideIndicator value="prompt">
+                  HTTP endpoints
                 </SelectItem>
               </SelectPopup>
             </Select>

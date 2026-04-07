@@ -42,6 +42,8 @@ import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
+import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
+import { buildMcpPromptModeSystemPrompt } from "../mcpPromptModeSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1395,8 +1397,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         });
       }
 
-      const codexSettings = yield* serverSettingsService.getSettings.pipe(
-        Effect.map((settings) => settings.providers.codex),
+      const allCodexSettings = yield* serverSettingsService.getSettings.pipe(
         Effect.mapError(
           (error) =>
             new ProviderAdapterProcessError({
@@ -1407,27 +1408,51 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }),
         ),
       );
+      const codexSettings = allCodexSettings.providers.codex;
+      const mcpDeliveryMode = allCodexSettings.mcpDeliveryMode;
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
       const checkpointContext = yield* projectionSnapshotQuery
         .getThreadCheckpointContext(input.threadId)
         .pipe(Effect.catch(() => Effect.succeed(Option.none())));
       const configOverrides: string[] = [];
+      let appendDeveloperInstructions: string | undefined;
       if (Option.isSome(checkpointContext) && serverConfig.port > 0) {
         const access = yield* managedRunService.issueMcpAccess(
           checkpointContext.value.projectId,
           input.threadId,
         );
-        const managedRunsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`;
-        configOverrides.push(`mcp_servers.t3_managed_runs.url="${managedRunsUrl}"`);
-        configOverrides.push(
-          `mcp_servers.t3_managed_runs.http_headers.Authorization="Bearer ${access.token}"`,
-        );
-        const scheduledTasksUrl = `http://127.0.0.1:${serverConfig.port}/mcp/scheduled-tasks`;
-        configOverrides.push(`mcp_servers.t3_scheduled_tasks.url="${scheduledTasksUrl}"`);
-        configOverrides.push(
-          `mcp_servers.t3_scheduled_tasks.http_headers.Authorization="Bearer ${access.token}"`,
-        );
+
+        if (mcpDeliveryMode === "tools") {
+          // Native MCP tool registration — all three services
+          const managedRunsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`;
+          configOverrides.push(`mcp_servers.t3_managed_runs.url="${managedRunsUrl}"`);
+          configOverrides.push(
+            `mcp_servers.t3_managed_runs.http_headers.Authorization="Bearer ${access.token}"`,
+          );
+          const scheduledTasksUrl = `http://127.0.0.1:${serverConfig.port}/mcp/scheduled-tasks`;
+          configOverrides.push(`mcp_servers.t3_scheduled_tasks.url="${scheduledTasksUrl}"`);
+          configOverrides.push(
+            `mcp_servers.t3_scheduled_tasks.http_headers.Authorization="Bearer ${access.token}"`,
+          );
+          const ticketingUrl = `http://127.0.0.1:${serverConfig.port}/mcp/ticketing`;
+          configOverrides.push(`mcp_servers.t3_ticketing.url="${ticketingUrl}"`);
+          configOverrides.push(
+            `mcp_servers.t3_ticketing.http_headers.Authorization="Bearer ${access.token}"`,
+          );
+          appendDeveloperInstructions =
+            MANAGED_RUNS_SYSTEM_PROMPT +
+            "\n\n" +
+            SCHEDULED_TASKS_SYSTEM_PROMPT +
+            "\n\n" +
+            TICKETING_SYSTEM_PROMPT;
+        } else {
+          // Prompt mode — no MCP server config, just system prompt with endpoints
+          appendDeveloperInstructions = buildMcpPromptModeSystemPrompt({
+            port: serverConfig.port,
+            token: access.token,
+          });
+        }
       }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
@@ -1438,12 +1463,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         binaryPath,
         ...(homePath ? { homePath } : {}),
         ...(configOverrides.length > 0 ? { configOverrides } : {}),
-        ...(configOverrides.length > 0
-          ? {
-              appendDeveloperInstructions:
-                MANAGED_RUNS_SYSTEM_PROMPT + "\n\n" + SCHEDULED_TASKS_SYSTEM_PROMPT,
-            }
-          : {}),
+        ...(appendDeveloperInstructions ? { appendDeveloperInstructions } : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }
           : {}),

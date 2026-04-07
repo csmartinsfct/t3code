@@ -152,6 +152,13 @@ Every mutation records a `TicketHistoryEntry` with:
 
 All tools are authenticated via the managed run token system (same as scheduled tasks). Dev bypass token `t3-dev-bypass` works with `?projectId=` query param.
 
+### MCP Delivery Modes
+
+The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) controls how these tools reach the AI model:
+
+- **`"tools"` (Native tools)**: All three MCP servers (managed-runs, scheduled-tasks, ticketing) are registered as native tool sets. Each tool appears individually in the model's tool list. System prompts explain usage.
+- **`"prompt"` (HTTP endpoints)**: No MCP tools are registered. Instead, the system prompt provides the HTTP endpoint URLs, a Bearer auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover tools via `tools/list` and call them via `tools/call` on demand.
+
 ---
 
 ## WebSocket RPC (28 methods)
