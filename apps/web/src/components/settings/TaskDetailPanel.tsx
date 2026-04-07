@@ -62,7 +62,11 @@ export function TaskDetailPanel() {
     const api = ensureNativeApi();
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
       if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
-        void navigate({ to: "/settings/tasks", replace: true });
+        void navigate({
+          to: "/settings/tasks",
+          ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
+          replace: true,
+        });
       } else if (event.type === "ticket_upserted" && event.ticket.id === ticketId) {
         void fetchTicket();
       } else if (
@@ -105,7 +109,11 @@ export function TaskDetailPanel() {
     try {
       const api = ensureNativeApi();
       await api.ticketing.delete({ id: ticketId });
-      void navigate({ to: "/settings/tasks", replace: true });
+      void navigate({
+        to: "/settings/tasks",
+        ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
+        replace: true,
+      });
     } catch (error) {
       console.error("Failed to delete ticket:", error);
     }
@@ -137,7 +145,13 @@ export function TaskDetailPanel() {
         <button
           type="button"
           className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => void navigate({ to: "/settings/tasks", replace: true })}
+          onClick={() =>
+            void navigate({
+              to: "/settings/tasks",
+              ...(ticket?.projectId ? { search: { project: String(ticket.projectId) } } : {}),
+              replace: true,
+            })
+          }
         >
           <ArrowLeftIcon className="size-3" />
           Back to Tasks

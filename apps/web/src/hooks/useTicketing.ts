@@ -3,6 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
 
+export interface UseTicketingOptions {
+  initialProjectId?: string | undefined;
+}
+
 export interface UseTicketingReturn {
   tickets: ReadonlyArray<TicketSummary>;
   projects: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>;
@@ -12,13 +16,15 @@ export interface UseTicketingReturn {
   refetch: () => Promise<void>;
 }
 
-export function useTicketing(): UseTicketingReturn {
+export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn {
   const [tickets, setTickets] = useState<ReadonlyArray<TicketSummary>>([]);
   const [projects, setProjects] = useState<
     ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>
   >([]);
   const [loading, setLoading] = useState(true);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    options?.initialProjectId ?? null,
+  );
 
   const fetchData = useCallback(async () => {
     try {

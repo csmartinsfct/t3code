@@ -1,6 +1,7 @@
 import { PlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { Route } from "../../routes/settings.tasks.index";
 
 import { useTicketing } from "../../hooks/useTicketing";
 import { Button } from "../ui/button";
@@ -10,8 +11,23 @@ import { TaskCard } from "./TaskCard";
 
 export function TasksPanel() {
   const navigate = useNavigate();
-  const { tickets, projects, loading, selectedProjectId, setSelectedProjectId } = useTicketing();
+  const { project: initialProject } = Route.useSearch();
+  const { tickets, projects, loading, selectedProjectId, setSelectedProjectId } = useTicketing({
+    initialProjectId: initialProject,
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  const handleProjectChange = useCallback(
+    (val: string | null) => {
+      setSelectedProjectId(val || null);
+      void navigate({
+        to: "/settings/tasks",
+        search: val ? { project: val } : {},
+        replace: true,
+      });
+    },
+    [setSelectedProjectId, navigate],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -36,10 +52,7 @@ export function TasksPanel() {
 
         {projects.length > 1 && (
           <div className="flex items-center gap-2">
-            <Select
-              value={selectedProjectId ?? ""}
-              onValueChange={(val) => setSelectedProjectId(val || null)}
-            >
+            <Select value={selectedProjectId ?? ""} onValueChange={handleProjectChange}>
               <SelectTrigger size="sm" className="w-48">
                 <SelectValue>
                   {projects.find((p) => p.id === selectedProjectId)?.title ?? "Select project"}
