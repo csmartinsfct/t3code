@@ -62,6 +62,24 @@ Use these as implementation references when designing protocol handling, UX flow
 
 These docs must be kept up to date as related code changes.
 
+## Data Directories
+
+The T3 server persists state in `~/.t3/` (overridable via `T3CODE_HOME`).
+
+- **Production** (`apps/desktop` packaged build): `~/.t3/userdata/`
+- **Dev** (`bun run dev` / `bun run dev:desktop`): `~/.t3/dev/`
+
+Each directory contains:
+
+- `state.sqlite` — main SQLite database (orchestration events, projections, ticketing, managed runs, scheduled tasks)
+- `keybindings.json`, `settings.json` — user config
+- `attachments/` — uploaded files
+- `logs/` — server and provider logs
+
+Electron also stores Chromium profile data (localStorage, cookies) under `~/Library/Application Support/t3code/` (production) or `~/Library/Application Support/t3code-dev/` (dev).
+
+**Important:** The production database contains real user data. Never run destructive operations (DROP TABLE, DELETE without WHERE, schema-breaking ALTERs) against it. Migrations must be additive and idempotent where possible. If a migration was already run and needs schema changes, create a new migration — never edit a migration that has already executed on production databases.
+
 ## Skills (`.claude/skills/`)
 
 - `start-electron-dev` — Start the Electron dev stack (`bun run dev:desktop`).

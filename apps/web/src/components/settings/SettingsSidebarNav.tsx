@@ -1,12 +1,5 @@
 import type { ComponentType } from "react";
-import {
-  ActivityIcon,
-  ArchiveIcon,
-  ArrowLeftIcon,
-
-  ClockIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { ActivityIcon, ArchiveIcon, ArrowLeftIcon, ClockIcon, Settings2Icon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
 import {
@@ -23,7 +16,6 @@ export type SettingsSectionPath =
   | "/settings/general"
   | "/settings/archived"
   | "/settings/scheduled-tasks"
-
   | "/settings/runs";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{

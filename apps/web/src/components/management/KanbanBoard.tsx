@@ -104,9 +104,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
         // Optimistically update local state
         applyLocalReorder(
-          items.map((item) =>
-            item.id === ticket.id ? { ...item, status: targetStatus } : item,
-          ),
+          items.map((item) => (item.id === ticket.id ? { ...item, status: targetStatus } : item)),
         );
         // Persist: update status for the moved ticket, reorder the full column
         void api.ticketing.update({

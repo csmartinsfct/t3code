@@ -14,7 +14,9 @@ export interface UseTicketingReturn {
   selectedProjectId: string | null;
   setSelectedProjectId: (id: string | null) => void;
   refetch: () => Promise<void>;
-  applyLocalReorder: (updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>) => void;
+  applyLocalReorder: (
+    updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>,
+  ) => void;
 }
 
 export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn {
@@ -115,12 +117,24 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
         return current.map((t) => {
           const u = updateMap.get(t.id);
           if (!u) return t;
-          return { ...t, sortOrder: u.sortOrder, ...(u.status ? { status: u.status as TicketSummary["status"] } : {}) };
+          return {
+            ...t,
+            sortOrder: u.sortOrder,
+            ...(u.status ? { status: u.status as TicketSummary["status"] } : {}),
+          };
         });
       });
     },
     [],
   );
 
-  return { tickets, projects, loading, selectedProjectId, setSelectedProjectId, refetch, applyLocalReorder };
+  return {
+    tickets,
+    projects,
+    loading,
+    selectedProjectId,
+    setSelectedProjectId,
+    refetch,
+    applyLocalReorder,
+  };
 }

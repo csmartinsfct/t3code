@@ -68,13 +68,10 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
     }
   }, []);
 
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      setActiveDragTicket(null);
-      boardRef.current?.handleDragEnd(event);
-    },
-    [],
-  );
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    setActiveDragTicket(null);
+    boardRef.current?.handleDragEnd(event);
+  }, []);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragTicket(null);

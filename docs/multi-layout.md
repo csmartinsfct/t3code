@@ -67,14 +67,14 @@ The `SidebarRail` resize logic includes a guard (`sidebar.tsx`) that skips `Resi
 
 ### Components
 
-| Component | File | Purpose |
-| --------- | ---- | ------- |
-| `KanbanBoard` | `KanbanBoard.tsx` | Groups tickets by status, sorts by `sortOrder`, renders columns. Exposes `handleDragEnd` via `forwardRef`/`useImperativeHandle`. |
-| `KanbanColumn` | `KanbanColumn.tsx` | Single status column. Wraps cards in `SortableContext` with `verticalListSortingStrategy`. The column body is a `useDroppable` target for cross-column drops. |
-| `KanbanCard` | `KanbanCard.tsx` | Ticket card using `useSortable`. Shows identifier, title, priority dot, labels. Fades when dragging (`opacity-40`). |
-| `KanbanCardOverlay` | `KanbanCard.tsx` | Lightweight drag preview rendered inside `DragOverlay`. |
-| `KanbanTicketDetail` | `KanbanTicketDetail.tsx` | Full ticket detail view (status/priority selectors, description, acceptance criteria, labels, dependencies, sub-tickets, comments, history). Replaces the board area when a card is clicked. |
-| `ComposerTicketAttachments` | `ComposerTicketAttachments.tsx` | Removable chips rendered in the chat composer when tickets are dropped on the chat panel. |
+| Component                   | File                            | Purpose                                                                                                                                                                                      |
+| --------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KanbanBoard`               | `KanbanBoard.tsx`               | Groups tickets by status, sorts by `sortOrder`, renders columns. Exposes `handleDragEnd` via `forwardRef`/`useImperativeHandle`.                                                             |
+| `KanbanColumn`              | `KanbanColumn.tsx`              | Single status column. Wraps cards in `SortableContext` with `verticalListSortingStrategy`. The column body is a `useDroppable` target for cross-column drops.                                |
+| `KanbanCard`                | `KanbanCard.tsx`                | Ticket card using `useSortable`. Shows identifier, title, priority dot, labels. Fades when dragging (`opacity-40`).                                                                          |
+| `KanbanCardOverlay`         | `KanbanCard.tsx`                | Lightweight drag preview rendered inside `DragOverlay`.                                                                                                                                      |
+| `KanbanTicketDetail`        | `KanbanTicketDetail.tsx`        | Full ticket detail view (status/priority selectors, description, acceptance criteria, labels, dependencies, sub-tickets, comments, history). Replaces the board area when a card is clicked. |
+| `ComposerTicketAttachments` | `ComposerTicketAttachments.tsx` | Removable chips rendered in the chat composer when tickets are dropped on the chat panel.                                                                                                    |
 
 ### Data Flow
 
@@ -101,11 +101,11 @@ Built on `@dnd-kit` (already used in the file explorer and sidebar).
 
 ### Drop Targets
 
-| Target | ID Pattern | Behavior |
-| ------ | ---------- | -------- |
-| Column body | `column:<status>` | Drop on empty area or after last card. |
-| Ticket card | `<ticketId>` | Reorder within column or move to this card's column. |
-| Chat panel | `chat-composer` | Insert ticket as a composer attachment. |
+| Target      | ID Pattern        | Behavior                                             |
+| ----------- | ----------------- | ---------------------------------------------------- |
+| Column body | `column:<status>` | Drop on empty area or after last card.               |
+| Ticket card | `<ticketId>`      | Reorder within column or move to this card's column. |
+| Chat panel  | `chat-composer`   | Insert ticket as a composer attachment.              |
 
 ### Drag-End Logic
 
@@ -121,8 +121,8 @@ When a ticket is dropped on the chat panel, it becomes a structured attachment i
 
 ```typescript
 interface ComposerTicketAttachment {
-  id: string;           // ticket.id
-  identifier: string;   // e.g. "TCO-1"
+  id: string; // ticket.id
+  identifier: string; // e.g. "TCO-1"
   title: string;
 }
 ```
