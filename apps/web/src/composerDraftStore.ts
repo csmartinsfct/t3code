@@ -204,6 +204,13 @@ export interface ComposerSkillAttachment {
   group: string | null;
 }
 
+/** A ticket reference dragged from the Kanban board into the composer. Not persisted. */
+export interface ComposerTicketAttachment {
+  id: string;
+  identifier: string;
+  title: string;
+}
+
 export interface ComposerThreadDraftState {
   prompt: string;
   images: ComposerImageAttachment[];
@@ -212,6 +219,8 @@ export interface ComposerThreadDraftState {
   terminalContexts: TerminalContextDraft[];
   /** Code snippet references pasted from the file editor. Not persisted. */
   codeSnippets: ComposerCodeSnippetAttachment[];
+  /** Ticket references dragged from the Kanban board. Not persisted. */
+  ticketAttachments: ComposerTicketAttachment[];
   /** Skill file attachments. Persisted as path references; content re-read on rehydration. */
   skills: ComposerSkillAttachment[];
   modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
@@ -300,6 +309,9 @@ interface ComposerDraftStoreState {
   addCodeSnippet: (threadId: ThreadId, snippet: ComposerCodeSnippetAttachment) => void;
   removeCodeSnippet: (threadId: ThreadId, snippetId: string) => void;
   clearCodeSnippets: (threadId: ThreadId) => void;
+  addTicketAttachment: (threadId: ThreadId, attachment: ComposerTicketAttachment) => void;
+  removeTicketAttachment: (threadId: ThreadId, attachmentId: string) => void;
+  clearTicketAttachments: (threadId: ThreadId) => void;
   addSkill: (threadId: ThreadId, skill: ComposerSkillAttachment) => void;
   removeSkill: (threadId: ThreadId, skillId: string) => void;
   clearSkills: (threadId: ThreadId) => void;
@@ -373,6 +385,10 @@ const EMPTY_CODE_SNIPPETS: ComposerCodeSnippetAttachment[] = Object.freeze(
   [],
 ) as unknown as ComposerCodeSnippetAttachment[];
 
+const EMPTY_TICKET_ATTACHMENTS: ComposerTicketAttachment[] = Object.freeze(
+  [],
+) as unknown as ComposerTicketAttachment[];
+
 const EMPTY_SKILLS: ComposerSkillAttachment[] = Object.freeze(
   [],
 ) as unknown as ComposerSkillAttachment[];
@@ -384,6 +400,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   persistedAttachments: EMPTY_PERSISTED_ATTACHMENTS,
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
   codeSnippets: EMPTY_CODE_SNIPPETS,
+  ticketAttachments: EMPTY_TICKET_ATTACHMENTS,
   skills: EMPTY_SKILLS,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
@@ -399,6 +416,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     persistedAttachments: [],
     terminalContexts: [],
     codeSnippets: [],
+    ticketAttachments: [],
     skills: [],
     modelSelectionByProvider: {},
     activeProvider: null,
@@ -471,6 +489,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.persistedAttachments.length === 0 &&
     draft.terminalContexts.length === 0 &&
     draft.codeSnippets.length === 0 &&
+    draft.ticketAttachments.length === 0 &&
     draft.skills.length === 0 &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
@@ -1381,6 +1400,7 @@ function toHydratedThreadDraft(
         endLine: s.endLine,
         code: s.code,
       })) ?? [],
+    ticketAttachments: [],
     skills:
       persistedDraft.skills?.map((s) => ({
         id: s.id,
@@ -2127,6 +2147,51 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           };
         });
       },
+      addTicketAttachment: (threadId, attachment) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          if (existing.ticketAttachments.some((t) => t.id === attachment.id)) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...existing,
+                ticketAttachments: [...existing.ticketAttachments, attachment],
+              },
+            },
+          };
+        });
+      },
+      removeTicketAttachment: (threadId, attachmentId) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...current,
+                ticketAttachments: current.ticketAttachments.filter((t) => t.id !== attachmentId),
+              },
+            },
+          };
+        });
+      },
+      clearTicketAttachments: (threadId) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current || current.ticketAttachments.length === 0) return state;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: { ...current, ticketAttachments: [] },
+            },
+          };
+        });
+      },
       addSkill: (threadId, skill) => {
         if (threadId.length === 0) return;
         set((state) => {
@@ -2367,6 +2432,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             persistedAttachments: [],
             terminalContexts: [],
             codeSnippets: [],
+            ticketAttachments: [],
             skills: [],
           };
           const nextDraftsByThreadId = { ...state.draftsByThreadId };

@@ -24,6 +24,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
     persistedAttachments: [],
     terminalContexts: [],
     codeSnippets: [],
+    ticketAttachments: [],
     skills: [],
     modelSelectionByProvider: {
       [provider]: {

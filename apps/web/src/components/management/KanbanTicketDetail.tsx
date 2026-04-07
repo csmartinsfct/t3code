@@ -5,7 +5,7 @@ import type {
   TicketStatus,
   TicketingStreamEvent,
 } from "@t3tools/contracts";
-import { ArrowLeftIcon, TrashIcon } from "lucide-react";
+import { TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
@@ -138,16 +138,6 @@ export function KanbanTicketDetail({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-8">
-        {/* Back link */}
-        <button
-          type="button"
-          className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onBack}
-        >
-          <ArrowLeftIcon className="size-3" />
-          Back to Board
-        </button>
-
         {/* Header */}
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between">

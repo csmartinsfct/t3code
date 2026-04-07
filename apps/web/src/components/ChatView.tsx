@@ -175,6 +175,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { FileSearchModal } from "./file-explorer/FileSearchModal";
 import { ComposerCodeSnippets } from "./ComposerCodeSnippets";
+import { ComposerTicketAttachments } from "./management/ComposerTicketAttachments";
 import { ComposerSkillChips } from "./ComposerSkillChips";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -253,6 +254,13 @@ function formatSkillsForModel(skills: ComposerSkillAttachment[]): string {
     .map((s) => `<skill name="${s.name}" source="${s.source}">\n${s.content}\n</skill>`)
     .join("\n\n");
 }
+function formatTicketAttachmentsForModel(
+  tickets: import("../composerDraftStore").ComposerTicketAttachment[],
+): string {
+  if (tickets.length === 0) return "";
+  return `Ticket ids: ${tickets.map((t) => t.identifier).join(", ")}`;
+}
+
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -639,6 +647,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerCodeSnippets = composerDraft.codeSnippets;
+  const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
   const composerSendState = useMemo(
     () =>
@@ -661,6 +670,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftCodeSnippet = useComposerDraftStore((store) => store.addCodeSnippet);
   const removeComposerDraftCodeSnippet = useComposerDraftStore((store) => store.removeCodeSnippet);
+  const removeComposerDraftTicketAttachment = useComposerDraftStore(
+    (store) => store.removeTicketAttachment,
+  );
   const addComposerDraftSkill = useComposerDraftStore((store) => store.addSkill);
   const removeComposerDraftSkill = useComposerDraftStore((store) => store.removeSkill);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
@@ -3158,6 +3170,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThreadId, removeComposerDraftCodeSnippet],
   );
 
+  const removeComposerTicketAttachment = useCallback(
+    (attachmentId: string) => {
+      if (!activeThreadId) return;
+      removeComposerDraftTicketAttachment(activeThreadId, attachmentId);
+    },
+    [activeThreadId, removeComposerDraftTicketAttachment],
+  );
+
   const onAttachSkill = useCallback(
     (skill: SkillEntry) => {
       if (!activeThreadId) return;
@@ -3537,15 +3557,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const composerImagesSnapshot = [...composerImages];
     const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
+    const composerTicketAttachmentsSnapshot = [...composerTicketAttachments];
     const composerSkillsSnapshot = [...composerSkills];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
+    const ticketsBlock = formatTicketAttachmentsForModel(composerTicketAttachmentsSnapshot);
     const baseMessageText = appendTerminalContextsToPrompt(
       promptForSend,
       composerTerminalContextsSnapshot,
     );
-    const preamble = [skillsBlock, snippetsBlock].filter(Boolean).join("\n\n");
+    const preamble = [skillsBlock, snippetsBlock, ticketsBlock].filter(Boolean).join("\n\n");
     const messageTextForSend = preamble ? `${preamble}\n\n${baseMessageText}` : baseMessageText;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
@@ -4813,6 +4835,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           <ComposerCodeSnippets
                             snippets={composerCodeSnippets}
                             onRemove={removeComposerCodeSnippet}
+                          />
+                        </div>
+                      )}
+
+                    {!isComposerApprovalState &&
+                      pendingUserInputs.length === 0 &&
+                      composerTicketAttachments.length > 0 && (
+                        <div className="mb-2 -mx-3 sm:-mx-4">
+                          <ComposerTicketAttachments
+                            attachments={composerTicketAttachments}
+                            onRemove={removeComposerTicketAttachment}
                           />
                         </div>
                       )}

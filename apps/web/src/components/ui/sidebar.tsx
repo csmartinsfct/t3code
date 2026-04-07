@@ -691,9 +691,11 @@ function SidebarRail({
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
+            if (resizeStateRef.current) return;
             revalidateSidebarWidth();
           });
     const handleWindowResize = () => {
+      if (resizeStateRef.current) return;
       revalidateSidebarWidth();
     };
 
