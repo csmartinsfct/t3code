@@ -56,6 +56,7 @@ Use these as implementation references when designing protocol handling, UX flow
 
 - [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
 - [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
+- [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, MCP tools, and Settings UI.
 
 These docs must be kept up to date as related code changes.
 
