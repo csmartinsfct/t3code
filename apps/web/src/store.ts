@@ -12,6 +12,7 @@ import {
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { summarizeTimelineText } from "@t3tools/shared/timeline";
 import { create } from "zustand";
 import {
   findLatestProposedPlan,
@@ -19,6 +20,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
 } from "./session-logic";
+import { logWebTimeline } from "./timelineLogger";
 import { type ChatMessage, type Project, type SidebarThreadSummary, type Thread } from "./types";
 
 // ── State ────────────────────────────────────────────────────────────
@@ -872,6 +874,14 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.message-sent": {
+      logWebTimeline("store.thread-message.apply", {
+        threadId: event.payload.threadId,
+        messageId: event.payload.messageId,
+        role: event.payload.role,
+        turnId: event.payload.turnId,
+        streaming: event.payload.streaming,
+        ...summarizeTimelineText(event.payload.text),
+      });
       return updateThreadState(state, event.payload.threadId, (thread) => {
         const message = mapMessage({
           id: event.payload.messageId,
@@ -963,6 +973,11 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.messages-deleted": {
+      logWebTimeline("store.thread-message.delete-apply", {
+        threadId: event.payload.threadId,
+        messageIds: event.payload.messageIds,
+        messageCount: event.payload.messageIds.length,
+      });
       return updateThreadState(state, event.payload.threadId, (thread) => {
         const deletedIds = new Set(event.payload.messageIds);
         const messages = thread.messages.filter((msg) => !deletedIds.has(msg.id));
@@ -972,6 +987,14 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.session-set": {
+      logWebTimeline("store.thread-session.apply", {
+        threadId: event.payload.threadId,
+        status: event.payload.session.status,
+        providerName: event.payload.session.providerName,
+        activeTurnId: event.payload.session.activeTurnId,
+        updatedAt: event.payload.session.updatedAt,
+        lastError: event.payload.session.lastError,
+      });
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
         session: mapSession(event.payload.session),

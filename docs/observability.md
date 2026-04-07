@@ -20,6 +20,13 @@ Logs are human-facing only:
 
 If you want a log message to show up in the trace file, emit it inside an active span with `Effect.log...`. `Logger.tracerLogger` will attach it as a span event.
 
+Packaged desktop builds also persist two stdout-style log files:
+
+- `~/.t3/userdata/logs/desktop-main.log`: Electron main-process logs, including renderer timeline breadcrumbs forwarded from `console`
+- `~/.t3/userdata/logs/server-child.log`: embedded backend stdout/stderr from the server process launched by Electron
+
+Those files are the fastest place to inspect a production desktop app when the UI says a thread is still working but no visible progress is happening.
+
 ### Traces
 
 Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.t3/userdata/logs/server.trace.ndjson`).
@@ -48,6 +55,87 @@ If OTLP is not configured, metrics still exist in-process, but you will not have
 ### Related Artifacts
 
 Provider event NDJSON files still exist for provider runtime streams. Those are separate from the main server trace file.
+
+- `~/.t3/userdata/logs/provider/*.log`: provider runtime event stream per thread
+- `~/.t3/userdata/logs/managed-runs/`: managed run logs
+- `~/.t3/userdata/logs/terminals/`: terminal session logs
+
+## Timeline Debugging
+
+For stuck turns, disappearing messages, delayed assistant output, and recovery issues, use the `[timeline]` logs first.
+
+Timeline logs are emitted from:
+
+- the web client before and after user-message submission, optimistic updates, recovery, and store application
+- the Electron main process when the renderer loads, becomes unresponsive, crashes, or emits timeline console messages
+- the server when orchestration commands are received, committed, sent to the provider, ingested back from runtime events, and projected into thread/session state
+
+Every timeline record is a single JSON line prefixed with `[timeline]`. Important fields:
+
+- `ts`: ISO timestamp
+- `scope`: where the event was logged, such as `web`, `server.ws`, or `server.provider`
+- `event`: the lifecycle step
+- correlation fields when available, such as `threadId`, `turnId`, `sessionId`, `messageId`, `commandType`, or `sequenceNumber`
+
+### First Files To Inspect
+
+For packaged desktop builds:
+
+- `desktop-main.log`: renderer-side breadcrumbs and Electron lifecycle
+- `server-child.log`: backend command/runtime/projection breadcrumbs
+- `server.trace.ndjson`: spans, timings, and embedded Effect log events
+- `provider/*.log`: raw provider runtime stream for the affected thread
+
+### Useful Greps
+
+Follow timeline logs live:
+
+```bash
+tail -f ~/.t3/userdata/logs/desktop-main.log ~/.t3/userdata/logs/server-child.log | rg '\[timeline\]'
+```
+
+Show only one thread:
+
+```bash
+rg '\[timeline\].*"threadId":"THREAD_ID"' ~/.t3/userdata/logs/desktop-main.log ~/.t3/userdata/logs/server-child.log
+```
+
+Show one turn across desktop and server logs:
+
+```bash
+rg '\[timeline\].*"turnId":"TURN_ID"' ~/.t3/userdata/logs/desktop-main.log ~/.t3/userdata/logs/server-child.log
+```
+
+Find turns that stayed in working state for too long in the renderer:
+
+```bash
+rg 'thread\.working\.stalled' ~/.t3/userdata/logs/desktop-main.log
+```
+
+### Reading A Stuck Turn Timeline
+
+For the common "message sent, UI says working, no answer arrives" case, expect this rough sequence:
+
+1. `web / composer.submit.start`
+2. `web / composer.turn-start.dispatched`
+3. `server.ws / orchestration.dispatch.received`
+4. `server.orchestration / command.committed`
+5. `server.provider-reactor / turn-send.start`
+6. `server.provider / send-turn.start`
+7. `server.provider / runtime-event`
+8. `server.runtime-ingestion / runtime-event.received`
+9. `server.projection / thread-message.upserted` or `thread-session.upserted`
+10. `web / orchestration.domain-event.received`
+11. `web / store.thread-message.apply` or `store.thread-session.apply`
+
+Where the sequence stops usually tells you which stage is broken:
+
+- stops before `orchestration.dispatch.received`: client-to-server dispatch problem
+- stops before `turn-send.start`: orchestration/reactor problem
+- stops after `send-turn.start` but before runtime events: provider/session problem
+- stops after runtime ingestion but before projection logs: projection/commit problem
+- reaches projection but not web store apply: websocket delivery or client recovery problem
+- reaches web store apply but the UI still looks stuck: rendering or client state derivation problem
 
 ## Run The Server In Instrumented Mode
 

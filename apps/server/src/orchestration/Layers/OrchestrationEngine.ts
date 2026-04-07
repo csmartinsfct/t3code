@@ -5,6 +5,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 import {
   Cause,
   Deferred,
@@ -142,6 +143,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           readModel,
         });
         const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+        yield* Effect.logInfo(
+          formatTimelineLog("server.orchestration", "command.decided", {
+            commandId: envelope.command.commandId,
+            commandType: envelope.command.type,
+            eventCount: eventBases.length,
+            eventTypes: eventBases.map((event) => event.type),
+          }),
+        );
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
@@ -189,6 +198,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         readModel = committedCommand.nextReadModel;
+        yield* Effect.logInfo(
+          formatTimelineLog("server.orchestration", "command.committed", {
+            commandId: envelope.command.commandId,
+            commandType: envelope.command.type,
+            sequence: committedCommand.lastSequence,
+            eventCount: committedCommand.committedEvents.length,
+            eventTypes: committedCommand.committedEvents.map((event) => event.type),
+            sequences: committedCommand.committedEvents.map((event) => event.sequence),
+          }),
+        );
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
@@ -238,6 +257,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           }
 
           const error = Cause.squash(exit.cause) as OrchestrationDispatchError;
+          yield* Effect.logWarning(
+            formatTimelineLog("server.orchestration", "command.failed", {
+              commandId: envelope.command.commandId,
+              commandType: envelope.command.type,
+              error,
+            }),
+          );
           if (!Schema.is(OrchestrationCommandPreviouslyRejectedError)(error)) {
             yield* reconcileReadModelAfterDispatchFailure.pipe(
               Effect.catch(() =>

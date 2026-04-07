@@ -43,6 +43,7 @@ import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { logWebTimeline } from "../timelineLogger";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -362,6 +363,12 @@ function EventRouter() {
       if (nextEvents.length === 0) {
         return;
       }
+      logWebTimeline("orchestration.domain-event.batch-apply", {
+        count: nextEvents.length,
+        firstSequence: nextEvents[0]?.sequence ?? null,
+        lastSequence: nextEvents.at(-1)?.sequence ?? null,
+        types: nextEvents.map((event) => event.type),
+      });
 
       const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
       const uiEvents = coalesceOrchestrationUiEvents(nextEvents);
@@ -431,12 +438,22 @@ function EventRouter() {
       }
 
       const fromSequenceExclusive = recovery.getState().latestSequence;
+      logWebTimeline("orchestration.recovery.replay.start", {
+        fromSequenceExclusive,
+      });
       try {
         const events = await api.orchestration.replayEvents(fromSequenceExclusive);
         if (!disposed) {
+          logWebTimeline("orchestration.recovery.replay.success", {
+            fromSequenceExclusive,
+            replayedCount: events.length,
+          });
           applyEventBatch(events);
         }
       } catch {
+        logWebTimeline("orchestration.recovery.replay.failed", {
+          fromSequenceExclusive,
+        });
         recovery.failReplayRecovery();
         void fallbackToSnapshotRecovery();
         return;
@@ -451,7 +468,7 @@ function EventRouter() {
       const started = recovery.beginSnapshotRecovery(reason);
       if (import.meta.env.MODE !== "test") {
         const state = recovery.getState();
-        console.info("[orchestration-recovery]", "Snapshot recovery requested.", {
+        logWebTimeline("orchestration.recovery.snapshot.requested", {
           reason,
           skipped: !started,
           ...(started
@@ -470,6 +487,12 @@ function EventRouter() {
       try {
         const snapshot = await api.orchestration.getSnapshot();
         if (!disposed) {
+          logWebTimeline("orchestration.recovery.snapshot.success", {
+            reason,
+            snapshotSequence: snapshot.snapshotSequence,
+            threadCount: snapshot.threads.length,
+            projectCount: snapshot.projects.length,
+          });
           syncServerReadModel(snapshot);
           reconcileSnapshotDerivedState();
           if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
@@ -477,6 +500,9 @@ function EventRouter() {
           }
         }
       } catch {
+        logWebTimeline("orchestration.recovery.snapshot.failed", {
+          reason,
+        });
         // Keep prior state and wait for welcome or a later replay attempt.
         recovery.failSnapshotRecovery();
       }
@@ -499,6 +525,10 @@ function EventRouter() {
           return;
         }
         if (action === "recover") {
+          logWebTimeline("orchestration.domain-event.sequence-gap", {
+            sequence: event.sequence,
+            type: event.type,
+          });
           flushPendingDomainEvents();
           void recoverFromSequenceGap();
         }

@@ -26,6 +26,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
 
 import {
@@ -196,7 +197,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     increment(providerRuntimeEventsTotal, {
       provider: event.provider,
       eventType: event.type,
-    }).pipe(Effect.andThen(publishRuntimeEvent(event)));
+    }).pipe(
+      Effect.andThen(
+        Effect.logInfo(
+          formatTimelineLog("server.provider", "runtime-event", {
+            provider: event.provider,
+            eventType: event.type,
+            eventId: event.eventId,
+            threadId: event.threadId,
+            turnId:
+              "payload" in event && typeof event.payload === "object" && event.payload !== null
+                ? ((event.payload as { turnId?: string }).turnId ?? null)
+                : null,
+          }),
+        ),
+      ),
+      Effect.andThen(publishRuntimeEvent(event)),
+    );
 
   const worker = Effect.forever(
     Queue.take(runtimeEventQueue).pipe(Effect.flatMap(processRuntimeEvent)),
@@ -418,6 +435,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.interaction_mode": input.interactionMode,
       "provider.attachment_count": input.attachments.length,
     });
+    yield* Effect.logInfo(
+      formatTimelineLog("server.provider", "send-turn.start", {
+        threadId: input.threadId,
+        interactionMode: input.interactionMode,
+        attachmentCount: input.attachments.length,
+        hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+        model: input.modelSelection?.model ?? null,
+      }),
+    );
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
     return yield* Effect.gen(function* () {
@@ -452,8 +478,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         attachmentCount: input.attachments.length,
         hasInput: typeof input.input === "string" && input.input.trim().length > 0,
       });
+      yield* Effect.logInfo(
+        formatTimelineLog("server.provider", "send-turn.success", {
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          turnId: turn.turnId,
+          resumeCursor: turn.resumeCursor ?? null,
+        }),
+      );
       return turn;
     }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          formatTimelineLog("server.provider", "send-turn.failed", {
+            threadId: input.threadId,
+            provider: metricProvider,
+            model: metricModel ?? null,
+            error,
+          }),
+        ),
+      ),
       withMetrics({
         counter: providerTurnsTotal,
         timer: providerTurnDuration,

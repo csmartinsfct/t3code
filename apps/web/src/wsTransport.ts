@@ -1,4 +1,5 @@
 import { Duration, Effect, Exit, ManagedRuntime, Option, Scope, Stream } from "effect";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import {
   createWsRpcProtocolLayer,
@@ -35,6 +36,11 @@ export class WsTransport {
     this.clientScope = this.runtime.runSync(Scope.make());
     this.clientPromise = this.runtime.runPromise(
       Scope.provide(this.clientScope)(makeWsRpcProtocolClient),
+    );
+    console.info(
+      formatTimelineLog("web", "ws.transport.created", {
+        hasExplicitUrl: typeof url === "string" && url.length > 0,
+      }),
     );
   }
 
@@ -104,9 +110,11 @@ export class WsTransport {
             return Effect.interrupt;
           }
           return Effect.sync(() => {
-            console.warn("WebSocket RPC subscription disconnected", {
-              error: formatErrorMessage(error),
-            });
+            console.warn(
+              formatTimelineLog("web", "ws.subscription.disconnected", {
+                error: formatErrorMessage(error),
+              }),
+            );
           }).pipe(Effect.andThen(Effect.sleep(retryDelayMs)));
         }),
         Effect.forever,
@@ -124,6 +132,7 @@ export class WsTransport {
       return;
     }
     this.disposed = true;
+    console.info(formatTimelineLog("web", "ws.transport.dispose"));
     await this.runtime.runPromise(Scope.close(this.clientScope, Exit.void)).finally(() => {
       this.runtime.dispose();
     });

@@ -30,6 +30,7 @@ import {
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
+import { summarizeTimelineText } from "@t3tools/shared/timeline";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
@@ -100,6 +101,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { LRUCache } from "../lib/lruCache";
+import { logWebTimeline } from "../timelineLogger";
 
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
@@ -407,6 +409,12 @@ function useLocalDispatchState(input: {
   const beginLocalDispatch = useCallback(
     (options?: { preparingWorktree?: boolean }) => {
       const preparingWorktree = Boolean(options?.preparingWorktree);
+      logWebTimeline("composer.local-dispatch.begin", {
+        threadId: input.activeThread?.id ?? null,
+        preparingWorktree,
+        phase: input.phase,
+        activeTurnId: input.activeThread?.session?.activeTurnId ?? null,
+      });
       setLocalDispatch((current) => {
         if (current) {
           return current.preparingWorktree === preparingWorktree
@@ -416,7 +424,7 @@ function useLocalDispatchState(input: {
         return createLocalDispatchSnapshot(input.activeThread, options);
       });
     },
-    [input.activeThread],
+    [input.activeThread, input.phase],
   );
 
   const resetLocalDispatch = useCallback(() => {
@@ -449,8 +457,25 @@ function useLocalDispatchState(input: {
     if (!serverAcknowledgedLocalDispatch) {
       return;
     }
+    logWebTimeline("composer.local-dispatch.acknowledged", {
+      threadId: input.activeThread?.id ?? null,
+      phase: input.phase,
+      activeTurnId: input.activeThread?.session?.activeTurnId ?? null,
+      hasPendingApproval: input.activePendingApproval !== null,
+      hasPendingUserInput: input.activePendingUserInput !== null,
+      threadError: input.threadError ?? null,
+    });
     resetLocalDispatch();
-  }, [resetLocalDispatch, serverAcknowledgedLocalDispatch]);
+  }, [
+    input.activePendingApproval,
+    input.activePendingUserInput,
+    input.activeThread?.id,
+    input.activeThread?.session?.activeTurnId,
+    input.phase,
+    input.threadError,
+    resetLocalDispatch,
+    serverAcknowledgedLocalDispatch,
+  ]);
 
   return {
     beginLocalDispatch,
@@ -713,6 +738,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
+  const stalledWorkingBucketRef = useRef<string | null>(null);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>(composerTerminalContexts);
   const [localDraftErrorsByThreadId, setLocalDraftErrorsByThreadId] = useState<
     Record<ThreadId, string | null>
@@ -2805,6 +2831,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (removedMessages.length === 0) {
       return;
     }
+    logWebTimeline("composer.optimistic-message.acknowledged", {
+      threadId: activeThread.id,
+      messageIds: removedMessages.map((message) => message.id),
+      messageCount: removedMessages.length,
+    });
     const timer = window.setTimeout(() => {
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => !serverIds.has(message.id)),
@@ -2829,6 +2860,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [prompt]);
 
   useEffect(() => {
+    if (optimisticUserMessagesRef.current.length > 0) {
+      logWebTimeline("composer.optimistic-message.cleared-on-thread-change", {
+        threadId,
+        pendingMessageIds: optimisticUserMessagesRef.current.map((message) => message.id),
+      });
+    }
     setOptimisticUserMessages((existing) => {
       for (const message of existing) {
         revokeUserMessagePreviewUrls(message);
@@ -2843,6 +2880,60 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setIsDragOverComposer(false);
     setExpandedImage(null);
   }, [resetLocalDispatch, threadId]);
+
+  useEffect(() => {
+    if (!activeThread || !isWorking) {
+      stalledWorkingBucketRef.current = null;
+      return;
+    }
+
+    const logIfStalled = () => {
+      const activityCandidates = [
+        activeThread.updatedAt,
+        activeThread.session?.updatedAt ?? null,
+        activeThread.latestTurn?.requestedAt ?? null,
+        activeThread.latestTurn?.startedAt ?? null,
+        activeThread.latestTurn?.completedAt ?? null,
+      ].flatMap((value) => (value ? [Date.parse(value)] : []));
+      const lastActivityAtMs = activityCandidates.reduce(
+        (max, value) => (Number.isFinite(value) ? Math.max(max, value) : max),
+        0,
+      );
+      if (lastActivityAtMs === 0) {
+        return;
+      }
+      const stalledForMs = Date.now() - lastActivityAtMs;
+      if (stalledForMs < 30_000) {
+        return;
+      }
+      const bucket = Math.floor(stalledForMs / 30_000);
+      const bucketKey = `${activeThread.id}:${bucket}`;
+      if (stalledWorkingBucketRef.current === bucketKey) {
+        return;
+      }
+      stalledWorkingBucketRef.current = bucketKey;
+      logWebTimeline("thread.working.stalled", {
+        threadId: activeThread.id,
+        stalledForMs,
+        phase,
+        isSendBusy,
+        isConnecting,
+        isRevertingCheckpoint,
+        optimisticPendingMessageIds: optimisticUserMessagesRef.current.map((message) => message.id),
+        latestTurnId: activeThread.latestTurn?.turnId ?? null,
+        latestTurnState: activeThread.latestTurn?.state ?? null,
+        sessionStatus: activeThread.session?.orchestrationStatus ?? null,
+        sessionUpdatedAt: activeThread.session?.updatedAt ?? null,
+        threadUpdatedAt: activeThread.updatedAt,
+      });
+    };
+
+    logIfStalled();
+    const timer = window.setInterval(logIfStalled, 15_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, isWorking, phase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3553,6 +3644,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
+    logWebTimeline("composer.submit.start", {
+      threadId: threadIdForSend,
+      isLocalDraftThread,
+      isServerThread,
+      isFirstMessage,
+      hasWorktreeBaseBranch: Boolean(baseBranchForWorktree),
+      runtimeMode,
+      interactionMode,
+      provider: selectedProvider,
+      model: selectedModelSelection.model,
+    });
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
     const composerImagesSnapshot = [...composerImages];
@@ -3577,6 +3679,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       models: selectedProviderModels,
       effort: selectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+    });
+    logWebTimeline("composer.submit.prepared", {
+      threadId: threadIdForSend,
+      messageId: messageIdForSend,
+      ...summarizeTimelineText(outgoingMessageText),
+      imageCount: composerImagesSnapshot.length,
+      optimisticAttachmentCount: composerImagesSnapshot.length,
+      terminalContextCount: composerTerminalContextsSnapshot.length,
+      skillCount: composerSkillsSnapshot.length,
+      snippetCount: composerCodeSnippetsSnapshot.length,
     });
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
@@ -3637,10 +3749,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (baseBranchForWorktree) {
         beginLocalDispatch({ preparingWorktree: true });
         const newBranch = buildTemporaryWorktreeBranchName();
+        logWebTimeline("composer.worktree.create.start", {
+          threadId: threadIdForSend,
+          baseBranch: baseBranchForWorktree,
+          newBranch,
+        });
         const result = await createWorktreeMutation.mutateAsync({
           cwd: activeProject.cwd,
           branch: baseBranchForWorktree,
           newBranch,
+        });
+        logWebTimeline("composer.worktree.create.success", {
+          threadId: threadIdForSend,
+          branch: result.worktree.branch,
+          worktreePath: result.worktree.path,
         });
         nextThreadBranch = result.worktree.branch;
         nextThreadWorktreePath = result.worktree.path;
@@ -3691,6 +3813,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       } as ModelSelection;
 
       if (isLocalDraftThread) {
+        logWebTimeline("composer.thread.create.start", {
+          threadId: threadIdForSend,
+          projectId: activeProject.id,
+          title,
+        });
         await api.orchestration.dispatchCommand({
           type: "thread.create",
           commandId: newCommandId(),
@@ -3705,6 +3832,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           createdAt: activeThread.createdAt,
         });
         createdServerThreadForLocalDraft = true;
+        logWebTimeline("composer.thread.create.success", {
+          threadId: threadIdForSend,
+          projectId: activeProject.id,
+        });
       }
 
       let setupScript: ProjectScript | null = null;
@@ -3764,6 +3895,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         // turn.start (critical)
         (async () => {
           const turnAttachments = await turnAttachmentsPromise;
+          logWebTimeline("composer.turn-start.ready", {
+            threadId: threadIdForSend,
+            messageId: messageIdForSend,
+            attachmentCount: turnAttachments.length,
+          });
           await api.orchestration.dispatchCommand({
             type: "thread.turn.start",
             commandId: newCommandId(),
@@ -3781,6 +3917,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
             createdAt: messageCreatedAt,
           });
           turnStartSucceeded = true;
+          logWebTimeline("composer.turn-start.dispatched", {
+            threadId: threadIdForSend,
+            messageId: messageIdForSend,
+          });
         })(),
       ]);
     })().catch(async (err: unknown) => {
@@ -3814,12 +3954,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
         addComposerTerminalContextsToDraft(composerTerminalContextsSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
       }
+      logWebTimeline("composer.submit.failed", {
+        threadId: threadIdForSend,
+        messageId: messageIdForSend,
+        error: err,
+        createdServerThreadForLocalDraft,
+        turnStartSucceeded,
+      });
       setThreadError(
         threadIdForSend,
         err instanceof Error ? err.message : "Failed to send message.",
       );
     });
     sendInFlightRef.current = false;
+    if (turnStartSucceeded) {
+      logWebTimeline("composer.submit.completed", {
+        threadId: threadIdForSend,
+        messageId: messageIdForSend,
+      });
+    }
     if (!turnStartSucceeded) {
       resetLocalDispatch();
     }

@@ -11,9 +11,11 @@ import {
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
+import { summarizeTimelineText } from "@t3tools/shared/timeline";
 import { Effect, Stream } from "effect";
 
 import { type WsRpcProtocolClient } from "./rpc/protocol";
+import { logWebTimeline } from "./timelineLogger";
 import { WsTransport } from "./wsTransport";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
@@ -41,6 +43,53 @@ interface GitRunStackedActionOptions {
 
 interface OrchestrationDomainEventSubscriptionOptions {
   readonly getFromSequenceExclusive?: () => number | undefined;
+}
+
+function summarizeOrchestrationCommand(command: {
+  readonly type: string;
+  readonly commandId?: string;
+  readonly threadId?: string;
+  readonly projectId?: string;
+  readonly createdAt?: string;
+  readonly message?: {
+    readonly messageId?: string;
+    readonly role?: string;
+    readonly text?: string;
+    readonly attachments?: ReadonlyArray<unknown>;
+  };
+}): Record<string, unknown> {
+  return {
+    type: command.type,
+    ...(command.commandId ? { commandId: command.commandId } : {}),
+    ...(command.threadId ? { threadId: command.threadId } : {}),
+    ...(command.projectId ? { projectId: command.projectId } : {}),
+    ...(command.createdAt ? { createdAt: command.createdAt } : {}),
+    ...(command.message
+      ? {
+          messageId: command.message.messageId ?? null,
+          messageRole: command.message.role ?? null,
+          ...summarizeTimelineText(command.message.text ?? ""),
+          attachmentCount: command.message.attachments?.length ?? 0,
+        }
+      : {}),
+  };
+}
+
+function summarizeOrchestrationEvent(event: OrchestrationEvent): Record<string, unknown> {
+  const payload = event.payload as Record<string, unknown>;
+  return {
+    sequence: event.sequence,
+    type: event.type,
+    aggregateKind: event.aggregateKind,
+    aggregateId: event.aggregateId,
+    occurredAt: event.occurredAt,
+    ...(typeof payload.threadId === "string" ? { threadId: payload.threadId } : {}),
+    ...(typeof payload.turnId === "string" ? { turnId: payload.turnId } : {}),
+    ...(typeof payload.messageId === "string" ? { messageId: payload.messageId } : {}),
+    ...(typeof payload.role === "string" ? { role: payload.role } : {}),
+    ...(typeof payload.streaming === "boolean" ? { streaming: payload.streaming } : {}),
+    ...(typeof payload.status === "string" ? { status: payload.status } : {}),
+  };
 }
 
 export interface WsRpcClient {
@@ -372,8 +421,25 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     orchestration: {
       getSnapshot: () =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
-      dispatchCommand: (input) =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+      dispatchCommand: async (input) => {
+        logWebTimeline("orchestration.dispatch.start", summarizeOrchestrationCommand(input));
+        try {
+          const result = await transport.request((client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand](input),
+          );
+          logWebTimeline("orchestration.dispatch.success", {
+            ...summarizeOrchestrationCommand(input),
+            sequence: result.sequence,
+          });
+          return result;
+        } catch (error) {
+          logWebTimeline("orchestration.dispatch.error", {
+            ...summarizeOrchestrationCommand(input),
+            error,
+          });
+          throw error;
+        }
+      },
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
@@ -383,12 +449,25 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           .request((client) => client[ORCHESTRATION_WS_METHODS.replayEvents](input))
           .then((events) => [...events]),
       onDomainEvent: (listener, options) =>
-        transport.subscribe((client) => {
-          const fromSequenceExclusive = options?.getFromSequenceExclusive?.();
-          return client[WS_METHODS.subscribeOrchestrationDomainEvents](
-            fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : {},
-          );
-        }, listener),
+        transport.subscribe(
+          (client) => {
+            const fromSequenceExclusive = options?.getFromSequenceExclusive?.();
+            logWebTimeline(
+              "orchestration.domain-event.subscribe",
+              fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : undefined,
+            );
+            return client[WS_METHODS.subscribeOrchestrationDomainEvents](
+              fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : {},
+            );
+          },
+          (event) => {
+            logWebTimeline(
+              "orchestration.domain-event.received",
+              summarizeOrchestrationEvent(event),
+            );
+            listener(event);
+          },
+        ),
     },
   };
 }

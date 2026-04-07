@@ -18,6 +18,7 @@ import {
   type AccountRateLimitsUpdatedPayload,
 } from "@t3tools/contracts";
 import { buildPlanImplementationPrompt } from "@t3tools/shared/proposedPlan";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 import { Cache, Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -326,6 +327,44 @@ function buildContextWindowActivityPayload(
     return undefined;
   }
   return event.payload.usage;
+}
+
+/**
+ * Map a structured `terminal_reason` from the SDK result (≥ 0.2.91) to a
+ * human-readable message suitable for the thread error banner.  Returns `null`
+ * when the reason does not warrant a visible error (e.g. user-initiated
+ * aborts) so the caller can fall back to the raw `errorMessage`.
+ */
+function humanReadableTerminalReason(reason: string | undefined): string | null {
+  switch (reason) {
+    case "max_turns":
+      return "Agent reached the maximum number of turns. Send a follow-up to continue.";
+    case "blocking_limit":
+      return "Rate limited — wait a moment and try again.";
+    case "prompt_too_long":
+      return "Context is too long. Try starting a new thread or compacting.";
+    case "model_error":
+      return "The model returned an error. Try again.";
+    case "image_error":
+      return "Failed to process an image in the conversation.";
+    case "rapid_refill_breaker":
+      return "Rate limited — wait a moment and try again.";
+    case "stop_hook_prevented":
+    case "hook_stopped":
+      return "A hook prevented the agent from continuing.";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Terminal reasons that indicate the session is still usable even though the
+ * adapter classified the turn as "failed".  The session should go to "ready"
+ * (not "error") and the banner message should be informational rather than a
+ * hard error.
+ */
+function isRecoverableTerminalReason(reason: string | undefined): boolean {
+  return reason === "max_turns" || reason === "blocking_limit" || reason === "rapid_refill_breaker";
 }
 
 function normalizeRuntimeTurnState(
@@ -1189,6 +1228,28 @@ const make = Effect.fn("make")(function* () {
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const activeTurnId = thread.session?.activeTurnId ?? null;
+    yield* Effect.logInfo(
+      formatTimelineLog("server.runtime-ingestion", "runtime-event.received", {
+        provider: event.provider,
+        eventType: event.type,
+        eventId: event.eventId,
+        threadId: event.threadId,
+        turnId: eventTurnId ?? null,
+        activeTurnId,
+        ...(event.type === "content.delta"
+          ? {
+              streamKind: event.payload.streamKind,
+              deltaLength: event.payload.delta.length,
+            }
+          : {}),
+        ...(event.type === "turn.completed"
+          ? {
+              state: event.payload.state,
+              errorMessage: event.payload.errorMessage ?? null,
+            }
+          : {}),
+      }),
+    );
 
     const conflictsWithActiveTurn =
       activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1236,11 +1297,15 @@ const make = Effect.fn("make")(function* () {
       const nextActiveTurnId =
         event.type === "turn.started"
           ? (eventTurnId ?? null)
-          : event.type === "turn.completed" ||
-              event.type === "session.exited" ||
-              event.type === "session.started"
+          : event.type === "turn.completed" || event.type === "session.exited"
             ? null
             : activeTurnId;
+      const turnFailed =
+        event.type === "turn.completed" &&
+        normalizeRuntimeTurnState(event.payload.state) === "failed";
+      const turnTerminalReason =
+        event.type === "turn.completed" ? event.payload.terminalReason : undefined;
+
       const status = (() => {
         switch (event.type) {
           case "session.state.changed":
@@ -1250,26 +1315,36 @@ const make = Effect.fn("make")(function* () {
           case "session.exited":
             return "stopped";
           case "turn.completed":
-            return normalizeRuntimeTurnState(event.payload.state) === "failed" ? "error" : "ready";
+            // Recoverable terminal reasons (max_turns, rate limits) keep the
+            // session usable — the user can send a follow-up message.
+            if (turnFailed && isRecoverableTerminalReason(turnTerminalReason)) {
+              return "ready";
+            }
+            return turnFailed ? "error" : "ready";
           case "session.started":
-            // A fresh session has no active turn — always start "ready".
-            // If a turn is resuming, the adapter will emit turn.started next.
-            return "ready";
           case "thread.started":
-            // Provider thread start notifications can arrive during an
-            // active turn; preserve turn-running state in that case.
+            // Provider session/thread start notifications can arrive during
+            // an active turn; preserve turn-running state in that case.
             return activeTurnId !== null ? "running" : "ready";
         }
       })();
-      const lastError =
-        event.type === "session.state.changed" && event.payload.state === "error"
-          ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
-          : event.type === "turn.completed" &&
-              normalizeRuntimeTurnState(event.payload.state) === "failed"
-            ? (event.payload.errorMessage ?? thread.session?.lastError ?? "Turn failed")
-            : status === "ready"
-              ? null
-              : (thread.session?.lastError ?? null);
+      const lastError = (() => {
+        if (event.type === "session.state.changed" && event.payload.state === "error") {
+          return event.payload.reason ?? thread.session?.lastError ?? "Provider session error";
+        }
+        if (turnFailed) {
+          return (
+            humanReadableTerminalReason(turnTerminalReason) ??
+            event.payload.errorMessage ??
+            thread.session?.lastError ??
+            "Turn failed"
+          );
+        }
+        if (status === "ready") {
+          return null;
+        }
+        return thread.session?.lastError ?? null;
+      })();
 
       if (shouldApplyThreadLifecycle) {
         if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
@@ -1304,6 +1379,16 @@ const make = Effect.fn("make")(function* () {
           },
           createdAt: now,
         });
+        yield* Effect.logInfo(
+          formatTimelineLog("server.runtime-ingestion", "thread-session.set-dispatched", {
+            provider: event.provider,
+            eventType: event.type,
+            threadId: thread.id,
+            status,
+            nextActiveTurnId,
+            lastError,
+          }),
+        );
       }
     }
 

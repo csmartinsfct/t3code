@@ -47,6 +47,7 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
+import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -678,6 +679,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
           });
+          yield* Effect.logInfo(
+            formatTimelineLog("server.projection", "thread-message.upserted", {
+              threadId: event.payload.threadId,
+              messageId: event.payload.messageId,
+              role: event.payload.role,
+              turnId: event.payload.turnId,
+              streaming: event.payload.streaming,
+              ...summarizeTimelineText(nextText),
+              replacedExisting: previousMessage !== undefined,
+            }),
+          );
           return;
         }
 
@@ -687,6 +699,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             messageIds: event.payload.messageIds,
           });
+          yield* Effect.logInfo(
+            formatTimelineLog("server.projection", "thread-message.deleted", {
+              threadId: event.payload.threadId,
+              messageIds: event.payload.messageIds,
+              messageCount: event.payload.messageIds.length,
+            }),
+          );
           // Attachment cleanup: recompute retained paths
           const remainingMessages = yield* projectionThreadMessageRepository.listByThreadId({
             threadId: event.payload.threadId,
@@ -854,6 +873,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         lastError: event.payload.session.lastError,
         updatedAt: event.payload.session.updatedAt,
       });
+      yield* Effect.logInfo(
+        formatTimelineLog("server.projection", "thread-session.upserted", {
+          threadId: event.payload.threadId,
+          status: event.payload.session.status,
+          providerName: event.payload.session.providerName,
+          activeTurnId: event.payload.session.activeTurnId,
+          updatedAt: event.payload.session.updatedAt,
+          lastError: event.payload.session.lastError,
+        }),
+      );
     });
 
     const applyThreadTurnsProjection: ProjectorDefinition["apply"] = Effect.fn(
@@ -868,6 +897,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             requestedAt: event.payload.createdAt,
           });
+          yield* Effect.logInfo(
+            formatTimelineLog("server.projection", "thread-turn.pending-start-recorded", {
+              threadId: event.payload.threadId,
+              messageId: event.payload.messageId,
+              createdAt: event.payload.createdAt,
+            }),
+          );
           return;
         }
 
@@ -948,6 +984,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
             threadId: event.payload.threadId,
           });
+          yield* Effect.logInfo(
+            formatTimelineLog("server.projection", "thread-turn.running-upserted", {
+              threadId: event.payload.threadId,
+              turnId,
+              status: event.payload.session.status,
+            }),
+          );
           return;
         }
 
@@ -976,6 +1019,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               startedAt: existingTurn.value.startedAt ?? event.payload.createdAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.createdAt,
             });
+            yield* Effect.logInfo(
+              formatTimelineLog("server.projection", "thread-turn.assistant-message-bound", {
+                threadId: event.payload.threadId,
+                turnId: event.payload.turnId,
+                messageId: event.payload.messageId,
+                streaming: event.payload.streaming,
+              }),
+            );
             return;
           }
           yield* projectionTurnRepository.upsertByTurnId({

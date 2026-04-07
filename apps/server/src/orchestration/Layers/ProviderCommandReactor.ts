@@ -16,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -492,8 +493,22 @@ const make = Effect.gen(function* () {
   }) {
     const thread = yield* resolveThread(input.threadId);
     if (!thread) {
+      yield* Effect.logWarning(
+        formatTimelineLog("server.provider-reactor", "turn-send.skipped-missing-thread", {
+          threadId: input.threadId,
+        }),
+      );
       return;
     }
+    yield* Effect.logInfo(
+      formatTimelineLog("server.provider-reactor", "turn-send.start", {
+        threadId: input.threadId,
+        messageLength: input.messageText.length,
+        attachmentCount: input.attachments?.length ?? 0,
+        interactionMode: input.interactionMode ?? null,
+        model: input.modelSelection?.model ?? null,
+      }),
+    );
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,
@@ -541,6 +556,11 @@ const make = Effect.gen(function* () {
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
+    yield* Effect.logInfo(
+      formatTimelineLog("server.provider-reactor", "turn-send.success", {
+        threadId: input.threadId,
+      }),
+    );
   });
 
   const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
@@ -645,8 +665,23 @@ const make = Effect.gen(function* () {
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
+    yield* Effect.logInfo(
+      formatTimelineLog("server.provider-reactor", "turn-start-requested.received", {
+        threadId: event.payload.threadId,
+        messageId: event.payload.messageId,
+        createdAt: event.payload.createdAt,
+        interactionMode: event.payload.interactionMode,
+        model: event.payload.modelSelection?.model ?? null,
+      }),
+    );
     const key = turnStartKeyForEvent(event);
     if (yield* hasHandledTurnStartRecently(key)) {
+      yield* Effect.logInfo(
+        formatTimelineLog("server.provider-reactor", "turn-start-requested.deduped", {
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+        }),
+      );
       return;
     }
 
@@ -657,6 +692,12 @@ const make = Effect.gen(function* () {
 
     const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
+      yield* Effect.logWarning(
+        formatTimelineLog("server.provider-reactor", "turn-start-requested.missing-user-message", {
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+        }),
+      );
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
@@ -709,13 +750,22 @@ const make = Effect.gen(function* () {
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.catchCause((cause) =>
-        appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Provider turn start failed",
-          detail: Cause.pretty(cause),
-          turnId: null,
-          createdAt: event.payload.createdAt,
+        Effect.gen(function* () {
+          yield* Effect.logWarning(
+            formatTimelineLog("server.provider-reactor", "turn-start-requested.send-failed", {
+              threadId: event.payload.threadId,
+              messageId: event.payload.messageId,
+              cause: Cause.pretty(cause),
+            }),
+          );
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Provider turn start failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          });
         }),
       ),
     );

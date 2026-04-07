@@ -35,6 +35,7 @@ import {
   baseProviderKind,
   providerProfileId,
 } from "@t3tools/contracts";
+import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -219,8 +220,34 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           ORCHESTRATION_WS_METHODS.dispatchCommand,
           Effect.gen(function* () {
             const normalizedCommand = yield* normalizeDispatchCommand(command);
+            yield* Effect.logInfo(
+              formatTimelineLog("server.ws", "orchestration.dispatch.received", {
+                type: normalizedCommand.type,
+                commandId: normalizedCommand.commandId,
+                ...(Object.hasOwn(normalizedCommand, "threadId")
+                  ? { threadId: (normalizedCommand as { threadId?: string }).threadId ?? null }
+                  : {}),
+                ...(Object.hasOwn(normalizedCommand, "projectId")
+                  ? { projectId: (normalizedCommand as { projectId?: string }).projectId ?? null }
+                  : {}),
+                ...(Object.hasOwn(normalizedCommand, "message") &&
+                typeof (normalizedCommand as { message?: { text?: string } }).message?.text ===
+                  "string"
+                  ? summarizeTimelineText(
+                      (normalizedCommand as { message: { text: string } }).message.text,
+                    )
+                  : {}),
+              }),
+            );
             const result = yield* startup.enqueueCommand(
               orchestrationEngine.dispatch(normalizedCommand),
+            );
+            yield* Effect.logInfo(
+              formatTimelineLog("server.ws", "orchestration.dispatch.completed", {
+                type: normalizedCommand.type,
+                commandId: normalizedCommand.commandId,
+                sequence: result.sequence,
+              }),
             );
             if (normalizedCommand.type === "thread.archive") {
               yield* terminalManager.close({ threadId: normalizedCommand.threadId }).pipe(
@@ -298,6 +325,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           Effect.gen(function* () {
             const snapshot = yield* orchestrationEngine.getReadModel();
             const fromSequenceExclusive = input.fromSequenceExclusive ?? snapshot.snapshotSequence;
+            yield* Effect.logInfo(
+              formatTimelineLog("server.ws", "orchestration.domain-events.subscribe", {
+                fromSequenceExclusive,
+                snapshotSequence: snapshot.snapshotSequence,
+              }),
+            );
             const replayEvents: Array<OrchestrationEvent> = yield* Stream.runCollect(
               orchestrationEngine.readEvents(fromSequenceExclusive),
             ).pipe(

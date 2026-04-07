@@ -293,6 +293,12 @@ function resultErrorsText(result: SDKResultMessage): string {
 }
 
 function isInterruptedResult(result: SDKResultMessage): boolean {
+  // Prefer the structured terminal_reason when available (SDK ≥ 0.2.91).
+  const reason = result.terminal_reason;
+  if (reason === "aborted_streaming" || reason === "aborted_tools") {
+    return true;
+  }
+
   const errors = resultErrorsText(result);
   if (errors.includes("interrupt")) {
     return true;
@@ -300,7 +306,6 @@ function isInterruptedResult(result: SDKResultMessage): boolean {
 
   return (
     result.subtype === "error_during_execution" &&
-    result.is_error === false &&
     (errors.includes("request was aborted") ||
       errors.includes("interrupted by user") ||
       errors.includes("aborted"))
@@ -567,7 +572,6 @@ function buildUserMessage(input: {
 }): SDKUserMessage {
   return {
     type: "user",
-    session_id: "",
     parent_tool_use_id: null,
     message: {
       role: "user",
@@ -653,14 +657,15 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
 });
 
 function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStatus {
-  if (result.subtype === "success") {
+  if (result.subtype === "success" || result.terminal_reason === "completed") {
     return "completed";
   }
 
-  const errors = resultErrorsText(result);
   if (isInterruptedResult(result)) {
     return "interrupted";
   }
+
+  const errors = resultErrorsText(result);
   if (errors.includes("cancel")) {
     return "cancelled";
   }
@@ -1429,6 +1434,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         payload: {
           state: status,
           ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
+          ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
           ...(result?.usage ? { usage: result.usage } : {}),
           ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
           ...(typeof result?.total_cost_usd === "number"
@@ -1513,6 +1519,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         state: status,
         ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
+        ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
         ...(result?.usage ? { usage: result.usage } : {}),
         ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
         ...(typeof result?.total_cost_usd === "number"

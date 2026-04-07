@@ -29,6 +29,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { formatTimelineLog, isTimelineLogMessage } from "@t3tools/shared/timeline";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { createSafeStdIoWrite } from "./safeStdio";
 import { syncShellEnvironment } from "./syncShellEnvironment";
@@ -164,6 +165,10 @@ function backendChildEnv(): NodeJS.ProcessEnv {
 function writeDesktopLogHeader(message: string): void {
   if (!desktopLogSink) return;
   desktopLogSink.write(`[${logTimestamp()}] [${logScope("desktop")}] ${message}\n`);
+}
+
+function writeDesktopTimeline(event: string, details?: unknown): void {
+  writeDesktopLogHeader(formatTimelineLog("desktop", event, details));
 }
 
 function writeBackendSessionBoundary(phase: "START" | "END", details: string): void {
@@ -1418,7 +1423,43 @@ function createWindow(): BrowserWindow {
   });
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
+    writeDesktopTimeline("renderer.did-finish-load", {
+      url: window.webContents.getURL(),
+    });
     emitUpdateState();
+  });
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
+    writeDesktopTimeline("renderer.did-fail-load", {
+      errorCode,
+      errorDescription,
+      validatedUrl,
+    });
+  });
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const shouldPersist =
+      level >= 2 || isTimelineLogMessage(message) || message.startsWith("[orchestration-recovery]");
+    if (!shouldPersist) {
+      return;
+    }
+    writeDesktopTimeline("renderer.console", {
+      level,
+      message,
+      line,
+      sourceId,
+    });
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    writeDesktopTimeline("renderer.process-gone", details);
+  });
+  window.on("unresponsive", () => {
+    writeDesktopTimeline("renderer.unresponsive", {
+      url: window.webContents.getURL(),
+    });
+  });
+  window.on("responsive", () => {
+    writeDesktopTimeline("renderer.responsive", {
+      url: window.webContents.getURL(),
+    });
   });
   window.once("ready-to-show", () => {
     if (isDevelopment && process.env.T3_DEV_RESTARTING) {
@@ -1429,6 +1470,9 @@ function createWindow(): BrowserWindow {
     } else {
       window.show();
     }
+    writeDesktopTimeline("renderer.ready-to-show", {
+      isDevelopment,
+    });
   });
 
   if (isDevelopment) {
