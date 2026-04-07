@@ -91,7 +91,8 @@ export type PersistedTicketHistoryEntry = typeof PersistedTicketHistoryEntry.Typ
 export const TicketRow = Schema.Struct({
   ...PersistedTicket.fields,
   isArchived: Schema.Number,
-  acceptanceCriteria: Schema.NullOr(Schema.Array(AcceptanceCriterion)).pipe(Schema.fromJsonString),
+  /** Kept as raw string | null — parsed in toPersistedTicket */
+  acceptanceCriteria: Schema.NullOr(Schema.String),
 });
 
 export const LabelRow = Schema.Struct({
