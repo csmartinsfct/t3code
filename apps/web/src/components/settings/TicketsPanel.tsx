@@ -13,7 +13,7 @@ export function TicketsPanel() {
   const navigate = useNavigate();
   const { project: initialProject } = Route.useSearch();
   const { tickets, projects, loading, selectedProjectId, setSelectedProjectId } = useTicketing({
-    initialProjectId: initialProject,
+    projectId: initialProject,
   });
   const [dialogOpen, setDialogOpen] = useState(false);
 

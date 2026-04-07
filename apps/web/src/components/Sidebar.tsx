@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  PanelLeftCloseIcon,
   PlusIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -117,6 +118,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -700,6 +702,9 @@ export default function Sidebar() {
   const clearProjectDraftThreadId = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadId,
   );
+  const viewMode = useUiStateStore((store) => store.viewMode);
+  const setViewMode = useUiStateStore((store) => store.setViewMode);
+  const { toggleSidebar } = useSidebar();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
@@ -2290,6 +2295,21 @@ export default function Sidebar() {
                   Projects
                 </span>
                 <div className="flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Collapse sidebar"
+                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => toggleSidebar()}
+                        />
+                      }
+                    >
+                      <PanelLeftCloseIcon className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="right">Collapse sidebar</TooltipPopup>
+                  </Tooltip>
                   <ProjectSortMenu
                     projectSortOrder={appSettings.sidebarProjectSortOrder}
                     threadSortOrder={appSettings.sidebarThreadSortOrder}
@@ -2425,6 +2445,31 @@ export default function Sidebar() {
           <SidebarSeparator />
           <SidebarFooter className="p-2">
             <SidebarUpdatePill />
+            {/* View mode toggle */}
+            <div className="flex rounded-md border border-border bg-muted/30 p-0.5">
+              <button
+                type="button"
+                className={`flex-1 rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  viewMode === "chat"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setViewMode("chat")}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                className={`flex-1 rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  viewMode === "management"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setViewMode("management")}
+              >
+                Board
+              </button>
+            </div>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton

@@ -1,10 +1,10 @@
 import type { TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
 
 export interface UseTicketingOptions {
-  initialProjectId?: string | undefined;
+  projectId?: string | undefined;
 }
 
 export interface UseTicketingReturn {
@@ -23,13 +23,29 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   >([]);
   const [loading, setLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    options?.initialProjectId ?? null,
+    options?.projectId ?? null,
   );
 
+  // Sync internal state when the caller-supplied projectId changes.
+  // Handles TanStack Router keeping components mounted across param-only
+  // navigations (thread switches in management view).
+  useEffect(() => {
+    if (options?.projectId !== undefined && options.projectId !== selectedProjectId) {
+      setTickets([]);
+      setSelectedProjectId(options.projectId);
+    }
+    // Only react to prop changes, not internal state changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options?.projectId]);
+
+  const fetchIdRef = useRef(0);
+
   const fetchData = useCallback(async () => {
+    const currentFetchId = ++fetchIdRef.current;
     try {
       const api = ensureNativeApi();
       const snapshot = await api.orchestration.getSnapshot();
+      if (fetchIdRef.current !== currentFetchId) return;
       const projectList = snapshot.projects.map((p) => ({
         id: p.id,
         title: p.title,
@@ -45,14 +61,18 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
 
       if (projectId) {
         const ticketList = await api.ticketing.list({ projectId: projectId as never });
+        if (fetchIdRef.current !== currentFetchId) return;
         setTickets(ticketList);
       } else {
         setTickets([]);
       }
     } catch (error) {
+      if (fetchIdRef.current !== currentFetchId) return;
       console.error("Failed to fetch tickets:", error);
     } finally {
-      setLoading(false);
+      if (fetchIdRef.current === currentFetchId) {
+        setLoading(false);
+      }
     }
   }, [selectedProjectId]);
 

@@ -202,7 +202,7 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 
 ### Data Hook
 
-`useTicketing({ initialProjectId? })` — fetches projects from orchestration snapshot, tickets from `api.ticketing.list()`, subscribes to real-time events. Project selection persisted in URL search params (`?project=<id>`).
+`useTicketing({ projectId? })` — fetches projects from orchestration snapshot, tickets from `api.ticketing.list()`, subscribes to real-time events. The hook syncs its internal project selection when the caller-supplied `projectId` changes. Project selection persisted in URL search params (`?project=<id>`).
 
 ---
 

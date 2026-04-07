@@ -1,9 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
+import { ManagementView } from "../components/management/ManagementView";
 import { SidebarTrigger } from "../components/ui/sidebar";
+import { useStore } from "../store";
+import { useUiStateStore } from "../uiStateStore";
 
 function ChatIndexRouteView() {
+  const viewMode = useUiStateStore((store) => store.viewMode);
+  const firstProjectId = useStore((store) => store.projects[0]?.id ?? null);
+
+  if (viewMode === "management" && firstProjectId) {
+    return <ManagementView threadId={null} projectId={firstProjectId} />;
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-muted-foreground/40">
       {!isElectron && (

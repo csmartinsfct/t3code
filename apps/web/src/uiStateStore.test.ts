@@ -16,6 +16,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
+    viewMode: "chat",
     ...overrides,
   };
 }

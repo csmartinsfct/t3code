@@ -16,9 +16,12 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
+export type ViewMode = "chat" | "management";
+
 interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
+  viewMode?: ViewMode;
 }
 
 export interface UiProjectState {
@@ -30,7 +33,9 @@ export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
 }
 
-export interface UiState extends UiProjectState, UiThreadState {}
+export interface UiState extends UiProjectState, UiThreadState {
+  viewMode: ViewMode;
+}
 
 export interface SyncProjectInput {
   id: ProjectId;
@@ -46,10 +51,12 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   threadLastVisitedAtById: {},
+  viewMode: "chat",
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
+let persistedViewMode: ViewMode = "chat";
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -66,12 +73,12 @@ function readPersistedState(): UiState {
           continue;
         }
         hydratePersistedProjectState(JSON.parse(legacyRaw) as PersistedUiState);
-        return initialState;
+        return { ...initialState, viewMode: persistedViewMode };
       }
       return initialState;
     }
     hydratePersistedProjectState(JSON.parse(raw) as PersistedUiState);
-    return initialState;
+    return { ...initialState, viewMode: persistedViewMode };
   } catch {
     return initialState;
   }
@@ -90,6 +97,8 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
       persistedProjectOrderCwds.push(cwd);
     }
   }
+  persistedViewMode =
+    parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
 }
 
 function persistState(state: UiState): void {
@@ -112,6 +121,7 @@ function persistState(state: UiState): void {
       JSON.stringify({
         expandedProjectCwds,
         projectOrderCwds,
+        viewMode: state.viewMode,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -390,6 +400,7 @@ interface UiStateStore extends UiState {
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
+  setViewMode: (mode: ViewMode) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -406,6 +417,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
+  setViewMode: (mode) => set({ viewMode: mode }),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

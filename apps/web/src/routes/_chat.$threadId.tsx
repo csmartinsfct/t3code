@@ -3,6 +3,8 @@ import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/reac
 import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import ChatView from "../components/ChatView";
+import { ManagementView } from "../components/management/ManagementView";
+import { useUiStateStore } from "../uiStateStore";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { projectScriptCwd } from "../projectScripts";
 import {
@@ -352,8 +354,14 @@ function ChatThreadRouteView() {
     }
   }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
 
+  const viewMode = useUiStateStore((store) => store.viewMode);
+
   if (!bootstrapComplete || !routeThreadExists) {
     return null;
+  }
+
+  if (viewMode === "management" && resolvedProjectId) {
+    return <ManagementView threadId={threadId} projectId={resolvedProjectId} />;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
