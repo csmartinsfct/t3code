@@ -57,6 +57,7 @@ import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks";
+import { TicketingService } from "./ticketing/Services/Ticketing";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { RepoDiscovery } from "./workspace/Services/RepoDiscovery";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
@@ -84,6 +85,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const startup = yield* ServerRuntimeStartup;
     const managedRuns = yield* ManagedRunService;
     const scheduledTasks = yield* ScheduledTaskService;
+    const ticketing = yield* TicketingService;
     const repoDiscovery = yield* RepoDiscovery;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -589,6 +591,122 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.subscribeScheduledTaskEvents]: () =>
         observeRpcStream(WS_METHODS.subscribeScheduledTaskEvents, scheduledTasks.streamEvents, {
           "rpc.aggregate": "scheduled-tasks",
+        }),
+      [WS_METHODS.ticketingList]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingList, ticketing.list(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingGetById]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetById, ticketing.getById(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingGetByIdentifier]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetByIdentifier, ticketing.getByIdentifier(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingCreate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingCreate, ticketing.create(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUpdate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUpdate, ticketing.update(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingDelete]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingDelete, ticketing.delete(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingReorder]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingReorder, ticketing.reorder(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingSearch]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingSearch, ticketing.search(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingGetTree]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetTree, ticketing.getTree(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingSetDependencies]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingSetDependencies, ticketing.setDependencies(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingAddDependency]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingAddDependency, ticketing.addDependency(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingRemoveDependency]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingRemoveDependency, ticketing.removeDependency(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUpdateCriterionStatus]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.ticketingUpdateCriterionStatus,
+          ticketing.updateCriterionStatus(input),
+          { "rpc.aggregate": "ticketing" },
+        ),
+      [WS_METHODS.ticketingGetHistory]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetHistory, ticketing.getHistory(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingListLabels]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingListLabels, ticketing.listLabels(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingCreateLabel]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingCreateLabel, ticketing.createLabel(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUpdateLabel]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUpdateLabel, ticketing.updateLabel(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingDeleteLabel]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingDeleteLabel, ticketing.deleteLabel(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingAddTicketLabel]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingAddTicketLabel, ticketing.addTicketLabel(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingRemoveTicketLabel]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.ticketingRemoveTicketLabel,
+          ticketing.removeTicketLabel(input),
+          { "rpc.aggregate": "ticketing" },
+        ),
+      [WS_METHODS.ticketingListComments]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingListComments, ticketing.listComments(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingCreateComment]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingCreateComment, ticketing.createComment(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUpdateComment]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUpdateComment, ticketing.updateComment(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingDeleteComment]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingDeleteComment, ticketing.deleteComment(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingListArtifacts]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingListArtifacts, ticketing.listArtifacts(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingCreateArtifact]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingCreateArtifact, ticketing.createArtifact(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingDeleteArtifact]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingDeleteArtifact, ticketing.deleteArtifact(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.subscribeTicketingEvents]: () =>
+        observeRpcStream(WS_METHODS.subscribeTicketingEvents, ticketing.streamEvents, {
+          "rpc.aggregate": "ticketing",
         }),
       [WS_METHODS.gitDiscoverRepos]: (input) =>
         observeRpcEffect(

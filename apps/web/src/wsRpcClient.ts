@@ -1,5 +1,6 @@
 import {
   type ScheduledTaskStreamEvent,
+  type TicketingStreamEvent,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -84,6 +85,38 @@ export interface WsRpcClient {
     readonly runNow: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksRunNow>;
     readonly listRuns: RpcUnaryMethod<typeof WS_METHODS.scheduledTasksListRuns>;
     readonly onEvent: (listener: (event: ScheduledTaskStreamEvent) => void) => () => void;
+  };
+  readonly ticketing: {
+    readonly list: RpcUnaryMethod<typeof WS_METHODS.ticketingList>;
+    readonly getById: RpcUnaryMethod<typeof WS_METHODS.ticketingGetById>;
+    readonly getByIdentifier: RpcUnaryMethod<typeof WS_METHODS.ticketingGetByIdentifier>;
+    readonly create: RpcUnaryMethod<typeof WS_METHODS.ticketingCreate>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdate>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.ticketingDelete>;
+    readonly reorder: RpcUnaryMethod<typeof WS_METHODS.ticketingReorder>;
+    readonly search: RpcUnaryMethod<typeof WS_METHODS.ticketingSearch>;
+    readonly getTree: RpcUnaryMethod<typeof WS_METHODS.ticketingGetTree>;
+    readonly setDependencies: RpcUnaryMethod<typeof WS_METHODS.ticketingSetDependencies>;
+    readonly addDependency: RpcUnaryMethod<typeof WS_METHODS.ticketingAddDependency>;
+    readonly removeDependency: RpcUnaryMethod<typeof WS_METHODS.ticketingRemoveDependency>;
+    readonly updateCriterionStatus: RpcUnaryMethod<
+      typeof WS_METHODS.ticketingUpdateCriterionStatus
+    >;
+    readonly getHistory: RpcUnaryMethod<typeof WS_METHODS.ticketingGetHistory>;
+    readonly listLabels: RpcUnaryMethod<typeof WS_METHODS.ticketingListLabels>;
+    readonly createLabel: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateLabel>;
+    readonly updateLabel: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdateLabel>;
+    readonly deleteLabel: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteLabel>;
+    readonly addTicketLabel: RpcUnaryMethod<typeof WS_METHODS.ticketingAddTicketLabel>;
+    readonly removeTicketLabel: RpcUnaryMethod<typeof WS_METHODS.ticketingRemoveTicketLabel>;
+    readonly listComments: RpcUnaryMethod<typeof WS_METHODS.ticketingListComments>;
+    readonly createComment: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateComment>;
+    readonly updateComment: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdateComment>;
+    readonly deleteComment: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteComment>;
+    readonly listArtifacts: RpcUnaryMethod<typeof WS_METHODS.ticketingListArtifacts>;
+    readonly createArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateArtifact>;
+    readonly deleteArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteArtifact>;
+    readonly onEvent: (listener: (event: TicketingStreamEvent) => void) => () => void;
   };
   readonly shell: {
     readonly openInEditor: (input: {
@@ -212,6 +245,57 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           (client) => client[WS_METHODS.subscribeScheduledTaskEvents]({}),
           listener,
         ),
+    },
+    ticketing: {
+      list: (input) => transport.request((client) => client[WS_METHODS.ticketingList](input)),
+      getById: (input) => transport.request((client) => client[WS_METHODS.ticketingGetById](input)),
+      getByIdentifier: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetByIdentifier](input)),
+      create: (input) => transport.request((client) => client[WS_METHODS.ticketingCreate](input)),
+      update: (input) => transport.request((client) => client[WS_METHODS.ticketingUpdate](input)),
+      delete: (input) => transport.request((client) => client[WS_METHODS.ticketingDelete](input)),
+      reorder: (input) => transport.request((client) => client[WS_METHODS.ticketingReorder](input)),
+      search: (input) => transport.request((client) => client[WS_METHODS.ticketingSearch](input)),
+      getTree: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetTree](input)) as never,
+      setDependencies: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingSetDependencies](input)),
+      addDependency: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingAddDependency](input)),
+      removeDependency: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingRemoveDependency](input)),
+      updateCriterionStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUpdateCriterionStatus](input)),
+      getHistory: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetHistory](input)),
+      listLabels: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingListLabels](input)),
+      createLabel: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingCreateLabel](input)),
+      updateLabel: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUpdateLabel](input)),
+      deleteLabel: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingDeleteLabel](input)),
+      addTicketLabel: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingAddTicketLabel](input)),
+      removeTicketLabel: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingRemoveTicketLabel](input)),
+      listComments: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingListComments](input)),
+      createComment: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingCreateComment](input)),
+      updateComment: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUpdateComment](input)),
+      deleteComment: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingDeleteComment](input)),
+      listArtifacts: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingListArtifacts](input)),
+      createArtifact: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingCreateArtifact](input)),
+      deleteArtifact: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingDeleteArtifact](input)),
+      onEvent: (listener) =>
+        transport.subscribe((client) => client[WS_METHODS.subscribeTicketingEvents]({}), listener),
     },
     shell: {
       openInEditor: (input) =>

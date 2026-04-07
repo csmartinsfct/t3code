@@ -75,6 +75,41 @@ import {
   ScheduledTaskRun,
 } from "./scheduledTasks";
 import {
+  ArtifactCreateInput,
+  ArtifactDeleteInput,
+  ArtifactListInput,
+  CommentCreateInput,
+  CommentDeleteInput,
+  CommentListInput,
+  CommentUpdateInput,
+  DependencyInput,
+  LabelCreateInput,
+  LabelDeleteInput,
+  LabelListInput,
+  LabelUpdateInput,
+  SetDependenciesInput,
+  Ticket,
+  TicketCreateInput,
+  TicketUpdateInput,
+  TicketDeleteInput,
+  TicketGetByIdInput,
+  TicketGetByIdentifierInput,
+  TicketHistoryEntry,
+  TicketHistoryInput,
+  TicketingError,
+  TicketingStreamEvent,
+  TicketLabelInput,
+  TicketListInput,
+  TicketReorderInput,
+  TicketSearchInput,
+  TicketSummary,
+  TicketTreeInput,
+  UpdateCriterionStatusInput,
+  Artifact,
+  Comment,
+  Label,
+} from "./ticketing";
+import {
   ProjectListDirectoryError,
   ProjectListDirectoryInput,
   ProjectListDirectoryResult,
@@ -178,11 +213,41 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksListRuns: "scheduledTasks.listRuns",
 
+  // Ticketing methods
+  ticketingList: "ticketing.list",
+  ticketingGetById: "ticketing.getById",
+  ticketingGetByIdentifier: "ticketing.getByIdentifier",
+  ticketingCreate: "ticketing.create",
+  ticketingUpdate: "ticketing.update",
+  ticketingDelete: "ticketing.delete",
+  ticketingReorder: "ticketing.reorder",
+  ticketingSearch: "ticketing.search",
+  ticketingGetTree: "ticketing.getTree",
+  ticketingSetDependencies: "ticketing.setDependencies",
+  ticketingAddDependency: "ticketing.addDependency",
+  ticketingRemoveDependency: "ticketing.removeDependency",
+  ticketingUpdateCriterionStatus: "ticketing.updateCriterionStatus",
+  ticketingGetHistory: "ticketing.getHistory",
+  ticketingListLabels: "ticketing.listLabels",
+  ticketingCreateLabel: "ticketing.createLabel",
+  ticketingUpdateLabel: "ticketing.updateLabel",
+  ticketingDeleteLabel: "ticketing.deleteLabel",
+  ticketingAddTicketLabel: "ticketing.addTicketLabel",
+  ticketingRemoveTicketLabel: "ticketing.removeTicketLabel",
+  ticketingListComments: "ticketing.listComments",
+  ticketingCreateComment: "ticketing.createComment",
+  ticketingUpdateComment: "ticketing.updateComment",
+  ticketingDeleteComment: "ticketing.deleteComment",
+  ticketingListArtifacts: "ticketing.listArtifacts",
+  ticketingCreateArtifact: "ticketing.createArtifact",
+  ticketingDeleteArtifact: "ticketing.deleteArtifact",
+
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeManagedRunEvents: "subscribeManagedRunEvents",
   subscribeScheduledTaskEvents: "subscribeScheduledTaskEvents",
+  subscribeTicketingEvents: "subscribeTicketingEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
 } as const;
@@ -535,6 +600,169 @@ export const WsSubscribeScheduledTaskEventsRpc = Rpc.make(WS_METHODS.subscribeSc
   stream: true,
 });
 
+// Ticketing RPCs
+
+export const WsTicketingListRpc = Rpc.make(WS_METHODS.ticketingList, {
+  payload: TicketListInput,
+  success: Schema.Array(TicketSummary),
+  error: TicketingError,
+});
+
+export const WsTicketingGetByIdRpc = Rpc.make(WS_METHODS.ticketingGetById, {
+  payload: TicketGetByIdInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
+export const WsTicketingGetByIdentifierRpc = Rpc.make(WS_METHODS.ticketingGetByIdentifier, {
+  payload: TicketGetByIdentifierInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
+export const WsTicketingCreateRpc = Rpc.make(WS_METHODS.ticketingCreate, {
+  payload: TicketCreateInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
+export const WsTicketingUpdateRpc = Rpc.make(WS_METHODS.ticketingUpdate, {
+  payload: TicketUpdateInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
+export const WsTicketingDeleteRpc = Rpc.make(WS_METHODS.ticketingDelete, {
+  payload: TicketDeleteInput,
+  error: TicketingError,
+});
+
+export const WsTicketingReorderRpc = Rpc.make(WS_METHODS.ticketingReorder, {
+  payload: TicketReorderInput,
+  error: TicketingError,
+});
+
+export const WsTicketingSearchRpc = Rpc.make(WS_METHODS.ticketingSearch, {
+  payload: TicketSearchInput,
+  success: Schema.Array(TicketSummary),
+  error: TicketingError,
+});
+
+export const WsTicketingGetTreeRpc = Rpc.make(WS_METHODS.ticketingGetTree, {
+  payload: TicketTreeInput,
+  success: Schema.Array(Schema.Struct({ ticket: TicketSummary })),
+  error: TicketingError,
+});
+
+export const WsTicketingSetDependenciesRpc = Rpc.make(WS_METHODS.ticketingSetDependencies, {
+  payload: SetDependenciesInput,
+  error: TicketingError,
+});
+
+export const WsTicketingAddDependencyRpc = Rpc.make(WS_METHODS.ticketingAddDependency, {
+  payload: DependencyInput,
+  error: TicketingError,
+});
+
+export const WsTicketingRemoveDependencyRpc = Rpc.make(WS_METHODS.ticketingRemoveDependency, {
+  payload: DependencyInput,
+  error: TicketingError,
+});
+
+export const WsTicketingUpdateCriterionStatusRpc = Rpc.make(
+  WS_METHODS.ticketingUpdateCriterionStatus,
+  {
+    payload: UpdateCriterionStatusInput,
+    success: Ticket,
+    error: TicketingError,
+  },
+);
+
+export const WsTicketingGetHistoryRpc = Rpc.make(WS_METHODS.ticketingGetHistory, {
+  payload: TicketHistoryInput,
+  success: Schema.Array(TicketHistoryEntry),
+  error: TicketingError,
+});
+
+export const WsTicketingListLabelsRpc = Rpc.make(WS_METHODS.ticketingListLabels, {
+  payload: LabelListInput,
+  success: Schema.Array(Label),
+  error: TicketingError,
+});
+
+export const WsTicketingCreateLabelRpc = Rpc.make(WS_METHODS.ticketingCreateLabel, {
+  payload: LabelCreateInput,
+  success: Label,
+  error: TicketingError,
+});
+
+export const WsTicketingUpdateLabelRpc = Rpc.make(WS_METHODS.ticketingUpdateLabel, {
+  payload: LabelUpdateInput,
+  success: Label,
+  error: TicketingError,
+});
+
+export const WsTicketingDeleteLabelRpc = Rpc.make(WS_METHODS.ticketingDeleteLabel, {
+  payload: LabelDeleteInput,
+  error: TicketingError,
+});
+
+export const WsTicketingAddTicketLabelRpc = Rpc.make(WS_METHODS.ticketingAddTicketLabel, {
+  payload: TicketLabelInput,
+  error: TicketingError,
+});
+
+export const WsTicketingRemoveTicketLabelRpc = Rpc.make(WS_METHODS.ticketingRemoveTicketLabel, {
+  payload: TicketLabelInput,
+  error: TicketingError,
+});
+
+export const WsTicketingListCommentsRpc = Rpc.make(WS_METHODS.ticketingListComments, {
+  payload: CommentListInput,
+  success: Schema.Array(Comment),
+  error: TicketingError,
+});
+
+export const WsTicketingCreateCommentRpc = Rpc.make(WS_METHODS.ticketingCreateComment, {
+  payload: CommentCreateInput,
+  success: Comment,
+  error: TicketingError,
+});
+
+export const WsTicketingUpdateCommentRpc = Rpc.make(WS_METHODS.ticketingUpdateComment, {
+  payload: CommentUpdateInput,
+  success: Comment,
+  error: TicketingError,
+});
+
+export const WsTicketingDeleteCommentRpc = Rpc.make(WS_METHODS.ticketingDeleteComment, {
+  payload: CommentDeleteInput,
+  error: TicketingError,
+});
+
+export const WsTicketingListArtifactsRpc = Rpc.make(WS_METHODS.ticketingListArtifacts, {
+  payload: ArtifactListInput,
+  success: Schema.Array(Artifact),
+  error: TicketingError,
+});
+
+export const WsTicketingCreateArtifactRpc = Rpc.make(WS_METHODS.ticketingCreateArtifact, {
+  payload: ArtifactCreateInput,
+  success: Artifact,
+  error: TicketingError,
+});
+
+export const WsTicketingDeleteArtifactRpc = Rpc.make(WS_METHODS.ticketingDeleteArtifact, {
+  payload: ArtifactDeleteInput,
+  error: TicketingError,
+});
+
+export const WsSubscribeTicketingEventsRpc = Rpc.make(WS_METHODS.subscribeTicketingEvents, {
+  payload: Schema.Struct({}),
+  success: TicketingStreamEvent,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -587,6 +815,34 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksListRunsRpc,
   WsSubscribeScheduledTaskEventsRpc,
+  WsTicketingListRpc,
+  WsTicketingGetByIdRpc,
+  WsTicketingGetByIdentifierRpc,
+  WsTicketingCreateRpc,
+  WsTicketingUpdateRpc,
+  WsTicketingDeleteRpc,
+  WsTicketingReorderRpc,
+  WsTicketingSearchRpc,
+  WsTicketingGetTreeRpc,
+  WsTicketingSetDependenciesRpc,
+  WsTicketingAddDependencyRpc,
+  WsTicketingRemoveDependencyRpc,
+  WsTicketingUpdateCriterionStatusRpc,
+  WsTicketingGetHistoryRpc,
+  WsTicketingListLabelsRpc,
+  WsTicketingCreateLabelRpc,
+  WsTicketingUpdateLabelRpc,
+  WsTicketingDeleteLabelRpc,
+  WsTicketingAddTicketLabelRpc,
+  WsTicketingRemoveTicketLabelRpc,
+  WsTicketingListCommentsRpc,
+  WsTicketingCreateCommentRpc,
+  WsTicketingUpdateCommentRpc,
+  WsTicketingDeleteCommentRpc,
+  WsTicketingListArtifactsRpc,
+  WsTicketingCreateArtifactRpc,
+  WsTicketingDeleteArtifactRpc,
+  WsSubscribeTicketingEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

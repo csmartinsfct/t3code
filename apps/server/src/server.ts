@@ -51,6 +51,9 @@ import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
 import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
 import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
 import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
+import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
+import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
+import { ticketingMcpRouteLayer } from "./ticketing/http";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -231,6 +234,12 @@ const RuntimeServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
+  Layer.provideMerge(
+    TicketingServiceLive.pipe(
+      Layer.provide(TicketingRepositoryLive),
+      Layer.provide(PersistenceLayerLive),
+    ),
+  ),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ProviderRateLimitsCacheLive),
@@ -249,6 +258,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   projectFaviconRouteLayer,
   managedRunsMcpRouteLayer,
   scheduledTasksMcpRouteLayer,
+  ticketingMcpRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );

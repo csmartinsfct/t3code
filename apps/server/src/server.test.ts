@@ -46,6 +46,7 @@ import {
 
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
+import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -313,6 +314,38 @@ const buildAppUnderTest = (options?: {
           executeJob: () => Effect.die(new Error("not mocked")),
           executeDueJobs: () => Effect.void,
           catchUpMissedRuns: () => Effect.void,
+          streamEvents: Stream.empty,
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(TicketingService, {
+          list: () => Effect.succeed([]),
+          getById: () => Effect.die(new Error("not mocked")),
+          getByIdentifier: () => Effect.die(new Error("not mocked")),
+          create: () => Effect.die(new Error("not mocked")),
+          update: () => Effect.die(new Error("not mocked")),
+          delete: () => Effect.void,
+          reorder: () => Effect.void,
+          search: () => Effect.succeed([]),
+          getTree: () => Effect.succeed([]),
+          setDependencies: () => Effect.void,
+          addDependency: () => Effect.void,
+          removeDependency: () => Effect.void,
+          updateCriterionStatus: () => Effect.die(new Error("not mocked")),
+          getHistory: () => Effect.succeed([]),
+          listLabels: () => Effect.succeed([]),
+          createLabel: () => Effect.die(new Error("not mocked")),
+          updateLabel: () => Effect.die(new Error("not mocked")),
+          deleteLabel: () => Effect.void,
+          addTicketLabel: () => Effect.void,
+          removeTicketLabel: () => Effect.void,
+          listComments: () => Effect.succeed([]),
+          createComment: () => Effect.die(new Error("not mocked")),
+          updateComment: () => Effect.die(new Error("not mocked")),
+          deleteComment: () => Effect.void,
+          listArtifacts: () => Effect.succeed([]),
+          createArtifact: () => Effect.die(new Error("not mocked")),
+          deleteArtifact: () => Effect.void,
           streamEvents: Stream.empty,
         }),
       ),

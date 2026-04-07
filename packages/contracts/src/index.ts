@@ -13,4 +13,5 @@ export * from "./editor";
 export * from "./project";
 export * from "./managedRuns";
 export * from "./scheduledTasks";
+export * from "./ticketing";
 export * from "./rpc";

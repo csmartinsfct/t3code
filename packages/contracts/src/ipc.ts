@@ -50,6 +50,41 @@ import type {
   ScheduledTaskRun,
 } from "./scheduledTasks";
 import type {
+  Artifact,
+  ArtifactCreateInput,
+  ArtifactDeleteInput,
+  ArtifactListInput,
+  Comment,
+  CommentCreateInput,
+  CommentDeleteInput,
+  CommentListInput,
+  CommentUpdateInput,
+  DependencyInput,
+  Label,
+  LabelCreateInput,
+  LabelDeleteInput,
+  LabelListInput,
+  LabelUpdateInput,
+  SetDependenciesInput,
+  Ticket,
+  TicketCreateInput,
+  TicketUpdateInput,
+  TicketDeleteInput,
+  TicketGetByIdInput,
+  TicketGetByIdentifierInput,
+  TicketHistoryEntry,
+  TicketHistoryInput,
+  TicketingStreamEvent,
+  TicketLabelInput,
+  TicketListInput,
+  TicketReorderInput,
+  TicketSearchInput,
+  TicketSummary,
+  TicketTreeInput,
+  TicketTreeNode,
+  UpdateCriterionStatusInput,
+} from "./ticketing";
+import type {
   ManagedRunDetail,
   ManagedRunGetInferenceRecordInput,
   ManagedRunGetInput,
@@ -242,6 +277,36 @@ export interface NativeApi {
     runNow: (input: ScheduledTaskRunNowInput) => Promise<ScheduledTaskRun>;
     listRuns: (input: ScheduledTaskListRunsInput) => Promise<ReadonlyArray<ScheduledTaskRun>>;
     onEvent: (callback: (event: ScheduledTaskStreamEvent) => void) => () => void;
+  };
+  ticketing: {
+    list: (input: TicketListInput) => Promise<ReadonlyArray<TicketSummary>>;
+    getById: (input: TicketGetByIdInput) => Promise<Ticket>;
+    getByIdentifier: (input: TicketGetByIdentifierInput) => Promise<Ticket>;
+    create: (input: TicketCreateInput) => Promise<Ticket>;
+    update: (input: TicketUpdateInput) => Promise<Ticket>;
+    delete: (input: TicketDeleteInput) => Promise<void>;
+    reorder: (input: TicketReorderInput) => Promise<void>;
+    search: (input: TicketSearchInput) => Promise<ReadonlyArray<TicketSummary>>;
+    getTree: (input: TicketTreeInput) => Promise<ReadonlyArray<TicketTreeNode>>;
+    setDependencies: (input: SetDependenciesInput) => Promise<void>;
+    addDependency: (input: DependencyInput) => Promise<void>;
+    removeDependency: (input: DependencyInput) => Promise<void>;
+    updateCriterionStatus: (input: UpdateCriterionStatusInput) => Promise<Ticket>;
+    getHistory: (input: TicketHistoryInput) => Promise<ReadonlyArray<TicketHistoryEntry>>;
+    listLabels: (input: LabelListInput) => Promise<ReadonlyArray<Label>>;
+    createLabel: (input: LabelCreateInput) => Promise<Label>;
+    updateLabel: (input: LabelUpdateInput) => Promise<Label>;
+    deleteLabel: (input: LabelDeleteInput) => Promise<void>;
+    addTicketLabel: (input: TicketLabelInput) => Promise<void>;
+    removeTicketLabel: (input: TicketLabelInput) => Promise<void>;
+    listComments: (input: CommentListInput) => Promise<ReadonlyArray<Comment>>;
+    createComment: (input: CommentCreateInput) => Promise<Comment>;
+    updateComment: (input: CommentUpdateInput) => Promise<Comment>;
+    deleteComment: (input: CommentDeleteInput) => Promise<void>;
+    listArtifacts: (input: ArtifactListInput) => Promise<ReadonlyArray<Artifact>>;
+    createArtifact: (input: ArtifactCreateInput) => Promise<Artifact>;
+    deleteArtifact: (input: ArtifactDeleteInput) => Promise<void>;
+    onEvent: (callback: (event: TicketingStreamEvent) => void) => () => void;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
