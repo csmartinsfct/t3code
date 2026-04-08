@@ -3,12 +3,15 @@ import type {
   TicketId,
   TicketPriority,
   TicketStatus,
+  TicketSummary,
   TicketingStreamEvent,
 } from "@t3tools/contracts";
+import { useDraggable } from "@dnd-kit/core";
 import { TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -272,30 +275,7 @@ export function KanbanTicketDetail({
 
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Sub-tickets ({ticket.subTickets.length})
-            </h3>
-            <div className="flex flex-col gap-1">
-              {ticket.subTickets.map((sub) => {
-                const subStatusCfg = STATUS_CONFIG[sub.status];
-                return (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
-                    onClick={() => onNavigateToTicket(sub.id)}
-                  >
-                    <div className={`size-2 shrink-0 rounded-full ${subStatusCfg.dotClass}`} />
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {sub.identifier}
-                    </span>
-                    <span className="truncate text-foreground">{sub.title}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
         )}
 
         {/* Comments */}
@@ -332,5 +312,86 @@ export function KanbanTicketDetail({
         </AlertDialogPopup>
       </AlertDialog>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-ticket list with drag-to-chat and shift+click multi-select
+// ---------------------------------------------------------------------------
+
+function SubTicketsList({
+  subTickets,
+  onNavigateToTicket,
+}: {
+  subTickets: readonly TicketSummary[];
+  onNavigateToTicket: (ticketId: TicketId) => void;
+}) {
+  const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
+  const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
+  const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-muted-foreground">
+        Sub-tickets ({subTickets.length})
+      </h3>
+      <div className="flex flex-col gap-1">
+        {subTickets.map((sub) => (
+          <DraggableSubTicket
+            key={sub.id}
+            sub={sub}
+            isSelected={selectedTicketIds.has(sub.id)}
+            onNavigate={() => {
+              clearSelection();
+              onNavigateToTicket(sub.id);
+            }}
+            onShiftClick={() => toggleTicket(sub.id, sub)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DraggableSubTicket({
+  sub,
+  isSelected,
+  onNavigate,
+  onShiftClick,
+}: {
+  sub: TicketSummary;
+  isSelected: boolean;
+  onNavigate: () => void;
+  onShiftClick: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: sub.id,
+    data: { ticket: sub, status: sub.status },
+  });
+  const subStatusCfg = STATUS_CONFIG[sub.status];
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      data-ticket-selectable
+      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+        isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+      } ${isDragging ? "opacity-40" : ""}`}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          onShiftClick();
+          return;
+        }
+        onNavigate();
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <div className={`size-2 shrink-0 rounded-full ${subStatusCfg.dotClass}`} />
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{sub.identifier}</span>
+      <span className="truncate text-foreground">{sub.title}</span>
+    </button>
   );
 }

@@ -3,15 +3,26 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { useDroppable } from "@dnd-kit/core";
 
 import { STATUS_CONFIG } from "../settings/ticketUtils";
+import type { EpicProgress } from "./KanbanCard";
 import { KanbanCard } from "./KanbanCard";
 
 interface KanbanColumnProps {
   status: TicketStatus;
   tickets: TicketSummary[];
+  epicProgressMap: ReadonlyMap<string, EpicProgress>;
+  selectedTicketIds: ReadonlySet<string>;
+  onShiftClickTicket: (ticket: TicketSummary) => void;
   onTicketClick: (ticketId: TicketId) => void;
 }
 
-export function KanbanColumn({ status, tickets, onTicketClick }: KanbanColumnProps) {
+export function KanbanColumn({
+  status,
+  tickets,
+  epicProgressMap,
+  selectedTicketIds,
+  onShiftClickTicket,
+  onTicketClick,
+}: KanbanColumnProps) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}`, data: { status } });
 
@@ -35,6 +46,9 @@ export function KanbanColumn({ status, tickets, onTicketClick }: KanbanColumnPro
                 key={ticket.id}
                 ticket={ticket}
                 status={status}
+                epicProgress={epicProgressMap.get(ticket.id)}
+                isSelected={selectedTicketIds.has(ticket.id)}
+                onShiftClick={onShiftClickTicket}
                 onClick={() => onTicketClick(ticket.id)}
               />
             ))}

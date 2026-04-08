@@ -6,17 +6,19 @@ import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState
 
 import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
+import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { cn } from "~/lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { Button } from "../ui/button";
 import { CreateTicketDialog } from "../settings/CreateTicketDialog";
 import { ALL_STATUSES } from "../settings/ticketUtils";
+import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
 
 interface KanbanBoardProps {
   projectId: string;
-  onDropOnChat?: (ticket: TicketSummary) => void;
+  onDropOnChat?: (tickets: TicketSummary[]) => void;
 }
 
 export interface KanbanBoardHandle {
@@ -30,6 +32,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const { tickets, loading, applyLocalReorder } = useTicketing({ projectId });
   const [selectedTicketId, setSelectedTicketId] = useState<TicketId | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
+  const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
+  const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
 
   const ticketsByStatus = useMemo(() => {
     const grouped: Record<TicketStatus, TicketSummary[]> = {
@@ -49,9 +55,44 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     return grouped;
   }, [tickets]);
 
-  // Keep a ref so the drag-end handler always sees the latest grouped tickets
+  // Compute epic progress: for each ticket with sub-tickets, count how many are done
+  const epicProgressMap = useMemo(() => {
+    const map = new Map<string, EpicProgress>();
+    const epics = tickets.filter((t) => t.subTicketCount > 0);
+    if (epics.length === 0) return map;
+
+    const epicIds = new Set(epics.map((e) => e.id));
+    // Group children by parentId
+    const childrenByParent = new Map<string, TicketSummary[]>();
+    for (const t of tickets) {
+      if (t.parentId && epicIds.has(t.parentId)) {
+        const list = childrenByParent.get(t.parentId);
+        if (list) list.push(t);
+        else childrenByParent.set(t.parentId, [t]);
+      }
+    }
+
+    for (const epic of epics) {
+      const children = childrenByParent.get(epic.id) ?? [];
+      const completed = children.filter((c) => c.status === "done").length;
+      map.set(epic.id, { completed, total: epic.subTicketCount });
+    }
+    return map;
+  }, [tickets]);
+
+  // Keep refs so the drag-end handler always sees the latest data
   const ticketsByStatusRef = useRef(ticketsByStatus);
   ticketsByStatusRef.current = ticketsByStatus;
+
+  const ticketsRef = useRef(tickets);
+  ticketsRef.current = tickets;
+
+  const handleShiftClickTicket = useCallback(
+    (ticket: TicketSummary) => {
+      toggleTicket(ticket.id, ticket);
+    },
+    [toggleTicket],
+  );
 
   const handleBoardDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -64,7 +105,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
       // --- Drop on chat ---
       if (overId === "chat-composer") {
-        onDropOnChat?.(ticket);
+        const selStore = useTicketSelectionStore.getState();
+        if (selStore.selectedTicketIds.has(ticket.id)) {
+          onDropOnChat?.([...selStore.selectedTickets.values()]);
+        } else {
+          onDropOnChat?.([ticket]);
+        }
         return;
       }
 
@@ -105,9 +151,23 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         const items = targetColumn.map((t, i) => ({ id: t.id, sortOrder: i * 1000 }));
 
         // Optimistically update local state
-        applyLocalReorder(
-          items.map((item) => (item.id === ticket.id ? { ...item, status: targetStatus } : item)),
+        const localUpdates: Array<{ id: string; sortOrder: number; status?: string }> = items.map(
+          (item) => (item.id === ticket.id ? { ...item, status: targetStatus } : item),
         );
+
+        // Epic cascade: move sub-tickets that match the source status
+        const cascadeSubTickets =
+          ticket.subTicketCount > 0
+            ? ticketsRef.current.filter(
+                (t) => t.parentId === ticket.id && t.status === sourceStatus,
+              )
+            : [];
+        for (const sub of cascadeSubTickets) {
+          localUpdates.push({ id: sub.id, sortOrder: sub.sortOrder, status: targetStatus });
+        }
+
+        applyLocalReorder(localUpdates);
+
         // Persist: update status for the moved ticket, reorder the full column
         void api.ticketing.update({
           id: ticket.id as never,
@@ -115,6 +175,14 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           sortOrder: (overIndex * 1000) as never,
         });
         void api.ticketing.reorder({ items: items as never });
+
+        // Persist sub-ticket status changes
+        for (const sub of cascadeSubTickets) {
+          void api.ticketing.update({
+            id: sub.id as never,
+            status: targetStatus as never,
+          });
+        }
       }
     },
     [applyLocalReorder, onDropOnChat],
@@ -122,17 +190,26 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   useImperativeHandle(ref, () => ({ handleDragEnd: handleBoardDragEnd }), [handleBoardDragEnd]);
 
-  const handleTicketClick = useCallback((ticketId: TicketId) => {
-    setSelectedTicketId(ticketId);
-  }, []);
+  const handleTicketClick = useCallback(
+    (ticketId: TicketId) => {
+      clearSelection();
+      setSelectedTicketId(ticketId);
+    },
+    [clearSelection],
+  );
 
   const handleBack = useCallback(() => {
+    clearSelection();
     setSelectedTicketId(null);
-  }, []);
+  }, [clearSelection]);
 
-  const handleNavigateToTicket = useCallback((ticketId: TicketId) => {
-    setSelectedTicketId(ticketId);
-  }, []);
+  const handleNavigateToTicket = useCallback(
+    (ticketId: TicketId) => {
+      clearSelection();
+      setSelectedTicketId(ticketId);
+    },
+    [clearSelection],
+  );
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -179,6 +256,9 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               key={status}
               status={status}
               tickets={ticketsByStatus[status]}
+              epicProgressMap={epicProgressMap}
+              selectedTicketIds={selectedTicketIds}
+              onShiftClickTicket={handleShiftClickTicket}
               onTicketClick={handleTicketClick}
             />
           ))}

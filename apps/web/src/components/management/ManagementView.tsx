@@ -10,13 +10,14 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import ChatView from "../ChatView";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../ui/sidebar";
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { KanbanBoard, type KanbanBoardHandle } from "./KanbanBoard";
-import { KanbanCardOverlay } from "./KanbanCard";
+import { KanbanCardOverlay, KanbanMultiCardOverlay } from "./KanbanCard";
 
 const MANAGEMENT_CHAT_SIDEBAR_WIDTH_STORAGE_KEY = "management_chat_sidebar_width";
 const MANAGEMENT_CHAT_DEFAULT_WIDTH = "clamp(25rem,40vw,38rem)";
@@ -45,36 +46,58 @@ function ChatDropTarget({ children }: { children: React.ReactNode }) {
 }
 
 export function ManagementView({ threadId, projectId }: ManagementViewProps) {
-  const [activeDragTicket, setActiveDragTicket] = useState<TicketSummary | null>(null);
+  const [activeDragTickets, setActiveDragTickets] = useState<TicketSummary[]>([]);
   const boardRef = useRef<KanbanBoardHandle>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
+  // Clear ticket selection when clicking on non-selectable areas
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.shiftKey) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-ticket-selectable]")) return;
+      const store = useTicketSelectionStore.getState();
+      if (store.selectedTicketIds.size > 0) store.clearSelection();
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
   const handleDropOnChat = useCallback(
-    (ticket: TicketSummary) => {
+    (tickets: TicketSummary[]) => {
       if (!threadId) return;
-      useComposerDraftStore.getState().addTicketAttachment(threadId, {
-        id: ticket.id,
-        identifier: ticket.identifier,
-        title: ticket.title,
-      });
+      const store = useComposerDraftStore.getState();
+      for (const ticket of tickets) {
+        store.addTicketAttachment(threadId, {
+          id: ticket.id,
+          identifier: ticket.identifier,
+          title: ticket.title,
+        });
+      }
+      useTicketSelectionStore.getState().clearSelection();
     },
     [threadId],
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const ticket = (event.active.data.current as { ticket?: TicketSummary })?.ticket;
-    if (ticket) {
-      setActiveDragTicket(ticket);
+    if (!ticket) return;
+
+    const selStore = useTicketSelectionStore.getState();
+    if (selStore.selectedTicketIds.has(ticket.id)) {
+      setActiveDragTickets([...selStore.selectedTickets.values()]);
+    } else {
+      setActiveDragTickets([ticket]);
     }
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
-    setActiveDragTicket(null);
+    setActiveDragTickets([]);
     boardRef.current?.handleDragEnd(event);
   }, []);
 
   const handleDragCancel = useCallback(() => {
-    setActiveDragTicket(null);
+    setActiveDragTickets([]);
   }, []);
 
   return (
@@ -117,7 +140,11 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
         </Sidebar>
       </SidebarProvider>
       <DragOverlay dropAnimation={null}>
-        {activeDragTicket ? <KanbanCardOverlay ticket={activeDragTicket} /> : null}
+        {activeDragTickets.length === 1 ? (
+          <KanbanCardOverlay ticket={activeDragTickets[0]!} />
+        ) : activeDragTickets.length > 1 ? (
+          <KanbanMultiCardOverlay tickets={activeDragTickets} />
+        ) : null}
       </DragOverlay>
     </DndContext>
   );

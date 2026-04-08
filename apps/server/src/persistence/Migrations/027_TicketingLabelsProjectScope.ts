@@ -14,9 +14,7 @@ export default Effect.gen(function* () {
   // Add project_id column if missing. The Bun SQLite driver throws duplicate-
   // column errors as defects while the Node driver wraps them as typed SqlError,
   // so Effect.ignore is used to swallow both error kinds.
-  yield* sql`ALTER TABLE labels ADD COLUMN project_id TEXT DEFAULT NULL`.pipe(
-    Effect.ignore,
-  );
+  yield* sql`ALTER TABLE labels ADD COLUMN project_id TEXT DEFAULT NULL`.pipe(Effect.ignore);
 
   // Backfill project_id from the first project if any labels already exist.
   yield* sql`
