@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createThreadJumpHintVisibilityController,
   getVisibleSidebarThreadIds,
+  listProjectThreads,
+  listVisibleProjectThreads,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
@@ -117,6 +119,69 @@ describe("createThreadJumpHintVisibilityController", () => {
     vi.advanceTimersByTime(THREAD_JUMP_HINT_SHOW_DELAY_MS);
 
     expect(visibilityChanges).toEqual([]);
+  });
+});
+
+describe("listVisibleProjectThreads", () => {
+  it("returns all non-deleted project threads regardless of archive status", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const visibleThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-visible"),
+      projectId,
+      archivedAt: null,
+    });
+    const archivedThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-archived"),
+      projectId,
+      archivedAt: "2026-03-09T10:11:00.000Z",
+    });
+
+    const result = listProjectThreads({
+      projectId,
+      threadIdsByProjectId: {
+        [projectId]: [visibleThread.id, archivedThread.id],
+      },
+      threadsById: {
+        [visibleThread.id]: visibleThread,
+        [archivedThread.id]: archivedThread,
+      },
+    });
+
+    expect(result).toEqual([visibleThread, archivedThread]);
+  });
+
+  it("returns only non-archived threads for the requested project", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const visibleThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-visible"),
+      projectId,
+      archivedAt: null,
+    });
+    const archivedThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-archived"),
+      projectId,
+      archivedAt: "2026-03-09T10:11:00.000Z",
+    });
+    const otherProjectThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-other-project"),
+      projectId: ProjectId.makeUnsafe("project-2"),
+      archivedAt: null,
+    });
+
+    const result = listVisibleProjectThreads({
+      projectId,
+      threadIdsByProjectId: {
+        [projectId]: [visibleThread.id, archivedThread.id],
+        [otherProjectThread.projectId]: [otherProjectThread.id],
+      },
+      threadsById: {
+        [visibleThread.id]: visibleThread,
+        [archivedThread.id]: archivedThread,
+        [otherProjectThread.id]: otherProjectThread,
+      },
+    });
+
+    expect(result).toEqual([visibleThread]);
   });
 });
 

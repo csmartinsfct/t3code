@@ -124,6 +124,8 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   getVisibleSidebarThreadIds,
+  listProjectThreads,
+  listVisibleProjectThreads,
   getVisibleThreadsForProject,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -876,10 +878,11 @@ export default function Sidebar() {
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
-        (threadIdsByProjectId[projectId] ?? [])
-          .map((threadId) => sidebarThreadsById[threadId])
-          .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-          .filter((thread) => thread.archivedAt === null),
+        listVisibleProjectThreads({
+          projectId,
+          threadIdsByProjectId,
+          threadsById: sidebarThreadsById,
+        }),
         appSettings.sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
@@ -1476,12 +1479,28 @@ export default function Sidebar() {
       }
       if (clicked !== "delete") return;
 
-      const projectThreadIds = threadIdsByProjectId[projectId] ?? [];
-      if (projectThreadIds.length > 0) {
+      const projectThreads = listProjectThreads({
+        projectId,
+        threadIdsByProjectId,
+        threadsById: sidebarThreadsById,
+      });
+      const visibleProjectThreads = projectThreads.filter((thread) => thread.archivedAt === null);
+      if (visibleProjectThreads.length > 0) {
         toastManager.add({
           type: "warning",
           title: "Project is not empty",
           description: "Delete all threads in this project before removing it.",
+        });
+        return;
+      }
+      if (projectThreads.length > 0) {
+        const archivedThreadCount = projectThreads.length;
+        toastManager.add({
+          type: "warning",
+          title: "Project has archived threads",
+          description: `Delete or unarchive the ${archivedThreadCount} archived thread${
+            archivedThreadCount === 1 ? "" : "s"
+          } in Settings > Archived before removing this project.`,
         });
         return;
       }
@@ -1516,6 +1535,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       getDraftThreadByProjectId,
       projects,
+      sidebarThreadsById,
       threadIdsByProjectId,
     ],
   );
@@ -1624,10 +1644,11 @@ export default function Sidebar() {
             },
           });
         const projectThreads = sortThreadsForSidebar(
-          (threadIdsByProjectId[project.id] ?? [])
-            .map((threadId) => sidebarThreadsById[threadId])
-            .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-            .filter((thread) => thread.archivedAt === null),
+          listVisibleProjectThreads({
+            projectId: project.id,
+            threadIdsByProjectId,
+            threadsById: sidebarThreadsById,
+          }),
           appSettings.sidebarThreadSortOrder,
         );
         const projectStatus = resolveProjectStatusIndicator(

@@ -241,6 +241,30 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   );
 }
 
+export function listProjectThreads<
+  TThreadId extends string,
+  TThread extends { id: TThreadId },
+>(input: {
+  projectId: string;
+  threadIdsByProjectId: Partial<Record<string, readonly TThreadId[]>>;
+  threadsById: Partial<Record<TThreadId, TThread | undefined>>;
+}): TThread[] {
+  return (input.threadIdsByProjectId[input.projectId] ?? [])
+    .map((threadId) => input.threadsById[threadId])
+    .filter((thread): thread is TThread => thread !== undefined);
+}
+
+export function listVisibleProjectThreads<
+  TThreadId extends string,
+  TThread extends { id: TThreadId; archivedAt: string | null },
+>(input: {
+  projectId: string;
+  threadIdsByProjectId: Partial<Record<string, readonly TThreadId[]>>;
+  threadsById: Partial<Record<TThreadId, TThread | undefined>>;
+}): TThread[] {
+  return listProjectThreads(input).filter((thread) => thread.archivedAt === null);
+}
+
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
   currentThreadId: T | null;
