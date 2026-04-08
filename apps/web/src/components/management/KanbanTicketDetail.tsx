@@ -7,9 +7,14 @@ import type {
   TicketingStreamEvent,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
-import { TrashIcon } from "lucide-react";
+import { EllipsisVerticalIcon, ListTreeIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
+
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { TicketMarkdown } from "./TicketMarkdown";
@@ -24,8 +29,21 @@ import {
 } from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
@@ -38,14 +56,33 @@ import {
   formatRelativeDate,
 } from "../settings/ticketUtils";
 
+const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
+
+Instructions:
+1. Read the attached ticket thoroughly — its title, description, and acceptance criteria.
+2. Propose a set of sub-tickets that together fully cover the parent ticket's scope. Each sub-ticket must:
+   - Be small enough to complete in a single AI agent session (optimize for limited context windows).
+   - Have a clear, specific title and description.
+   - Include concrete acceptance criteria.
+3. If there are dependencies between tickets make sure to link them appropriately.
+4. If the parent ticket has acceptance criteria, map each criterion to one or more sub-tickets — nothing should be lost.
+5. Present the proposed sub-tickets as a numbered list with title, description, and acceptance criteria for each. Do NOT create anything yet.
+6. Wait for my explicit confirmation before proceeding.
+7. Once I confirm, create each sub-ticket as a child of the parent ticket using the ticketing tools (set parentId to the attached ticket's identifier).
+8. After all sub-tickets are created, update the parent ticket: revise its description to a high-level overview and remove detailed acceptance criteria that are now covered by sub-tickets.
+
+Goal: Break this ticket into well-scoped units of work so that an AI agent can pick up and complete each one independently, within a single session.`;
+
 interface KanbanTicketDetailProps {
   ticketId: TicketId;
+  projectId: string;
   onBack: () => void;
   onNavigateToTicket: (ticketId: TicketId) => void;
 }
 
 export function KanbanTicketDetail({
   ticketId,
+  projectId,
   onBack,
   onNavigateToTicket,
 }: KanbanTicketDetailProps) {
@@ -93,12 +130,17 @@ export function KanbanTicketDetail({
         } else {
           // A dependency ticket was updated
           const current = ticketRef.current;
-          if (current?.dependencies.some((d) => d.dependsOnTicketId === event.ticket.id)) {
+          if (
+            current?.dependencies.some(
+              (d) => d.dependsOnTicketId === event.ticket.id
+            )
+          ) {
             void fetchTicket();
           }
         }
       } else if (
-        (event.type === "comment_upserted" || event.type === "comment_deleted") &&
+        (event.type === "comment_upserted" ||
+          event.type === "comment_deleted") &&
         event.ticketId === ticketId
       ) {
         void fetchTicket();
@@ -118,7 +160,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update status:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handlePriorityChange = useCallback(
@@ -132,7 +174,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update priority:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleDelete = useCallback(async () => {
@@ -144,6 +186,41 @@ export function KanbanTicketDetail({
       console.error("Failed to delete ticket:", error);
     }
   }, [ticketId, onBack]);
+
+  const navigate = useNavigate();
+
+  const handleDecompose = useCallback(() => {
+    if (!ticket) return;
+
+    const {
+      clearProjectDraftThreadId,
+      setProjectDraftThreadId,
+      applyStickyState,
+      setPrompt,
+      addTicketAttachment,
+    } = useComposerDraftStore.getState();
+
+    const typedProjectId = projectId as ProjectId;
+
+    clearProjectDraftThreadId(typedProjectId);
+
+    const threadId = newThreadId();
+    setProjectDraftThreadId(typedProjectId, threadId, {
+      createdAt: new Date().toISOString(),
+      envMode: "local",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+    });
+    applyStickyState(threadId);
+
+    addTicketAttachment(threadId, {
+      id: ticket.id,
+      identifier: ticket.identifier,
+      title: ticket.title,
+    });
+    setPrompt(threadId, DECOMPOSE_PROMPT);
+
+    void navigate({ to: "/$threadId", params: { threadId } });
+  }, [ticket, projectId, navigate]);
 
   if (loading) {
     return (
@@ -174,17 +251,38 @@ export function KanbanTicketDetail({
               <span className="font-mono text-[11px] text-muted-foreground">
                 {ticket.identifier}
               </span>
-              <h2 className="mt-0.5 text-sm font-medium text-foreground">{ticket.title}</h2>
+              <h2 className="mt-0.5 text-sm font-medium text-foreground">
+                {ticket.title}
+              </h2>
             </div>
-            <Button
-              size="xs"
-              variant="outline"
-              className="text-destructive hover:text-destructive"
-              onClick={() => setDeleteDialogOpen(true)}
-            >
-              <TrashIcon className="size-3" />
-              Delete
-            </Button>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label="Ticket actions"
+                  />
+                }
+              >
+                <EllipsisVerticalIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem onClick={handleDecompose}>
+                  <ListTreeIcon className="size-3.5" />
+                  Decompose
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem
+                  variant="destructive"
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  <TrashIcon className="size-3.5" />
+                  Delete
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
           </div>
 
           {/* Status + Priority inline selectors */}
@@ -219,17 +317,27 @@ export function KanbanTicketDetail({
 
             <Select
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
+              onValueChange={(v) =>
+                void handlePriorityChange(v as TicketPriority)
+              }
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <div className={`size-2 rounded-full ${priorityCfg.dotClass}`} />
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-1.5 px-1.5 py-1"
+              >
+                <div
+                  className={`size-2 rounded-full ${priorityCfg.dotClass}`}
+                />
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
                 {ALL_PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <div className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`} />
+                      <div
+                        className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`}
+                      />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -247,7 +355,9 @@ export function KanbanTicketDetail({
         {/* Description */}
         {ticket.description && (
           <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-            <p className="text-[11px] font-medium text-muted-foreground">Description</p>
+            <p className="text-[11px] font-medium text-muted-foreground">
+              Description
+            </p>
             <div className="mt-0.5 text-foreground">
               <TicketMarkdown>{ticket.description}</TicketMarkdown>
             </div>
@@ -266,7 +376,9 @@ export function KanbanTicketDetail({
         {/* Labels */}
         {ticket.labels.length > 0 && (
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Labels
+            </h3>
             <div className="flex flex-wrap gap-1.5">
               {ticket.labels.map((label) => (
                 <span
@@ -303,7 +415,9 @@ export function KanbanTicketDetail({
                     <Badge size="sm" variant={depStatusCfg.badgeVariant}>
                       {depStatusCfg.label}
                     </Badge>
-                    <span className="truncate text-foreground">{dep.title}</span>
+                    <span className="truncate text-foreground">
+                      {dep.title}
+                    </span>
                   </button>
                 );
               })}
@@ -313,7 +427,10 @@ export function KanbanTicketDetail({
 
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
-          <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
+          <SubTicketsList
+            subTickets={ticket.subTickets}
+            onNavigateToTicket={onNavigateToTicket}
+          />
         )}
 
         {/* Comments */}
@@ -333,8 +450,8 @@ export function KanbanTicketDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
+              This will permanently delete "{ticket.identifier}: {ticket.title}"
+              and all its data. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -343,7 +460,11 @@ export function KanbanTicketDetail({
                 Cancel
               </Button>
             </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+            >
               Delete
             </Button>
           </AlertDialogFooter>
@@ -382,25 +503,28 @@ function SubTicketsList({
     });
   }, []);
 
-  const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
-    const key = id as string;
-    const cached = cacheRef.current.get(key);
-    if (cached) return cached;
-    const existing = inflightRef.current.get(key);
-    if (existing) return existing;
-    const promise = ensureNativeApi()
-      .ticketing.getById({ id })
-      .then((t) => {
-        cacheRef.current.set(key, t);
-        return t;
-      })
-      .catch(() => null)
-      .finally(() => {
-        inflightRef.current.delete(key);
-      });
-    inflightRef.current.set(key, promise);
-    return promise;
-  }, []);
+  const fetchPreview = useCallback(
+    async (id: TicketId): Promise<Ticket | null> => {
+      const key = id as string;
+      const cached = cacheRef.current.get(key);
+      if (cached) return cached;
+      const existing = inflightRef.current.get(key);
+      if (existing) return existing;
+      const promise = ensureNativeApi()
+        .ticketing.getById({ id })
+        .then((t) => {
+          cacheRef.current.set(key, t);
+          return t;
+        })
+        .catch(() => null)
+        .finally(() => {
+          inflightRef.current.delete(key);
+        });
+      inflightRef.current.set(key, promise);
+      return promise;
+    },
+    []
+  );
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
     return cacheRef.current.get(id as string);
@@ -464,7 +588,9 @@ function DraggableSubTicket({
             type="button"
             data-ticket-selectable
             className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+              isSelected
+                ? "bg-primary/5 ring-1.5 ring-primary/40"
+                : "hover:bg-accent/30"
             } ${isDragging ? "opacity-40" : ""}`}
             onClick={(e) => {
               if (e.shiftKey) {

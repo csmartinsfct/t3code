@@ -349,6 +349,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       ) : selectedTicketId ? (
         <KanbanTicketDetail
           ticketId={selectedTicketId}
+          projectId={projectId}
           onBack={handleBack}
           onNavigateToTicket={handleNavigateToTicket}
         />
