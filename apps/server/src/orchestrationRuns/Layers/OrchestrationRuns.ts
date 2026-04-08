@@ -10,6 +10,7 @@ import type {
 } from "@t3tools/contracts";
 import { OrchestrationRunError, TicketId as TicketIdSchema } from "@t3tools/contracts";
 import { Effect, Layer, Option, PubSub, Stream } from "effect";
+import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import {
@@ -23,6 +24,8 @@ import {
   OrchestrationRunService,
   type OrchestrationRunServiceShape,
 } from "../Services/OrchestrationRuns.ts";
+
+const SCOPE = "server.orchestration-runs";
 
 const VALID_TRANSITIONS: Record<OrchestrationRunStatus, Set<OrchestrationRunStatus>> = {
   pending: new Set(["running", "canceled"]),
@@ -96,6 +99,13 @@ const makeOrchestrationRunService = Effect.gen(function* () {
       );
 
       if (ticket.projectId !== projectId) {
+        yield* Effect.logWarning(
+          formatTimelineLog(SCOPE, "run.resolve-ticket.failed", {
+            ticketIdentifierOrId,
+            projectId,
+            reason: "ticket belongs to different project",
+          }),
+        );
         return yield* new OrchestrationRunError({
           message: `Ticket '${ticketIdentifierOrId}' does not belong to project ${projectId}`,
         });
@@ -120,6 +130,12 @@ const makeOrchestrationRunService = Effect.gen(function* () {
     createdThreadIds: ReadonlyArray<ThreadId>,
   ) =>
     Effect.gen(function* () {
+      yield* Effect.logWarning(
+        formatTimelineLog(SCOPE, "run.create.cleanup-started", {
+          runId,
+          createdThreadCount: createdThreadIds.length,
+        }),
+      );
       for (const threadId of createdThreadIds.toReversed()) {
         yield* dispatchQueuedCommand(
           {
@@ -137,6 +153,14 @@ const makeOrchestrationRunService = Effect.gen(function* () {
   const create: OrchestrationRunServiceShape["create"] = (input) =>
     Effect.gen(function* () {
       const now = new Date().toISOString();
+
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.create.start", {
+          projectId: input.projectId,
+          ticketCount: input.ticketIdentifiers.length,
+          ticketIdentifiers: input.ticketIdentifiers,
+        }),
+      );
 
       // Resolve ticket identifiers to UUIDs
       const tickets: Ticket[] = [];
@@ -224,12 +248,30 @@ const makeOrchestrationRunService = Effect.gen(function* () {
 
       yield* createThreads.pipe(Effect.onError(() => cleanupFailedCreate(runId, createdThreadIds)));
 
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.create.threads-created", {
+          runId,
+          orchestrationThreadId,
+          workingThreadIds,
+          ticketCount: tickets.length,
+        }),
+      );
+
       // Publish stream event
       yield* PubSub.publish(eventsPubSub, {
         type: "run.created" as const,
         projectId: input.projectId,
         run: toRun(persisted),
       });
+
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.create.completed", {
+          runId,
+          orchestrationThreadId,
+          status: "pending",
+          ticketCount: tickets.length,
+        }),
+      );
 
       return {
         runId,
@@ -249,7 +291,9 @@ const makeOrchestrationRunService = Effect.gen(function* () {
             }),
         ),
       );
-      if (Option.isNone(row)) {
+      const found = Option.isSome(row);
+      yield* Effect.logInfo(formatTimelineLog(SCOPE, "run.get", { runId: input.runId, found }));
+      if (!found) {
         return yield* new OrchestrationRunError({
           message: `Orchestration run not found: ${input.runId}`,
         });
@@ -260,6 +304,14 @@ const makeOrchestrationRunService = Effect.gen(function* () {
   const list: OrchestrationRunServiceShape["list"] = (input) =>
     repo.listByProject({ projectId: input.projectId }).pipe(
       Effect.map((rows) => rows.map(toSummary)),
+      Effect.tap((summaries) =>
+        Effect.logInfo(
+          formatTimelineLog(SCOPE, "run.list", {
+            projectId: input.projectId,
+            count: summaries.length,
+          }),
+        ),
+      ),
       Effect.mapError(
         (cause) =>
           new OrchestrationRunError({
@@ -301,10 +353,17 @@ const makeOrchestrationRunService = Effect.gen(function* () {
           ),
         );
       if (Option.isNone(run)) {
-        return persistedChildren
+        const result = persistedChildren
           .map((thread) => threadById.get(thread.threadId))
           .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
           .toSorted(compareIsoDateThenId);
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "run.child-threads", {
+            parentThreadId: input.parentThreadId,
+            count: result.length,
+          }),
+        );
+        return result;
       }
 
       const ticketOrder = JSON.parse(run.value.ticketOrderJson) as Array<OrchestrationTicketEntry>;
@@ -316,7 +375,14 @@ const makeOrchestrationRunService = Effect.gen(function* () {
         .filter((thread) => !orderedIds.has(thread.id))
         .toSorted(compareIsoDateThenId);
 
-      return [...orderedChildren, ...extraChildren];
+      const result = [...orderedChildren, ...extraChildren];
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.child-threads", {
+          parentThreadId: input.parentThreadId,
+          count: result.length,
+        }),
+      );
+      return result;
     });
 
   const transitionStatus = (
@@ -324,6 +390,10 @@ const makeOrchestrationRunService = Effect.gen(function* () {
     targetStatus: OrchestrationRunStatus,
   ) =>
     Effect.gen(function* () {
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.transition.start", { runId, to: targetStatus }),
+      );
+
       const row = yield* repo.getById({ runId }).pipe(
         Effect.mapError(
           (cause) =>
@@ -334,6 +404,9 @@ const makeOrchestrationRunService = Effect.gen(function* () {
         ),
       );
       if (Option.isNone(row)) {
+        yield* Effect.logWarning(
+          formatTimelineLog(SCOPE, "run.transition.not-found", { runId, to: targetStatus }),
+        );
         return yield* new OrchestrationRunError({
           message: `Orchestration run not found: ${runId}`,
         });
@@ -342,6 +415,14 @@ const makeOrchestrationRunService = Effect.gen(function* () {
       const current = row.value;
       const allowed = VALID_TRANSITIONS[current.status];
       if (!allowed?.has(targetStatus)) {
+        yield* Effect.logWarning(
+          formatTimelineLog(SCOPE, "run.transition.rejected", {
+            runId,
+            from: current.status,
+            to: targetStatus,
+            reason: "invalid transition",
+          }),
+        );
         return yield* new OrchestrationRunError({
           message: `Invalid status transition: ${current.status} → ${targetStatus}`,
         });
@@ -371,6 +452,15 @@ const makeOrchestrationRunService = Effect.gen(function* () {
         projectId: current.projectId,
         run,
       });
+
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.transition.completed", {
+          runId,
+          from: current.status,
+          to: targetStatus,
+          updatedAt: now,
+        }),
+      );
 
       return run;
     });
@@ -412,6 +502,13 @@ const makeOrchestrationRunService = Effect.gen(function* () {
 
       const current = row.value;
       if (current.status !== "running") {
+        yield* Effect.logWarning(
+          formatTimelineLog(SCOPE, "run.progress.rejected", {
+            runId: input.runId,
+            status: current.status,
+            reason: "not running",
+          }),
+        );
         return yield* new OrchestrationRunError({
           message: `Cannot update progress of run in '${current.status}' status`,
         });
@@ -442,6 +539,15 @@ const makeOrchestrationRunService = Effect.gen(function* () {
         projectId: current.projectId,
         run,
       });
+
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "run.progress.updated", {
+          runId: input.runId,
+          previousIndex: current.currentTicketIndex,
+          currentTicketIndex: input.currentTicketIndex,
+          currentPhase: input.currentPhase ?? current.currentPhase,
+        }),
+      );
 
       return run;
     });
