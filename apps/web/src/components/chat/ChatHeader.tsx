@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import type { MultiRepoGitStatus } from "../../lib/multiRepoTypes";
+import type { UseOrchestrationSwitcherReturn } from "../../hooks/useOrchestrationSwitcher";
 import GitActionsControl from "../GitActionsControl";
 import { DiffIcon, FolderOpenIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -17,6 +18,7 @@ import ManagedRunsControl from "../ManagedRunsControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
+import { ThreadSwitcherDropdown } from "./ThreadSwitcherDropdown";
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -48,6 +50,8 @@ interface ChatHeaderProps {
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
   onToggleFileExplorer: () => void;
+  orchestrationSwitcher: UseOrchestrationSwitcherReturn | null;
+  onSwitchThread: ((threadId: string) => void) | undefined;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -80,17 +84,27 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleTerminal,
   onToggleDiff,
   onToggleFileExplorer,
+  orchestrationSwitcher,
+  onSwitchThread,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <h2
-          className="min-w-0 shrink truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
+        {orchestrationSwitcher?.visible && onSwitchThread ? (
+          <ThreadSwitcherDropdown
+            items={orchestrationSwitcher.items}
+            currentLabel={orchestrationSwitcher.currentLabel}
+            onNavigate={onSwitchThread}
+          />
+        ) : (
+          <h2
+            className="min-w-0 shrink truncate text-sm font-medium text-foreground"
+            title={activeThreadTitle}
+          >
+            {activeThreadTitle}
+          </h2>
+        )}
         {activeProjectName && (
           <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>

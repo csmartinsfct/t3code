@@ -113,6 +113,7 @@ import { OrchestrationTimeline } from "./chat/OrchestrationTimeline";
 import { OrchestrationProgressHeader } from "./chat/OrchestrationProgressHeader";
 import { OrchestrationReadOnlyComposer } from "./chat/OrchestrationReadOnlyComposer";
 import { useOrchestrationTimeline } from "../hooks/useOrchestrationTimeline";
+import { useOrchestrationSwitcher } from "../hooks/useOrchestrationSwitcher";
 import { getWsRpcClient } from "../wsRpcClient";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -121,6 +122,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  Loader2Icon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -925,10 +927,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const isOrchestrationThread = activeThread?.isOrchestrationThread ?? false;
+  const isOrchestrationChild = (activeThread?.parentThreadId ?? null) !== null;
   const orchestrationTimeline = useOrchestrationTimeline(
     isOrchestrationThread ? activeThread : null,
     activeThread?.projectId ?? null,
   );
+  const orchestrationSwitcher = useOrchestrationSwitcher(
+    isOrchestrationThread || isOrchestrationChild ? activeThread : null,
+    activeThread?.projectId ?? null,
+  );
+  const onSwitchThread = useCallback(
+    (threadId: string) => {
+      void navigate({ to: "/$threadId", params: { threadId } });
+    },
+    [navigate],
+  );
+  const isWaitingForAgentStart =
+    isOrchestrationChild &&
+    orchestrationSwitcher.visible &&
+    orchestrationSwitcher.items.find((i) => i.isActive)?.isStarted === false;
   const onOrchestrationPause = useCallback(() => {
     if (!orchestrationTimeline.run) return;
     void getWsRpcClient().orchestration.pauseRun({ runId: orchestrationTimeline.run.id });
@@ -4850,6 +4867,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
           onToggleFileExplorer={onToggleFileExplorer}
+          orchestrationSwitcher={orchestrationSwitcher.visible ? orchestrationSwitcher : null}
+          onSwitchThread={onSwitchThread}
         />
       </header>
 
@@ -4905,6 +4924,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
               >
                 <OrchestrationReadOnlyComposer run={orchestrationTimeline.run} />
+              </div>
+            </>
+          ) : isWaitingForAgentStart ? (
+            <>
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <div className="flex items-center gap-2 text-muted-foreground/50">
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                  <span className="text-sm">Waiting for agent to start</span>
+                </div>
+              </div>
+              <div
+                className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
+              >
+                <div className="mx-auto w-full min-w-0 max-w-[52rem]">
+                  <div className="rounded-[20px] border border-border bg-card px-4 py-3">
+                    <div className="flex items-center justify-center gap-2 text-muted-foreground/50">
+                      <span className="text-sm">
+                        This thread will become interactive once the agent starts working on it
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           ) : (
