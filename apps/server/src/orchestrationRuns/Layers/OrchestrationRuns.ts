@@ -384,6 +384,68 @@ const makeOrchestrationRunService = Effect.gen(function* () {
   const cancel: OrchestrationRunServiceShape["cancel"] = (input) =>
     transitionStatus(input.runId, "canceled");
 
+  const start: OrchestrationRunServiceShape["start"] = (input) =>
+    transitionStatus(input.runId, "running");
+
+  const complete: OrchestrationRunServiceShape["complete"] = (input) =>
+    transitionStatus(input.runId, "completed");
+
+  const fail: OrchestrationRunServiceShape["fail"] = (input) =>
+    transitionStatus(input.runId, "failed");
+
+  const updateRunProgress: OrchestrationRunServiceShape["updateRunProgress"] = (input) =>
+    Effect.gen(function* () {
+      const row = yield* repo.getById({ runId: input.runId }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationRunError({
+              message: "Failed to load orchestration run",
+              cause,
+            }),
+        ),
+      );
+      if (Option.isNone(row)) {
+        return yield* new OrchestrationRunError({
+          message: `Orchestration run not found: ${input.runId}`,
+        });
+      }
+
+      const current = row.value;
+      if (current.status !== "running") {
+        return yield* new OrchestrationRunError({
+          message: `Cannot update progress of run in '${current.status}' status`,
+        });
+      }
+
+      const now = new Date().toISOString();
+      const updated: PersistedOrchestrationRun = {
+        ...current,
+        currentTicketIndex: input.currentTicketIndex,
+        ...(input.currentPhase !== undefined ? { currentPhase: input.currentPhase } : {}),
+        updatedAt: now,
+      };
+
+      yield* repo.update(updated).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationRunError({
+              message: "Failed to update orchestration run progress",
+              cause,
+            }),
+        ),
+      );
+
+      const run = toRun(updated);
+
+      yield* PubSub.publish(eventsPubSub, {
+        type: "run.updated" as const,
+        projectId: current.projectId,
+        run,
+      });
+
+      return run;
+    });
+
   const streamEvents: OrchestrationRunServiceShape["streamEvents"] = (projectId) =>
     Stream.fromPubSub(eventsPubSub).pipe(Stream.filter((event) => event.projectId === projectId));
 
@@ -395,6 +457,10 @@ const makeOrchestrationRunService = Effect.gen(function* () {
     pause,
     resume,
     cancel,
+    start,
+    complete,
+    fail,
+    updateRunProgress,
     streamEvents,
   } satisfies OrchestrationRunServiceShape;
 });

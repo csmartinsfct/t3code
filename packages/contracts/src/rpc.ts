@@ -599,6 +599,12 @@ export const WsOrchestrationCancelRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.can
   error: OrchestrationRunError,
 });
 
+export const WsOrchestrationStartRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.startRun, {
+  payload: OrchestrationRpcSchemas.startRun.input,
+  success: OrchestrationRpcSchemas.startRun.output,
+  error: OrchestrationRunError,
+});
+
 export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
   WS_METHODS.subscribeOrchestrationDomainEvents,
   {
@@ -959,5 +965,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationPauseRunRpc,
   WsOrchestrationResumeRunRpc,
   WsOrchestrationCancelRunRpc,
+  WsOrchestrationStartRunRpc,
   WsSubscribeOrchestrationRunEventsRpc,
 );

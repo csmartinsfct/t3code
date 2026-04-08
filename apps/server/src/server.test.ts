@@ -48,6 +48,7 @@ import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
+import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -358,16 +359,25 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.succeed(OrchestrationRunService, {
-          create: () => Effect.die(new Error("not mocked")),
-          get: () => Effect.die(new Error("not mocked")),
-          list: () => Effect.succeed([]),
-          getChildThreads: () => Effect.succeed([]),
-          pause: () => Effect.die(new Error("not mocked")),
-          resume: () => Effect.die(new Error("not mocked")),
-          cancel: () => Effect.die(new Error("not mocked")),
-          streamEvents: () => Stream.empty,
-        }),
+        Layer.merge(
+          Layer.succeed(OrchestrationRunService, {
+            create: () => Effect.die(new Error("not mocked")),
+            get: () => Effect.die(new Error("not mocked")),
+            list: () => Effect.succeed([]),
+            getChildThreads: () => Effect.succeed([]),
+            pause: () => Effect.die(new Error("not mocked")),
+            resume: () => Effect.die(new Error("not mocked")),
+            cancel: () => Effect.die(new Error("not mocked")),
+            start: () => Effect.die(new Error("not mocked")),
+            complete: () => Effect.die(new Error("not mocked")),
+            fail: () => Effect.die(new Error("not mocked")),
+            updateRunProgress: () => Effect.die(new Error("not mocked")),
+            streamEvents: () => Stream.empty,
+          }),
+          Layer.succeed(OrchestrationRunRunner, {
+            startRun: () => Effect.die(new Error("not mocked")),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(TextGeneration)({

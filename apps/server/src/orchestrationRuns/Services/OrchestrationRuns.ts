@@ -9,8 +9,10 @@ import type {
   OrchestrationResumeRunInput,
   OrchestrationRun,
   OrchestrationRunError,
+  OrchestrationRunPhase,
   OrchestrationRunStreamEvent,
   OrchestrationRunSummary,
+  OrchestrationStartRunInput,
   OrchestrationThread,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
@@ -44,6 +46,24 @@ export interface OrchestrationRunServiceShape {
   readonly cancel: (
     input: OrchestrationCancelRunInput,
   ) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
+
+  readonly start: (
+    input: OrchestrationStartRunInput,
+  ) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
+
+  readonly complete: (input: {
+    readonly runId: import("@t3tools/contracts").OrchestrationRunId;
+  }) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
+
+  readonly fail: (input: {
+    readonly runId: import("@t3tools/contracts").OrchestrationRunId;
+  }) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
+
+  readonly updateRunProgress: (input: {
+    readonly runId: import("@t3tools/contracts").OrchestrationRunId;
+    readonly currentTicketIndex: number;
+    readonly currentPhase?: OrchestrationRunPhase;
+  }) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
 
   readonly streamEvents: (projectId: string) => Stream.Stream<OrchestrationRunStreamEvent, never>;
 }

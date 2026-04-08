@@ -57,6 +57,7 @@ import { ticketingMcpRouteLayer } from "./ticketing/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 import { OrchestrationRunServiceLive } from "./orchestrationRuns/Layers/OrchestrationRuns";
+import { OrchestrationRunRunnerLive } from "./orchestrationRuns/Layers/OrchestrationRunRunner";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -261,6 +262,39 @@ const RuntimeServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ) as Layer.Layer<
       import("./orchestrationRuns/Services/OrchestrationRuns").OrchestrationRunService
+    >,
+  ),
+  // OrchestrationRunRunnerLive's requirements (OrchestrationRunService, OrchestrationEngineService,
+  // TicketingService, ServerRuntimeStartup) are satisfied by earlier layers in the chain.
+  Layer.provideMerge(
+    OrchestrationRunRunnerLive.pipe(
+      Layer.provide(
+        OrchestrationRunServiceLive.pipe(
+          Layer.provide(OrchestrationRunRepositoryLive),
+          Layer.provide(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+          Layer.provide(
+            TicketingServiceLive.pipe(
+              Layer.provide(TicketingRepositoryLive),
+              Layer.provide(PersistenceLayerLive),
+            ),
+          ),
+          Layer.provide(
+            OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+          ),
+          Layer.provide(PersistenceLayerLive),
+        ),
+      ),
+      Layer.provide(
+        OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+      ),
+      Layer.provide(
+        TicketingServiceLive.pipe(
+          Layer.provide(TicketingRepositoryLive),
+          Layer.provide(PersistenceLayerLive),
+        ),
+      ),
+    ) as Layer.Layer<
+      import("./orchestrationRuns/Services/OrchestrationRunRunner").OrchestrationRunRunner
     >,
   ),
   Layer.provideMerge(

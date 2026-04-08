@@ -70,6 +70,7 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns";
+import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner";
 import {
   resolveClaudeMcpServerNames,
   resolveCodexMcpServerNames,
@@ -104,6 +105,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
     const orchestrationRuns = yield* OrchestrationRunService;
+    const orchestrationRunRunner = yield* OrchestrationRunRunner;
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -422,6 +424,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 ? cause
                 : new OrchestrationRunError({
                     message: "Failed to cancel orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.startRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.startRun,
+          orchestrationRunRunner.startRun(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to start orchestration run",
                     cause,
                   }),
             ),

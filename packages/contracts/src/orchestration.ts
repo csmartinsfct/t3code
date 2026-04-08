@@ -30,6 +30,7 @@ export const ORCHESTRATION_WS_METHODS = {
   pauseRun: "orchestration.pauseRun",
   resumeRun: "orchestration.resumeRun",
   cancelRun: "orchestration.cancelRun",
+  startRun: "orchestration.startRun",
 } as const;
 
 export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent"] as const;
@@ -1309,6 +1310,11 @@ export const OrchestrationCancelRunInput = Schema.Struct({
 });
 export type OrchestrationCancelRunInput = typeof OrchestrationCancelRunInput.Type;
 
+export const OrchestrationStartRunInput = Schema.Struct({
+  runId: OrchestrationRunId,
+});
+export type OrchestrationStartRunInput = typeof OrchestrationStartRunInput.Type;
+
 export class OrchestrationRunError extends Schema.TaggedErrorClass<OrchestrationRunError>()(
   "OrchestrationRunError",
   {
@@ -1368,6 +1374,10 @@ export const OrchestrationRpcSchemas = {
   },
   cancelRun: {
     input: OrchestrationCancelRunInput,
+    output: OrchestrationRun,
+  },
+  startRun: {
+    input: OrchestrationStartRunInput,
     output: OrchestrationRun,
   },
 } as const;
