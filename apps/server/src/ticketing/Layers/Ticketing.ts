@@ -166,8 +166,9 @@ const makeTicketingService = Effect.gen(function* () {
 
       if (parent.status !== newStatus) {
         const now = nowIso();
+        const updatedParent = { ...parent, status: newStatus, updatedAt: now };
         yield* repo
-          .updateTicket({ ...parent, status: newStatus, updatedAt: now })
+          .updateTicket(updatedParent)
           .pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
         yield* recordHistory(
           parent.id,
@@ -177,6 +178,28 @@ const makeTicketingService = Effect.gen(function* () {
           },
           "system",
         ).pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
+
+        // Notify clients about the parent's status change
+        const parentLabels = yield* repo
+          .listLabelsForTicket({ ticketId: parent.id })
+          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
+        const parentSubCount = yield* repo
+          .countByParent({ parentId: parent.id })
+          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
+        const parentDepCount = (yield* repo
+          .listDependencies({ ticketId: parent.id })
+          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")))).length;
+        yield* publishEvent({
+          type: "ticket_upserted",
+          projectId: updatedParent.projectId,
+          ticket: buildTicketSummary(
+            updatedParent,
+            parentLabels as Label[],
+            parentSubCount,
+            parentDepCount,
+          ),
+        });
+
         yield* propagateEpicStatus(parent.id, depth + 1);
       }
     });

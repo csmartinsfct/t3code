@@ -52,11 +52,13 @@ export function KanbanTicketDetail({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const ticketRef = useRef<Ticket | null>(null);
 
   const fetchTicket = useCallback(async () => {
     try {
       const api = ensureNativeApi();
       const data = await api.ticketing.getById({ id: ticketId });
+      ticketRef.current = data;
       setTicket(data);
     } catch (error) {
       console.error("Failed to fetch ticket:", error);
@@ -75,8 +77,26 @@ export function KanbanTicketDetail({
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
       if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
         onBack();
-      } else if (event.type === "ticket_upserted" && event.ticket.id === ticketId) {
-        void fetchTicket();
+      } else if (event.type === "ticket_deleted") {
+        // A sub-ticket was deleted — refetch if it was one of ours
+        const current = ticketRef.current;
+        if (current?.subTickets.some((s) => s.id === event.ticketId)) {
+          void fetchTicket();
+        }
+      } else if (event.type === "ticket_upserted") {
+        if (event.ticket.id === ticketId) {
+          // The current ticket itself was updated
+          void fetchTicket();
+        } else if (event.ticket.parentId === ticketId) {
+          // A sub-ticket was upserted
+          void fetchTicket();
+        } else {
+          // A dependency ticket was updated
+          const current = ticketRef.current;
+          if (current?.dependencies.some((d) => d.dependsOnTicketId === event.ticket.id)) {
+            void fetchTicket();
+          }
+        }
       } else if (
         (event.type === "comment_upserted" || event.type === "comment_deleted") &&
         event.ticketId === ticketId
@@ -92,6 +112,7 @@ export function KanbanTicketDetail({
       try {
         const api = ensureNativeApi();
         const updated = await api.ticketing.update({ id: ticketId, status });
+        ticketRef.current = updated;
         setTicket(updated);
       } catch (error) {
         console.error("Failed to update status:", error);
@@ -105,6 +126,7 @@ export function KanbanTicketDetail({
       try {
         const api = ensureNativeApi();
         const updated = await api.ticketing.update({ id: ticketId, priority });
+        ticketRef.current = updated;
         setTicket(updated);
       } catch (error) {
         console.error("Failed to update priority:", error);
