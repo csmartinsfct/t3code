@@ -555,6 +555,7 @@ export function KanbanTicketDetail({
                     <Badge size="sm" variant={depStatusCfg.badgeVariant}>
                       {depStatusCfg.label}
                     </Badge>
+                    <span className="shrink-0 text-muted-foreground">{dep.identifier}</span>
                     <span className="truncate text-foreground">{dep.title}</span>
                   </button>
                 );
@@ -788,6 +789,7 @@ function DraggableSubTicket({
         <Badge size="sm" variant={subStatusCfg.badgeVariant}>
           {subStatusCfg.label}
         </Badge>
+        <span className="shrink-0 text-muted-foreground">{sub.identifier}</span>
         <span className="truncate text-foreground">{sub.title}</span>
       </PopoverTrigger>
       <PopoverPopup

@@ -111,6 +111,7 @@ const HISTORY_SELECT = `
 const DEP_SELECT = `
   d.ticket_id AS "ticketId",
   d.depends_on_ticket_id AS "dependsOnTicketId",
+  t.identifier AS "identifier",
   t.title AS "title",
   t.status AS "status"
 `;
@@ -196,6 +197,7 @@ const makeTicketingRepository = Effect.gen(function* () {
   const DepRow = Schema.Struct({
     ticketId: Schema.String,
     dependsOnTicketId: Schema.String,
+    identifier: Schema.String,
     title: Schema.String,
     status: Schema.String,
   });

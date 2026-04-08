@@ -113,6 +113,7 @@ export type Label = typeof Label.Type;
 export const TicketDependency = Schema.Struct({
   ticketId: TicketId,
   dependsOnTicketId: TicketId,
+  identifier: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   status: TicketStatus,
 });
