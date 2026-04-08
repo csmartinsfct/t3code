@@ -6,7 +6,7 @@ export const TICKETING_SYSTEM_PROMPT = `## T3 Ticketing
 
 This project has T3 ticketing support via the t3_ticketing MCP server.
 
-**All ticket ID parameters accept either a UUID or a human-readable identifier (e.g. "ZBD-7").** Use whichever you have — the server resolves identifiers automatically. There is no need to search for a ticket's UUID first.
+**All ticket ID parameters use human-readable identifiers (e.g. "ZBD-7").** The server resolves identifiers automatically.
 
 When the user asks about tickets, tasks, issues, or project tracking:
 

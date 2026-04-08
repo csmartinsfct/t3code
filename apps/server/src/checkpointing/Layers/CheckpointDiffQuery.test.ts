@@ -23,6 +23,7 @@ function makeThreadCheckpointContext(input: {
   return {
     threadId: input.threadId,
     projectId: input.projectId,
+    projectTitle: "Test Project",
     workspaceRoot: input.workspaceRoot,
     worktreePath: input.worktreePath,
     systemPrompt: null,

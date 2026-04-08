@@ -2906,6 +2906,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const envHeader = buildMcpEnvironmentHeader({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
+          projectTitle: checkpointContext.value.projectTitle,
         });
 
         if (mcpDeliveryMode === "tools") {

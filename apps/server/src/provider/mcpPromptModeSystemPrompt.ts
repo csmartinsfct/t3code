@@ -2,18 +2,29 @@
  * Builds a short environment header injected at the top of the MCP system prompt.
  * Tells the agent which T3 server instance it is connected to (port, dev vs prod,
  * data directory) so it can fall back to direct DB/API access when needed.
+ *
+ * In production builds, data directory and database path are only exposed to
+ * the "T3 Code" project to prevent regular consumer threads from accessing
+ * internal state directly.
  */
-export function buildMcpEnvironmentHeader(params: { port: number; isDev: boolean }): string {
-  const { port, isDev } = params;
+export function buildMcpEnvironmentHeader(params: {
+  port: number;
+  isDev: boolean;
+  projectTitle?: string;
+}): string {
+  const { port, isDev, projectTitle } = params;
   const env = isDev ? "development" : "production";
-  const dataDir = isDev ? "~/.t3/dev/" : "~/.t3/userdata/";
   const lines = [`## T3 Server Environment`, ``, `- **Build:** ${env}`];
   if (!isDev) {
     lines.push(`- **Port:** ${port}`);
     lines.push(`- **Base URL:** http://localhost:${port}`);
   }
-  lines.push(`- **Data directory:** ${dataDir}`);
-  lines.push(`- **Database:** ${dataDir}state.sqlite`);
+  // Expose data directory / database only in dev or for the T3 Code project itself
+  if (isDev || projectTitle === "T3 Code") {
+    const dataDir = isDev ? "~/.t3/dev/" : "~/.t3/userdata/";
+    lines.push(`- **Data directory:** ${dataDir}`);
+    lines.push(`- **Database:** ${dataDir}state.sqlite`);
+  }
   if (isDev) {
     lines.push(`- **Dev bypass token:** \`t3-dev-bypass\` (for direct MCP HTTP calls)`);
   }

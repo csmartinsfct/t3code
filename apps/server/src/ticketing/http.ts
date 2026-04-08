@@ -212,13 +212,19 @@ function createTicketingMcpServer(
       title: "List Tickets",
       description: "List tickets for the current project with optional filters.",
       inputSchema: {
-        status: z.array(z.string()).optional().describe("Filter by status(es)."),
-        priority: z.array(z.string()).optional().describe("Filter by priority(ies)."),
+        status: z
+          .array(z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"]))
+          .optional()
+          .describe("Filter by status(es)."),
+        priority: z
+          .array(z.enum(["none", "low", "medium", "high", "urgent"]))
+          .optional()
+          .describe("Filter by priority(ies)."),
         parentId: z
           .string()
           .optional()
           .nullable()
-          .describe("Filter by parent ticket ID or identifier (e.g. 'ZBD-7')."),
+          .describe("Filter by parent ticket identifier (e.g. 'ZBD-7')."),
         labelId: z.string().optional().describe("Filter by label ID."),
         search: z.string().optional().describe("Search in title/description/identifier."),
         includeArchived: z.boolean().optional().describe("Include archived tickets."),
@@ -262,7 +268,7 @@ function createTicketingMcpServer(
       title: "Get Ticket",
       description: "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
       inputSchema: {
-        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ id }) => {
@@ -289,9 +295,15 @@ function createTicketingMcpServer(
         parentId: z
           .string()
           .optional()
-          .describe("Parent ticket ID or identifier (e.g. 'ZBD-7') for sub-tickets."),
-        status: z.string().optional().describe("Initial status (default: backlog)."),
-        priority: z.string().optional().describe("Priority (default: none)."),
+          .describe("Parent ticket identifier (e.g. 'ZBD-7') for sub-tickets."),
+        status: z
+          .enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+          .optional()
+          .describe("Initial status (default: backlog)."),
+        priority: z
+          .enum(["none", "low", "medium", "high", "urgent"])
+          .optional()
+          .describe("Priority (default: none)."),
         labelIds: z.array(z.string()).optional().describe("Label IDs to attach."),
         dependencyIds: z
           .array(z.string())
@@ -332,12 +344,18 @@ function createTicketingMcpServer(
       title: "Update Ticket",
       description: "Update an existing ticket.",
       inputSchema: {
-        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7') to update."),
+        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7') to update."),
         title: z.string().optional().describe("New title."),
         description: z.string().optional().nullable().describe("New description."),
-        status: z.string().optional().describe("New status."),
-        priority: z.string().optional().describe("New priority."),
-        parentId: z.string().optional().nullable().describe("New parent ticket ID or identifier."),
+        status: z
+          .enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+          .optional()
+          .describe("New status."),
+        priority: z
+          .enum(["none", "low", "medium", "high", "urgent"])
+          .optional()
+          .describe("New priority."),
+        parentId: z.string().optional().nullable().describe("New parent ticket identifier (e.g. 'ZBD-7')."),
         sortOrder: z.number().optional().describe("New sort order."),
       },
     },
@@ -376,7 +394,7 @@ function createTicketingMcpServer(
       title: "Delete Ticket",
       description: "Delete a ticket and all its data.",
       inputSchema: {
-        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7') to delete."),
+        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7') to delete."),
       },
     },
     async ({ id }) => {
@@ -429,7 +447,7 @@ function createTicketingMcpServer(
         rootTicketId: z
           .string()
           .optional()
-          .describe("Optional root ticket ID or identifier (e.g. 'ZBD-7')."),
+          .describe("Optional root ticket identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ rootTicketId }) => {
@@ -484,10 +502,10 @@ function createTicketingMcpServer(
       title: "Set Ticket Dependencies",
       description: "Replace all dependencies for a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         dependsOnTicketIds: z
           .array(z.string())
-          .describe("Ticket UUIDs or identifiers this depends on."),
+          .describe("Ticket identifiers this depends on (e.g. 'ZBD-7')."),
       },
     },
     async ({ ticketId, dependsOnTicketIds }) => {
@@ -515,8 +533,8 @@ function createTicketingMcpServer(
       title: "Add Ticket Dependency",
       description: "Add a dependency between two tickets.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
-        dependsOnTicketId: z.string().describe("The dependency UUID or identifier."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
+        dependsOnTicketId: z.string().describe("The dependency identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ ticketId, dependsOnTicketId }) => {
@@ -544,8 +562,8 @@ function createTicketingMcpServer(
       title: "Remove Ticket Dependency",
       description: "Remove a dependency between two tickets.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
-        dependsOnTicketId: z.string().describe("The dependency UUID or identifier."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
+        dependsOnTicketId: z.string().describe("The dependency identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ ticketId, dependsOnTicketId }) => {
@@ -575,7 +593,7 @@ function createTicketingMcpServer(
       title: "Update Acceptance Criterion Status",
       description: "Update the status of an acceptance criterion on a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         index: z.number().int().nonnegative().describe("Criterion index (0-based)."),
         status: z.enum(["pending", "met", "not_met"]).describe("New status."),
         reason: z.string().optional().describe("Optional reason for the status change."),
@@ -609,7 +627,7 @@ function createTicketingMcpServer(
       title: "Get Ticket History",
       description: "Get audit history for a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         limit: z.number().int().positive().optional().describe("Max entries."),
       },
     },
@@ -730,7 +748,7 @@ function createTicketingMcpServer(
       title: "Add Label to Ticket",
       description: "Add a label to a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         labelId: z.string().describe("The label ID."),
       },
     },
@@ -758,7 +776,7 @@ function createTicketingMcpServer(
       title: "Remove Label from Ticket",
       description: "Remove a label from a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         labelId: z.string().describe("The label ID."),
       },
     },
@@ -788,7 +806,7 @@ function createTicketingMcpServer(
       title: "List Ticket Comments",
       description: "List comments on a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         limit: z.number().int().positive().optional().describe("Max comments."),
       },
     },
@@ -816,7 +834,7 @@ function createTicketingMcpServer(
       title: "Create Comment",
       description: "Add a comment to a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         parentId: z.string().optional().describe("Parent comment ID for threaded replies."),
         authorType: z.enum(["human", "llm"]).describe("Author type."),
         authorName: z.string().describe("Author display name."),
@@ -897,7 +915,7 @@ function createTicketingMcpServer(
       title: "List Ticket Artifacts",
       description: "List artifacts attached to a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ ticketId }) => {
@@ -923,7 +941,7 @@ function createTicketingMcpServer(
           .string()
           .optional()
           .describe(
-            "The ticket UUID or identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId.",
+            "The ticket identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId.",
           ),
         commentId: z
           .string()

@@ -109,6 +109,7 @@ const ProjectionThreadIdLookupRowSchema = Schema.Struct({
 const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  projectTitle: Schema.String,
   workspaceRoot: Schema.String,
   worktreePath: Schema.NullOr(Schema.String),
   systemPrompt: Schema.NullOr(Schema.String),
@@ -404,6 +405,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
+          projects.title AS "projectTitle",
           projects.workspace_root AS "workspaceRoot",
           threads.worktree_path AS "worktreePath",
           projects.system_prompt AS "systemPrompt"
@@ -794,6 +796,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       return Option.some({
         threadId: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
+        projectTitle: threadRow.value.projectTitle,
         workspaceRoot: threadRow.value.workspaceRoot,
         worktreePath: threadRow.value.worktreePath,
         systemPrompt: threadRow.value.systemPrompt,

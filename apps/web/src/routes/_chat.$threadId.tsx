@@ -361,7 +361,26 @@ function ChatThreadRouteView() {
   }
 
   if (viewMode === "management" && resolvedProjectId) {
-    return <ManagementView threadId={threadId} projectId={resolvedProjectId} />;
+    const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+    const shouldRenderFileExplorerContent = fileExplorerOpen || hasOpenedFileExplorer;
+    return (
+      <>
+        <ManagementView threadId={threadId} projectId={resolvedProjectId} />
+        <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
+          {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+        </DiffPanelSheet>
+        <FileExplorerSheet
+          fileExplorerOpen={fileExplorerOpen}
+          onCloseFileExplorer={closeFileExplorer}
+        >
+          {shouldRenderFileExplorerContent && projectCwd ? (
+            <Suspense fallback={<FileExplorerLoadingFallback mode="sheet" />}>
+              <LazyFileExplorer cwd={projectCwd} mode="sheet" onClose={closeFileExplorer} />
+            </Suspense>
+          ) : null}
+        </FileExplorerSheet>
+      </>
+    );
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
