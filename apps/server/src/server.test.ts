@@ -47,6 +47,7 @@ import {
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
+import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -101,6 +102,9 @@ const makeDefaultOrchestrationReadModel = () => {
         runtimeMode: "full-access" as const,
         branch: null,
         worktreePath: null,
+        parentThreadId: null,
+        isOrchestrationThread: false,
+        ticketId: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
@@ -351,6 +355,18 @@ const buildAppUnderTest = (options?: {
           createArtifact: () => Effect.die(new Error("not mocked")),
           deleteArtifact: () => Effect.void,
           streamEvents: Stream.empty,
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(OrchestrationRunService, {
+          create: () => Effect.die(new Error("not mocked")),
+          get: () => Effect.die(new Error("not mocked")),
+          list: () => Effect.succeed([]),
+          getChildThreads: () => Effect.succeed([]),
+          pause: () => Effect.die(new Error("not mocked")),
+          resume: () => Effect.die(new Error("not mocked")),
+          cancel: () => Effect.die(new Error("not mocked")),
+          streamEvents: () => Stream.empty,
         }),
       ),
       Layer.provide(
@@ -1218,6 +1234,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             runtimeMode: "full-access" as const,
             branch: null,
             worktreePath: null,
+            parentThreadId: null,
+            isOrchestrationThread: false,
+            ticketId: null,
             createdAt: now,
             updatedAt: now,
             archivedAt: null,

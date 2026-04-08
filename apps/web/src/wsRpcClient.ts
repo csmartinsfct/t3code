@@ -7,7 +7,9 @@ import {
   type ManagedRunStreamEvent,
   type NativeApi,
   type OrchestrationEvent,
+  type OrchestrationRunStreamEvent,
   ORCHESTRATION_WS_METHODS,
+  type ProjectId,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -216,9 +218,20 @@ export interface WsRpcClient {
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
+    readonly createRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.createRun>;
+    readonly getRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getRun>;
+    readonly listRuns: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.listRuns>;
+    readonly getChildThreads: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getChildThreads>;
+    readonly pauseRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.pauseRun>;
+    readonly resumeRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.resumeRun>;
+    readonly cancelRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.cancelRun>;
     readonly onDomainEvent: (
       listener: (event: OrchestrationEvent) => void,
       options?: OrchestrationDomainEventSubscriptionOptions,
+    ) => () => void;
+    readonly onRunEvent: (
+      projectId: ProjectId,
+      listener: (event: OrchestrationRunStreamEvent) => void,
     ) => () => void;
   };
 }
@@ -448,6 +461,24 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport
           .request((client) => client[ORCHESTRATION_WS_METHODS.replayEvents](input))
           .then((events) => [...events]),
+      createRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.createRun](input)),
+      getRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getRun](input)),
+      listRuns: (input) =>
+        transport
+          .request((client) => client[ORCHESTRATION_WS_METHODS.listRuns](input))
+          .then((runs) => [...runs]),
+      getChildThreads: (input) =>
+        transport
+          .request((client) => client[ORCHESTRATION_WS_METHODS.getChildThreads](input))
+          .then((threads) => [...threads]),
+      pauseRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.pauseRun](input)),
+      resumeRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.resumeRun](input)),
+      cancelRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.cancelRun](input)),
       onDomainEvent: (listener, options) =>
         transport.subscribe(
           (client) => {
@@ -467,6 +498,11 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
             );
             listener(event);
           },
+        ),
+      onRunEvent: (projectId, listener) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeOrchestrationRunEvents]({ projectId }),
+          listener,
         ),
     },
   };

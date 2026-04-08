@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  TicketId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -29,6 +30,9 @@ export const ProjectionThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  parentThreadId: Schema.NullOr(ThreadId),
+  isOrchestrationThread: Schema.Boolean,
+  ticketId: Schema.NullOr(TicketId),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -51,6 +55,11 @@ export const ListProjectionThreadsByProjectInput = Schema.Struct({
   projectId: ProjectId,
 });
 export type ListProjectionThreadsByProjectInput = typeof ListProjectionThreadsByProjectInput.Type;
+
+export const ListProjectionThreadsByParentInput = Schema.Struct({
+  parentThreadId: ThreadId,
+});
+export type ListProjectionThreadsByParentInput = typeof ListProjectionThreadsByParentInput.Type;
 
 /**
  * ProjectionThreadRepositoryShape - Service API for projected thread records.
@@ -77,6 +86,15 @@ export interface ProjectionThreadRepositoryShape {
    */
   readonly listByProjectId: (
     input: ListProjectionThreadsByProjectInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>;
+
+  /**
+   * List child threads of an orchestration parent thread.
+   *
+   * Returned in creation order (execution order).
+   */
+  readonly listByParentThreadId: (
+    input: ListProjectionThreadsByParentInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>;
 
   /**

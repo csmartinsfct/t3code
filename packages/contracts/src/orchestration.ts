@@ -8,12 +8,14 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationRunId,
   ProjectId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
+import { TicketId } from "./ticketing";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -21,6 +23,13 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
+  createRun: "orchestration.createRun",
+  getRun: "orchestration.getRun",
+  listRuns: "orchestration.listRuns",
+  getChildThreads: "orchestration.getChildThreads",
+  pauseRun: "orchestration.pauseRun",
+  resumeRun: "orchestration.resumeRun",
+  cancelRun: "orchestration.cancelRun",
 } as const;
 
 export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent"] as const;
@@ -369,6 +378,9 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  parentThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
+  isOrchestrationThread: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  ticketId: Schema.NullOr(TicketId).pipe(Schema.withDecodingDefault(() => null)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
@@ -431,6 +443,9 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  isOrchestrationThread: Schema.optional(Schema.Boolean),
+  ticketId: Schema.optional(Schema.NullOr(TicketId)),
   initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
 });
@@ -779,6 +794,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  isOrchestrationThread: Schema.optional(Schema.Boolean),
+  ticketId: Schema.optional(Schema.NullOr(TicketId)),
   sourceThreadId: Schema.optional(ThreadId),
   initialDraft: Schema.optional(ThreadInitialDraft),
   createdAt: IsoDateTime,
@@ -1173,6 +1191,136 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+// ---------------------------------------------------------------------------
+// Orchestration Runs
+// ---------------------------------------------------------------------------
+
+export const ORCHESTRATION_RUN_STATUSES = [
+  "pending",
+  "running",
+  "paused",
+  "completed",
+  "canceled",
+  "failed",
+] as const;
+export const OrchestrationRunStatus = Schema.Literals(ORCHESTRATION_RUN_STATUSES);
+export type OrchestrationRunStatus = typeof OrchestrationRunStatus.Type;
+
+export const ORCHESTRATION_RUN_PHASES = ["working", "reviewing"] as const;
+export const OrchestrationRunPhase = Schema.Literals(ORCHESTRATION_RUN_PHASES);
+export type OrchestrationRunPhase = typeof OrchestrationRunPhase.Type;
+
+export const OrchestrationTicketEntry = Schema.Struct({
+  ticketId: TicketId,
+  workingThreadId: ThreadId,
+});
+export type OrchestrationTicketEntry = typeof OrchestrationTicketEntry.Type;
+
+export const OrchestrationRun = Schema.Struct({
+  id: OrchestrationRunId,
+  orchestrationThreadId: ThreadId,
+  projectId: ProjectId,
+  status: OrchestrationRunStatus,
+  ticketOrder: Schema.Array(OrchestrationTicketEntry),
+  currentTicketIndex: Schema.Int,
+  currentPhase: OrchestrationRunPhase,
+  reviewIteration: NonNegativeInt,
+  maxReviewIterations: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationRun = typeof OrchestrationRun.Type;
+
+export const OrchestrationRunSummary = Schema.Struct({
+  id: OrchestrationRunId,
+  orchestrationThreadId: ThreadId,
+  projectId: ProjectId,
+  status: OrchestrationRunStatus,
+  currentTicketIndex: Schema.Int,
+  ticketCount: NonNegativeInt,
+  currentPhase: OrchestrationRunPhase,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationRunSummary = typeof OrchestrationRunSummary.Type;
+
+export const OrchestrationRunStreamEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("snapshot"),
+    projectId: ProjectId,
+    runs: Schema.Array(OrchestrationRunSummary),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("run.created"),
+    projectId: ProjectId,
+    run: OrchestrationRun,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("run.updated"),
+    projectId: ProjectId,
+    run: OrchestrationRun,
+  }),
+]);
+export type OrchestrationRunStreamEvent = typeof OrchestrationRunStreamEvent.Type;
+
+export const OrchestrationCreateRunInput = Schema.Struct({
+  projectId: ProjectId,
+  ticketIdentifiers: Schema.Array(TrimmedNonEmptyString),
+  modelSelection: ModelSelection,
+  runtimeMode: Schema.optional(RuntimeMode),
+  maxReviewIterations: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationCreateRunInput = typeof OrchestrationCreateRunInput.Type;
+
+export const OrchestrationCreateRunResult = Schema.Struct({
+  runId: OrchestrationRunId,
+  orchestrationThreadId: ThreadId,
+  workingThreadIds: Schema.Array(ThreadId),
+});
+export type OrchestrationCreateRunResult = typeof OrchestrationCreateRunResult.Type;
+
+export const OrchestrationGetRunInput = Schema.Struct({
+  runId: OrchestrationRunId,
+});
+export type OrchestrationGetRunInput = typeof OrchestrationGetRunInput.Type;
+
+export const OrchestrationListRunsInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationListRunsInput = typeof OrchestrationListRunsInput.Type;
+
+export const OrchestrationGetChildThreadsInput = Schema.Struct({
+  parentThreadId: ThreadId,
+});
+export type OrchestrationGetChildThreadsInput = typeof OrchestrationGetChildThreadsInput.Type;
+
+export const OrchestrationPauseRunInput = Schema.Struct({
+  runId: OrchestrationRunId,
+});
+export type OrchestrationPauseRunInput = typeof OrchestrationPauseRunInput.Type;
+
+export const OrchestrationResumeRunInput = Schema.Struct({
+  runId: OrchestrationRunId,
+});
+export type OrchestrationResumeRunInput = typeof OrchestrationResumeRunInput.Type;
+
+export const OrchestrationCancelRunInput = Schema.Struct({
+  runId: OrchestrationRunId,
+});
+export type OrchestrationCancelRunInput = typeof OrchestrationCancelRunInput.Type;
+
+export class OrchestrationRunError extends Schema.TaggedErrorClass<OrchestrationRunError>()(
+  "OrchestrationRunError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+// ---------------------------------------------------------------------------
+// RPC Schemas
+// ---------------------------------------------------------------------------
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -1193,6 +1341,34 @@ export const OrchestrationRpcSchemas = {
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
+  },
+  createRun: {
+    input: OrchestrationCreateRunInput,
+    output: OrchestrationCreateRunResult,
+  },
+  getRun: {
+    input: OrchestrationGetRunInput,
+    output: OrchestrationRun,
+  },
+  listRuns: {
+    input: OrchestrationListRunsInput,
+    output: Schema.Array(OrchestrationRunSummary),
+  },
+  getChildThreads: {
+    input: OrchestrationGetChildThreadsInput,
+    output: Schema.Array(OrchestrationThread),
+  },
+  pauseRun: {
+    input: OrchestrationPauseRunInput,
+    output: OrchestrationRun,
+  },
+  resumeRun: {
+    input: OrchestrationResumeRunInput,
+    output: OrchestrationRun,
+  },
+  cancelRun: {
+    input: OrchestrationCancelRunInput,
+    output: OrchestrationRun,
   },
 } as const;
 

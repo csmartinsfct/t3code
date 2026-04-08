@@ -165,6 +165,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(command.parentThreadId !== undefined
+            ? { parentThreadId: command.parentThreadId }
+            : {}),
+          ...(command.isOrchestrationThread !== undefined
+            ? { isOrchestrationThread: command.isOrchestrationThread }
+            : {}),
+          ...(command.ticketId !== undefined ? { ticketId: command.ticketId } : {}),
           ...(command.initialDraft ? { initialDraft: command.initialDraft } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,

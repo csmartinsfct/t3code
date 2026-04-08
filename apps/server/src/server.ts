@@ -54,6 +54,9 @@ import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
 import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
 import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingMcpRouteLayer } from "./ticketing/http";
+import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
+import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
+import { OrchestrationRunServiceLive } from "./orchestrationRuns/Layers/OrchestrationRuns";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -240,17 +243,39 @@ const RuntimeServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
-  Layer.provideMerge(KeybindingsLive),
-  Layer.provideMerge(ProviderRegistryLive),
-  Layer.provideMerge(ProviderRateLimitsCacheLive),
-  Layer.provideMerge(ServerSettingsLive),
-  Layer.provideMerge(WorkspaceLayerLive),
-  Layer.provideMerge(ProjectFaviconResolverLive),
-
-  // Misc.
-  Layer.provideMerge(AnalyticsServiceLayerLive),
-  Layer.provideMerge(OpenLive),
-  Layer.provideMerge(ServerLifecycleEventsLive),
+  // OrchestrationRunServiceLive's remaining requirements (ServerRuntimeStartup, TicketingService)
+  // are satisfied by earlier layers in the provideMerge chain at runtime.
+  Layer.provideMerge(
+    OrchestrationRunServiceLive.pipe(
+      Layer.provide(OrchestrationRunRepositoryLive),
+      Layer.provide(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+      Layer.provide(
+        TicketingServiceLive.pipe(
+          Layer.provide(TicketingRepositoryLive),
+          Layer.provide(PersistenceLayerLive),
+        ),
+      ),
+      Layer.provide(
+        OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+      ),
+      Layer.provide(PersistenceLayerLive),
+    ) as Layer.Layer<
+      import("./orchestrationRuns/Services/OrchestrationRuns").OrchestrationRunService
+    >,
+  ),
+  Layer.provideMerge(
+    Layer.empty.pipe(
+      Layer.provideMerge(KeybindingsLive),
+      Layer.provideMerge(ProviderRegistryLive),
+      Layer.provideMerge(ProviderRateLimitsCacheLive),
+      Layer.provideMerge(ServerSettingsLive),
+      Layer.provideMerge(WorkspaceLayerLive),
+      Layer.provideMerge(ProjectFaviconResolverLive),
+      Layer.provideMerge(AnalyticsServiceLayerLive),
+      Layer.provideMerge(OpenLive),
+      Layer.provideMerge(ServerLifecycleEventsLive),
+    ),
+  ),
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
