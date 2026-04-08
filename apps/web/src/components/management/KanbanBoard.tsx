@@ -48,6 +48,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       canceled: [],
     };
     for (const ticket of tickets) {
+      // Skip subtickets — they belong to an epic and shouldn't appear on the board
+      if (ticket.parentId) continue;
       grouped[ticket.status]?.push(ticket);
     }
     for (const status of ALL_STATUSES) {
