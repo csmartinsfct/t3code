@@ -116,6 +116,8 @@ const DEP_SELECT = `
 
 const TransitiveDepRow = Schema.Struct({ ticketId: Schema.String });
 
+const IdIdentifierRow = Schema.Struct({ id: Schema.String, identifier: Schema.String });
+
 const CountRow = Schema.Struct({ cnt: Schema.Number });
 
 const makeTicketingRepository = Effect.gen(function* () {
@@ -357,6 +359,15 @@ const makeTicketingRepository = Effect.gen(function* () {
       writeTicket(input).pipe(
         Effect.mapError(toPersistenceSqlError("TicketingRepository.updateTicket:query")),
       ),
+    getIdentifierMap: (ids) =>
+      Effect.gen(function* () {
+        if (ids.length === 0) return new Map<string, string>();
+        const placeholders = ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
+        const rows =
+          yield* sql`SELECT id, identifier FROM tickets WHERE id IN (${sql.literal(placeholders)})`;
+        const typed = rows as unknown as ReadonlyArray<typeof IdIdentifierRow.Type>;
+        return new Map(typed.map((r) => [r.id, r.identifier]));
+      }).pipe(Effect.mapError(toPersistenceSqlError("TicketingRepository.getIdentifierMap:query"))),
     getById: (input) =>
       getTicketById(input).pipe(
         Effect.map((opt) => opt.pipe(Option.map(toPersistedTicket))),

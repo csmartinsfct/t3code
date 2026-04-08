@@ -181,6 +181,31 @@ const makeTicketingService = Effect.gen(function* () {
       }
     });
 
+  // ---- ID resolution ----
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const resolveId: TicketingServiceShape["resolveId"] = (idOrIdentifier) => {
+    if (UUID_RE.test(idOrIdentifier)) {
+      return Effect.succeed(TicketId.makeUnsafe(idOrIdentifier));
+    }
+    return repo.getByIdentifier({ identifier: idOrIdentifier }).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail<TicketingError>(
+              new TicketNotFoundError({ ticketId: idOrIdentifier as never }),
+            ),
+          onSome: (ticket) => Effect.succeed(ticket.id),
+        }),
+      ),
+      Effect.mapError(toOperationError("resolveId")),
+    );
+  };
+
+  const resolveIdentifiers: TicketingServiceShape["resolveIdentifiers"] = (ids) =>
+    repo.getIdentifierMap(ids).pipe(Effect.mapError(toOperationError("resolveIdentifiers")));
+
   // ---- Service shape implementation ----
 
   const list: TicketingServiceShape["list"] = (input) =>
@@ -864,6 +889,8 @@ const makeTicketingService = Effect.gen(function* () {
     });
 
   return {
+    resolveId,
+    resolveIdentifiers,
     list,
     getById,
     getByIdentifier,

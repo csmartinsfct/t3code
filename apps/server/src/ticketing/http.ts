@@ -5,7 +5,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { z } from "zod";
 
 import type { TicketingError, ProjectId, ThreadId } from "@t3tools/contracts";
-import { TicketId, LabelId, CommentId, ArtifactId } from "@t3tools/contracts";
+import { LabelId, CommentId, ArtifactId } from "@t3tools/contracts";
 import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
 import { TicketingService, type TicketingServiceShape } from "./Services/Ticketing";
 
@@ -69,6 +69,116 @@ function mcpError(message: string) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// MCP response transformation — strip ticket UUIDs, use identifiers
+// ---------------------------------------------------------------------------
+
+type IdMap = ReadonlyMap<string, string>;
+
+/** Collect ticket UUIDs referenced by ticket-like objects that need identifier resolution. */
+function collectTicketUuids(obj: unknown): string[] {
+  const uuids: string[] = [];
+  if (!obj || typeof obj !== "object") return uuids;
+  const walk = (v: unknown) => {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    const o = v as Record<string, unknown>;
+    // Ticket / TicketSummary — has identifier + id
+    if (typeof o.id === "string" && typeof o.identifier === "string") {
+      uuids.push(o.id);
+      if (typeof o.parentId === "string") uuids.push(o.parentId);
+    }
+    // TicketDependency — has ticketId + dependsOnTicketId
+    if (typeof o.ticketId === "string" && typeof o.dependsOnTicketId === "string") {
+      uuids.push(o.ticketId, o.dependsOnTicketId);
+    }
+    // Comment / Artifact / HistoryEntry — has ticketId but not dependsOnTicketId
+    if (typeof o.ticketId === "string" && !("dependsOnTicketId" in o)) {
+      uuids.push(o.ticketId);
+    }
+    // Recurse into known container fields
+    for (const key of [
+      "subTickets",
+      "dependencies",
+      "comments",
+      "artifacts",
+      "children",
+      "ticket",
+    ]) {
+      if (key in o) walk(o[key]);
+    }
+  };
+  walk(obj);
+  return uuids;
+}
+
+/** Transform a response to replace ticket UUIDs with identifiers for MCP output. */
+function transformForMcp(obj: unknown, idMap: IdMap): unknown {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map((item) => transformForMcp(item, idMap));
+
+  const o = obj as Record<string, unknown>;
+
+  // TicketTreeNode — has { ticket, children, dependencies }
+  if ("ticket" in o && "children" in o && "dependencies" in o) {
+    return {
+      ticket: transformForMcp(o.ticket, idMap),
+      children: transformForMcp(o.children, idMap),
+      dependencies: transformForMcp(o.dependencies, idMap),
+    };
+  }
+
+  // Ticket / TicketSummary — has identifier + id
+  if (typeof o.id === "string" && typeof o.identifier === "string") {
+    const { id: _id, projectId: _pid, ticketNumber: _tn, parentId, ...rest } = o;
+    const result: Record<string, unknown> = {
+      ...rest,
+      parentIdentifier: typeof parentId === "string" ? (idMap.get(parentId) ?? parentId) : null,
+    };
+    // Recurse into nested fields
+    for (const key of ["subTickets", "dependencies", "comments", "artifacts"]) {
+      if (key in result) result[key] = transformForMcp(result[key], idMap);
+    }
+    return result;
+  }
+
+  // TicketDependency — has ticketId + dependsOnTicketId
+  if (typeof o.ticketId === "string" && typeof o.dependsOnTicketId === "string") {
+    return {
+      identifier: idMap.get(o.ticketId) ?? o.ticketId,
+      dependsOnIdentifier: idMap.get(o.dependsOnTicketId) ?? o.dependsOnTicketId,
+      title: o.title,
+      status: o.status,
+    };
+  }
+
+  // Comment — has ticketId + body
+  if (typeof o.ticketId === "string" && typeof o.body === "string") {
+    const { ticketId, ...rest } = o;
+    return { ...rest, ticketIdentifier: idMap.get(ticketId) ?? ticketId };
+  }
+
+  // Artifact — has ticketId + type + payload
+  if ("ticketId" in o && typeof o.type === "string" && "payload" in o) {
+    const { ticketId, ...rest } = o;
+    if (typeof ticketId === "string") {
+      return { ...rest, ticketIdentifier: idMap.get(ticketId) ?? ticketId };
+    }
+    return rest;
+  }
+
+  // HistoryEntry — has ticketId + action + changes
+  if (typeof o.ticketId === "string" && typeof o.action === "string" && "changes" in o) {
+    const { ticketId, ...rest } = o;
+    return { ...rest, ticketIdentifier: idMap.get(ticketId) ?? ticketId };
+  }
+
+  return obj;
+}
+
 function createTicketingMcpServer(
   ticketing: TicketingServiceShape,
   bridge: ReturnType<typeof createEffectBridge>,
@@ -78,6 +188,21 @@ function createTicketingMcpServer(
     { name: "t3-ticketing", version: "0.0.1" },
     { capabilities: { tools: {} } },
   );
+
+  /** Resolve a ticket UUID or human-readable identifier (e.g. "ZBD-7") to the canonical TicketId. */
+  const resolve = (idOrIdentifier: string) => bridge.run(ticketing.resolveId(idOrIdentifier));
+
+  /** Resolve identifiers and transform a response object for MCP output. */
+  async function mcpJson(response: unknown): Promise<string> {
+    const uuids = collectTicketUuids(response);
+    // Batch-resolve any ticket UUIDs we haven't seen
+    const unique = [...new Set(uuids)].filter(Boolean);
+    const idMap: IdMap =
+      unique.length > 0
+        ? await bridge.run(ticketing.resolveIdentifiers(unique))
+        : new Map<string, string>();
+    return JSON.stringify(transformForMcp(response, idMap), null, 2);
+  }
 
   // ---- Tickets ----
 
@@ -89,7 +214,11 @@ function createTicketingMcpServer(
       inputSchema: {
         status: z.array(z.string()).optional().describe("Filter by status(es)."),
         priority: z.array(z.string()).optional().describe("Filter by priority(ies)."),
-        parentId: z.string().optional().nullable().describe("Filter by parent ticket ID."),
+        parentId: z
+          .string()
+          .optional()
+          .nullable()
+          .describe("Filter by parent ticket ID or identifier (e.g. 'ZBD-7')."),
         labelId: z.string().optional().describe("Filter by label ID."),
         search: z.string().optional().describe("Search in title/description/identifier."),
         includeArchived: z.boolean().optional().describe("Include archived tickets."),
@@ -99,12 +228,18 @@ function createTicketingMcpServer(
     },
     async ({ status, priority, parentId, labelId, search, includeArchived, limit, offset }) => {
       try {
+        const resolvedParentId =
+          parentId !== undefined
+            ? parentId
+              ? ((await resolve(parentId)) as never)
+              : (null as never)
+            : undefined;
         const tickets = await bridge.run(
           ticketing.list({
             projectId: context.projectId,
             ...(status ? { status: status as never } : {}),
             ...(priority ? { priority: priority as never } : {}),
-            ...(parentId !== undefined ? { parentId: (parentId ?? null) as never } : {}),
+            ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
             ...(labelId ? { labelId: LabelId.makeUnsafe(labelId) } : {}),
             ...(search ? { search } : {}),
             ...(includeArchived !== undefined ? { includeArchived } : {}),
@@ -112,7 +247,7 @@ function createTicketingMcpServer(
             ...(offset ? { offset } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(tickets, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(tickets) }] };
       } catch (error) {
         return mcpError(
           `Failed to list tickets: ${error instanceof Error ? error.message : String(error)}`,
@@ -125,13 +260,16 @@ function createTicketingMcpServer(
     "get_ticket",
     {
       title: "Get Ticket",
-      description: "Get full details of a ticket by ID.",
-      inputSchema: { id: z.string().describe("The ticket ID.") },
+      description: "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
+      inputSchema: {
+        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+      },
     },
     async ({ id }) => {
       try {
-        const ticket = await bridge.run(ticketing.getById({ id: TicketId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify(ticket, null, 2) }] };
+        const resolved = await resolve(id);
+        const ticket = await bridge.run(ticketing.getById({ id: resolved }));
+        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
       } catch (error) {
         return mcpError(
           `Failed to get ticket '${id}': ${error instanceof Error ? error.message : String(error)}`,
@@ -148,30 +286,38 @@ function createTicketingMcpServer(
       inputSchema: {
         title: z.string().describe("Ticket title."),
         description: z.string().optional().describe("Ticket description."),
-        parentId: z.string().optional().describe("Parent ticket ID for sub-tickets."),
+        parentId: z
+          .string()
+          .optional()
+          .describe("Parent ticket ID or identifier (e.g. 'ZBD-7') for sub-tickets."),
         status: z.string().optional().describe("Initial status (default: backlog)."),
         priority: z.string().optional().describe("Priority (default: none)."),
         labelIds: z.array(z.string()).optional().describe("Label IDs to attach."),
-        dependencyIds: z.array(z.string()).optional().describe("Ticket IDs this depends on."),
+        dependencyIds: z
+          .array(z.string())
+          .optional()
+          .describe("Ticket IDs or identifiers this depends on."),
       },
     },
     async ({ title, description, parentId, status, priority, labelIds, dependencyIds }) => {
       try {
+        const resolvedParentId = parentId ? await resolve(parentId) : undefined;
+        const resolvedDepIds = dependencyIds
+          ? await Promise.all(dependencyIds.map(resolve))
+          : undefined;
         const ticket = await bridge.run(
           ticketing.create({
             projectId: context.projectId,
             title,
             ...(description ? { description } : {}),
-            ...(parentId ? { parentId: TicketId.makeUnsafe(parentId) } : {}),
+            ...(resolvedParentId ? { parentId: resolvedParentId } : {}),
             ...(status ? { status: status as never } : {}),
             ...(priority ? { priority: priority as never } : {}),
             ...(labelIds ? { labelIds: labelIds.map((id) => LabelId.makeUnsafe(id)) } : {}),
-            ...(dependencyIds
-              ? { dependencyIds: dependencyIds.map((id) => TicketId.makeUnsafe(id)) }
-              : {}),
+            ...(resolvedDepIds ? { dependencyIds: resolvedDepIds } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(ticket, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
       } catch (error) {
         return mcpError(
           `Failed to create ticket: ${error instanceof Error ? error.message : String(error)}`,
@@ -186,31 +332,36 @@ function createTicketingMcpServer(
       title: "Update Ticket",
       description: "Update an existing ticket.",
       inputSchema: {
-        id: z.string().describe("The ticket ID to update."),
+        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7') to update."),
         title: z.string().optional().describe("New title."),
         description: z.string().optional().nullable().describe("New description."),
         status: z.string().optional().describe("New status."),
         priority: z.string().optional().describe("New priority."),
-        parentId: z.string().optional().nullable().describe("New parent ticket ID."),
+        parentId: z.string().optional().nullable().describe("New parent ticket ID or identifier."),
         sortOrder: z.number().optional().describe("New sort order."),
       },
     },
     async ({ id, title, description, status, priority, parentId, sortOrder }) => {
       try {
+        const resolvedId = await resolve(id);
+        const resolvedParentId =
+          parentId !== undefined
+            ? parentId
+              ? ((await resolve(parentId)) as never)
+              : null
+            : undefined;
         const ticket = await bridge.run(
           ticketing.update({
-            id: TicketId.makeUnsafe(id),
+            id: resolvedId,
             ...(title ? { title } : {}),
             ...(description !== undefined ? { description } : {}),
             ...(status ? { status: status as never } : {}),
             ...(priority ? { priority: priority as never } : {}),
-            ...(parentId !== undefined
-              ? { parentId: parentId ? (TicketId.makeUnsafe(parentId) as never) : null }
-              : {}),
+            ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
             ...(sortOrder !== undefined ? { sortOrder } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(ticket, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
       } catch (error) {
         return mcpError(
           `Failed to update ticket '${id}': ${error instanceof Error ? error.message : String(error)}`,
@@ -224,11 +375,14 @@ function createTicketingMcpServer(
     {
       title: "Delete Ticket",
       description: "Delete a ticket and all its data.",
-      inputSchema: { id: z.string().describe("The ticket ID to delete.") },
+      inputSchema: {
+        id: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7') to delete."),
+      },
     },
     async ({ id }) => {
       try {
-        await bridge.run(ticketing.delete({ id: TicketId.makeUnsafe(id) }));
+        const resolvedId = await resolve(id);
+        await bridge.run(ticketing.delete({ id: resolvedId }));
         return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
       } catch (error) {
         return mcpError(
@@ -257,7 +411,7 @@ function createTicketingMcpServer(
             ...(limit ? { limit } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(tickets, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(tickets) }] };
       } catch (error) {
         return mcpError(
           `Failed to search tickets: ${error instanceof Error ? error.message : String(error)}`,
@@ -272,18 +426,22 @@ function createTicketingMcpServer(
       title: "Get Ticket Tree",
       description: "Get hierarchical tree of tickets for the current project.",
       inputSchema: {
-        rootTicketId: z.string().optional().describe("Optional root ticket ID."),
+        rootTicketId: z
+          .string()
+          .optional()
+          .describe("Optional root ticket ID or identifier (e.g. 'ZBD-7')."),
       },
     },
     async ({ rootTicketId }) => {
       try {
+        const resolvedRoot = rootTicketId ? await resolve(rootTicketId) : undefined;
         const tree = await bridge.run(
           ticketing.getTree({
             projectId: context.projectId,
-            ...(rootTicketId ? { rootTicketId: TicketId.makeUnsafe(rootTicketId) } : {}),
+            ...(resolvedRoot ? { rootTicketId: resolvedRoot } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(tree, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(tree) }] };
       } catch (error) {
         return mcpError(
           `Failed to get ticket tree: ${error instanceof Error ? error.message : String(error)}`,
@@ -300,16 +458,15 @@ function createTicketingMcpServer(
       inputSchema: {
         items: z
           .array(z.object({ id: z.string(), sortOrder: z.number() }))
-          .describe("Array of {id, sortOrder} pairs."),
+          .describe("Array of {id or identifier, sortOrder} pairs."),
       },
     },
     async ({ items }) => {
       try {
-        await bridge.run(
-          ticketing.reorder({
-            items: items.map((i) => ({ id: TicketId.makeUnsafe(i.id), sortOrder: i.sortOrder })),
-          }),
+        const resolved = await Promise.all(
+          items.map(async (i) => ({ id: await resolve(i.id), sortOrder: i.sortOrder })),
         );
+        await bridge.run(ticketing.reorder({ items: resolved }));
         return { content: [{ type: "text" as const, text: JSON.stringify({ reordered: true }) }] };
       } catch (error) {
         return mcpError(
@@ -327,16 +484,20 @@ function createTicketingMcpServer(
       title: "Set Ticket Dependencies",
       description: "Replace all dependencies for a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
-        dependsOnTicketIds: z.array(z.string()).describe("Ticket IDs this depends on."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        dependsOnTicketIds: z
+          .array(z.string())
+          .describe("Ticket UUIDs or identifiers this depends on."),
       },
     },
     async ({ ticketId, dependsOnTicketIds }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
+        const resolvedDepIds = await Promise.all(dependsOnTicketIds.map(resolve));
         await bridge.run(
           ticketing.setDependencies({
-            ticketId: TicketId.makeUnsafe(ticketId),
-            dependsOnTicketIds: dependsOnTicketIds.map((id) => TicketId.makeUnsafe(id)),
+            ticketId: resolvedTicketId,
+            dependsOnTicketIds: resolvedDepIds,
           }),
         );
         return { content: [{ type: "text" as const, text: JSON.stringify({ updated: true }) }] };
@@ -354,16 +515,18 @@ function createTicketingMcpServer(
       title: "Add Ticket Dependency",
       description: "Add a dependency between two tickets.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket that depends on another."),
-        dependsOnTicketId: z.string().describe("The ticket being depended on."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        dependsOnTicketId: z.string().describe("The dependency UUID or identifier."),
       },
     },
     async ({ ticketId, dependsOnTicketId }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
+        const resolvedDepId = await resolve(dependsOnTicketId);
         await bridge.run(
           ticketing.addDependency({
-            ticketId: TicketId.makeUnsafe(ticketId),
-            dependsOnTicketId: TicketId.makeUnsafe(dependsOnTicketId),
+            ticketId: resolvedTicketId,
+            dependsOnTicketId: resolvedDepId,
           }),
         );
         return { content: [{ type: "text" as const, text: JSON.stringify({ added: true }) }] };
@@ -381,16 +544,18 @@ function createTicketingMcpServer(
       title: "Remove Ticket Dependency",
       description: "Remove a dependency between two tickets.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
-        dependsOnTicketId: z.string().describe("The dependency to remove."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+        dependsOnTicketId: z.string().describe("The dependency UUID or identifier."),
       },
     },
     async ({ ticketId, dependsOnTicketId }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
+        const resolvedDepId = await resolve(dependsOnTicketId);
         await bridge.run(
           ticketing.removeDependency({
-            ticketId: TicketId.makeUnsafe(ticketId),
-            dependsOnTicketId: TicketId.makeUnsafe(dependsOnTicketId),
+            ticketId: resolvedTicketId,
+            dependsOnTicketId: resolvedDepId,
           }),
         );
         return { content: [{ type: "text" as const, text: JSON.stringify({ removed: true }) }] };
@@ -410,7 +575,7 @@ function createTicketingMcpServer(
       title: "Update Acceptance Criterion Status",
       description: "Update the status of an acceptance criterion on a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         index: z.number().int().nonnegative().describe("Criterion index (0-based)."),
         status: z.enum(["pending", "met", "not_met"]).describe("New status."),
         reason: z.string().optional().describe("Optional reason for the status change."),
@@ -418,15 +583,16 @@ function createTicketingMcpServer(
     },
     async ({ ticketId, index, status, reason }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         const ticket = await bridge.run(
           ticketing.updateCriterionStatus({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             index,
             status,
             ...(reason ? { reason } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(ticket, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
       } catch (error) {
         return mcpError(
           `Failed to update criterion: ${error instanceof Error ? error.message : String(error)}`,
@@ -443,19 +609,20 @@ function createTicketingMcpServer(
       title: "Get Ticket History",
       description: "Get audit history for a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         limit: z.number().int().positive().optional().describe("Max entries."),
       },
     },
     async ({ ticketId, limit }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         const history = await bridge.run(
           ticketing.getHistory({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             ...(limit ? { limit } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(history, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(history) }] };
       } catch (error) {
         return mcpError(
           `Failed to get history: ${error instanceof Error ? error.message : String(error)}`,
@@ -563,15 +730,16 @@ function createTicketingMcpServer(
       title: "Add Label to Ticket",
       description: "Add a label to a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         labelId: z.string().describe("The label ID."),
       },
     },
     async ({ ticketId, labelId }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         await bridge.run(
           ticketing.addTicketLabel({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             labelId: LabelId.makeUnsafe(labelId),
           }),
         );
@@ -590,15 +758,16 @@ function createTicketingMcpServer(
       title: "Remove Label from Ticket",
       description: "Remove a label from a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         labelId: z.string().describe("The label ID."),
       },
     },
     async ({ ticketId, labelId }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         await bridge.run(
           ticketing.removeTicketLabel({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             labelId: LabelId.makeUnsafe(labelId),
           }),
         );
@@ -619,19 +788,20 @@ function createTicketingMcpServer(
       title: "List Ticket Comments",
       description: "List comments on a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         limit: z.number().int().positive().optional().describe("Max comments."),
       },
     },
     async ({ ticketId, limit }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         const comments = await bridge.run(
           ticketing.listComments({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             ...(limit ? { limit } : {}),
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(comments, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(comments) }] };
       } catch (error) {
         return mcpError(
           `Failed to list comments: ${error instanceof Error ? error.message : String(error)}`,
@@ -646,7 +816,7 @@ function createTicketingMcpServer(
       title: "Create Comment",
       description: "Add a comment to a ticket.",
       inputSchema: {
-        ticketId: z.string().describe("The ticket ID."),
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
         parentId: z.string().optional().describe("Parent comment ID for threaded replies."),
         authorType: z.enum(["human", "llm"]).describe("Author type."),
         authorName: z.string().describe("Author display name."),
@@ -656,9 +826,10 @@ function createTicketingMcpServer(
     },
     async ({ ticketId, parentId, authorType, authorName, authorModel, body }) => {
       try {
+        const resolvedTicketId = await resolve(ticketId);
         const comment = await bridge.run(
           ticketing.createComment({
-            ticketId: TicketId.makeUnsafe(ticketId),
+            ticketId: resolvedTicketId,
             ...(parentId ? { parentId: CommentId.makeUnsafe(parentId) } : {}),
             authorType,
             authorName,
@@ -666,7 +837,7 @@ function createTicketingMcpServer(
             body,
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(comment) }] };
       } catch (error) {
         return mcpError(
           `Failed to create comment: ${error instanceof Error ? error.message : String(error)}`,
@@ -690,7 +861,7 @@ function createTicketingMcpServer(
         const comment = await bridge.run(
           ticketing.updateComment({ id: CommentId.makeUnsafe(id), body }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(comment) }] };
       } catch (error) {
         return mcpError(
           `Failed to update comment '${id}': ${error instanceof Error ? error.message : String(error)}`,
@@ -725,14 +896,15 @@ function createTicketingMcpServer(
     {
       title: "List Ticket Artifacts",
       description: "List artifacts attached to a ticket.",
-      inputSchema: { ticketId: z.string().describe("The ticket ID.") },
+      inputSchema: {
+        ticketId: z.string().describe("The ticket UUID or identifier (e.g. 'ZBD-7')."),
+      },
     },
     async ({ ticketId }) => {
       try {
-        const artifacts = await bridge.run(
-          ticketing.listArtifacts({ ticketId: TicketId.makeUnsafe(ticketId) }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(artifacts, null, 2) }] };
+        const resolvedTicketId = await resolve(ticketId);
+        const artifacts = await bridge.run(ticketing.listArtifacts({ ticketId: resolvedTicketId }));
+        return { content: [{ type: "text" as const, text: await mcpJson(artifacts) }] };
       } catch (error) {
         return mcpError(
           `Failed to list artifacts: ${error instanceof Error ? error.message : String(error)}`,
@@ -750,7 +922,9 @@ function createTicketingMcpServer(
         ticketId: z
           .string()
           .optional()
-          .describe("The ticket ID (mutually exclusive with commentId)."),
+          .describe(
+            "The ticket UUID or identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId.",
+          ),
         commentId: z
           .string()
           .optional()
@@ -766,16 +940,17 @@ function createTicketingMcpServer(
     },
     async ({ ticketId, commentId, type, title, payload }) => {
       try {
+        const resolvedTicketId = ticketId ? await resolve(ticketId) : undefined;
         const artifact = await bridge.run(
           ticketing.createArtifact({
-            ...(ticketId ? { ticketId: TicketId.makeUnsafe(ticketId) } : {}),
+            ...(resolvedTicketId ? { ticketId: resolvedTicketId } : {}),
             ...(commentId ? { commentId: CommentId.makeUnsafe(commentId) } : {}),
             type,
             ...(title ? { title } : {}),
             payload,
           }),
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify(artifact, null, 2) }] };
+        return { content: [{ type: "text" as const, text: await mcpJson(artifact) }] };
       } catch (error) {
         return mcpError(
           `Failed to create artifact: ${error instanceof Error ? error.message : String(error)}`,

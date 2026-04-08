@@ -23,6 +23,7 @@ import type {
   TicketGetByIdentifierInput,
   TicketHistoryEntry,
   TicketHistoryInput,
+  TicketId,
   TicketingError,
   TicketingStreamEvent,
   TicketLabelInput,
@@ -38,6 +39,14 @@ import { ServiceMap } from "effect";
 import type { Effect, Stream } from "effect";
 
 export interface TicketingServiceShape {
+  /** Resolve a UUID or human-readable identifier (e.g. "ZBD-7") to a TicketId (UUID). */
+  readonly resolveId: (idOrIdentifier: string) => Effect.Effect<TicketId, TicketingError>;
+
+  /** Batch-resolve ticket UUIDs to their human-readable identifiers. */
+  readonly resolveIdentifiers: (
+    ids: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyMap<string, string>, TicketingError>;
+
   // Tickets
   readonly list: (
     input: TicketListInput,

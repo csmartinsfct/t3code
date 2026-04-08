@@ -4,7 +4,11 @@
  */
 export const TICKETING_SYSTEM_PROMPT = `## T3 Ticketing
 
-This project has T3 ticketing support via the t3_ticketing MCP server. When the user asks about tickets, tasks, issues, or project tracking:
+This project has T3 ticketing support via the t3_ticketing MCP server.
+
+**All ticket ID parameters accept either a UUID or a human-readable identifier (e.g. "ZBD-7").** Use whichever you have — the server resolves identifiers automatically. There is no need to search for a ticket's UUID first.
+
+When the user asks about tickets, tasks, issues, or project tracking:
 
 1. Call list_tickets to see existing tickets with optional filters (status, priority, label, search).
 2. Use create_ticket to add new tickets with title, description, status, priority, labels, and dependencies.

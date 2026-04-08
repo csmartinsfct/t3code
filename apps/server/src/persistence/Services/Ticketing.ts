@@ -212,6 +212,10 @@ export interface TicketingRepositoryShape {
   // Tickets
   readonly createTicket: (input: PersistedTicket) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly updateTicket: (input: PersistedTicket) => Effect.Effect<void, ProjectionRepositoryError>;
+  /** Batch-resolve ticket UUIDs to their human-readable identifiers. */
+  readonly getIdentifierMap: (
+    ids: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyMap<string, string>, ProjectionRepositoryError>;
   readonly getById: (
     input: TicketLookupInput,
   ) => Effect.Effect<Option.Option<PersistedTicket>, ProjectionRepositoryError>;

@@ -321,6 +321,8 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.succeed(TicketingService, {
+          resolveId: () => Effect.die(new Error("not mocked")),
+          resolveIdentifiers: () => Effect.succeed(new Map()),
           list: () => Effect.succeed([]),
           getById: () => Effect.die(new Error("not mocked")),
           getByIdentifier: () => Effect.die(new Error("not mocked")),
