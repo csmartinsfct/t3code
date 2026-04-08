@@ -3,18 +3,11 @@
  * Tells the agent which T3 server instance it is connected to (port, dev vs prod,
  * data directory) so it can fall back to direct DB/API access when needed.
  */
-export function buildMcpEnvironmentHeader(params: {
-  port: number;
-  isDev: boolean;
-}): string {
+export function buildMcpEnvironmentHeader(params: { port: number; isDev: boolean }): string {
   const { port, isDev } = params;
   const env = isDev ? "development" : "production";
   const dataDir = isDev ? "~/.t3/dev/" : "~/.t3/userdata/";
-  const lines = [
-    `## T3 Server Environment`,
-    ``,
-    `- **Build:** ${env}`,
-  ];
+  const lines = [`## T3 Server Environment`, ``, `- **Build:** ${env}`];
   if (!isDev) {
     lines.push(`- **Port:** ${port}`);
     lines.push(`- **Base URL:** http://localhost:${port}`);

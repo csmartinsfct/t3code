@@ -2,7 +2,8 @@ import type { AcceptanceCriterion, Ticket, TicketId } from "@t3tools/contracts";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { PRIORITY_CONFIG, STATUS_CONFIG } from "../settings/ticketUtils";
+
+import { TicketMarkdown } from "./TicketMarkdown";
 
 interface SubTicketPreviewContentProps {
   ticketId: TicketId;
@@ -40,20 +41,11 @@ export function SubTicketPreviewContent({
     return <p className="py-2 text-center text-xs text-muted-foreground">Failed to load preview</p>;
   }
 
-  const statusCfg = STATUS_CONFIG[ticket.status];
-  const priorityCfg = PRIORITY_CONFIG[ticket.priority];
   const criteria = ticket.acceptanceCriteria ?? [];
   const metCount = criteria.filter((c) => c.status === "met").length;
 
   return (
     <div className="-mr-4 flex max-h-[568px] flex-col gap-3 overflow-y-auto pr-4">
-      {/* Header: status dot · identifier · priority dot */}
-      <div className="flex items-center gap-2">
-        <div className={`size-2 shrink-0 rounded-full ${statusCfg.dotClass}`} />
-        <span className="font-mono text-[11px] text-muted-foreground">{ticket.identifier}</span>
-        <div className={`size-2 shrink-0 rounded-full ${priorityCfg.dotClass}`} />
-      </div>
-
       {/* Title */}
       <h4 className="text-sm font-medium leading-snug text-foreground">{ticket.title}</h4>
 
@@ -61,9 +53,9 @@ export function SubTicketPreviewContent({
       {ticket.description && (
         <div className="flex flex-col gap-1">
           <span className="text-[11px] font-medium text-muted-foreground">Description</span>
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground/80">
-            {ticket.description}
-          </p>
+          <div className="text-foreground/80">
+            <TicketMarkdown>{ticket.description}</TicketMarkdown>
+          </div>
         </div>
       )}
 
@@ -118,10 +110,6 @@ function ReadOnlyCriterion({ criterion }: { criterion: AcceptanceCriterion }) {
 function PreviewSkeleton() {
   return (
     <div className="flex animate-pulse flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="size-2 rounded-full bg-muted" />
-        <div className="h-3 w-16 rounded bg-muted" />
-      </div>
       <div className="h-4 w-3/4 rounded bg-muted" />
       <div className="flex flex-col gap-1.5">
         <div className="h-3 w-full rounded bg-muted" />

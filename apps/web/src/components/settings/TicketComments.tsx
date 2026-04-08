@@ -7,6 +7,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { formatRelativeDate } from "./ticketUtils";
+import { TicketMarkdown } from "../management/TicketMarkdown";
 
 interface TicketCommentsProps {
   ticketId: TicketId;
@@ -66,7 +67,9 @@ function CommentBubble({
           )}
           <span className="text-muted-foreground">{formatRelativeDate(comment.createdAt)}</span>
         </div>
-        <p className="mt-1 whitespace-pre-wrap text-xs text-foreground">{comment.body}</p>
+        <div className="mt-1 text-foreground">
+          <TicketMarkdown>{comment.body}</TicketMarkdown>
+        </div>
         {!replyOpen && (
           <button
             type="button"
@@ -99,7 +102,9 @@ function CommentBubble({
                     {formatRelativeDate(reply.createdAt)}
                   </span>
                 </div>
-                <p className="mt-1 whitespace-pre-wrap text-xs text-foreground">{reply.body}</p>
+                <div className="mt-1 text-foreground">
+                  <TicketMarkdown>{reply.body}</TicketMarkdown>
+                </div>
               </div>
             );
           })}

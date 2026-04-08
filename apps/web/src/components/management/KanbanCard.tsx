@@ -62,7 +62,10 @@ export function KanbanCard({
       <div className="flex items-center gap-1.5">
         <span className="font-mono text-[10px] text-muted-foreground">{ticket.identifier}</span>
         {ticket.priority !== "none" && (
-          <div className={`size-1.5 rounded-full ${priorityCfg.dotClass}`} />
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <div className={`size-1.5 rounded-full ${priorityCfg.dotClass}`} />
+            {priorityCfg.label.toLowerCase()}
+          </span>
         )}
       </div>
       <span className="text-xs font-medium text-foreground">{ticket.title}</span>

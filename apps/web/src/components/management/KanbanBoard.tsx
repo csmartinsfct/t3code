@@ -1,7 +1,7 @@
 import type { TicketId, TicketStatus, TicketSummary } from "@t3tools/contracts";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { ArrowLeftIcon, PlusIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
@@ -9,8 +9,6 @@ import { useTicketing } from "../../hooks/useTicketing";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { cn } from "~/lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
-import { Button } from "../ui/button";
-import { CreateTicketDialog } from "../settings/CreateTicketDialog";
 import { ALL_STATUSES } from "../settings/ticketUtils";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
@@ -32,7 +30,6 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const { tickets, loading, applyLocalReorder } = useTicketing({ projectId });
   const [ticketStack, setTicketStack] = useState<TicketId[]>([]);
   const selectedTicketId = ticketStack.length > 0 ? ticketStack[ticketStack.length - 1] : null;
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
@@ -235,10 +232,6 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         ) : (
           <h2 className="text-xs font-medium text-foreground">Board</h2>
         )}
-        <Button size="xs" variant="outline" onClick={() => setCreateDialogOpen(true)}>
-          <PlusIcon className="size-3.5" />
-          New ticket
-        </Button>
       </div>
 
       {/* Board body */}
@@ -268,11 +261,6 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         </div>
       )}
 
-      <CreateTicketDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        projectId={projectId}
-      />
     </div>
   );
 });

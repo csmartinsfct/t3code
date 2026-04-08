@@ -393,6 +393,84 @@ label:has(> select#reasoning-effort) select {
   text-align: left;
 }
 
+/* Ticket markdown — compact variant for ticket descriptions & comments */
+.ticket-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ticket-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ticket-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.ticket-markdown p,
+.ticket-markdown ul,
+.ticket-markdown ol,
+.ticket-markdown blockquote,
+.ticket-markdown pre {
+  margin: 0.35rem 0;
+}
+
+.ticket-markdown ul {
+  padding-left: 1.1rem;
+  list-style-type: disc;
+}
+
+.ticket-markdown ol {
+  padding-left: 1.1rem;
+  list-style-type: decimal;
+}
+
+.ticket-markdown li + li {
+  margin-top: 0.15rem;
+}
+
+.ticket-markdown a {
+  color: var(--info-foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--info-foreground) 40%, transparent);
+}
+
+.ticket-markdown a:hover {
+  opacity: 0.8;
+}
+
+.ticket-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.6rem;
+  color: var(--muted-foreground);
+}
+
+.ticket-markdown :not(pre) > code {
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.05rem 0.3rem;
+  font-size: 0.7rem;
+}
+
+.ticket-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--muted);
+  padding: 0.5rem 0.6rem;
+}
+
+.ticket-markdown pre code {
+  border: none;
+  background: transparent;
+  padding: 0;
+  line-height: 1.4;
+  font-size: 0.7rem;
+}
+
 /* Diffs theme bridge (match diff surfaces to app palette) */
 .diff-panel-viewport {
   background: color-mix(in srgb, var(--background) 94%, var(--card));

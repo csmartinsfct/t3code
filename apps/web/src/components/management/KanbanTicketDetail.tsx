@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
+import { TicketMarkdown } from "./TicketMarkdown";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -21,6 +22,7 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -169,16 +171,22 @@ export function KanbanTicketDetail({
               value={ticket.status}
               onValueChange={(v) => void handleStatusChange(v as TicketStatus)}
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <div className={`size-2 rounded-full ${statusCfg.dotClass}`} />
-                <SelectValue />
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-0 border-none px-0 py-0 shadow-none"
+              >
+                <Badge size="sm" variant={statusCfg.badgeVariant}>
+                  <SelectValue />
+                </Badge>
               </SelectTrigger>
               <SelectPopup>
                 {ALL_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     <div className="flex items-center gap-2">
-                      <div className={`size-2 rounded-full ${STATUS_CONFIG[s].dotClass}`} />
-                      {STATUS_CONFIG[s].label}
+                      <Badge size="sm" variant={STATUS_CONFIG[s].badgeVariant}>
+                        {STATUS_CONFIG[s].label}
+                      </Badge>
                     </div>
                   </SelectItem>
                 ))}
@@ -218,9 +226,9 @@ export function KanbanTicketDetail({
         {ticket.description && (
           <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
             <p className="text-[11px] font-medium text-muted-foreground">Description</p>
-            <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground">
-              {ticket.description}
-            </p>
+            <div className="mt-0.5 text-foreground">
+              <TicketMarkdown>{ticket.description}</TicketMarkdown>
+            </div>
           </div>
         )}
 
@@ -336,6 +344,16 @@ function SubTicketsList({
   const cacheRef = useRef(new Map<string, Ticket>());
   const inflightRef = useRef(new Map<string, Promise<Ticket | null>>());
 
+  // Invalidate cache when a sub-ticket is updated externally
+  useEffect(() => {
+    const api = ensureNativeApi();
+    return api.ticketing.onEvent((event: TicketingStreamEvent) => {
+      if (event.type === "ticket_upserted") {
+        cacheRef.current.delete(event.ticket.id as string);
+      }
+    });
+  }, []);
+
   const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
     const key = id as string;
     const cached = cacheRef.current.get(key);
@@ -433,13 +451,16 @@ function DraggableSubTicket({
           />
         }
       >
-        <div className={`size-2 shrink-0 rounded-full ${subStatusCfg.dotClass}`} />
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          {sub.identifier}
-        </span>
+        <Badge size="sm" variant={subStatusCfg.badgeVariant}>{subStatusCfg.label}</Badge>
         <span className="truncate text-foreground">{sub.title}</span>
       </PopoverTrigger>
-      <PopoverPopup side="bottom" align="end" alignOffset={-190} sideOffset={4} className="w-[380px]">
+      <PopoverPopup
+        side="bottom"
+        align="end"
+        alignOffset={-190}
+        sideOffset={4}
+        className="w-[380px]"
+      >
         <SubTicketPreviewContent
           ticketId={sub.id}
           fetchPreview={fetchPreview}

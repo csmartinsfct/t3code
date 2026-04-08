@@ -6,7 +6,7 @@ import type { TicketHistoryAction, TicketPriority, TicketStatus } from "@t3tools
 
 export const STATUS_CONFIG: Record<
   TicketStatus,
-  { label: string; dotClass: string; badgeVariant: string }
+  { label: string; dotClass: string; badgeVariant: "default" | "destructive" | "error" | "info" | "outline" | "secondary" | "success" | "warning" }
 > = {
   backlog: { label: "Backlog", dotClass: "bg-muted-foreground/50", badgeVariant: "outline" },
   todo: { label: "To Do", dotClass: "bg-blue-500", badgeVariant: "info" },
