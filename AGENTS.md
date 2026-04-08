@@ -62,6 +62,18 @@ Use these as implementation references when designing protocol handling, UX flow
 
 These docs must be kept up to date as related code changes.
 
+## Dev Server
+
+The dev server listens on `http://localhost:3773` by default (configurable via `T3CODE_PORT` env var or `--port` CLI flag). MCP endpoints are available at:
+
+- `http://localhost:3773/mcp/ticketing`
+- `http://localhost:3773/mcp/managed-runs`
+- `http://localhost:3773/mcp/scheduled-tasks`
+
+Auth: `Authorization: Bearer t3-dev-bypass` (dev-only bypass token). Ticketing and managed-runs endpoints require a `?projectId=<uuid>` query param.
+
+If the MCP tools in this session are connected to the wrong instance (e.g. production), use these endpoints directly or write to the dev database at `~/.t3/dev/state.sqlite`.
+
 ## Data Directories
 
 The T3 server persists state in `~/.t3/` (overridable via `T3CODE_HOME`).

@@ -77,7 +77,10 @@ import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
 import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
-import { buildMcpPromptModeSystemPrompt } from "../mcpPromptModeSystemPrompt.ts";
+import {
+  buildMcpEnvironmentHeader,
+  buildMcpPromptModeSystemPrompt,
+} from "../mcpPromptModeSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
@@ -2900,6 +2903,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           input.threadId,
         );
 
+        const envHeader = buildMcpEnvironmentHeader({
+          port: serverConfig.port,
+          isDev: serverConfig.devUrl !== undefined,
+        });
+
         if (mcpDeliveryMode === "tools") {
           // Native MCP tool registration — all three services
           mcpServersConfig = {
@@ -2925,6 +2933,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             "mcp__t3_ticketing__*",
           ];
           mcpSystemPromptAppend =
+            envHeader +
+            "\n\n" +
             MANAGED_RUNS_SYSTEM_PROMPT +
             "\n\n" +
             SCHEDULED_TASKS_SYSTEM_PROMPT +
@@ -2932,10 +2942,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             TICKETING_SYSTEM_PROMPT;
         } else {
           // Prompt mode — no MCP server config, just system prompt with endpoints
-          mcpSystemPromptAppend = buildMcpPromptModeSystemPrompt({
-            port: serverConfig.port,
-            token: access.token,
-          });
+          mcpSystemPromptAppend =
+            envHeader +
+            "\n\n" +
+            buildMcpPromptModeSystemPrompt({
+              port: serverConfig.port,
+              token: access.token,
+            });
         }
       }
       // Inject project-specific system prompt (independent of MCP services / port)

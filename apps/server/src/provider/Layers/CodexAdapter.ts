@@ -44,7 +44,10 @@ import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
 import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
-import { buildMcpPromptModeSystemPrompt } from "../mcpPromptModeSystemPrompt.ts";
+import {
+  buildMcpEnvironmentHeader,
+  buildMcpPromptModeSystemPrompt,
+} from "../mcpPromptModeSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1441,6 +1444,11 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.threadId,
         );
 
+        const envHeader = buildMcpEnvironmentHeader({
+          port: serverConfig.port,
+          isDev: serverConfig.devUrl !== undefined,
+        });
+
         if (mcpDeliveryMode === "tools") {
           // Native MCP tool registration — all three services
           const managedRunsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`;
@@ -1459,6 +1467,8 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             `mcp_servers.t3_ticketing.http_headers.Authorization="Bearer ${access.token}"`,
           );
           appendDeveloperInstructions =
+            envHeader +
+            "\n\n" +
             MANAGED_RUNS_SYSTEM_PROMPT +
             "\n\n" +
             SCHEDULED_TASKS_SYSTEM_PROMPT +
@@ -1466,10 +1476,13 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             TICKETING_SYSTEM_PROMPT;
         } else {
           // Prompt mode — no MCP server config, just system prompt with endpoints
-          appendDeveloperInstructions = buildMcpPromptModeSystemPrompt({
-            port: serverConfig.port,
-            token: access.token,
-          });
+          appendDeveloperInstructions =
+            envHeader +
+            "\n\n" +
+            buildMcpPromptModeSystemPrompt({
+              port: serverConfig.port,
+              token: access.token,
+            });
         }
       }
       // Inject project-specific system prompt (independent of MCP services / port)

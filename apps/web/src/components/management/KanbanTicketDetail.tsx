@@ -8,7 +8,7 @@ import type {
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
 import { TrashIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
@@ -22,7 +22,9 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketHistory } from "../settings/TicketHistory";
@@ -330,6 +332,34 @@ function SubTicketsList({
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
 
+  // Hover-preview cache scoped to this list's lifetime
+  const cacheRef = useRef(new Map<string, Ticket>());
+  const inflightRef = useRef(new Map<string, Promise<Ticket | null>>());
+
+  const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
+    const key = id as string;
+    const cached = cacheRef.current.get(key);
+    if (cached) return cached;
+    const existing = inflightRef.current.get(key);
+    if (existing) return existing;
+    const promise = ensureNativeApi()
+      .ticketing.getById({ id })
+      .then((t) => {
+        cacheRef.current.set(key, t);
+        return t;
+      })
+      .catch(() => null)
+      .finally(() => {
+        inflightRef.current.delete(key);
+      });
+    inflightRef.current.set(key, promise);
+    return promise;
+  }, []);
+
+  const getCached = useCallback((id: TicketId): Ticket | undefined => {
+    return cacheRef.current.get(id as string);
+  }, []);
+
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-medium text-muted-foreground">
@@ -346,6 +376,8 @@ function SubTicketsList({
               onNavigateToTicket(sub.id);
             }}
             onShiftClick={() => toggleTicket(sub.id, sub)}
+            fetchPreview={fetchPreview}
+            getCached={getCached}
           />
         ))}
       </div>
@@ -358,11 +390,15 @@ function DraggableSubTicket({
   isSelected,
   onNavigate,
   onShiftClick,
+  fetchPreview,
+  getCached,
 }: {
   sub: TicketSummary;
   isSelected: boolean;
   onNavigate: () => void;
   onShiftClick: () => void;
+  fetchPreview: (id: TicketId) => Promise<Ticket | null>;
+  getCached: (id: TicketId) => Ticket | undefined;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: sub.id,
@@ -371,27 +407,45 @@ function DraggableSubTicket({
   const subStatusCfg = STATUS_CONFIG[sub.status];
 
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      data-ticket-selectable
-      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-        isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
-      } ${isDragging ? "opacity-40" : ""}`}
-      onClick={(e) => {
-        if (e.shiftKey) {
-          e.preventDefault();
-          onShiftClick();
-          return;
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        delay={300}
+        closeDelay={150}
+        render={
+          <button
+            ref={setNodeRef}
+            type="button"
+            data-ticket-selectable
+            className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+            } ${isDragging ? "opacity-40" : ""}`}
+            onClick={(e) => {
+              if (e.shiftKey) {
+                e.preventDefault();
+                onShiftClick();
+                return;
+              }
+              onNavigate();
+            }}
+            {...attributes}
+            {...listeners}
+          />
         }
-        onNavigate();
-      }}
-      {...attributes}
-      {...listeners}
-    >
-      <div className={`size-2 shrink-0 rounded-full ${subStatusCfg.dotClass}`} />
-      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{sub.identifier}</span>
-      <span className="truncate text-foreground">{sub.title}</span>
-    </button>
+      >
+        <div className={`size-2 shrink-0 rounded-full ${subStatusCfg.dotClass}`} />
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+          {sub.identifier}
+        </span>
+        <span className="truncate text-foreground">{sub.title}</span>
+      </PopoverTrigger>
+      <PopoverPopup side="bottom" align="end" alignOffset={-190} sideOffset={4} className="w-[380px]">
+        <SubTicketPreviewContent
+          ticketId={sub.id}
+          fetchPreview={fetchPreview}
+          getCached={getCached}
+        />
+      </PopoverPopup>
+    </Popover>
   );
 }
