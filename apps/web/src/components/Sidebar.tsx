@@ -879,7 +879,7 @@ export default function Sidebar() {
         (threadIdsByProjectId[projectId] ?? [])
           .map((threadId) => sidebarThreadsById[threadId])
           .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-          .filter((thread) => thread.archivedAt === null),
+          .filter((thread) => thread.archivedAt === null && thread.parentThreadId === null),
         appSettings.sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
@@ -1604,7 +1604,10 @@ export default function Sidebar() {
   );
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+    () =>
+      sidebarThreads.filter(
+        (thread) => thread.archivedAt === null && thread.parentThreadId === null,
+      ),
     [sidebarThreads],
   );
   const sortedProjects = useMemo(
@@ -1627,7 +1630,7 @@ export default function Sidebar() {
           (threadIdsByProjectId[project.id] ?? [])
             .map((threadId) => sidebarThreadsById[threadId])
             .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-            .filter((thread) => thread.archivedAt === null),
+            .filter((thread) => thread.archivedAt === null && thread.parentThreadId === null),
           appSettings.sidebarThreadSortOrder,
         );
         const projectStatus = resolveProjectStatusIndicator(

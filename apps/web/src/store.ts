@@ -180,6 +180,9 @@ function mapThread(thread: OrchestrationThread): Thread {
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
     initialDraft: thread.initialDraft,
+    isOrchestrationThread: thread.isOrchestrationThread,
+    parentThreadId: thread.parentThreadId,
+    ticketId: thread.ticketId,
   };
 }
 
@@ -234,6 +237,8 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     hasActionableProposedPlan: hasActionableProposedPlan(
       findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
     ),
+    isOrchestrationThread: thread.isOrchestrationThread,
+    parentThreadId: thread.parentThreadId,
   };
 }
 
@@ -257,7 +262,9 @@ function sidebarThreadSummariesEqual(
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
-    left.hasActionableProposedPlan === right.hasActionableProposedPlan
+    left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
+    left.isOrchestrationThread === right.isOrchestrationThread &&
+    left.parentThreadId === right.parentThreadId
   );
 }
 
