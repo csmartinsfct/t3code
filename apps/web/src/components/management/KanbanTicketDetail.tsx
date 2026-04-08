@@ -29,21 +29,9 @@ import {
 } from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
@@ -90,6 +78,15 @@ export function KanbanTicketDetail({
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const ticketRef = useRef<Ticket | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [editingWorktree, setEditingWorktree] = useState(false);
+  const [worktreeDraft, setWorktreeDraft] = useState("");
+  const descriptionRef = useRef<HTMLDivElement>(null);
+  /** Set to true when Escape is pressed so the blur handler skips saving. */
+  const cancelEditRef = useRef(false);
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -130,17 +127,12 @@ export function KanbanTicketDetail({
         } else {
           // A dependency ticket was updated
           const current = ticketRef.current;
-          if (
-            current?.dependencies.some(
-              (d) => d.dependsOnTicketId === event.ticket.id
-            )
-          ) {
+          if (current?.dependencies.some((d) => d.dependsOnTicketId === event.ticket.id)) {
             void fetchTicket();
           }
         }
       } else if (
-        (event.type === "comment_upserted" ||
-          event.type === "comment_deleted") &&
+        (event.type === "comment_upserted" || event.type === "comment_deleted") &&
         event.ticketId === ticketId
       ) {
         void fetchTicket();
@@ -160,7 +152,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update status:", error);
       }
     },
-    [ticketId]
+    [ticketId],
   );
 
   const handlePriorityChange = useCallback(
@@ -174,8 +166,104 @@ export function KanbanTicketDetail({
         console.error("Failed to update priority:", error);
       }
     },
-    [ticketId]
+    [ticketId],
   );
+
+  const handleTitleSave = useCallback(async () => {
+    const trimmed = titleDraft.trim();
+    if (!trimmed) {
+      setEditingTitle(false);
+      return;
+    }
+    if (trimmed === ticketRef.current?.title) {
+      setEditingTitle(false);
+      return;
+    }
+    const previous = ticketRef.current;
+    if (previous) {
+      const optimistic = { ...previous, title: trimmed };
+      ticketRef.current = optimistic;
+      setTicket(optimistic);
+    }
+    setEditingTitle(false);
+    try {
+      const api = ensureNativeApi();
+      const updated = await api.ticketing.update({
+        id: ticketId,
+        title: trimmed as never,
+      });
+      ticketRef.current = updated;
+      setTicket(updated);
+    } catch (error) {
+      console.error("Failed to update title:", error);
+      if (previous) {
+        ticketRef.current = previous;
+        setTicket(previous);
+      }
+    }
+  }, [ticketId, titleDraft]);
+
+  const handleDescriptionSave = useCallback(async () => {
+    const newDesc = descriptionDraft.trim() || null;
+    const currentDesc = ticketRef.current?.description ?? null;
+    if (newDesc === currentDesc) {
+      setEditingDescription(false);
+      return;
+    }
+    const previous = ticketRef.current;
+    if (previous) {
+      const optimistic = { ...previous, description: newDesc };
+      ticketRef.current = optimistic;
+      setTicket(optimistic);
+    }
+    setEditingDescription(false);
+    try {
+      const api = ensureNativeApi();
+      const updated = await api.ticketing.update({
+        id: ticketId,
+        description: newDesc,
+      });
+      ticketRef.current = updated;
+      setTicket(updated);
+    } catch (error) {
+      console.error("Failed to update description:", error);
+      if (previous) {
+        ticketRef.current = previous;
+        setTicket(previous);
+      }
+    }
+  }, [ticketId, descriptionDraft]);
+
+  const handleWorktreeSave = useCallback(async () => {
+    const newWorktree = worktreeDraft.trim() || null;
+    const currentWorktree = ticketRef.current?.worktree ?? null;
+    if (newWorktree === currentWorktree) {
+      setEditingWorktree(false);
+      return;
+    }
+    const previous = ticketRef.current;
+    if (previous) {
+      const optimistic = { ...previous, worktree: newWorktree };
+      ticketRef.current = optimistic;
+      setTicket(optimistic);
+    }
+    setEditingWorktree(false);
+    try {
+      const api = ensureNativeApi();
+      const updated = await api.ticketing.update({
+        id: ticketId,
+        worktree: newWorktree,
+      });
+      ticketRef.current = updated;
+      setTicket(updated);
+    } catch (error) {
+      console.error("Failed to update worktree:", error);
+      if (previous) {
+        ticketRef.current = previous;
+        setTicket(previous);
+      }
+    }
+  }, [ticketId, worktreeDraft]);
 
   const handleDelete = useCallback(async () => {
     try {
@@ -251,9 +339,34 @@ export function KanbanTicketDetail({
               <span className="font-mono text-[11px] text-muted-foreground">
                 {ticket.identifier}
               </span>
-              <h2 className="mt-0.5 text-sm font-medium text-foreground">
-                {ticket.title}
-              </h2>
+              <input
+                type="text"
+                className="mt-0.5 w-full cursor-text bg-transparent font-[inherit]! text-sm font-medium text-foreground outline-none"
+                value={editingTitle ? titleDraft : ticket.title}
+                onFocus={() => {
+                  setTitleDraft(ticket.title);
+                  setEditingTitle(true);
+                }}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={() => {
+                  if (cancelEditRef.current) {
+                    cancelEditRef.current = false;
+                    setEditingTitle(false);
+                  } else if (editingTitle) {
+                    void handleTitleSave();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                  if (e.key === "Escape") {
+                    cancelEditRef.current = true;
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
             </div>
             <Menu>
               <MenuTrigger
@@ -274,10 +387,7 @@ export function KanbanTicketDetail({
                   Decompose
                 </MenuItem>
                 <MenuSeparator />
-                <MenuItem
-                  variant="destructive"
-                  onClick={() => setDeleteDialogOpen(true)}
-                >
+                <MenuItem variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
                   <TrashIcon className="size-3.5" />
                   Delete
                 </MenuItem>
@@ -317,27 +427,17 @@ export function KanbanTicketDetail({
 
             <Select
               value={ticket.priority}
-              onValueChange={(v) =>
-                void handlePriorityChange(v as TicketPriority)
-              }
+              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
             >
-              <SelectTrigger
-                size="xs"
-                variant="ghost"
-                className="h-auto gap-1.5 px-1.5 py-1"
-              >
-                <div
-                  className={`size-2 rounded-full ${priorityCfg.dotClass}`}
-                />
+              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
+                <div className={`size-2 rounded-full ${priorityCfg.dotClass}`} />
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
                 {ALL_PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <div
-                        className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`}
-                      />
+                      <div className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`} />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -353,16 +453,58 @@ export function KanbanTicketDetail({
         </div>
 
         {/* Description */}
-        {ticket.description && (
-          <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-            <p className="text-[11px] font-medium text-muted-foreground">
-              Description
-            </p>
-            <div className="mt-0.5 text-foreground">
+        <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+          <p className="text-[11px] font-medium text-muted-foreground">Description</p>
+          {editingDescription ? (
+            <textarea
+              className="mt-0.5 w-full resize-y bg-transparent font-[inherit]! text-xs leading-relaxed text-foreground outline-none"
+              value={descriptionDraft}
+              onChange={(e) => setDescriptionDraft(e.target.value)}
+              onBlur={() => {
+                if (cancelEditRef.current) {
+                  cancelEditRef.current = false;
+                  setEditingDescription(false);
+                } else {
+                  void handleDescriptionSave();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  cancelEditRef.current = true;
+                  (e.target as HTMLTextAreaElement).blur();
+                }
+              }}
+              autoFocus
+              style={{
+                minHeight: descriptionRef.current
+                  ? `${descriptionRef.current.offsetHeight}px`
+                  : undefined,
+              }}
+              rows={Math.max(3, descriptionDraft.split("\n").length + 1)}
+            />
+          ) : ticket.description ? (
+            <div
+              ref={descriptionRef}
+              className="mt-0.5 cursor-text text-foreground"
+              onClick={() => {
+                setDescriptionDraft(ticket.description ?? "");
+                setEditingDescription(true);
+              }}
+            >
               <TicketMarkdown>{ticket.description}</TicketMarkdown>
             </div>
-          </div>
-        )}
+          ) : (
+            <p
+              className="mt-0.5 cursor-text text-xs italic text-muted-foreground/60"
+              onClick={() => {
+                setDescriptionDraft("");
+                setEditingDescription(true);
+              }}
+            >
+              Click to add a description...
+            </p>
+          )}
+        </div>
 
         {/* Acceptance Criteria */}
         {ticket.acceptanceCriteria && ticket.acceptanceCriteria.length > 0 && (
@@ -376,9 +518,7 @@ export function KanbanTicketDetail({
         {/* Labels */}
         {ticket.labels.length > 0 && (
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Labels
-            </h3>
+            <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
             <div className="flex flex-wrap gap-1.5">
               {ticket.labels.map((label) => (
                 <span
@@ -415,9 +555,7 @@ export function KanbanTicketDetail({
                     <Badge size="sm" variant={depStatusCfg.badgeVariant}>
                       {depStatusCfg.label}
                     </Badge>
-                    <span className="truncate text-foreground">
-                      {dep.title}
-                    </span>
+                    <span className="truncate text-foreground">{dep.title}</span>
                   </button>
                 );
               })}
@@ -425,12 +563,47 @@ export function KanbanTicketDetail({
           </div>
         )}
 
+        {/* Worktree */}
+        <div className="flex flex-col gap-2">
+          <h3 className="text-xs font-medium text-muted-foreground">Worktree</h3>
+          <input
+            type="text"
+            className={`w-full cursor-text bg-transparent font-[inherit]! text-xs outline-none ${
+              editingWorktree || ticket.worktree
+                ? "text-foreground"
+                : "italic text-muted-foreground/60"
+            }`}
+            value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
+            placeholder="No worktree specified"
+            onFocus={() => {
+              setWorktreeDraft(ticket.worktree ?? "");
+              setEditingWorktree(true);
+            }}
+            onChange={(e) => setWorktreeDraft(e.target.value)}
+            onBlur={() => {
+              if (cancelEditRef.current) {
+                cancelEditRef.current = false;
+                setEditingWorktree(false);
+              } else if (editingWorktree) {
+                void handleWorktreeSave();
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                cancelEditRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+          />
+        </div>
+
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
-          <SubTicketsList
-            subTickets={ticket.subTickets}
-            onNavigateToTicket={onNavigateToTicket}
-          />
+          <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
         )}
 
         {/* Comments */}
@@ -450,8 +623,8 @@ export function KanbanTicketDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}"
-              and all its data. This action cannot be undone.
+              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -460,11 +633,7 @@ export function KanbanTicketDetail({
                 Cancel
               </Button>
             </AlertDialogClose>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void handleDelete()}
-            >
+            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
               Delete
             </Button>
           </AlertDialogFooter>
@@ -475,7 +644,7 @@ export function KanbanTicketDetail({
 }
 
 // ---------------------------------------------------------------------------
-// Sub-ticket list with drag-to-chat and shift+click multi-select
+// Sub-ticket list with drag-to-chat and Alt/Shift+click multi-select
 // ---------------------------------------------------------------------------
 
 function SubTicketsList({
@@ -487,7 +656,24 @@ function SubTicketsList({
 }) {
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
+  const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
+
+  const handleSubTicketMultiSelectClick = useCallback(
+    (e: React.MouseEvent, sub: TicketSummary) => {
+      if (e.altKey || e.metaKey) {
+        e.preventDefault();
+        toggleTicket(sub.id, sub);
+        return;
+      }
+      if (e.shiftKey) {
+        e.preventDefault();
+        rangeSelectTo(sub.id, subTickets);
+        return;
+      }
+    },
+    [toggleTicket, rangeSelectTo, subTickets],
+  );
 
   // Hover-preview cache scoped to this list's lifetime
   const cacheRef = useRef(new Map<string, Ticket>());
@@ -503,28 +689,25 @@ function SubTicketsList({
     });
   }, []);
 
-  const fetchPreview = useCallback(
-    async (id: TicketId): Promise<Ticket | null> => {
-      const key = id as string;
-      const cached = cacheRef.current.get(key);
-      if (cached) return cached;
-      const existing = inflightRef.current.get(key);
-      if (existing) return existing;
-      const promise = ensureNativeApi()
-        .ticketing.getById({ id })
-        .then((t) => {
-          cacheRef.current.set(key, t);
-          return t;
-        })
-        .catch(() => null)
-        .finally(() => {
-          inflightRef.current.delete(key);
-        });
-      inflightRef.current.set(key, promise);
-      return promise;
-    },
-    []
-  );
+  const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
+    const key = id as string;
+    const cached = cacheRef.current.get(key);
+    if (cached) return cached;
+    const existing = inflightRef.current.get(key);
+    if (existing) return existing;
+    const promise = ensureNativeApi()
+      .ticketing.getById({ id })
+      .then((t) => {
+        cacheRef.current.set(key, t);
+        return t;
+      })
+      .catch(() => null)
+      .finally(() => {
+        inflightRef.current.delete(key);
+      });
+    inflightRef.current.set(key, promise);
+    return promise;
+  }, []);
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
     return cacheRef.current.get(id as string);
@@ -545,7 +728,7 @@ function SubTicketsList({
               clearSelection();
               onNavigateToTicket(sub.id);
             }}
-            onShiftClick={() => toggleTicket(sub.id, sub)}
+            onMultiSelectClick={handleSubTicketMultiSelectClick}
             fetchPreview={fetchPreview}
             getCached={getCached}
           />
@@ -559,14 +742,14 @@ function DraggableSubTicket({
   sub,
   isSelected,
   onNavigate,
-  onShiftClick,
+  onMultiSelectClick,
   fetchPreview,
   getCached,
 }: {
   sub: TicketSummary;
   isSelected: boolean;
   onNavigate: () => void;
-  onShiftClick: () => void;
+  onMultiSelectClick: (e: React.MouseEvent, sub: TicketSummary) => void;
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
   getCached: (id: TicketId) => Ticket | undefined;
 }) {
@@ -588,14 +771,11 @@ function DraggableSubTicket({
             type="button"
             data-ticket-selectable
             className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-              isSelected
-                ? "bg-primary/5 ring-1.5 ring-primary/40"
-                : "hover:bg-accent/30"
+              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
             } ${isDragging ? "opacity-40" : ""}`}
             onClick={(e) => {
-              if (e.shiftKey) {
-                e.preventDefault();
-                onShiftClick();
+              if (e.altKey || e.metaKey || e.shiftKey) {
+                onMultiSelectClick(e, sub);
                 return;
               }
               onNavigate();

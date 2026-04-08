@@ -85,6 +85,7 @@ Ticket {
   priority: "none" | "low" | "medium" | "high" | "urgent"
   sortOrder: number                         // REAL for fractional indexing
   isArchived: boolean
+  worktree: string | null                   // git worktree/branch name
   acceptanceCriteria: AcceptanceCriterion[] | null
   labels: Label[]
   dependencies: TicketDependency[]

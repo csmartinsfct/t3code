@@ -97,6 +97,7 @@ const makeTicketingService = Effect.gen(function* () {
     priority: ticket.priority,
     sortOrder: ticket.sortOrder,
     isArchived: ticket.isArchived,
+    worktree: ticket.worktree,
     labels,
     subTicketCount,
     dependencyCount,
@@ -132,6 +133,7 @@ const makeTicketingService = Effect.gen(function* () {
         priority: ticket.priority,
         sortOrder: ticket.sortOrder,
         isArchived: ticket.isArchived,
+        worktree: ticket.worktree,
         acceptanceCriteria: ticket.acceptanceCriteria,
         labels: labels as Label[],
         dependencies: deps as TicketDependency[],
@@ -148,6 +150,26 @@ const makeTicketingService = Effect.gen(function* () {
         updatedAt: ticket.updatedAt,
       } satisfies Ticket;
     }).pipe(Effect.mapError(toOperationError("buildFullTicket")));
+
+  /** Re-publish a parent ticket's summary so clients see updated subTicketCount. */
+  const notifyParent = (parentId: TicketId): Effect.Effect<void, TicketingError> =>
+    Effect.gen(function* () {
+      const parent = yield* resolveTicketOrFail(parentId);
+      const parentLabels = yield* repo
+        .listLabelsForTicket({ ticketId: parent.id })
+        .pipe(Effect.mapError(toOperationError("notifyParent")));
+      const parentSubCount = yield* repo
+        .countByParent({ parentId: parent.id })
+        .pipe(Effect.mapError(toOperationError("notifyParent")));
+      const parentDepCount = (yield* repo
+        .listDependencies({ ticketId: parent.id })
+        .pipe(Effect.mapError(toOperationError("notifyParent")))).length;
+      yield* publishEvent({
+        type: "ticket_upserted",
+        projectId: parent.projectId,
+        ticket: buildTicketSummary(parent, parentLabels as Label[], parentSubCount, parentDepCount),
+      });
+    });
 
   const propagateEpicStatus = (
     ticketId: TicketId,
@@ -286,6 +308,7 @@ const makeTicketingService = Effect.gen(function* () {
         priority: input.priority ?? "none",
         sortOrder: input.sortOrder ?? 0,
         isArchived: false,
+        worktree: input.worktree ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -330,6 +353,11 @@ const makeTicketingService = Effect.gen(function* () {
         ticket: buildTicketSummary(ticket, labels as Label[], subCount, depCount),
       });
 
+      // Notify the parent so clients see the updated subTicketCount
+      if (ticket.parentId) {
+        yield* notifyParent(ticket.parentId);
+      }
+
       return full;
     });
 
@@ -372,6 +400,10 @@ const makeTicketingService = Effect.gen(function* () {
         changes.sortOrder = { old: existing.sortOrder, new: input.sortOrder };
         patch.sortOrder = input.sortOrder;
       }
+      if (input.worktree !== undefined) {
+        changes.worktree = { old: existing.worktree, new: input.worktree };
+        patch.worktree = input.worktree ?? null;
+      }
 
       const updated = { ...existing, ...patch } as PersistedTicket;
 
@@ -404,6 +436,14 @@ const makeTicketingService = Effect.gen(function* () {
         ticket: buildTicketSummary(updated, labels as Label[], subCount, depCount),
       });
 
+      // When parentId changes, notify both old and new parents so counts stay fresh
+      if (changes.parentId) {
+        const oldParentId = changes.parentId.old as TicketId | null;
+        const newParentId = changes.parentId.new as TicketId | null;
+        if (oldParentId) yield* notifyParent(oldParentId);
+        if (newParentId) yield* notifyParent(newParentId);
+      }
+
       return full;
     });
 
@@ -416,6 +456,11 @@ const makeTicketingService = Effect.gen(function* () {
         projectId: ticket.projectId,
         ticketId: input.id,
       });
+
+      // Notify the parent so clients see the updated subTicketCount
+      if (ticket.parentId) {
+        yield* notifyParent(ticket.parentId);
+      }
     });
 
   const reorder: TicketingServiceShape["reorder"] = (input) =>

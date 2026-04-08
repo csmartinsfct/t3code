@@ -54,7 +54,7 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
   // Clear ticket selection when clicking on non-selectable areas
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
-      if (e.shiftKey) return;
+      if (e.shiftKey || e.altKey || e.metaKey) return;
       const target = e.target as HTMLElement;
       if (target.closest("[data-ticket-selectable]")) return;
       const store = useTicketSelectionStore.getState();

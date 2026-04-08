@@ -36,6 +36,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
+  const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
 
   const ticketsByStatus = useMemo(() => {
@@ -53,7 +54,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       grouped[ticket.status]?.push(ticket);
     }
     for (const status of ALL_STATUSES) {
-      grouped[status].sort((a, b) => a.sortOrder - b.sortOrder);
+      grouped[status].sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder ||
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
     }
     return grouped;
   }, [tickets]);
@@ -90,11 +95,24 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const ticketsRef = useRef(tickets);
   ticketsRef.current = tickets;
 
-  const handleShiftClickTicket = useCallback(
-    (ticket: TicketSummary) => {
-      toggleTicket(ticket.id, ticket);
+  const flatOrderedTickets = useMemo(() => {
+    return ALL_STATUSES.flatMap((s) => ticketsByStatus[s]);
+  }, [ticketsByStatus]);
+
+  const handleTicketMultiSelectClick = useCallback(
+    (e: React.MouseEvent, ticket: TicketSummary) => {
+      if (e.altKey || e.metaKey) {
+        e.preventDefault();
+        toggleTicket(ticket.id, ticket);
+        return;
+      }
+      if (e.shiftKey) {
+        e.preventDefault();
+        rangeSelectTo(ticket.id, flatOrderedTickets);
+        return;
+      }
     },
-    [toggleTicket],
+    [toggleTicket, rangeSelectTo, flatOrderedTickets],
   );
 
   // ---------------------------------------------------------------------------
@@ -362,7 +380,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               tickets={ticketsByStatus[status]}
               epicProgressMap={epicProgressMap}
               selectedTicketIds={selectedTicketIds}
-              onShiftClickTicket={handleShiftClickTicket}
+              onMultiSelectClick={handleTicketMultiSelectClick}
               onTicketClick={handleTicketClick}
             />
           ))}

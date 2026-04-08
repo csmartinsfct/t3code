@@ -163,6 +163,7 @@ export const TicketSummary = Schema.Struct({
   priority: TicketPriority,
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
+  worktree: Schema.NullOr(Schema.String),
   labels: Schema.Array(Label),
   subTicketCount: Schema.Int,
   dependencyCount: Schema.Int,
@@ -183,6 +184,7 @@ export const Ticket = Schema.Struct({
   priority: TicketPriority,
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
+  worktree: Schema.NullOr(Schema.String),
   acceptanceCriteria: Schema.NullOr(Schema.Array(AcceptanceCriterion)),
   labels: Schema.Array(Label),
   dependencies: Schema.Array(TicketDependency),
@@ -226,6 +228,7 @@ export const TicketCreateInput = Schema.Struct({
   status: Schema.optional(TicketStatus),
   priority: Schema.optional(TicketPriority),
   sortOrder: Schema.optional(Schema.Number),
+  worktree: Schema.optional(Schema.NullOr(Schema.String)),
   labelIds: Schema.optional(Schema.Array(LabelId)),
   dependencyIds: Schema.optional(Schema.Array(TicketId)),
 });
@@ -240,6 +243,7 @@ export const TicketUpdateInput = Schema.Struct({
   priority: Schema.optional(TicketPriority),
   parentId: Schema.optional(Schema.NullOr(TicketId)),
   sortOrder: Schema.optional(Schema.Number),
+  worktree: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type TicketUpdateInput = typeof TicketUpdateInput.Type;
 

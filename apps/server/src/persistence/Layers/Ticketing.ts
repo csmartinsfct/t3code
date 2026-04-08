@@ -57,6 +57,7 @@ const TICKET_SELECT = `
   identifier,
   title,
   description,
+  worktree,
   acceptance_criteria_json AS "acceptanceCriteria",
   status,
   priority,
@@ -131,13 +132,13 @@ const makeTicketingRepository = Effect.gen(function* () {
       sql`
         INSERT INTO tickets (
           id, project_id, parent_id, ticket_number, identifier,
-          title, description, acceptance_criteria_json,
+          title, description, worktree, acceptance_criteria_json,
           status, priority, sort_order, is_archived,
           created_at, updated_at
         )
         VALUES (
           ${row.id}, ${row.projectId}, ${row.parentId}, ${row.ticketNumber}, ${row.identifier},
-          ${row.title}, ${row.description},
+          ${row.title}, ${row.description}, ${row.worktree},
           ${row.acceptanceCriteria ? JSON.stringify(row.acceptanceCriteria) : null},
           ${row.status}, ${row.priority}, ${row.sortOrder}, ${row.isArchived ? 1 : 0},
           ${row.createdAt}, ${row.updatedAt}
@@ -146,6 +147,7 @@ const makeTicketingRepository = Effect.gen(function* () {
           parent_id = excluded.parent_id,
           title = excluded.title,
           description = excluded.description,
+          worktree = excluded.worktree,
           acceptance_criteria_json = excluded.acceptance_criteria_json,
           status = excluded.status,
           priority = excluded.priority,
@@ -172,7 +174,7 @@ const makeTicketingRepository = Effect.gen(function* () {
     Request: TicketsByProjectInput,
     Result: TicketRow,
     execute: ({ projectId }) =>
-      sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE project_id = ${projectId} AND is_archived = 0 ORDER BY sort_order ASC, created_at DESC`,
+      sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE project_id = ${projectId} AND is_archived = 0 ORDER BY sort_order ASC, created_at ASC`,
   });
 
   const listTicketsByParent = SqlSchema.findAll({
@@ -411,7 +413,7 @@ const makeTicketingRepository = Effect.gen(function* () {
         const offset = input.offset ?? 0;
 
         const rawRows =
-          yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets ${sql.literal(joinClause)} WHERE ${sql.literal(where)} ORDER BY sort_order ASC, created_at DESC LIMIT ${limit} OFFSET ${offset}`;
+          yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets ${sql.literal(joinClause)} WHERE ${sql.literal(where)} ORDER BY sort_order ASC, created_at ASC LIMIT ${limit} OFFSET ${offset}`;
         const rows = rawRows as unknown as ReadonlyArray<typeof TicketRow.Type>;
         return rows.map(toPersistedTicket);
       }).pipe(Effect.mapError(toPersistenceSqlError("TicketingRepository.listByProject:query"))),

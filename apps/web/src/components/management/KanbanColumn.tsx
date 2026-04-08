@@ -11,7 +11,7 @@ interface KanbanColumnProps {
   tickets: TicketSummary[];
   epicProgressMap: ReadonlyMap<string, EpicProgress>;
   selectedTicketIds: ReadonlySet<string>;
-  onShiftClickTicket: (ticket: TicketSummary) => void;
+  onMultiSelectClick: (e: React.MouseEvent, ticket: TicketSummary) => void;
   onTicketClick: (ticketId: TicketId) => void;
 }
 
@@ -20,7 +20,7 @@ export function KanbanColumn({
   tickets,
   epicProgressMap,
   selectedTicketIds,
-  onShiftClickTicket,
+  onMultiSelectClick,
   onTicketClick,
 }: KanbanColumnProps) {
   const cfg = STATUS_CONFIG[status];
@@ -48,7 +48,7 @@ export function KanbanColumn({
                 status={status}
                 epicProgress={epicProgressMap.get(ticket.id)}
                 isSelected={selectedTicketIds.has(ticket.id)}
-                onShiftClick={onShiftClickTicket}
+                onMultiSelectClick={onMultiSelectClick}
                 onClick={() => onTicketClick(ticket.id)}
               />
             ))}

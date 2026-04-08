@@ -40,6 +40,7 @@ import Migration0024 from "./Migrations/024_ManagedRunInference.ts";
 import Migration0025 from "./Migrations/025_Ticketing.ts";
 import Migration0026 from "./Migrations/026_ProjectSystemPrompt.ts";
 import Migration0027 from "./Migrations/027_TicketingLabelsProjectScope.ts";
+import Migration0028 from "./Migrations/028_TicketingWorktree.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -79,6 +80,7 @@ export const migrationEntries = [
   [25, "Ticketing", Migration0025],
   [26, "ProjectSystemPrompt", Migration0026],
   [27, "TicketingLabelsProjectScope", Migration0027],
+  [28, "TicketingWorktree", Migration0028],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

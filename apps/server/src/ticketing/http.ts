@@ -309,9 +309,22 @@ function createTicketingMcpServer(
           .array(z.string())
           .optional()
           .describe("Ticket IDs or identifiers this depends on."),
+        worktree: z
+          .string()
+          .optional()
+          .describe("Git worktree/branch name for isolated development."),
       },
     },
-    async ({ title, description, parentId, status, priority, labelIds, dependencyIds }) => {
+    async ({
+      title,
+      description,
+      parentId,
+      status,
+      priority,
+      labelIds,
+      dependencyIds,
+      worktree,
+    }) => {
       try {
         const resolvedParentId = parentId ? await resolve(parentId) : undefined;
         const resolvedDepIds = dependencyIds
@@ -327,6 +340,7 @@ function createTicketingMcpServer(
             ...(priority ? { priority: priority as never } : {}),
             ...(labelIds ? { labelIds: labelIds.map((id) => LabelId.makeUnsafe(id)) } : {}),
             ...(resolvedDepIds ? { dependencyIds: resolvedDepIds } : {}),
+            ...(worktree ? { worktree } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
@@ -361,9 +375,14 @@ function createTicketingMcpServer(
           .nullable()
           .describe("New parent ticket identifier (e.g. 'ZBD-7')."),
         sortOrder: z.number().optional().describe("New sort order."),
+        worktree: z
+          .string()
+          .optional()
+          .nullable()
+          .describe("Git worktree/branch name. Set to null to clear."),
       },
     },
-    async ({ id, title, description, status, priority, parentId, sortOrder }) => {
+    async ({ id, title, description, status, priority, parentId, sortOrder, worktree }) => {
       try {
         const resolvedId = await resolve(id);
         const resolvedParentId =
@@ -381,6 +400,7 @@ function createTicketingMcpServer(
             ...(priority ? { priority: priority as never } : {}),
             ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
             ...(sortOrder !== undefined ? { sortOrder } : {}),
+            ...(worktree !== undefined ? { worktree } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };

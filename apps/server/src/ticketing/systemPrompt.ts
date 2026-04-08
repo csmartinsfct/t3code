@@ -20,4 +20,5 @@ When the user asks about tickets, tasks, issues, or project tracking:
 8. Use create_comment for ticket discussions. Comments support single-depth threading (replies to top-level comments).
 9. Use create_artifact to attach Figma URLs, Mermaid diagrams, or images to tickets or comments.
 10. Use update_criterion_status to track acceptance criteria progress (pending, met, not_met).
-11. Use get_ticket_history for audit trails of all ticket changes.`;
+11. Use get_ticket_history for audit trails of all ticket changes.
+12. Tickets can optionally have a \`worktree\` field storing the git worktree/branch name for isolated development. Set it via create_ticket or update_ticket. Set to null to clear.`;

@@ -1,7 +1,8 @@
 /**
  * Zustand store for Kanban ticket multi-selection state.
  *
- * Supports Shift+Click (toggle individual) and bulk drag-to-chat.
+ * Supports Alt/Option+Click (toggle individual), Shift+Click (range select),
+ * and bulk drag-to-chat.
  * Shared between board cards and ticket-detail sub-tickets — they are
  * never visible simultaneously, so one store suffices.
  */
@@ -19,7 +20,7 @@ export interface TicketSelectionState {
 }
 
 interface TicketSelectionStore extends TicketSelectionState {
-  /** Toggle a single ticket in the selection (Shift+Click). */
+  /** Toggle a single ticket in the selection (Alt/Option+Click). */
   toggleTicket: (ticketId: TicketId, ticket: TicketSummary) => void;
   /**
    * Select a range of tickets (Shift+Click with anchor).

@@ -34,6 +34,7 @@ export const PersistedTicket = Schema.Struct({
   priority: TicketPriority,
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
+  worktree: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
