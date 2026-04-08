@@ -355,7 +355,11 @@ function createTicketingMcpServer(
           .enum(["none", "low", "medium", "high", "urgent"])
           .optional()
           .describe("New priority."),
-        parentId: z.string().optional().nullable().describe("New parent ticket identifier (e.g. 'ZBD-7')."),
+        parentId: z
+          .string()
+          .optional()
+          .nullable()
+          .describe("New parent ticket identifier (e.g. 'ZBD-7')."),
         sortOrder: z.number().optional().describe("New sort order."),
       },
     },
@@ -940,9 +944,7 @@ function createTicketingMcpServer(
         ticketId: z
           .string()
           .optional()
-          .describe(
-            "The ticket identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId.",
-          ),
+          .describe("The ticket identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId."),
         commentId: z
           .string()
           .optional()

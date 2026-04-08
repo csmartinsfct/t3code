@@ -41,9 +41,17 @@ const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
+const DIFF_SHEET_STORAGE_KEY = "chat_diff_sheet_width";
+const DIFF_SHEET_MIN_WIDTH = 400;
+const DIFF_SHEET_MAX_WIDTH = 1200;
+
 const FILE_EXPLORER_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_file_explorer_sidebar_width";
 const FILE_EXPLORER_INLINE_DEFAULT_WIDTH = "clamp(40rem,60vw,75rem)";
 const FILE_EXPLORER_INLINE_SIDEBAR_MIN_WIDTH = 640;
+
+const FILE_EXPLORER_SHEET_STORAGE_KEY = "chat_file_explorer_sheet_width";
+const FILE_EXPLORER_SHEET_MIN_WIDTH = 600;
+const FILE_EXPLORER_SHEET_MAX_WIDTH = 1600;
 
 const DiffPanelSheet = (props: {
   children: ReactNode;
@@ -64,6 +72,11 @@ const DiffPanelSheet = (props: {
         showCloseButton={false}
         keepMounted
         className="w-[min(88vw,820px)] max-w-[820px] p-0"
+        resizable={{
+          storageKey: DIFF_SHEET_STORAGE_KEY,
+          minWidth: DIFF_SHEET_MIN_WIDTH,
+          maxWidth: DIFF_SHEET_MAX_WIDTH,
+        }}
       >
         {props.children}
       </SheetPopup>
@@ -106,6 +119,11 @@ const FileExplorerSheet = (props: {
         showCloseButton={false}
         keepMounted
         className="w-[min(88vw,1200px)] max-w-[1200px] p-0"
+        resizable={{
+          storageKey: FILE_EXPLORER_SHEET_STORAGE_KEY,
+          minWidth: FILE_EXPLORER_SHEET_MIN_WIDTH,
+          maxWidth: FILE_EXPLORER_SHEET_MAX_WIDTH,
+        }}
       >
         {props.children}
       </SheetPopup>
