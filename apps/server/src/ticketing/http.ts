@@ -213,7 +213,9 @@ function createTicketingMcpServer(
       description: "List tickets for the current project with optional filters.",
       inputSchema: {
         status: z
-          .array(z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"]))
+          .array(
+            z.enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"]),
+          )
           .optional()
           .describe("Filter by status(es)."),
         priority: z
@@ -297,7 +299,7 @@ function createTicketingMcpServer(
           .optional()
           .describe("Parent ticket identifier (e.g. 'ZBD-7') for sub-tickets."),
         status: z
-          .enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+          .enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"])
           .optional()
           .describe("Initial status (default: backlog)."),
         priority: z
@@ -313,6 +315,19 @@ function createTicketingMcpServer(
           .string()
           .optional()
           .describe("Git worktree/branch name for isolated development."),
+        acceptanceCriteria: z
+          .array(
+            z.object({
+              text: z.string().describe("Criterion text."),
+              status: z
+                .enum(["pending", "met", "not_met"])
+                .optional()
+                .default("pending")
+                .describe("Initial status (default: pending)."),
+            }),
+          )
+          .optional()
+          .describe("Acceptance criteria for the ticket."),
       },
     },
     async ({
@@ -324,6 +339,7 @@ function createTicketingMcpServer(
       labelIds,
       dependencyIds,
       worktree,
+      acceptanceCriteria,
     }) => {
       try {
         const resolvedParentId = parentId ? await resolve(parentId) : undefined;
@@ -341,6 +357,17 @@ function createTicketingMcpServer(
             ...(labelIds ? { labelIds: labelIds.map((id) => LabelId.makeUnsafe(id)) } : {}),
             ...(resolvedDepIds ? { dependencyIds: resolvedDepIds } : {}),
             ...(worktree ? { worktree } : {}),
+            ...(acceptanceCriteria
+              ? {
+                  acceptanceCriteria: acceptanceCriteria.map((c) => ({
+                    text: c.text,
+                    status: c.status ?? ("pending" as const),
+                    reason: null,
+                    verifiedBy: null,
+                    verifiedAt: null,
+                  })),
+                }
+              : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
@@ -362,7 +389,7 @@ function createTicketingMcpServer(
         title: z.string().optional().describe("New title."),
         description: z.string().optional().nullable().describe("New description."),
         status: z
-          .enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+          .enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"])
           .optional()
           .describe("New status."),
         priority: z
@@ -380,15 +407,51 @@ function createTicketingMcpServer(
           .optional()
           .nullable()
           .describe("Git worktree/branch name. Set to null to clear."),
+        acceptanceCriteria: z
+          .array(
+            z.object({
+              text: z.string().describe("Criterion text."),
+              status: z
+                .enum(["pending", "met", "not_met"])
+                .optional()
+                .default("pending")
+                .describe("Status (default: pending)."),
+            }),
+          )
+          .optional()
+          .nullable()
+          .describe("Replace acceptance criteria. Pass null to clear."),
       },
     },
-    async ({ id, title, description, status, priority, parentId, sortOrder, worktree }) => {
+    async ({
+      id,
+      title,
+      description,
+      status,
+      priority,
+      parentId,
+      sortOrder,
+      worktree,
+      acceptanceCriteria,
+    }) => {
       try {
         const resolvedId = await resolve(id);
         const resolvedParentId =
           parentId !== undefined
             ? parentId
               ? ((await resolve(parentId)) as never)
+              : null
+            : undefined;
+        const mappedCriteria =
+          acceptanceCriteria !== undefined
+            ? acceptanceCriteria
+              ? acceptanceCriteria.map((c) => ({
+                  text: c.text,
+                  status: c.status ?? ("pending" as const),
+                  reason: null,
+                  verifiedBy: null,
+                  verifiedAt: null,
+                }))
               : null
             : undefined;
         const ticket = await bridge.run(
@@ -401,6 +464,7 @@ function createTicketingMcpServer(
             ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
             ...(sortOrder !== undefined ? { sortOrder } : {}),
             ...(worktree !== undefined ? { worktree } : {}),
+            ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };

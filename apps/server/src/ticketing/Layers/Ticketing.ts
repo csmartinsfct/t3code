@@ -41,7 +41,8 @@ const toOperationError =
 const deriveEpicStatus = (children: ReadonlyArray<{ status: TicketStatus }>): TicketStatus => {
   if (children.length === 0) return "backlog";
   const statuses = children.map((c) => c.status);
-  if (statuses.some((s) => s === "in_progress" || s === "in_review")) return "in_progress";
+  if (statuses.some((s) => s === "in_progress" || s === "in_review" || s === "blocked"))
+    return "in_progress";
   if (statuses.every((s) => s === "done")) return "done";
   if (statuses.every((s) => s === "canceled")) return "canceled";
   if (statuses.every((s) => s === "done" || s === "canceled")) return "done";

@@ -696,7 +696,19 @@ const makeManagedRunService = Effect.gen(function* () {
     );
     const anyHealthy =
       validated?.runtimeServices.some((service) => service.validationStatus === "healthy") ?? false;
-    if (anyHealthy) {
+
+    // After a clean exit, only stay "running" if there are genuinely independent
+    // background services (url/port/docker). Command-type health checks alone
+    // (e.g. `test -f artifact`) are one-shot validations — the process is done.
+    const hasLiveService =
+      validated?.runtimeServices.some(
+        (service) =>
+          service.validationStatus === "healthy" &&
+          service.canonicalHealthCheck !== null &&
+          service.canonicalHealthCheck.type !== "command",
+      ) ?? false;
+
+    if (anyHealthy && hasLiveService) {
       yield* updateRun(runId, (current) => ({
         ...current,
         status: "running",
@@ -705,6 +717,16 @@ const makeManagedRunService = Effect.gen(function* () {
         lastExitSignal: exitSignal,
       })).pipe(Effect.catch(() => Effect.void));
       yield* startHealthPollFiber(runId);
+    } else if (anyHealthy) {
+      yield* updateRun(runId, (current) => ({
+        ...current,
+        status: "completed",
+        updatedAt: completedAt,
+        completedAt,
+        lastExitCode: exitCode,
+        lastExitSignal: exitSignal,
+        logsExpireAt: logsExpiryIso(),
+      })).pipe(Effect.catch(() => Effect.void));
     } else {
       yield* updateRun(runId, (current) => ({
         ...current,
@@ -824,17 +846,25 @@ const makeManagedRunService = Effect.gen(function* () {
       return;
     }
 
+    const hasLiveService = validated.runtimeServices.some(
+      (service) =>
+        service.validationStatus === "healthy" &&
+        service.canonicalHealthCheck !== null &&
+        service.canonicalHealthCheck.type !== "command",
+    );
+
     yield* repository
       .update({
         ...summarize(validated),
-        status: anyHealthy ? "running" : "lost",
+        status: anyHealthy && hasLiveService ? "running" : "lost",
         updatedAt: nowIso(),
         lastError: validated.lastError,
-        logsExpireAt: validated.logsExpireAt ?? (anyHealthy ? null : logsExpiryIso()),
+        logsExpireAt:
+          validated.logsExpireAt ?? (anyHealthy && hasLiveService ? null : logsExpiryIso()),
       })
       .pipe(Effect.catch(() => Effect.void));
 
-    if (anyHealthy) {
+    if (anyHealthy && hasLiveService) {
       yield* startHealthPollFiber(run.runId);
     }
   });
@@ -1069,7 +1099,7 @@ const makeManagedRunService = Effect.gen(function* () {
       .write({
         threadId: terminalThreadId,
         terminalId,
-        data: `${script.command}\r`,
+        data: `${script.command}; exit $?\r`,
       })
       .pipe(
         Effect.mapError((cause) => toManagedRunOperationError("managedRuns.writeTerminal", cause)),

@@ -29,6 +29,7 @@ export const TicketStatus = Schema.Literals([
   "backlog",
   "todo",
   "in_progress",
+  "blocked",
   "in_review",
   "done",
   "canceled",

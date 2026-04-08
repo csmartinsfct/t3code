@@ -81,7 +81,7 @@ Ticket {
   identifier: string                        // "T3CO-42"
   title: string
   description: string | null
-  status: "backlog" | "todo" | "in_progress" | "in_review" | "done" | "canceled"
+  status: "backlog" | "todo" | "in_progress" | "blocked" | "in_review" | "done" | "canceled"
   priority: "none" | "low" | "medium" | "high" | "urgent"
   sortOrder: number                         // REAL for fractional indexing
   isArchived: boolean

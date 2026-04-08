@@ -44,6 +44,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       backlog: [],
       todo: [],
       in_progress: [],
+      blocked: [],
       in_review: [],
       done: [],
       canceled: [],
