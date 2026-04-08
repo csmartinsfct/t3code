@@ -1,5 +1,5 @@
 import type { TicketId, TicketStatus, TicketSummary } from "@t3tools/contracts";
-import type { DragEndEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { ArrowLeftIcon } from "lucide-react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -20,7 +20,10 @@ interface KanbanBoardProps {
 }
 
 export interface KanbanBoardHandle {
+  handleDragStart: (event: DragStartEvent) => void;
+  handleDragOver: (event: DragOverEvent) => void;
   handleDragEnd: (event: DragEndEvent) => void;
+  handleDragCancel: () => void;
 }
 
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(
@@ -94,17 +97,124 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     [toggleTicket],
   );
 
-  const handleBoardDragEnd = useCallback(
-    (event: DragEndEvent) => {
+  // ---------------------------------------------------------------------------
+  // Drag-and-drop handlers
+  // ---------------------------------------------------------------------------
+
+  // Track the original column so we can detect cross-column moves and revert on cancel
+  const dragOriginalStatusRef = useRef<TicketStatus | null>(null);
+  const dragActiveIdRef = useRef<string | null>(null);
+
+  const findTicketColumn = (ticketId: string): TicketStatus | null => {
+    for (const s of ALL_STATUSES) {
+      if (ticketsByStatusRef.current[s].some((t) => t.id === ticketId)) return s;
+    }
+    return null;
+  };
+
+  const revertToOriginalColumn = useCallback(
+    (ticketId: string, originalStatus: TicketStatus) => {
+      const currentStatus = findTicketColumn(ticketId);
+      if (!currentStatus || currentStatus === originalStatus) return;
+      const source = ticketsByStatusRef.current[currentStatus];
+      const target = ticketsByStatusRef.current[originalStatus];
+      const movedTicket = source.find((t) => t.id === ticketId);
+      if (!movedTicket) return;
+      const updates: Array<{ id: string; sortOrder: number; status?: string }> = [];
+      const sourceWithout = source.filter((t) => t.id !== ticketId);
+      for (let i = 0; i < sourceWithout.length; i++) {
+        updates.push({ id: sourceWithout[i]!.id, sortOrder: i * 1000 });
+      }
+      const targetWith = [...target, movedTicket];
+      for (let i = 0; i < targetWith.length; i++) {
+        updates.push({
+          id: targetWith[i]!.id,
+          sortOrder: i * 1000,
+          ...(targetWith[i]!.id === ticketId ? { status: originalStatus } : {}),
+        });
+      }
+      applyLocalReorder(updates);
+    },
+    [applyLocalReorder],
+  );
+
+  const handleBoardDragStart = useCallback((event: DragStartEvent) => {
+    const data = event.active.data.current as { status: TicketStatus } | undefined;
+    dragOriginalStatusRef.current = data?.status ?? null;
+    dragActiveIdRef.current = String(event.active.id);
+  }, []);
+
+  // Move items between columns during drag so the target SortableContext includes
+  // the dragged ID and cards animate to make room.
+  const handleBoardDragOver = useCallback(
+    (event: DragOverEvent) => {
       const { active, over } = event;
       if (!over || !active.data.current) return;
 
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      if (overId === "chat-composer") return;
+
+      const activeStatus = findTicketColumn(activeId);
+      if (!activeStatus) return;
+
+      let overStatus: TicketStatus;
+      if (overId.startsWith("column:")) {
+        overStatus = overId.replace("column:", "") as TicketStatus;
+      } else {
+        const overData = over.data.current as { status?: TicketStatus } | undefined;
+        overStatus = overData?.status ?? activeStatus;
+      }
+
+      if (activeStatus === overStatus) return;
+
+      const sourceColumn = ticketsByStatusRef.current[activeStatus];
+      const targetColumn = ticketsByStatusRef.current[overStatus];
+      const activeTicket = sourceColumn.find((t) => t.id === activeId);
+      if (!activeTicket) return;
+
+      let insertIndex: number;
+      if (overId.startsWith("column:")) {
+        insertIndex = targetColumn.length;
+      } else {
+        insertIndex = targetColumn.findIndex((t) => t.id === overId);
+        if (insertIndex === -1) insertIndex = targetColumn.length;
+      }
+
+      const updates: Array<{ id: string; sortOrder: number; status?: string }> = [];
+      const sourceWithout = sourceColumn.filter((t) => t.id !== activeId);
+      for (let i = 0; i < sourceWithout.length; i++) {
+        updates.push({ id: sourceWithout[i]!.id, sortOrder: i * 1000 });
+      }
+      const targetWith = [...targetColumn];
+      targetWith.splice(insertIndex, 0, activeTicket);
+      for (let i = 0; i < targetWith.length; i++) {
+        updates.push({
+          id: targetWith[i]!.id,
+          sortOrder: i * 1000,
+          ...(targetWith[i]!.id === activeId ? { status: overStatus } : {}),
+        });
+      }
+      applyLocalReorder(updates);
+    },
+    [applyLocalReorder],
+  );
+
+  const handleBoardDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      const originalStatus = dragOriginalStatusRef.current;
+      dragOriginalStatusRef.current = null;
+      dragActiveIdRef.current = null;
+
+      if (!over || !active.data.current || !originalStatus) return;
+
       const ticket = (active.data.current as { ticket: TicketSummary }).ticket;
-      const sourceStatus = (active.data.current as { status: TicketStatus }).status;
       const overId = String(over.id);
 
       // --- Drop on chat ---
       if (overId === "chat-composer") {
+        revertToOriginalColumn(ticket.id, originalStatus);
         const selStore = useTicketSelectionStore.getState();
         if (selStore.selectedTicketIds.has(ticket.id)) {
           onDropOnChat?.([...selStore.selectedTickets.values()]);
@@ -114,81 +224,78 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         return;
       }
 
-      // --- Determine target status and index ---
-      let targetStatus: TicketStatus;
-      let overIndex: number;
+      // The item may have already been moved cross-column by onDragOver.
+      // Determine its current column and do a final position adjustment.
+      const currentStatus = findTicketColumn(ticket.id) ?? originalStatus;
+      const column = [...ticketsByStatusRef.current[currentStatus]];
+      const currentIndex = column.findIndex((t) => t.id === ticket.id);
 
-      if (overId.startsWith("column:")) {
-        // Dropped on the column background (empty area) — append to end
-        targetStatus = overId.replace("column:", "") as TicketStatus;
-        overIndex = ticketsByStatusRef.current[targetStatus].length;
-      } else {
-        // Dropped on another ticket
-        const overData = over.data.current as { status?: TicketStatus } | undefined;
-        targetStatus = overData?.status ?? sourceStatus;
-        const column = ticketsByStatusRef.current[targetStatus];
-        overIndex = column.findIndex((t) => t.id === overId);
-        if (overIndex === -1) overIndex = column.length;
+      // Final same-column position adjustment from the drop target
+      let finalColumn = column;
+      if (!overId.startsWith("column:")) {
+        const overIndex = column.findIndex((t) => t.id === overId);
+        if (overIndex >= 0 && overIndex !== currentIndex && currentIndex >= 0) {
+          finalColumn = arrayMove(column, currentIndex, overIndex);
+        }
       }
 
+      // Persist column order
+      const items = finalColumn.map((t, i) => ({ id: t.id, sortOrder: i * 1000 }));
+      applyLocalReorder(items);
       const api = ensureNativeApi();
+      void api.ticketing.reorder({ items: items as never });
 
-      if (targetStatus === sourceStatus) {
-        // --- Same column reorder ---
-        const column = [...ticketsByStatusRef.current[sourceStatus]];
-        const fromIndex = column.findIndex((t) => t.id === ticket.id);
-        if (fromIndex === -1 || fromIndex === overIndex) return;
-
-        const reordered = arrayMove(column, fromIndex, overIndex);
-        const items = reordered.map((t, i) => ({ id: t.id, sortOrder: i * 1000 }));
-        applyLocalReorder(items);
-        void api.ticketing.reorder({ items: items as never });
-      } else {
-        // --- Cross-column move ---
-        // Insert into target column at the drop index
-        const targetColumn = [...ticketsByStatusRef.current[targetStatus]];
-        targetColumn.splice(overIndex, 0, ticket);
-        const items = targetColumn.map((t, i) => ({ id: t.id, sortOrder: i * 1000 }));
-
-        // Optimistically update local state
-        const localUpdates: Array<{ id: string; sortOrder: number; status?: string }> = items.map(
-          (item) => (item.id === ticket.id ? { ...item, status: targetStatus } : item),
-        );
-
-        // Epic cascade: move sub-tickets that match the source status
-        const cascadeSubTickets =
-          ticket.subTicketCount > 0
-            ? ticketsRef.current.filter(
-                (t) => t.parentId === ticket.id && t.status === sourceStatus,
-              )
-            : [];
-        for (const sub of cascadeSubTickets) {
-          localUpdates.push({ id: sub.id, sortOrder: sub.sortOrder, status: targetStatus });
-        }
-
-        applyLocalReorder(localUpdates);
-
-        // Persist: update status for the moved ticket, reorder the full column
+      // Persist status change + epic cascade
+      if (currentStatus !== originalStatus) {
         void api.ticketing.update({
           id: ticket.id as never,
-          status: targetStatus as never,
-          sortOrder: (overIndex * 1000) as never,
+          status: currentStatus as never,
         });
-        void api.ticketing.reorder({ items: items as never });
 
-        // Persist sub-ticket status changes
-        for (const sub of cascadeSubTickets) {
-          void api.ticketing.update({
-            id: sub.id as never,
-            status: targetStatus as never,
-          });
+        if (ticket.subTicketCount > 0) {
+          const cascadeSubTickets = ticketsRef.current.filter(
+            (t) => t.parentId === ticket.id && t.status === originalStatus,
+          );
+          if (cascadeSubTickets.length > 0) {
+            const cascadeUpdates = cascadeSubTickets.map((sub) => ({
+              id: sub.id,
+              sortOrder: sub.sortOrder,
+              status: currentStatus,
+            }));
+            applyLocalReorder(cascadeUpdates);
+            for (const sub of cascadeSubTickets) {
+              void api.ticketing.update({
+                id: sub.id as never,
+                status: currentStatus as never,
+              });
+            }
+          }
         }
       }
     },
-    [applyLocalReorder, onDropOnChat],
+    [applyLocalReorder, onDropOnChat, revertToOriginalColumn],
   );
 
-  useImperativeHandle(ref, () => ({ handleDragEnd: handleBoardDragEnd }), [handleBoardDragEnd]);
+  const handleBoardDragCancel = useCallback(() => {
+    const originalStatus = dragOriginalStatusRef.current;
+    const activeId = dragActiveIdRef.current;
+    dragOriginalStatusRef.current = null;
+    dragActiveIdRef.current = null;
+    if (originalStatus && activeId) {
+      revertToOriginalColumn(activeId, originalStatus);
+    }
+  }, [revertToOriginalColumn]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      handleDragStart: handleBoardDragStart,
+      handleDragOver: handleBoardDragOver,
+      handleDragEnd: handleBoardDragEnd,
+      handleDragCancel: handleBoardDragCancel,
+    }),
+    [handleBoardDragStart, handleBoardDragOver, handleBoardDragEnd, handleBoardDragCancel],
+  );
 
   const handleTicketClick = useCallback(
     (ticketId: TicketId) => {
@@ -260,7 +367,6 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           ))}
         </div>
       )}
-
     </div>
   );
 });

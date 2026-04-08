@@ -8,6 +8,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -89,6 +90,11 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
     } else {
       setActiveDragTickets([ticket]);
     }
+    boardRef.current?.handleDragStart(event);
+  }, []);
+
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    boardRef.current?.handleDragOver(event);
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
@@ -98,6 +104,7 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
 
   const handleDragCancel = useCallback(() => {
     setActiveDragTickets([]);
+    boardRef.current?.handleDragCancel();
   }, []);
 
   return (
@@ -105,6 +112,7 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
       sensors={sensors}
       collisionDetection={pointerWithin}
       onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >

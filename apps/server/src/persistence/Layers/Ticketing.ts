@@ -175,7 +175,7 @@ const makeTicketingRepository = Effect.gen(function* () {
     Request: TicketListByParentInput,
     Result: TicketRow,
     execute: ({ parentId }) =>
-      sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE parent_id = ${parentId} ORDER BY sort_order ASC, created_at DESC`,
+      sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE parent_id = ${parentId} ORDER BY sort_order ASC, created_at ASC`,
   });
 
   const countChildren = SqlSchema.findAll({

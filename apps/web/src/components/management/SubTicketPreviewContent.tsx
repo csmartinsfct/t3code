@@ -2,7 +2,6 @@ import type { AcceptanceCriterion, Ticket, TicketId } from "@t3tools/contracts";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-
 import { TicketMarkdown } from "./TicketMarkdown";
 
 interface SubTicketPreviewContentProps {

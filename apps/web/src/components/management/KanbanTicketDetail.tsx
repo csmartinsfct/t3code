@@ -451,7 +451,9 @@ function DraggableSubTicket({
           />
         }
       >
-        <Badge size="sm" variant={subStatusCfg.badgeVariant}>{subStatusCfg.label}</Badge>
+        <Badge size="sm" variant={subStatusCfg.badgeVariant}>
+          {subStatusCfg.label}
+        </Badge>
         <span className="truncate text-foreground">{sub.title}</span>
       </PopoverTrigger>
       <PopoverPopup
