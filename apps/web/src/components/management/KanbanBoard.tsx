@@ -30,7 +30,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   ref,
 ) {
   const { tickets, loading, applyLocalReorder } = useTicketing({ projectId });
-  const [selectedTicketId, setSelectedTicketId] = useState<TicketId | null>(null);
+  const [ticketStack, setTicketStack] = useState<TicketId[]>([]);
+  const selectedTicketId = ticketStack.length > 0 ? ticketStack[ticketStack.length - 1] : null;
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
@@ -193,20 +194,20 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const handleTicketClick = useCallback(
     (ticketId: TicketId) => {
       clearSelection();
-      setSelectedTicketId(ticketId);
+      setTicketStack([ticketId]);
     },
     [clearSelection],
   );
 
   const handleBack = useCallback(() => {
     clearSelection();
-    setSelectedTicketId(null);
+    setTicketStack((prev) => prev.slice(0, -1));
   }, [clearSelection]);
 
   const handleNavigateToTicket = useCallback(
     (ticketId: TicketId) => {
       clearSelection();
-      setSelectedTicketId(ticketId);
+      setTicketStack((prev) => [...prev, ticketId]);
     },
     [clearSelection],
   );
@@ -227,7 +228,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             onClick={handleBack}
           >
             <ArrowLeftIcon className="size-3" />
-            Back to board
+            Back
           </button>
         ) : (
           <h2 className="text-xs font-medium text-foreground">Board</h2>
