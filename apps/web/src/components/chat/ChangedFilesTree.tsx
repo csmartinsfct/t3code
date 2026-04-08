@@ -67,7 +67,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             <ChevronRightIcon
               aria-hidden="true"
               className={cn(
-                "size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover:text-foreground/80",
+                "size-3.5 shrink-0 text-foreground/80 transition-transform",
                 isExpanded && "rotate-90",
               )}
             />
@@ -76,7 +76,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             ) : (
               <FolderClosedIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
             )}
-            <span className="truncate font-mono text-[11px] text-muted-foreground/90 group-hover:text-foreground/90">
+            <span className="truncate font-mono text-[11px] text-foreground/90">
               {node.name}
             </span>
             {hasNonZeroStat(node.stat) && (
@@ -109,7 +109,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           theme={resolvedTheme}
           className="size-3.5 text-muted-foreground/70"
         />
-        <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
+        <span className="truncate font-mono text-[11px] text-foreground/90">
           {node.name}
         </span>
         {node.stat && (
