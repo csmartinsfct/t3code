@@ -25,7 +25,13 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
@@ -75,10 +81,14 @@ export function KanbanTicketDetail({
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
       if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
         onBack();
-      } else if (event.type === "ticket_upserted" && event.ticket.id === ticketId) {
+      } else if (
+        event.type === "ticket_upserted" &&
+        event.ticket.id === ticketId
+      ) {
         void fetchTicket();
       } else if (
-        (event.type === "comment_upserted" || event.type === "comment_deleted") &&
+        (event.type === "comment_upserted" ||
+          event.type === "comment_deleted") &&
         event.ticketId === ticketId
       ) {
         void fetchTicket();
@@ -97,7 +107,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update status:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handlePriorityChange = useCallback(
@@ -110,7 +120,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update priority:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleDelete = useCallback(async () => {
@@ -144,7 +154,7 @@ export function KanbanTicketDetail({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-8">
         {/* Header */}
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between">
@@ -152,7 +162,9 @@ export function KanbanTicketDetail({
               <span className="font-mono text-[11px] text-muted-foreground">
                 {ticket.identifier}
               </span>
-              <h2 className="mt-0.5 text-sm font-medium text-foreground">{ticket.title}</h2>
+              <h2 className="mt-0.5 text-sm font-medium text-foreground">
+                {ticket.title}
+              </h2>
             </div>
             <Button
               size="xs"
@@ -197,17 +209,27 @@ export function KanbanTicketDetail({
 
             <Select
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
+              onValueChange={(v) =>
+                void handlePriorityChange(v as TicketPriority)
+              }
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <div className={`size-2 rounded-full ${priorityCfg.dotClass}`} />
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-1.5 px-1.5 py-1"
+              >
+                <div
+                  className={`size-2 rounded-full ${priorityCfg.dotClass}`}
+                />
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
                 {ALL_PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <div className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`} />
+                      <div
+                        className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`}
+                      />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -225,7 +247,9 @@ export function KanbanTicketDetail({
         {/* Description */}
         {ticket.description && (
           <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-            <p className="text-[11px] font-medium text-muted-foreground">Description</p>
+            <p className="text-[11px] font-medium text-muted-foreground">
+              Description
+            </p>
             <div className="mt-0.5 text-foreground">
               <TicketMarkdown>{ticket.description}</TicketMarkdown>
             </div>
@@ -244,7 +268,9 @@ export function KanbanTicketDetail({
         {/* Labels */}
         {ticket.labels.length > 0 && (
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Labels
+            </h3>
             <div className="flex flex-wrap gap-1.5">
               {ticket.labels.map((label) => (
                 <span
@@ -269,23 +295,34 @@ export function KanbanTicketDetail({
               Dependencies ({ticket.dependencies.length})
             </h3>
             <div className="flex flex-col gap-1">
-              {ticket.dependencies.map((dep) => (
-                <button
-                  key={dep.dependsOnTicketId}
-                  type="button"
-                  className="flex w-fit items-center gap-1.5 text-xs text-blue-500 hover:underline"
-                  onClick={() => onNavigateToTicket(dep.dependsOnTicketId)}
-                >
-                  {dep.dependsOnTicketId}
-                </button>
-              ))}
+              {ticket.dependencies.map((dep) => {
+                const depStatusCfg = STATUS_CONFIG[dep.status];
+                return (
+                  <button
+                    key={dep.dependsOnTicketId}
+                    type="button"
+                    className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
+                    onClick={() => onNavigateToTicket(dep.dependsOnTicketId)}
+                  >
+                    <Badge size="sm" variant={depStatusCfg.badgeVariant}>
+                      {depStatusCfg.label}
+                    </Badge>
+                    <span className="truncate text-foreground">
+                      {dep.title}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
-          <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
+          <SubTicketsList
+            subTickets={ticket.subTickets}
+            onNavigateToTicket={onNavigateToTicket}
+          />
         )}
 
         {/* Comments */}
@@ -305,8 +342,8 @@ export function KanbanTicketDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
+              This will permanently delete "{ticket.identifier}: {ticket.title}"
+              and all its data. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -315,7 +352,11 @@ export function KanbanTicketDetail({
                 Cancel
               </Button>
             </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+            >
               Delete
             </Button>
           </AlertDialogFooter>
@@ -354,25 +395,28 @@ function SubTicketsList({
     });
   }, []);
 
-  const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
-    const key = id as string;
-    const cached = cacheRef.current.get(key);
-    if (cached) return cached;
-    const existing = inflightRef.current.get(key);
-    if (existing) return existing;
-    const promise = ensureNativeApi()
-      .ticketing.getById({ id })
-      .then((t) => {
-        cacheRef.current.set(key, t);
-        return t;
-      })
-      .catch(() => null)
-      .finally(() => {
-        inflightRef.current.delete(key);
-      });
-    inflightRef.current.set(key, promise);
-    return promise;
-  }, []);
+  const fetchPreview = useCallback(
+    async (id: TicketId): Promise<Ticket | null> => {
+      const key = id as string;
+      const cached = cacheRef.current.get(key);
+      if (cached) return cached;
+      const existing = inflightRef.current.get(key);
+      if (existing) return existing;
+      const promise = ensureNativeApi()
+        .ticketing.getById({ id })
+        .then((t) => {
+          cacheRef.current.set(key, t);
+          return t;
+        })
+        .catch(() => null)
+        .finally(() => {
+          inflightRef.current.delete(key);
+        });
+      inflightRef.current.set(key, promise);
+      return promise;
+    },
+    []
+  );
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
     return cacheRef.current.get(id as string);
@@ -436,7 +480,9 @@ function DraggableSubTicket({
             type="button"
             data-ticket-selectable
             className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+              isSelected
+                ? "bg-primary/5 ring-1.5 ring-primary/40"
+                : "hover:bg-accent/30"
             } ${isDragging ? "opacity-40" : ""}`}
             onClick={(e) => {
               if (e.shiftKey) {

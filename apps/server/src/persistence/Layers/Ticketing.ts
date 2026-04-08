@@ -108,8 +108,10 @@ const HISTORY_SELECT = `
 `;
 
 const DEP_SELECT = `
-  ticket_id AS "ticketId",
-  depends_on_ticket_id AS "dependsOnTicketId"
+  d.ticket_id AS "ticketId",
+  d.depends_on_ticket_id AS "dependsOnTicketId",
+  t.title AS "title",
+  t.status AS "status"
 `;
 
 const TransitiveDepRow = Schema.Struct({ ticketId: Schema.String });
@@ -190,20 +192,22 @@ const makeTicketingRepository = Effect.gen(function* () {
   const DepRow = Schema.Struct({
     ticketId: Schema.String,
     dependsOnTicketId: Schema.String,
+    title: Schema.String,
+    status: Schema.String,
   });
 
   const listDeps = SqlSchema.findAll({
     Request: DependencyLookupInput,
     Result: DepRow,
     execute: ({ ticketId }) =>
-      sql`SELECT ${sql.literal(DEP_SELECT)} FROM ticket_dependencies WHERE ticket_id = ${ticketId}`,
+      sql`SELECT ${sql.literal(DEP_SELECT)} FROM ticket_dependencies d JOIN tickets t ON t.id = d.depends_on_ticket_id WHERE d.ticket_id = ${ticketId}`,
   });
 
   const listDependents_ = SqlSchema.findAll({
     Request: DependencyLookupInput,
     Result: DepRow,
     execute: ({ ticketId }) =>
-      sql`SELECT ${sql.literal(DEP_SELECT)} FROM ticket_dependencies WHERE depends_on_ticket_id = ${ticketId}`,
+      sql`SELECT ${sql.literal(DEP_SELECT)} FROM ticket_dependencies d JOIN tickets t ON t.id = d.ticket_id WHERE d.depends_on_ticket_id = ${ticketId}`,
   });
 
   const transitiveDeps = SqlSchema.findAll({
