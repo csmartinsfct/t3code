@@ -153,6 +153,7 @@ Each ticket entry in the orchestration run plan stores both `workingThreadId` an
 - marks the ticket `done` when the review returns `changesNeeded: false`
 - moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
+- pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `review`, or `reviewFeedback` cannot be validated or rendered
 
 The chat UI uses that explicit `reviewThreadId` identity to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
@@ -193,7 +194,7 @@ Rules:
 - aliases are normalized to canonical keys during validation/save
 - validation returns structured errors with block context so the UI can identify the failing block
 
-The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts` and currently covers shared ticket/project variables plus review-only and review-feedback-only variables. The review flow is modeled as one logical prompt id (`review`), and the shipped default now represents the full review instructions as a single configurable prompt document.
+The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts`. Shared ticket/project variables such as `ticketId`, `ticketTitle`, `ticketDescription`, `acceptanceCriteria`, `worktree`, `projectTitle`, and `projectPath` are available across the orchestration prompt ids, while review-only and review-feedback-only variables remain scoped to the prompts that can safely render them. The review flow is modeled as one logical prompt id (`review`), and the shipped default now represents the full review instructions as a single configurable prompt document.
 
 Global prompt storage is now server-authoritative through `settings.json`:
 
@@ -214,6 +215,10 @@ Effective prompt resolution is:
 1. project override
 2. current global prompt from `settings.prompts`
 3. immutable shipped default from `settings.promptDefaults`
+
+The runner resolves, validates, and renders the effective prompt document at dispatch time for every new orchestration turn. That means resumed runs and later review-feedback turns always use the current effective document for that prompt id instead of reusing text captured when the run first started.
+
+If validation or rendering fails at dispatch time, the runner does not fall back to hardcoded user-facing prompt text. Instead, it appends an `orchestration.run.prompt.render.failed` activity with the affected prompt id and pauses the run so the prompt document can be fixed before execution continues.
 
 The `review` shipped default is one logical prompt document that includes both the fixed review instructions and the ticket-specific review body, so downstream consumers can fully customize or reset review behavior using one prompt id.
 

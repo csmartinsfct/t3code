@@ -47,6 +47,20 @@ describe("prompt template variable registry", () => {
     expect(listPromptTemplateVariables("review").map((definition) => definition.key)).not.toContain(
       "reviewSummary",
     );
+    expect(listPromptTemplateVariables("resume").map((definition) => definition.key)).toEqual(
+      expect.arrayContaining([
+        "ticketId",
+        "ticketTitle",
+        "ticketDescription",
+        "acceptanceCriteria",
+        "worktree",
+        "projectTitle",
+        "projectPath",
+      ]),
+    );
+    expect(listPromptTemplateVariables("resume").map((definition) => definition.key)).not.toContain(
+      "commitDiff",
+    );
   });
 
   it("normalizes aliases to canonical keys", () => {
@@ -154,6 +168,35 @@ describe("validatePromptTemplateDocument", () => {
         ],
       },
       referencedVariables: ["ticketId", "ticketTitle", "commitDiff", "reviewIteration"],
+    });
+  });
+
+  it("accepts shared ticket and project variables for resume prompts", () => {
+    const result = validatePromptTemplateDocument({
+      promptId: "resume",
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: null,
+            text: "Resume ${ticketIdentifier} in ${projectTitle} @ ${projectPath}",
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: null,
+            text: "Resume ${ticketId} in ${projectTitle} @ ${projectPath}",
+          },
+        ],
+      },
+      referencedVariables: ["ticketId", "projectTitle", "projectPath"],
     });
   });
 

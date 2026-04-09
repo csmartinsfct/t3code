@@ -102,7 +102,7 @@ If the ticket worktree is not null, treat it as part of the task context while r
         iteration: 1,
         ticketWorktree: null,
       }),
-    ).toContain("Worktree:\nnull");
+    ).not.toContain("Worktree:");
   });
 });
 

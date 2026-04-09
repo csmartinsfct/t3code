@@ -151,6 +151,91 @@ const makeTurnAbortedRuntimeEvent = (input: {
   },
 });
 
+const makeCompletedWorkAndReviewThreads = (
+  reviewText: string,
+): ReadonlyArray<OrchestrationThread> => [
+  {
+    id: workingThread1,
+    projectId,
+    title: ticket1.title,
+    modelSelection: { provider: "codex", model: "gpt-5-codex" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    parentThreadId: orchestrationThreadId,
+    isOrchestrationThread: false,
+    ticketId: ticket1Id,
+    latestTurn: {
+      turnId: TurnId.makeUnsafe("turn-work"),
+      state: "completed",
+      requestedAt: "2026-04-09T10:00:00.000Z",
+      startedAt: "2026-04-09T10:00:00.000Z",
+      completedAt: "2026-04-09T10:00:01.000Z",
+      assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+    },
+    createdAt: "2026-04-09T10:00:00.000Z",
+    updatedAt: "2026-04-09T10:00:01.000Z",
+    archivedAt: null,
+    deletedAt: null,
+    messages: [],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [
+      {
+        turnId: TurnId.makeUnsafe("turn-work"),
+        checkpointTurnCount: 1,
+        checkpointRef: "checkpoint:work-1" as never,
+        status: "ready",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+        completedAt: "2026-04-09T10:00:01.000Z",
+      },
+    ],
+    session: null,
+  },
+  {
+    id: reviewThread1,
+    projectId,
+    title: `${ticket1.title} Review`,
+    modelSelection: { provider: "codex", model: "gpt-5-codex" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    parentThreadId: orchestrationThreadId,
+    isOrchestrationThread: false,
+    ticketId: ticket1Id,
+    latestTurn: {
+      turnId: TurnId.makeUnsafe("turn-review"),
+      state: "completed",
+      requestedAt: "2026-04-09T10:00:02.000Z",
+      startedAt: "2026-04-09T10:00:02.000Z",
+      completedAt: "2026-04-09T10:00:03.000Z",
+      assistantMessageId: MessageId.makeUnsafe("assistant-review"),
+    },
+    createdAt: "2026-04-09T10:00:00.000Z",
+    updatedAt: "2026-04-09T10:00:03.000Z",
+    archivedAt: null,
+    deletedAt: null,
+    messages: [
+      {
+        id: MessageId.makeUnsafe("assistant-review"),
+        role: "assistant",
+        text: reviewText,
+        turnId: TurnId.makeUnsafe("turn-review"),
+        streaming: false,
+        createdAt: "2026-04-09T10:00:03.000Z",
+        updatedAt: "2026-04-09T10:00:03.000Z",
+      },
+    ],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+    session: null,
+  },
+];
+
 const makeTicketingService = (
   overrides: Partial<TicketingServiceShape> = {},
 ): TicketingServiceShape => ({
@@ -234,6 +319,7 @@ const makeLayer = (opts: {
   providerService?: Partial<ProviderServiceShape>;
   providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
+  onDispatch?: (command: OrchestrationCommand) => void;
   readModelProjects?: ReadonlyArray<OrchestrationProject>;
   readModelThreads?: ReadonlyArray<OrchestrationThread>;
   serverSettingsOverrides?: DeepPartial<typeof DEFAULT_SERVER_SETTINGS>;
@@ -383,6 +469,7 @@ const makeLayer = (opts: {
         readEvents: () => Stream.empty,
         dispatch: (command: OrchestrationCommand) => {
           dispatchedCommands.push(command);
+          opts.onDispatch?.(command);
           return Effect.succeed({ sequence: dispatchedCommands.length });
         },
         streamDomainEvents: Stream.empty,
@@ -542,7 +629,7 @@ describe("OrchestrationRunRunner", () => {
     expect(dispatchedCommands).toEqual([]);
   });
 
-  it("resumes the in-flight ticket with a continue prompt instead of restarting it", async () => {
+  it("resumes the in-flight ticket with the resolved resume prompt instead of restarting it", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const pausedSingleTicketRun = makeRun({
       ticketOrder: [
@@ -563,6 +650,21 @@ describe("OrchestrationRunRunner", () => {
 
     const layer = makeLayer({
       dispatchedCommands,
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            resume: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Resume custom ${ticketId} in ${projectTitle}",
+                },
+              ],
+            },
+          },
+        },
+      },
       runService: {
         get: () => {
           getCallCount += 1;
@@ -605,7 +707,7 @@ describe("OrchestrationRunRunner", () => {
     );
 
     expect(turnStarts).toHaveLength(1);
-    expect(turnStarts[0]?.message.text).toBe("Continue.");
+    expect(turnStarts[0]?.message.text).toBe("Resume custom T3CO-1 in Runner project");
     expect(parentActivities.map((command) => command.activity.kind)).toContain(
       "orchestration.run.resumed",
     );
@@ -626,10 +728,20 @@ describe("OrchestrationRunRunner", () => {
       ticketOrder: [
         { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
       ],
+      maxReviewIterations: 1,
     });
+    const readModelThreads = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({
+        changesNeeded: false,
+        summary: "Looks good.",
+        comments: [],
+        suggestions: [],
+      }),
+    );
 
     const layer = makeLayer({
       dispatchedCommands,
+      readModelThreads,
       serverSettingsOverrides: {
         prompts: {
           orchestration: {
@@ -638,7 +750,7 @@ describe("OrchestrationRunRunner", () => {
               blocks: [
                 {
                   when: null,
-                  text: "Custom implement ${ticketId} in ${worktree}",
+                  text: "Custom implement ${ticketId} in ${projectTitle}",
                 },
               ],
             },
@@ -706,7 +818,7 @@ describe("OrchestrationRunRunner", () => {
     );
 
     expect(turnStarts.find((command) => command.threadId === workingThread1)?.message.text).toBe(
-      "Custom implement T3CO-1 in default",
+      "Custom implement T3CO-1 in Runner project",
     );
     expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
       "Review custom T3CO-1 :: patch",
@@ -719,10 +831,20 @@ describe("OrchestrationRunRunner", () => {
       ticketOrder: [
         { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
       ],
+      maxReviewIterations: 1,
     });
+    const readModelThreads = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({
+        changesNeeded: false,
+        summary: "Project prompt review passed.",
+        comments: [],
+        suggestions: [],
+      }),
+    );
 
     const layer = makeLayer({
       dispatchedCommands,
+      readModelThreads,
       readModelProjects: [
         {
           id: projectId,
@@ -810,6 +932,293 @@ describe("OrchestrationRunRunner", () => {
     );
     expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
       "Project review T3CO-1 :: patch",
+    );
+  });
+
+  it("renders the reviewFeedback prompt for follow-up implementation turns", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+
+    const workingThreadState: OrchestrationThread = {
+      id: workingThread1,
+      projectId,
+      title: ticket1.title,
+      modelSelection: { provider: "codex", model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      parentThreadId: orchestrationThreadId,
+      isOrchestrationThread: false,
+      ticketId: ticket1Id,
+      latestTurn: {
+        turnId: TurnId.makeUnsafe("turn-work"),
+        state: "completed",
+        requestedAt: "2026-04-09T10:00:00.000Z",
+        startedAt: "2026-04-09T10:00:00.000Z",
+        completedAt: "2026-04-09T10:00:01.000Z",
+        assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+      },
+      createdAt: "2026-04-09T10:00:00.000Z",
+      updatedAt: "2026-04-09T10:00:01.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [
+        {
+          turnId: TurnId.makeUnsafe("turn-work"),
+          checkpointTurnCount: 1,
+          checkpointRef: "checkpoint:work-1" as never,
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+          completedAt: "2026-04-09T10:00:01.000Z",
+        },
+      ],
+      session: null,
+    };
+
+    const reviewThreadState: OrchestrationThread = {
+      id: reviewThread1,
+      projectId,
+      title: `${ticket1.title} Review`,
+      modelSelection: { provider: "codex", model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      parentThreadId: orchestrationThreadId,
+      isOrchestrationThread: false,
+      ticketId: ticket1Id,
+      latestTurn: null,
+      createdAt: "2026-04-09T10:00:00.000Z",
+      updatedAt: "2026-04-09T10:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    };
+    const mutableReviewThreadState = reviewThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      messages: OrchestrationThread["messages"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+
+    let reviewDispatchCount = 0;
+    const setReviewResult = (input: {
+      turnId: string;
+      assistantMessageId: string;
+      text: string;
+      completedAt: string;
+    }) => {
+      mutableReviewThreadState.latestTurn = {
+        turnId: TurnId.makeUnsafe(input.turnId),
+        state: "completed",
+        requestedAt: input.completedAt,
+        startedAt: input.completedAt,
+        completedAt: input.completedAt,
+        assistantMessageId: MessageId.makeUnsafe(input.assistantMessageId),
+      };
+      mutableReviewThreadState.messages = [
+        {
+          id: MessageId.makeUnsafe(input.assistantMessageId),
+          role: "assistant",
+          text: input.text,
+          turnId: TurnId.makeUnsafe(input.turnId),
+          streaming: false,
+          createdAt: input.completedAt,
+          updatedAt: input.completedAt,
+        },
+      ];
+      mutableReviewThreadState.updatedAt = input.completedAt;
+    };
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      onDispatch: (command) => {
+        if (command.type !== "thread.turn.start" || command.threadId !== reviewThread1) {
+          return;
+        }
+        reviewDispatchCount += 1;
+        if (reviewDispatchCount === 1) {
+          setReviewResult({
+            turnId: "turn-review-1",
+            assistantMessageId: "assistant-review-1",
+            completedAt: "2026-04-09T10:00:03.000Z",
+            text: JSON.stringify({
+              changesNeeded: true,
+              summary: "Tighten the auth guard.",
+              comments: [
+                {
+                  file: "src/auth.ts",
+                  line: 7,
+                  severity: "critical",
+                  body: "Handle the missing token case.",
+                },
+              ],
+              suggestions: ["Re-run the edge-case path."],
+            }),
+          });
+          return;
+        }
+
+        setReviewResult({
+          turnId: "turn-review-2",
+          assistantMessageId: "assistant-review-2",
+          completedAt: "2026-04-09T10:00:05.000Z",
+          text: JSON.stringify({
+            changesNeeded: false,
+            summary: "Ready to accept.",
+            comments: [],
+            suggestions: [],
+          }),
+        });
+      },
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            reviewFeedback: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Feedback custom ${ticketId}: ${reviewSummary}",
+                },
+                {
+                  when: { type: "exists", variable: "reviewComments" },
+                  text: "\n${reviewComments}",
+                },
+                {
+                  when: { type: "exists", variable: "reviewSuggestions" },
+                  text: "\n${reviewSuggestions}",
+                },
+              ],
+            },
+          },
+        },
+      },
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+      ]),
+      readModelThreads: [workingThreadState, reviewThreadState],
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const workTurnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === workingThread1,
+    );
+
+    expect(workTurnStarts).toHaveLength(2);
+    expect(workTurnStarts[1]?.message.text).toBe(
+      "Feedback custom T3CO-1: Tighten the auth guard.\n- [critical] src/auth.ts:7 - Handle the missing token case.\n- Re-run the edge-case path.",
+    );
+  });
+
+  it("pauses with a prompt-specific activity when the effective prompt document is invalid", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+    });
+    const pausedRun = makeRun({
+      ...singleTicketRun,
+      status: "paused",
+      currentTicketIndex: 0,
+    });
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            implement: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Broken ${reviewSummary}",
+                },
+              ],
+            },
+          },
+        },
+      },
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        pause: () => Effect.succeed(pausedRun),
+      },
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const workTurnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === workingThread1,
+    );
+
+    expect(workTurnStarts).toHaveLength(0);
+    expect(parentActivities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          activity: expect.objectContaining({
+            kind: "orchestration.run.prompt.render.failed",
+            summary: expect.stringContaining("implement"),
+            payload: expect.objectContaining({
+              ticketId: ticket1Id,
+              ticketIdentifier: ticket1.identifier,
+              promptId: "implement",
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          activity: expect.objectContaining({
+            kind: "orchestration.run.paused",
+            summary: expect.stringContaining("implement"),
+          }),
+        }),
+      ]),
     );
   });
 

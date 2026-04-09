@@ -122,7 +122,6 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       runService: orchestrationRuns,
       orchestrationEngine,
       providerService,
-      providerRegistry,
       checkpointDiffQuery,
       ticketing,
       startup,

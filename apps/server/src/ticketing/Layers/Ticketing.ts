@@ -325,7 +325,7 @@ const makeTicketingService = Effect.gen(function* () {
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(TicketId.makeUnsafe(input.id));
       if (input.projectId && ticket.projectId !== input.projectId) {
-        return yield* Effect.fail(new TicketNotFoundError({ ticketId: input.id }));
+        return yield* new TicketNotFoundError({ ticketId: input.id });
       }
       return yield* buildFullTicket(ticket);
     });
@@ -423,20 +423,16 @@ const makeTicketingService = Effect.gen(function* () {
           onSome: Effect.succeed,
         });
         if (resolvedOriginThread.projectId !== input.projectId) {
-          return yield* Effect.fail<TicketingError>(
-            new TicketingValidationError({
-              field: "originThreadId",
-              message: "Origin thread must belong to the same project as the ticket",
-            }),
-          );
+          return yield* new TicketingValidationError({
+            field: "originThreadId",
+            message: "Origin thread must belong to the same project as the ticket",
+          });
         }
         if (resolvedOriginThread.deletedAt !== null) {
-          return yield* Effect.fail<TicketingError>(
-            new TicketingValidationError({
-              field: "originThreadId",
-              message: "Origin thread has been deleted",
-            }),
-          );
+          return yield* new TicketingValidationError({
+            field: "originThreadId",
+            message: "Origin thread has been deleted",
+          });
         }
       }
       const { ticketNumber, identifier } = yield* repo
@@ -748,13 +744,11 @@ const makeTicketingService = Effect.gen(function* () {
         if (transitive.includes(input.ticketId)) {
           const ticket = yield* resolveTicketOrFail(input.ticketId);
           const depTicket = yield* resolveTicketOrFail(depId);
-          return yield* Effect.fail<TicketingError>(
-            new DependencyCycleError({
-              ticketId: input.ticketId,
-              dependsOnTicketId: depId,
-              cycle: [ticket.identifier as never, depTicket.identifier as never],
-            }),
-          );
+          return yield* new DependencyCycleError({
+            ticketId: input.ticketId,
+            dependsOnTicketId: depId,
+            cycle: [ticket.identifier as never, depTicket.identifier as never],
+          });
         }
       }
       yield* repo
@@ -774,13 +768,11 @@ const makeTicketingService = Effect.gen(function* () {
       if (transitive.includes(input.ticketId)) {
         const ticket = yield* resolveTicketOrFail(input.ticketId);
         const depTicket = yield* resolveTicketOrFail(input.dependsOnTicketId);
-        return yield* Effect.fail<TicketingError>(
-          new DependencyCycleError({
-            ticketId: input.ticketId,
-            dependsOnTicketId: input.dependsOnTicketId,
-            cycle: [ticket.identifier as never, depTicket.identifier as never],
-          }),
-        );
+        return yield* new DependencyCycleError({
+          ticketId: input.ticketId,
+          dependsOnTicketId: input.dependsOnTicketId,
+          cycle: [ticket.identifier as never, depTicket.identifier as never],
+        });
       }
       yield* repo
         .addDependency({
@@ -817,20 +809,16 @@ const makeTicketingService = Effect.gen(function* () {
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(input.ticketId);
       if (!ticket.acceptanceCriteria || ticket.acceptanceCriteria.length === 0) {
-        return yield* Effect.fail<TicketingError>(
-          new TicketingValidationError({
-            field: "acceptanceCriteria",
-            message: "Ticket has no acceptance criteria",
-          }),
-        );
+        return yield* new TicketingValidationError({
+          field: "acceptanceCriteria",
+          message: "Ticket has no acceptance criteria",
+        });
       }
       if (input.index < 0 || input.index >= ticket.acceptanceCriteria.length) {
-        return yield* Effect.fail<TicketingError>(
-          new TicketingValidationError({
-            field: "index",
-            message: `Index ${input.index} out of range (0-${ticket.acceptanceCriteria.length - 1})`,
-          }),
-        );
+        return yield* new TicketingValidationError({
+          field: "index",
+          message: `Index ${input.index} out of range (0-${ticket.acceptanceCriteria.length - 1})`,
+        });
       }
 
       const now = nowIso();
@@ -970,12 +958,10 @@ const makeTicketingService = Effect.gen(function* () {
           onSome: Effect.succeed,
         });
         if (parentComment.parentId !== null) {
-          return yield* Effect.fail<TicketingError>(
-            new TicketingValidationError({
-              field: "parentId",
-              message: "Cannot reply to a reply — only top-level comments can have replies",
-            }),
-          );
+          return yield* new TicketingValidationError({
+            field: "parentId",
+            message: "Cannot reply to a reply — only top-level comments can have replies",
+          });
         }
       }
 
@@ -1075,20 +1061,16 @@ const makeTicketingService = Effect.gen(function* () {
       const ticketId = input.ticketId ?? null;
       const commentId = input.commentId ?? null;
       if (!ticketId && !commentId) {
-        return yield* Effect.fail<TicketingError>(
-          new TicketingValidationError({
-            field: "ticketId/commentId",
-            message: "Either ticketId or commentId must be provided",
-          }),
-        );
+        return yield* new TicketingValidationError({
+          field: "ticketId/commentId",
+          message: "Either ticketId or commentId must be provided",
+        });
       }
       if (ticketId && commentId) {
-        return yield* Effect.fail<TicketingError>(
-          new TicketingValidationError({
-            field: "ticketId/commentId",
-            message: "Only one of ticketId or commentId can be provided",
-          }),
-        );
+        return yield* new TicketingValidationError({
+          field: "ticketId/commentId",
+          message: "Only one of ticketId or commentId can be provided",
+        });
       }
 
       const now = nowIso();

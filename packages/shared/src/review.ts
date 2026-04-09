@@ -145,7 +145,7 @@ export function buildReviewPrompt(
     ticketTitle: input.ticketTitle,
     ticketDescription: input.ticketDescription,
     acceptanceCriteria: input.acceptanceCriteria,
-    worktree: input.ticketWorktree ?? "null",
+    worktree: input.ticketWorktree ?? "",
     commitDiff: input.diffSummaryOrPatch,
     reviewIteration: String(input.iteration),
   });

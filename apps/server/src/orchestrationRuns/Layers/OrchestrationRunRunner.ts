@@ -2,12 +2,14 @@ import type {
   CommandId,
   ModelSelection,
   OrchestrationCommand,
+  OrchestrationPromptId,
   OrchestrationProject,
   OrchestrationRun,
   OrchestrationRunId,
   OrchestrationThread,
   ProviderRuntimeEvent,
   PromptTemplateDocument,
+  PromptTemplateValidationError,
   ReviewOutput,
   Ticket,
   ThreadId,
@@ -18,12 +20,24 @@ import {
   OrchestrationRunError,
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
-import { buildReviewPrompt, parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
+import { parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
 import {
   renderPromptTemplate,
   resolveOrchestrationPromptDocuments,
+  validatePromptTemplateDocument,
 } from "@t3tools/shared/promptTemplates";
-import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Scope,
+  Schema,
+  Stream,
+} from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import {
@@ -36,18 +50,14 @@ import {
 } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import {
-  ProviderRegistry,
-  type ProviderRegistryShape,
-} from "../../provider/Services/ProviderRegistry.ts";
+  ProviderService,
+  type ProviderServiceShape,
+} from "../../provider/Services/ProviderService.ts";
 import {
   ServerRuntimeStartup,
   type ServerRuntimeStartupShape,
 } from "../../serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
-import {
-  ProviderService,
-  type ProviderServiceShape,
-} from "../../provider/Services/ProviderService.ts";
 import {
   TicketingService,
   type TicketingServiceShape,
@@ -67,7 +77,11 @@ const TURN_TIMEOUT = Duration.minutes(30);
 type TurnOutcome =
   | { readonly result: "completed" }
   | { readonly result: "interrupted"; readonly reason: string | null }
-  | { readonly result: "failed"; readonly error: string | null };
+  | {
+      readonly result: "failed";
+      readonly error: string | null;
+      readonly promptId?: OrchestrationPromptId;
+    };
 
 type ProviderTurnWatcherEvent = Extract<
   ProviderRuntimeEvent,
@@ -78,6 +92,14 @@ type ProviderTurnTerminalEvent = Extract<
   ProviderRuntimeEvent,
   { type: "turn.completed" | "turn.aborted" }
 >;
+
+type PromptRenderContext = {
+  readonly ticket: Ticket;
+  readonly project: Pick<OrchestrationProject, "title" | "workspaceRoot">;
+  readonly commitDiff?: string;
+  readonly reviewIteration?: number;
+  readonly review?: ReviewOutput;
+};
 
 // ---------------------------------------------------------------------------
 // Active run state — mutable in-memory tracker so pause/cancel/resume and
@@ -96,6 +118,16 @@ type ActiveRunState = {
 const runnerCommandId = (tag: string): CommandId =>
   `runner:${tag}:${crypto.randomUUID()}` as CommandId;
 
+class PromptRenderFailure extends Error {
+  constructor(
+    readonly promptId: OrchestrationPromptId,
+    readonly detail: string,
+  ) {
+    super(`Failed to render orchestration prompt ${promptId}: ${detail}`);
+    this.name = "PromptRenderFailure";
+  }
+}
+
 const isProviderTurnWatcherEvent = (
   event: ProviderRuntimeEvent,
 ): event is ProviderTurnWatcherEvent =>
@@ -110,29 +142,11 @@ const terminalReasonFromRuntimeEvent = (event: ProviderTurnTerminalEvent): strin
   );
 };
 
-const buildWorkPrompt = (input: {
-  readonly promptDocument: PromptTemplateDocument;
-  readonly ticket: Ticket;
-  readonly project: Pick<OrchestrationProject, "title" | "workspaceRoot">;
-}): string => {
-  return renderPromptTemplate(input.promptDocument, {
-    ticketId: input.ticket.identifier,
-    ticketTitle: input.ticket.title,
-    worktree: input.ticket.worktree ?? "default",
-    projectTitle: input.project.title,
-    projectPath: input.project.workspaceRoot,
-  });
-};
+const formatAcceptanceCriteria = (acceptanceCriteria: Ticket["acceptanceCriteria"]): string =>
+  acceptanceCriteria?.map((criterion) => `- ${criterion.text}`).join("\n") ?? "";
 
-const buildResumePrompt = (promptDocument: PromptTemplateDocument): string =>
-  renderPromptTemplate(promptDocument, {});
-
-const buildReviewFeedbackPrompt = (input: {
-  readonly promptDocument: PromptTemplateDocument;
-  readonly ticketIdentifier: string;
-  readonly review: ReviewOutput;
-}): string => {
-  const reviewComments = input.review.comments
+const formatReviewComments = (review: ReviewOutput): string =>
+  review.comments
     .map((comment) => {
       const location =
         comment.file !== null
@@ -142,16 +156,53 @@ const buildReviewFeedbackPrompt = (input: {
     })
     .join("\n");
 
-  const reviewSuggestions = input.review.suggestions
-    .map((suggestion) => `- ${suggestion}`)
-    .join("\n");
+const formatReviewSuggestions = (review: ReviewOutput): string =>
+  review.suggestions.map((suggestion) => `- ${suggestion}`).join("\n");
 
-  return renderPromptTemplate(input.promptDocument, {
-    ticketId: input.ticketIdentifier,
-    reviewSummary: input.review.summary,
-    reviewComments,
-    reviewSuggestions,
+const buildPromptVariableMap = (input: PromptRenderContext) => ({
+  ticketId: input.ticket.identifier,
+  ticketTitle: input.ticket.title,
+  ticketDescription: input.ticket.description ?? "",
+  acceptanceCriteria: formatAcceptanceCriteria(input.ticket.acceptanceCriteria),
+  worktree: input.ticket.worktree ?? "",
+  projectTitle: input.project.title,
+  projectPath: input.project.workspaceRoot,
+  commitDiff: input.commitDiff ?? "",
+  reviewIteration: typeof input.reviewIteration === "number" ? String(input.reviewIteration) : "",
+  reviewSummary: input.review?.summary ?? "",
+  reviewComments: input.review ? formatReviewComments(input.review) : "",
+  reviewSuggestions: input.review ? formatReviewSuggestions(input.review) : "",
+});
+
+const describePromptValidationErrors = (
+  errors: ReadonlyArray<PromptTemplateValidationError>,
+): string =>
+  errors
+    .map((error) => {
+      const location = error.blockIndex !== null ? `block ${error.blockIndex}: ` : "";
+      return `${location}${error.message}`;
+    })
+    .join("; ");
+
+const renderValidatedPromptDocument = (input: {
+  readonly promptId: OrchestrationPromptId;
+  readonly promptDocument: PromptTemplateDocument;
+  readonly context: PromptRenderContext;
+}): Effect.Effect<string, PromptRenderFailure> => {
+  const validation = validatePromptTemplateDocument({
+    promptId: input.promptId,
+    document: input.promptDocument,
   });
+
+  if (!validation.ok) {
+    return Effect.fail(
+      new PromptRenderFailure(input.promptId, describePromptValidationErrors(validation.errors)),
+    );
+  }
+
+  return Effect.succeed(
+    renderPromptTemplate(validation.document, buildPromptVariableMap(input.context)),
+  );
 };
 
 const buildOrchestrationTitle = (tickets: ReadonlyArray<Ticket>): string => {
@@ -164,7 +215,6 @@ interface OrchestrationRunRunnerDeps {
   readonly runService: OrchestrationRunServiceShape;
   readonly orchestrationEngine: OrchestrationEngineShape;
   readonly providerService: ProviderServiceShape;
-  readonly providerRegistry: ProviderRegistryShape;
   readonly checkpointDiffQuery: CheckpointDiffQueryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
@@ -177,7 +227,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       runService,
       orchestrationEngine,
       providerService,
-      providerRegistry,
       checkpointDiffQuery,
       ticketing,
       startup,
@@ -553,6 +602,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       return dispatchCommand(command, `Failed to dispatch turn for thread ${input.threadId}`);
     };
 
+    const wrapDispatchError = (message: string, cause: unknown) =>
+      cause instanceof PromptRenderFailure
+        ? cause
+        : new OrchestrationRunError({
+            message,
+            cause,
+          });
+
     type DispatchWorkTurnMode = "start" | "resume" | "feedback";
 
     /**
@@ -567,31 +624,64 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
     }) => {
       return getResolvedProjectPromptContext(input.projectId).pipe(
         Effect.flatMap(({ project, prompts }) => {
-          const text =
-            input.mode === "resume"
-              ? buildResumePrompt(prompts.resume)
-              : input.mode === "feedback" && input.reviewFeedback
-                ? buildReviewFeedbackPrompt({
-                    promptDocument: prompts.reviewFeedback,
-                    ticketIdentifier: input.ticket.identifier,
-                    review: input.reviewFeedback,
-                  })
-                : buildWorkPrompt({
-                    promptDocument: prompts.implement,
-                    ticket: input.ticket,
-                    project,
-                  });
-          return dispatchThreadTurn({
-            threadId: input.workingThreadId,
-            text,
-          });
+          if (input.mode === "resume") {
+            return renderValidatedPromptDocument({
+              promptId: "resume",
+              promptDocument: prompts.resume,
+              context: {
+                ticket: input.ticket,
+                project,
+              },
+            }).pipe(
+              Effect.flatMap((text) =>
+                dispatchThreadTurn({
+                  threadId: input.workingThreadId,
+                  text,
+                }),
+              ),
+            );
+          }
+
+          if (input.mode === "feedback" && input.reviewFeedback) {
+            return renderValidatedPromptDocument({
+              promptId: "reviewFeedback",
+              promptDocument: prompts.reviewFeedback,
+              context: {
+                ticket: input.ticket,
+                project,
+                review: input.reviewFeedback,
+              },
+            }).pipe(
+              Effect.flatMap((text) =>
+                dispatchThreadTurn({
+                  threadId: input.workingThreadId,
+                  text,
+                }),
+              ),
+            );
+          }
+
+          return renderValidatedPromptDocument({
+            promptId: "implement",
+            promptDocument: prompts.implement,
+            context: {
+              ticket: input.ticket,
+              project,
+            },
+          }).pipe(
+            Effect.flatMap((text) =>
+              dispatchThreadTurn({
+                threadId: input.workingThreadId,
+                text,
+              }),
+            ),
+          );
         }),
-        Effect.mapError(
-          (cause) =>
-            new OrchestrationRunError({
-              message: `Failed to dispatch work turn for ticket ${input.ticket.identifier}`,
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          wrapDispatchError(
+            `Failed to dispatch work turn for ticket ${input.ticket.identifier}`,
+            cause,
+          ),
         ),
       );
     };
@@ -610,17 +700,16 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           threadId: input.workingThreadId,
           toTurnCount: turnCount,
         });
-        const { prompts } = yield* getResolvedProjectPromptContext(input.projectId);
-        const prompt = buildReviewPrompt(prompts.review, {
-          ticketIdentifier: input.ticket.identifier,
-          ticketTitle: input.ticket.title,
-          ticketDescription: input.ticket.description ?? "No description provided.",
-          acceptanceCriteria:
-            input.ticket.acceptanceCriteria?.map((criterion) => criterion.text).join("\n") ??
-            "No acceptance criteria provided.",
-          diffSummaryOrPatch: fullDiff.diff,
-          iteration: input.reviewIteration + 1,
-          ticketWorktree: input.ticket.worktree,
+        const { project, prompts } = yield* getResolvedProjectPromptContext(input.projectId);
+        const prompt = yield* renderValidatedPromptDocument({
+          promptId: "review",
+          promptDocument: prompts.review,
+          context: {
+            ticket: input.ticket,
+            project,
+            commitDiff: fullDiff.diff,
+            reviewIteration: input.reviewIteration + 1,
+          },
         });
 
         yield* dispatchThreadTurn({
@@ -629,12 +718,11 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           modelSelection: input.modelSelection,
         });
       }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestrationRunError({
-              message: `Failed to dispatch review turn for ticket ${input.ticket.identifier}`,
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          wrapDispatchError(
+            `Failed to dispatch review turn for ticket ${input.ticket.identifier}`,
+            cause,
+          ),
         ),
       );
 
@@ -657,6 +745,33 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           tone: "error",
         }).pipe(Effect.catch(() => Effect.void));
       });
+
+    const pauseRunForPromptRenderFailure = (input: {
+      readonly runId: OrchestrationRunId;
+      readonly orchestrationThreadId: ThreadId;
+      readonly ticketId: Ticket["id"];
+      readonly ticketIdentifier: Ticket["identifier"];
+      readonly promptId: OrchestrationPromptId;
+      readonly error: string;
+    }) => {
+      const reason = `Failed to render orchestration prompt ${input.promptId} for ticket ${input.ticketIdentifier}: ${input.error}`;
+      return Effect.gen(function* () {
+        yield* postActivity({
+          threadId: input.orchestrationThreadId,
+          kind: "orchestration.run.prompt.render.failed",
+          summary: reason,
+          tone: "error",
+          payload: {
+            ticketId: input.ticketId,
+            ticketIdentifier: input.ticketIdentifier,
+            promptId: input.promptId,
+            error: input.error,
+          },
+        }).pipe(Effect.catch(() => Effect.void));
+
+        yield* pauseRunWithReason(input.runId, input.orchestrationThreadId, reason);
+      });
+    };
 
     const resolveNextActionableTicketIndex = (run: OrchestrationRun) =>
       Effect.gen(function* () {
@@ -747,7 +862,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
     const runChildTurn = (input: {
       readonly threadId: ThreadId;
-      readonly dispatch: Effect.Effect<unknown, OrchestrationRunError>;
+      readonly dispatch: Effect.Effect<unknown, OrchestrationRunError | PromptRenderFailure>;
       readonly runId: OrchestrationRunId;
       readonly ticketId: Ticket["id"];
       readonly ticketIdentifier: Ticket["identifier"];
@@ -765,7 +880,23 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               Effect.forkScoped,
             );
 
-            yield* input.dispatch;
+            const dispatchExit = yield* Effect.exit(input.dispatch);
+            if (dispatchExit._tag === "Failure") {
+              yield* Fiber.interrupt(completionFiber);
+              const dispatchFailure = Option.getOrNull(Cause.findErrorOption(dispatchExit.cause));
+              return {
+                result: "failed" as const,
+                error:
+                  dispatchFailure instanceof PromptRenderFailure
+                    ? dispatchFailure.detail
+                    : Schema.is(OrchestrationRunError)(dispatchFailure)
+                      ? dispatchFailure.message
+                      : "Failed to dispatch orchestration turn",
+                ...(dispatchFailure instanceof PromptRenderFailure
+                  ? { promptId: dispatchFailure.promptId }
+                  : {}),
+              };
+            }
 
             yield* Effect.logInfo(
               formatTimelineLog(SCOPE, "runner.ticket.turn-dispatched", {
@@ -804,7 +935,12 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             threadId: input.threadId,
             phase: input.phase,
             outcome: outcome.result,
-            ...(outcome.result === "failed" ? { error: outcome.error } : {}),
+            ...(outcome.result === "failed"
+              ? {
+                  error: outcome.error,
+                  promptId: outcome.promptId ?? null,
+                }
+              : {}),
           }),
         );
 
@@ -1020,6 +1156,17 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   yield* ticketing
                     .update({ id: entry.ticketId, status: "blocked" })
                     .pipe(Effect.catch(() => Effect.void));
+                  if (workOutcome.promptId) {
+                    yield* pauseRunForPromptRenderFailure({
+                      runId,
+                      orchestrationThreadId,
+                      ticketId: entry.ticketId,
+                      ticketIdentifier: ticket.identifier,
+                      promptId: workOutcome.promptId,
+                      error: workOutcome.error ?? "unknown prompt render error",
+                    });
+                    return "blocked" as const;
+                  }
                   yield* pauseRunWithReason(
                     runId,
                     orchestrationThreadId,
@@ -1142,19 +1289,29 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 threadId: reviewThreadId,
                 dispatch: resumeReviewTurn
                   ? getResolvedProjectPromptContext(run.projectId).pipe(
-                      Effect.flatMap(({ prompts }) =>
-                        dispatchThreadTurn({
-                          threadId: reviewThreadId,
-                          text: buildResumePrompt(prompts.resume),
-                          modelSelection: reviewModelSelection,
-                        }),
+                      Effect.flatMap(({ project, prompts }) =>
+                        renderValidatedPromptDocument({
+                          promptId: "resume",
+                          promptDocument: prompts.resume,
+                          context: {
+                            ticket,
+                            project,
+                          },
+                        }).pipe(
+                          Effect.flatMap((text) =>
+                            dispatchThreadTurn({
+                              threadId: reviewThreadId,
+                              text,
+                              modelSelection: reviewModelSelection,
+                            }),
+                          ),
+                        ),
                       ),
-                      Effect.mapError(
-                        (cause) =>
-                          new OrchestrationRunError({
-                            message: `Failed to resume review turn for ticket ${ticket.identifier}`,
-                            cause,
-                          }),
+                      Effect.mapError((cause) =>
+                        wrapDispatchError(
+                          `Failed to resume review turn for ticket ${ticket.identifier}`,
+                          cause,
+                        ),
                       ),
                     )
                   : dispatchReviewTurn({
@@ -1179,6 +1336,17 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 yield* ticketing
                   .update({ id: entry.ticketId, status: "blocked" })
                   .pipe(Effect.catch(() => Effect.void));
+                if (reviewOutcome.promptId) {
+                  yield* pauseRunForPromptRenderFailure({
+                    runId,
+                    orchestrationThreadId,
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                    promptId: reviewOutcome.promptId,
+                    error: reviewOutcome.error ?? "unknown prompt render error",
+                  });
+                  return "blocked" as const;
+                }
                 yield* pauseRunWithReason(
                   runId,
                   orchestrationThreadId,
@@ -1685,10 +1853,6 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
   const runService = yield* OrchestrationRunService;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
-  const providerRegistry = yield* ProviderRegistry;
-  // ProviderRateLimitsCache is still required by the layer signature but no
-  // longer consumed inside the runner — keep the yield* so the Effect
-  // dependency graph stays satisfied for existing wiring.
   yield* ProviderRateLimitsCache;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const ticketing = yield* TicketingService;
@@ -1699,7 +1863,6 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
     runService,
     orchestrationEngine,
     providerService,
-    providerRegistry,
     checkpointDiffQuery,
     ticketing,
     startup,

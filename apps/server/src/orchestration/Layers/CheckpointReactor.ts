@@ -652,7 +652,7 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       thread,
       projects: readModel.projects,
-    }).pipe(Effect.catch(() => Effect.succeed([sessionRuntime.value.cwd])));
+    });
 
     const cwdsToRevert = revertCwds.length > 0 ? revertCwds : [sessionRuntime.value.cwd];
 
