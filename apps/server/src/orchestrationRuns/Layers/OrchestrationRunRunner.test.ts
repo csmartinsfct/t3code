@@ -1,6 +1,7 @@
 import {
   EventId,
   MessageId,
+  DEFAULT_SERVER_SETTINGS,
   type OrchestrationCommand,
   OrchestrationRunId,
   ProjectId,
@@ -25,6 +26,7 @@ import {
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   TicketingService,
   type TicketingServiceShape,
@@ -231,6 +233,7 @@ const makeLayer = (opts: {
   providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
   readModelThreads?: ReadonlyArray<OrchestrationThread>;
+  serverSettingsOverrides?: Partial<typeof DEFAULT_SERVER_SETTINGS>;
 }) => {
   const dispatchedCommands = opts.dispatchedCommands ?? [];
   const readModelThreads =
@@ -348,6 +351,7 @@ const makeLayer = (opts: {
         enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) => effect,
       }),
     ),
+    Layer.provide(ServerSettingsService.layerTest(opts.serverSettingsOverrides ?? {})),
     Layer.provide(
       Layer.succeed(OrchestrationEngineService, {
         getReadModel: () =>
@@ -594,6 +598,99 @@ describe("OrchestrationRunRunner", () => {
     );
     expect(parentActivities.map((command) => command.activity.kind)).toContain(
       "orchestration.run.completed",
+    );
+  });
+
+  it("uses customized global orchestration prompt templates from server settings", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+    });
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            implement: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Custom implement ${ticketId} in ${worktree}",
+                },
+              ],
+            },
+            resume: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Resume custom ${ticketId}",
+                },
+              ],
+            },
+            review: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Review custom ${ticketId} :: ${commitDiff}",
+                },
+              ],
+            },
+            reviewFeedback: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Feedback custom ${ticketId}: ${reviewSummary}",
+                },
+              ],
+            },
+          },
+        },
+      },
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...singleTicketRun,
+              currentTicketIndex: 0,
+              currentPhase: "reviewing",
+            }),
+          ),
+        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+
+    expect(turnStarts.find((command) => command.threadId === workingThread1)?.message.text).toBe(
+      "Custom implement T3CO-1 in default",
+    );
+    expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
+      "Review custom T3CO-1 :: patch",
     );
   });
 

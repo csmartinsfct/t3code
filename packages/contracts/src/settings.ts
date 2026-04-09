@@ -8,6 +8,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
 import { ModelSelection } from "./orchestration";
+import { ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS, PromptDocumentV1 } from "./promptTemplates";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -94,6 +95,27 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const OrchestrationPromptSettings = Schema.Struct({
+  implement: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.implement),
+  ),
+  resume: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.resume),
+  ),
+  review: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.review),
+  ),
+  reviewFeedback: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.reviewFeedback),
+  ),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type OrchestrationPromptSettings = typeof OrchestrationPromptSettings.Type;
+
+export const ServerPromptSettings = Schema.Struct({
+  orchestration: OrchestrationPromptSettings,
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type ServerPromptSettings = typeof ServerPromptSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   maxReviewIterations: NonNegativeInt.pipe(
@@ -137,6 +159,12 @@ export const ServerSettings = Schema.Struct({
     claudeProfiles: Schema.Array(ClaudeProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  prompts: ServerPromptSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  promptDefaults: ServerPromptSettings.pipe(
+    Schema.withDecodingDefault(() => ({
+      orchestration: ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
+    })),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -204,6 +232,8 @@ const ClaudeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const PromptDocumentPatch = Schema.NullOr(PromptDocumentV1);
+
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   maxReviewIterations: Schema.optionalKey(NonNegativeInt),
@@ -224,6 +254,18 @@ export const ServerSettingsPatch = Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       claudeProfiles: Schema.optionalKey(Schema.Array(ClaudeProfileSettings)),
+    }),
+  ),
+  prompts: Schema.optionalKey(
+    Schema.Struct({
+      orchestration: Schema.optionalKey(
+        Schema.Struct({
+          implement: Schema.optionalKey(PromptDocumentPatch),
+          resume: Schema.optionalKey(PromptDocumentPatch),
+          review: Schema.optionalKey(PromptDocumentPatch),
+          reviewFeedback: Schema.optionalKey(PromptDocumentPatch),
+        }),
+      ),
     }),
   ),
 });

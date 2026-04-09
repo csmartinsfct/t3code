@@ -193,7 +193,16 @@ Rules:
 - aliases are normalized to canonical keys during validation/save
 - validation returns structured errors with block context so the UI can identify the failing block
 
-The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts` and currently covers shared ticket/project variables plus review-only and review-feedback-only variables. The review flow is modeled as one logical prompt id (`review`) even though the runtime still keeps a fixed review system prompt alongside the rendered user prompt text.
+The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts` and currently covers shared ticket/project variables plus review-only and review-feedback-only variables. The review flow is modeled as one logical prompt id (`review`), and the shipped default now represents the full review instructions as a single configurable prompt document.
+
+Global prompt storage is now server-authoritative through `settings.json`:
+
+- `settings.prompts.orchestration.<promptId>` stores the current effective global prompt document for `implement`, `resume`, `review`, and `reviewFeedback`
+- `settings.promptDefaults.orchestration.<promptId>` exposes the immutable shipped default document for the same ids
+- persisted settings stay sparse by stripping prompt ids that match the shipped default exactly
+- `server.updateSettings` accepts `null` for a prompt id in `settings.prompts.orchestration` to reset that prompt back to its shipped default
+
+The `review` shipped default is one logical prompt document that includes both the fixed review instructions and the ticket-specific review body, so downstream consumers can fully customize or reset review behavior using one prompt id.
 
 ### History Recording
 

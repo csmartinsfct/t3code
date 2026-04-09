@@ -5,9 +5,9 @@ import {
   buildReviewPrompt,
   parseReviewOutputJsonCandidates,
   parseReviewOutputJson,
-  REVIEW_SYSTEM_PROMPT,
   selectReviewModel,
 } from "./review";
+import { ORCHESTRATION_PROMPT_DEFAULTS } from "./promptTemplates";
 
 function makeProvider(
   input: Omit<Partial<ServerProvider>, "provider"> & { provider: ProviderKind },
@@ -44,7 +44,7 @@ function makeRateLimit(provider: ProviderKind, utilization: number): ProviderRat
 describe("buildReviewPrompt", () => {
   it("returns the exact deterministic review prompt template", () => {
     expect(
-      buildReviewPrompt({
+      buildReviewPrompt(ORCHESTRATION_PROMPT_DEFAULTS.review, {
         ticketIdentifier: "T3CO-22",
         ticketTitle: "Review protocol schema and prompt template",
         ticketDescription: "Define the review contracts.",
@@ -53,9 +53,10 @@ describe("buildReviewPrompt", () => {
         iteration: 2,
         ticketWorktree: "t3code_orchestration",
       }),
-    ).toEqual({
-      systemPrompt: REVIEW_SYSTEM_PROMPT,
-      userPrompt: `Review the completed work for ticket T3CO-22: Review protocol schema and prompt template.
+    )
+      .toEqual(`You are reviewing completed work for a ticket in an automated orchestration workflow. Evaluate the implementation against the ticket requirements and the provided diff. Return valid JSON only. Do not include markdown fences, commentary, or any text outside the JSON object.
+
+Review the completed work for ticket T3CO-22: Review protocol schema and prompt template.
 
 Ticket description:
 Define the review contracts.
@@ -87,13 +88,12 @@ Return a JSON object matching this shape exactly:
   "suggestions": string[]
 }
 
-If the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.`,
-    });
+If the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.`);
   });
 
   it("renders a null worktree literally when no ticket worktree is provided", () => {
     expect(
-      buildReviewPrompt({
+      buildReviewPrompt(ORCHESTRATION_PROMPT_DEFAULTS.review, {
         ticketIdentifier: "T3CO-22",
         ticketTitle: "Review protocol schema and prompt template",
         ticketDescription: "desc",
@@ -101,7 +101,7 @@ If the ticket worktree is not null, treat it as part of the task context while r
         diffSummaryOrPatch: "diff",
         iteration: 1,
         ticketWorktree: null,
-      }).userPrompt,
+      }),
     ).toContain("Worktree:\nnull");
   });
 });

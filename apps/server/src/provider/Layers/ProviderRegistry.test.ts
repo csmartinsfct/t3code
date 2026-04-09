@@ -110,7 +110,9 @@ function makeMutableServerSettingsService(
       updateSettings: (patch) =>
         Effect.gen(function* () {
           const current = yield* Ref.get(settingsRef);
-          const next = Schema.decodeSync(ServerSettings)(deepMerge(current, patch));
+          const next = Schema.decodeSync(ServerSettings)(
+            deepMerge(current, patch as unknown as Partial<ContractServerSettings>),
+          );
           yield* Ref.set(settingsRef, next);
           yield* PubSub.publish(changes, next);
           return next;

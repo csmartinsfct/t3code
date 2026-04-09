@@ -250,4 +250,128 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
+
+  it.effect(
+    "resolves full effective orchestration prompts while keeping shipped defaults immutable",
+    () =>
+      Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsService;
+
+        const next = yield* serverSettings.updateSettings({
+          prompts: {
+            orchestration: {
+              implement: {
+                version: 1,
+                blocks: [
+                  {
+                    when: null,
+                    text: "Custom implement ${ticketId}",
+                  },
+                ],
+              },
+            },
+          },
+        });
+
+        assert.deepEqual(next.prompts.orchestration.implement, {
+          version: 1,
+          blocks: [
+            {
+              when: null,
+              text: "Custom implement ${ticketId}",
+            },
+          ],
+        });
+        assert.deepEqual(
+          next.prompts.orchestration.resume,
+          DEFAULT_SERVER_SETTINGS.prompts.orchestration.resume,
+        );
+        assert.deepEqual(
+          next.promptDefaults.orchestration,
+          DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration,
+        );
+      }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect(
+    "resets orchestration prompts back to shipped defaults when a prompt id is set to null",
+    () =>
+      Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsService;
+
+        yield* serverSettings.updateSettings({
+          prompts: {
+            orchestration: {
+              reviewFeedback: {
+                version: 1,
+                blocks: [
+                  {
+                    when: null,
+                    text: "Custom feedback ${ticketId}",
+                  },
+                ],
+              },
+            },
+          },
+        });
+
+        const next = yield* serverSettings.updateSettings({
+          prompts: {
+            orchestration: {
+              reviewFeedback: null,
+            },
+          },
+        });
+
+        assert.deepEqual(
+          next.prompts.orchestration.reviewFeedback,
+          DEFAULT_SERVER_SETTINGS.prompts.orchestration.reviewFeedback,
+        );
+        assert.deepEqual(
+          next.promptDefaults.orchestration.reviewFeedback,
+          DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration.reviewFeedback,
+        );
+      }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("persists prompt documents atomically instead of writing partial prompt objects", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        prompts: {
+          orchestration: {
+            review: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Custom review ${ticketId}",
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.deepEqual(JSON.parse(raw), {
+        prompts: {
+          orchestration: {
+            review: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Custom review ${ticketId}",
+                },
+              ],
+            },
+          },
+        },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
 });

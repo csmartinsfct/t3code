@@ -6,6 +6,7 @@ import type {
   OrchestrationRunId,
   OrchestrationThread,
   ProviderRuntimeEvent,
+  PromptTemplateDocument,
   ReviewOutput,
   Ticket,
   ThreadId,
@@ -17,10 +18,7 @@ import {
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
 import { buildReviewPrompt, parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
-import {
-  ORCHESTRATION_PROMPT_DEFAULTS,
-  renderPromptTemplate,
-} from "@t3tools/shared/promptTemplates";
+import { renderPromptTemplate } from "@t3tools/shared/promptTemplates";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
@@ -41,6 +39,7 @@ import {
   ServerRuntimeStartup,
   type ServerRuntimeStartupShape,
 } from "../../serverRuntimeStartup.ts";
+import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -107,18 +106,19 @@ const terminalReasonFromRuntimeEvent = (event: ProviderTurnTerminalEvent): strin
   );
 };
 
-const buildWorkPrompt = (ticket: Ticket): string => {
-  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.implement, {
+const buildWorkPrompt = (promptDocument: PromptTemplateDocument, ticket: Ticket): string => {
+  return renderPromptTemplate(promptDocument, {
     ticketId: ticket.identifier,
     ticketTitle: ticket.title,
     worktree: ticket.worktree ?? "default",
   });
 };
 
-const buildResumePrompt = (): string =>
-  renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.resume, {});
+const buildResumePrompt = (promptDocument: PromptTemplateDocument): string =>
+  renderPromptTemplate(promptDocument, {});
 
 const buildReviewFeedbackPrompt = (input: {
+  readonly promptDocument: PromptTemplateDocument;
   readonly ticketIdentifier: string;
   readonly review: ReviewOutput;
 }): string => {
@@ -136,7 +136,7 @@ const buildReviewFeedbackPrompt = (input: {
     .map((suggestion) => `- ${suggestion}`)
     .join("\n");
 
-  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.reviewFeedback, {
+  return renderPromptTemplate(input.promptDocument, {
     ticketId: input.ticketIdentifier,
     reviewSummary: input.review.summary,
     reviewComments,
@@ -158,6 +158,7 @@ interface OrchestrationRunRunnerDeps {
   readonly checkpointDiffQuery: CheckpointDiffQueryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
+  readonly serverSettings: ServerSettingsShape;
 }
 
 export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerDeps) =>
@@ -170,7 +171,12 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       checkpointDiffQuery,
       ticketing,
       startup,
+      serverSettings,
     } = deps;
+
+    const getOrchestrationPrompts = serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.prompts.orchestration),
+    );
 
     // Background orchestration work must outlive the individual RPC request
     // that triggered it, so keep these fibers in their own detached scope
@@ -520,19 +526,23 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly mode: DispatchWorkTurnMode;
       readonly reviewFeedback?: ReviewOutput;
     }) => {
-      const text =
-        input.mode === "resume"
-          ? buildResumePrompt()
-          : input.mode === "feedback" && input.reviewFeedback
-            ? buildReviewFeedbackPrompt({
-                ticketIdentifier: input.ticket.identifier,
-                review: input.reviewFeedback,
-              })
-            : buildWorkPrompt(input.ticket);
-      return dispatchThreadTurn({
-        threadId: input.workingThreadId,
-        text,
-      }).pipe(
+      return getOrchestrationPrompts.pipe(
+        Effect.flatMap((prompts) => {
+          const text =
+            input.mode === "resume"
+              ? buildResumePrompt(prompts.resume)
+              : input.mode === "feedback" && input.reviewFeedback
+                ? buildReviewFeedbackPrompt({
+                    promptDocument: prompts.reviewFeedback,
+                    ticketIdentifier: input.ticket.identifier,
+                    review: input.reviewFeedback,
+                  })
+                : buildWorkPrompt(prompts.implement, input.ticket);
+          return dispatchThreadTurn({
+            threadId: input.workingThreadId,
+            text,
+          });
+        }),
         Effect.mapError(
           (cause) =>
             new OrchestrationRunError({
@@ -556,7 +566,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           threadId: input.workingThreadId,
           toTurnCount: turnCount,
         });
-        const prompt = buildReviewPrompt({
+        const prompts = yield* getOrchestrationPrompts;
+        const prompt = buildReviewPrompt(prompts.review, {
           ticketIdentifier: input.ticket.identifier,
           ticketTitle: input.ticket.title,
           ticketDescription: input.ticket.description ?? "No description provided.",
@@ -570,7 +581,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
         yield* dispatchThreadTurn({
           threadId: input.reviewThreadId,
-          text: `${prompt.systemPrompt}\n\n${prompt.userPrompt}`,
+          text: prompt,
           modelSelection: input.modelSelection,
         });
       }).pipe(
@@ -1085,11 +1096,22 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               const reviewOutcome = yield* runChildTurn({
                 threadId: reviewThreadId,
                 dispatch: resumeReviewTurn
-                  ? dispatchThreadTurn({
-                      threadId: reviewThreadId,
-                      text: buildResumePrompt(),
-                      modelSelection: reviewModelSelection,
-                    })
+                  ? getOrchestrationPrompts.pipe(
+                      Effect.flatMap((prompts) =>
+                        dispatchThreadTurn({
+                          threadId: reviewThreadId,
+                          text: buildResumePrompt(prompts.resume),
+                          modelSelection: reviewModelSelection,
+                        }),
+                      ),
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationRunError({
+                            message: `Failed to resume review turn for ticket ${ticket.identifier}`,
+                            cause,
+                          }),
+                      ),
+                    )
                   : dispatchReviewTurn({
                       reviewThreadId,
                       ticket,
@@ -1625,6 +1647,7 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
+  const serverSettings = yield* ServerSettingsService;
 
   return yield* makeOrchestrationRunRunnerFromDeps({
     runService,
@@ -1634,6 +1657,7 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
     checkpointDiffQuery,
     ticketing,
     startup,
+    serverSettings,
   });
 });
 

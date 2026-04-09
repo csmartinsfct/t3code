@@ -52,6 +52,8 @@ export const PromptTemplateDocument = Schema.Struct({
   blocks: Schema.Array(PromptTemplateBlock),
 });
 export type PromptTemplateDocument = typeof PromptTemplateDocument.Type;
+export const PromptDocumentV1 = PromptTemplateDocument;
+export type PromptDocumentV1 = typeof PromptDocumentV1.Type;
 
 export const PromptTemplateVariableDefinition = Schema.Struct({
   key: CanonicalPromptVariableKey,
@@ -88,3 +90,62 @@ export const PromptTemplateValidationError = Schema.Struct({
   token: Schema.NullOr(Schema.String),
 });
 export type PromptTemplateValidationError = typeof PromptTemplateValidationError.Type;
+
+export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
+  implement: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "Work on ticket ${ticketTitle} - ${ticketId}. Worktree: ${worktree}. Pull the ticket details and any other context you need yourself. If you get blocked, update the ticket status to blocked and stop. Try to complete the acceptance criteria mentioned in the ticket, if defined. Otherwise try to comply with the specifications in the ticket.",
+      },
+    ],
+  },
+  resume: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "Continue.",
+      },
+    ],
+  },
+  review: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "You are reviewing completed work for a ticket in an automated orchestration workflow. Evaluate the implementation against the ticket requirements and the provided diff. Return valid JSON only. Do not include markdown fences, commentary, or any text outside the JSON object.\n\nReview the completed work for ticket ${ticketId}: ${ticketTitle}.\n\nTicket description:\n${ticketDescription}",
+      },
+      {
+        when: null,
+        text: "\n\nAcceptance criteria:\n${acceptanceCriteria}",
+      },
+      {
+        when: null,
+        text: '\n\nWorktree:\n${worktree}\n\nDiff:\n${commitDiff}\n\nReview iteration: ${reviewIteration}\n\nReturn a JSON object matching this shape exactly:\n{\n  "changesNeeded": boolean,\n  "summary": string,\n  "comments": [\n    {\n      "file": string | null,\n      "line": number | null,\n      "severity": "critical" | "suggestion" | "nit",\n      "body": string\n    }\n  ],\n  "suggestions": string[]\n}\n\nIf the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.',
+      },
+    ],
+  },
+  reviewFeedback: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "Address the automated review feedback for ticket ${ticketId}.\n\nReview summary: ${reviewSummary}",
+      },
+      {
+        when: { type: "exists", variable: "reviewComments" },
+        text: "\n\nReview comments:\n${reviewComments}",
+      },
+      {
+        when: { type: "exists", variable: "reviewSuggestions" },
+        text: "\n\nRequested follow-up:\n${reviewSuggestions}",
+      },
+      {
+        when: null,
+        text: "\n\nApply the needed fixes, then continue until the ticket is ready for review again.",
+      },
+    ],
+  },
+} as const satisfies Record<OrchestrationPromptId, PromptDocumentV1>;

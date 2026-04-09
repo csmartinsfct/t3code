@@ -4,12 +4,13 @@ import {
   modelSelectionProviderKind,
   providerProfileId,
   type ModelSelection,
+  type PromptTemplateDocument,
   type ProviderKind,
   type ProviderRateLimitsSnapshot,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { ORCHESTRATION_PROMPT_DEFAULTS, renderPromptTemplate } from "./promptTemplates";
+import { renderPromptTemplate } from "./promptTemplates";
 
 export interface ReviewPromptTemplateInput {
   readonly ticketIdentifier: string;
@@ -20,9 +21,6 @@ export interface ReviewPromptTemplateInput {
   readonly iteration: number;
   readonly ticketWorktree: string | null;
 }
-
-export const REVIEW_SYSTEM_PROMPT =
-  "You are reviewing completed work for a ticket in an automated orchestration workflow. Evaluate the implementation against the ticket requirements and the provided diff. Return valid JSON only. Do not include markdown fences, commentary, or any text outside the JSON object.";
 
 function tryParseJson(text: string): { readonly ok: true; readonly value: unknown } | null {
   try {
@@ -138,8 +136,11 @@ export function parseReviewOutputJson(text: string): unknown {
   return parseReviewOutputJsonCandidates(text)[0];
 }
 
-export function buildReviewUserPrompt(input: ReviewPromptTemplateInput): string {
-  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.review, {
+export function buildReviewPrompt(
+  document: PromptTemplateDocument,
+  input: ReviewPromptTemplateInput,
+): string {
+  return renderPromptTemplate(document, {
     ticketId: input.ticketIdentifier,
     ticketTitle: input.ticketTitle,
     ticketDescription: input.ticketDescription,
@@ -148,16 +149,6 @@ export function buildReviewUserPrompt(input: ReviewPromptTemplateInput): string 
     commitDiff: input.diffSummaryOrPatch,
     reviewIteration: String(input.iteration),
   });
-}
-
-export function buildReviewPrompt(input: ReviewPromptTemplateInput): {
-  readonly systemPrompt: string;
-  readonly userPrompt: string;
-} {
-  return {
-    systemPrompt: REVIEW_SYSTEM_PROMPT,
-    userPrompt: buildReviewUserPrompt(input),
-  };
 }
 
 export interface SelectReviewModelInput {

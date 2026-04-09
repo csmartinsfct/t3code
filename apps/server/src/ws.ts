@@ -126,6 +126,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       checkpointDiffQuery,
       ticketing,
       startup,
+      serverSettings,
     });
 
     const loadServerConfig = Effect.gen(function* () {

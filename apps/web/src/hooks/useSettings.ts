@@ -41,6 +41,31 @@ const OLD_SETTINGS_KEY = "t3code:app-settings:v1";
 
 const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
 
+function applyOptimisticServerSettingsPatch(
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+): ServerSettings {
+  const nextPatch = patch.prompts?.orchestration
+    ? {
+        ...patch,
+        prompts: {
+          ...patch.prompts,
+          orchestration: Object.fromEntries(
+            Object.entries(patch.prompts.orchestration).map(([promptId, document]) => [
+              promptId,
+              document ??
+                current.promptDefaults.orchestration[
+                  promptId as keyof typeof current.promptDefaults.orchestration
+                ],
+            ]),
+          ) as NonNullable<NonNullable<ServerSettingsPatch["prompts"]>["orchestration"]>,
+        },
+      }
+    : patch;
+
+  return deepMerge(current, nextPatch as Partial<ServerSettings>);
+}
+
 function splitPatch(patch: Partial<UnifiedSettings>): {
   serverPatch: ServerSettingsPatch;
   clientPatch: Partial<ClientSettings>;
@@ -108,7 +133,9 @@ export function useUpdateSettings() {
       if (Object.keys(serverPatch).length > 0) {
         const currentServerConfig = getServerConfig();
         if (currentServerConfig) {
-          applySettingsUpdated(deepMerge(currentServerConfig.settings, serverPatch));
+          applySettingsUpdated(
+            applyOptimisticServerSettingsPatch(currentServerConfig.settings, serverPatch),
+          );
         }
         // Fire-and-forget RPC — push will reconcile on success
         void ensureNativeApi().server.updateSettings(serverPatch);

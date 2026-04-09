@@ -14,6 +14,7 @@ import {
   type BaseProviderKind,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
+  ORCHESTRATION_PROMPT_IDS,
   type ModelSelection,
   ServerSettings,
   ServerSettingsError,
@@ -71,16 +72,26 @@ export class ServerSettingsService extends ServiceMap.Service<
       ServerSettingsService,
       Effect.gen(function* () {
         const currentSettingsRef = yield* Ref.make<ServerSettings>(
-          deepMerge(DEFAULT_SERVER_SETTINGS, overrides),
+          resolvePromptSettings(
+            deepMerge(DEFAULT_SERVER_SETTINGS, overrides as unknown as DeepPartial<ServerSettings>),
+          ),
         );
 
         return {
           start: Effect.void,
           ready: Effect.void,
-          getSettings: Ref.get(currentSettingsRef),
+          getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolvePromptSettings)),
           updateSettings: (patch) =>
             Ref.get(currentSettingsRef).pipe(
-              Effect.map((currentSettings) => deepMerge(currentSettings, patch)),
+              Effect.map((currentSettings) => {
+                const normalizedPatch = applyPromptResetPatch(currentSettings, patch);
+                return resolvePromptSettings(
+                  deepMerge(
+                    currentSettings,
+                    normalizedPatch as unknown as DeepPartial<ServerSettings>,
+                  ),
+                );
+              }),
               Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
             ),
           streamChanges: Stream.empty,
@@ -153,15 +164,91 @@ function resolveModelSelectionProviders(settings: ServerSettings): ServerSetting
   };
 }
 
-// Values under these keys are compared as a whole — never stripped field-by-field.
-const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
-  "textGenerationModelSelection",
-  "managedRunInferenceModelSelection",
-  "orchestrationImplementerModelSelection",
-  "orchestrationReviewerModelSelection",
-]);
+function resolvePromptSettings(settings: ServerSettings): ServerSettings {
+  const promptDefaults = DEFAULT_SERVER_SETTINGS.promptDefaults;
+  const resolvedPrompts = {
+    orchestration: {
+      ...promptDefaults.orchestration,
+      ...settings.prompts.orchestration,
+    },
+  } satisfies ServerSettings["prompts"];
 
-function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
+  if (
+    Equal.equals(resolvedPrompts, settings.prompts) &&
+    Equal.equals(promptDefaults, settings.promptDefaults)
+  ) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    prompts: resolvedPrompts,
+    promptDefaults,
+  };
+}
+
+function applyPromptResetPatch(
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+): ServerSettingsPatch {
+  const orchestrationPatch = patch.prompts?.orchestration;
+  if (!orchestrationPatch) {
+    return patch;
+  }
+
+  if (!Object.values(orchestrationPatch).some((document) => document === null)) {
+    return patch;
+  }
+
+  const nextOrchestrationPatch = Object.fromEntries(
+    ORCHESTRATION_PROMPT_IDS.flatMap((promptId) => {
+      const document = orchestrationPatch[promptId];
+      if (document === undefined) {
+        return [];
+      }
+      return [[promptId, document ?? current.promptDefaults.orchestration[promptId]]];
+    }),
+  ) as NonNullable<NonNullable<ServerSettingsPatch["prompts"]>["orchestration"]>;
+
+  return {
+    ...patch,
+    prompts: {
+      ...patch.prompts,
+      orchestration: nextOrchestrationPatch,
+    },
+  };
+}
+
+function isAtomicServerSettingsPath(path: ReadonlyArray<string>): boolean {
+  if (path.length === 1) {
+    return (
+      path[0] === "textGenerationModelSelection" ||
+      path[0] === "managedRunInferenceModelSelection" ||
+      path[0] === "orchestrationImplementerModelSelection" ||
+      path[0] === "orchestrationReviewerModelSelection"
+    );
+  }
+
+  if (
+    path.length === 3 &&
+    (path[0] === "prompts" || path[0] === "promptDefaults") &&
+    path[1] === "orchestration"
+  ) {
+    return (ORCHESTRATION_PROMPT_IDS as ReadonlyArray<string>).includes(path[2]!);
+  }
+
+  return false;
+}
+
+function stripDefaultServerSettings(
+  current: unknown,
+  defaults: unknown,
+  path: ReadonlyArray<string> = [],
+): unknown | undefined {
+  if (isAtomicServerSettingsPath(path)) {
+    return Equal.equals(current, defaults) ? undefined : current;
+  }
+
   if (Array.isArray(current) || Array.isArray(defaults)) {
     return Equal.equals(current, defaults) ? undefined : current;
   }
@@ -177,15 +264,12 @@ function stripDefaultServerSettings(current: unknown, defaults: unknown): unknow
     const next: Record<string, unknown> = {};
 
     for (const key of Object.keys(currentRecord)) {
-      if (ATOMIC_SETTINGS_KEYS.has(key)) {
-        if (!Equal.equals(currentRecord[key], defaultsRecord[key])) {
-          next[key] = currentRecord[key];
-        }
-      } else {
-        const stripped = stripDefaultServerSettings(currentRecord[key], defaultsRecord[key]);
-        if (stripped !== undefined) {
-          next[key] = stripped;
-        }
+      const stripped = stripDefaultServerSettings(currentRecord[key], defaultsRecord[key], [
+        ...path,
+        key,
+      ]);
+      if (stripped !== undefined) {
+        next[key] = stripped;
       }
     }
 
@@ -246,7 +330,7 @@ const makeServerSettings = Effect.gen(function* () {
       });
       return DEFAULT_SERVER_SETTINGS;
     }
-    return decoded.value;
+    return resolvePromptSettings(decoded.value);
   });
 
   const settingsCache = yield* Cache.make<typeof cacheKey, ServerSettings, ServerSettingsError>({
@@ -347,12 +431,18 @@ const makeServerSettings = Effect.gen(function* () {
   return {
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getSettingsFromCache.pipe(Effect.map(resolveModelSelectionProviders)),
+    getSettings: getSettingsFromCache.pipe(
+      Effect.map(resolveModelSelectionProviders),
+      Effect.map(resolvePromptSettings),
+    ),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const next = yield* Schema.decodeEffect(ServerSettings)(deepMerge(current, patch)).pipe(
+          const normalizedPatch = applyPromptResetPatch(current, patch);
+          const next = yield* Schema.decodeEffect(ServerSettings)(
+            deepMerge(current, normalizedPatch as unknown as DeepPartial<ServerSettings>),
+          ).pipe(
             Effect.mapError(
               (cause) =>
                 new ServerSettingsError({
@@ -362,14 +452,18 @@ const makeServerSettings = Effect.gen(function* () {
                 }),
             ),
           );
-          yield* writeSettingsAtomically(next);
-          yield* Cache.set(settingsCache, cacheKey, next);
-          yield* emitChange(next);
-          return resolveModelSelectionProviders(next);
+          const resolvedNext = resolvePromptSettings(next);
+          yield* writeSettingsAtomically(resolvedNext);
+          yield* Cache.set(settingsCache, cacheKey, resolvedNext);
+          yield* emitChange(resolvedNext);
+          return resolvePromptSettings(resolveModelSelectionProviders(resolvedNext));
         }),
       ),
     get streamChanges() {
-      return Stream.fromPubSub(changesPubSub).pipe(Stream.map(resolveModelSelectionProviders));
+      return Stream.fromPubSub(changesPubSub).pipe(
+        Stream.map(resolveModelSelectionProviders),
+        Stream.map(resolvePromptSettings),
+      );
     },
   } satisfies ServerSettingsShape;
 });
