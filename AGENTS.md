@@ -97,5 +97,6 @@ Electron also stores Chromium profile data (localStorage, cookies) under `~/Libr
 - `start-electron-dev` — Start the Electron dev stack (`bun run dev:desktop`).
 - `production-build` — Build a production macOS DMG via `scripts/build-desktop-artifact.ts`.
 - `test-managed-runs-mcp` — Test the managed runs MCP endpoint end-to-end using the dev bypass token.
+- `test-orchestration` — End-to-end orchestration test: reset test repo, create tickets, run orchestration with real models, verify via chrome-devtools MCP.
 
 Skills must be kept up to date as related code changes. When modifying behavior covered by a skill or doc, review and update the corresponding file.
