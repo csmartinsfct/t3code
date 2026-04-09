@@ -25,6 +25,20 @@ type TurnOutcome =
   | { readonly result: "completed" }
   | { readonly result: "failed"; readonly error: string | null };
 
+// ---------------------------------------------------------------------------
+// Active run state — mutable in-memory tracker so pause/cancel/resume and
+// user-takeover detection can reach into the running loop.
+// ---------------------------------------------------------------------------
+
+type ActiveRunState = {
+  runId: OrchestrationRunId;
+  orchestrationThreadId: ThreadId;
+  /** Set when dispatching a turn, cleared on turn completion. */
+  activeWorkingThreadId: ThreadId | null;
+  /** Background fiber running the sequential execution loop. */
+  fiber: Fiber.Fiber<void, never>;
+};
+
 const runnerCommandId = (tag: string): CommandId =>
   `runner:${tag}:${crypto.randomUUID()}` as CommandId;
 
@@ -48,6 +62,9 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
   // Create a scope for background fibers that lives as long as the service.
   const runnerScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(runnerScope, Exit.void));
+
+  // Mutable in-memory state for the currently active run.
+  let activeRunState: ActiveRunState | null = null;
 
   const dispatchCommand = (
     command: import("@t3tools/contracts").OrchestrationCommand,
@@ -236,17 +253,50 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
     });
 
+  // ---------------------------------------------------------------------------
+  // Interrupt / stop helpers
+  // ---------------------------------------------------------------------------
+
+  /** Dispatch a turn interrupt for a working thread (best-effort). */
+  const interruptWorkingThread = (threadId: ThreadId) =>
+    dispatchCommand(
+      {
+        type: "thread.turn.interrupt",
+        commandId: runnerCommandId("interrupt"),
+        threadId,
+        createdAt: new Date().toISOString(),
+      },
+      `Failed to interrupt turn on thread ${threadId}`,
+    ).pipe(Effect.catch(() => Effect.void));
+
+  /** Dispatch a session stop for a working thread (best-effort). */
+  const stopWorkingThread = (threadId: ThreadId) =>
+    dispatchCommand(
+      {
+        type: "thread.session.stop",
+        commandId: runnerCommandId("stop"),
+        threadId,
+        createdAt: new Date().toISOString(),
+      },
+      `Failed to stop session on thread ${threadId}`,
+    ).pipe(Effect.catch(() => Effect.void));
+
+  // ---------------------------------------------------------------------------
+  // Sequential execution loop — extracted so both startRun and resumeRun
+  // can invoke it.
+  // ---------------------------------------------------------------------------
+
   /**
-   * The main sequential execution loop. Runs in the background after startRun
-   * transitions the run to "running".
+   * Run the sequential execution loop from `startIndex` through the ticket
+   * plan. When `isResume` is true, the startup preamble (activity post,
+   * title generation) is skipped because the run was already started.
    */
-  const executeRun = (runId: OrchestrationRunId) =>
+  const executeRunLoop = (runId: OrchestrationRunId, startIndex: number, isResume: boolean) =>
     Effect.gen(function* () {
       // 1. Load run and parse ticket order
       const run = yield* runService.get({ runId });
       const ticketOrder = run.ticketOrder;
       const orchestrationThreadId = run.orchestrationThreadId as ThreadId;
-      const startIndex = run.currentTicketIndex + 1;
 
       yield* Effect.logInfo(
         formatTimelineLog(SCOPE, "runner.execute.loaded", {
@@ -254,6 +304,7 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
           ticketCount: ticketOrder.length,
           orchestrationThreadId,
           startIndex,
+          isResume,
         }),
       );
 
@@ -281,37 +332,39 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
         }),
       );
 
-      // 3. Post run-start activity
-      yield* postActivity({
-        threadId: orchestrationThreadId,
-        kind: "orchestration.run.started",
-        summary: `Orchestration run started with ${ticketOrder.length} ticket${ticketOrder.length === 1 ? "" : "s"}`,
-      });
-
-      // 4. Generate orchestration thread title
-      const orderedTickets = ticketOrder.map((entry) => tickets.get(entry.ticketId)!);
-      yield* dispatchCommand(
-        {
-          type: "thread.meta.update",
-          commandId: runnerCommandId("orchestration-title"),
+      // 3. Startup preamble — only on fresh start, not resume
+      if (!isResume) {
+        yield* postActivity({
           threadId: orchestrationThreadId,
-          title: buildOrchestrationTitle(orderedTickets),
-        },
-        "Failed to update orchestration thread title",
-      ).pipe(Effect.catch(() => Effect.void));
+          kind: "orchestration.run.started",
+          summary: `Orchestration run started with ${ticketOrder.length} ticket${ticketOrder.length === 1 ? "" : "s"}`,
+        });
 
-      const generatedTitle = buildOrchestrationTitle(orderedTickets);
-      yield* Effect.logInfo(
-        formatTimelineLog(SCOPE, "runner.execute.title-set", { runId, title: generatedTitle }),
-      );
+        // Generate orchestration thread title
+        const orderedTickets = ticketOrder.map((entry) => tickets.get(entry.ticketId)!);
+        yield* dispatchCommand(
+          {
+            type: "thread.meta.update",
+            commandId: runnerCommandId("orchestration-title"),
+            threadId: orchestrationThreadId,
+            title: buildOrchestrationTitle(orderedTickets),
+          },
+          "Failed to update orchestration thread title",
+        ).pipe(Effect.catch(() => Effect.void));
 
-      // 5. Sequential loop
+        const generatedTitle = buildOrchestrationTitle(orderedTickets);
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.execute.title-set", { runId, title: generatedTitle }),
+        );
+      }
+
+      // 4. Sequential loop
       for (let index = startIndex; index < ticketOrder.length; index++) {
         const entry = ticketOrder[index]!;
         const ticket = tickets.get(entry.ticketId)!;
         const workingThreadId = entry.workingThreadId as ThreadId;
 
-        // 5a. Check run status — may have been paused/canceled externally
+        // 4a. Check run status — may have been paused/canceled externally
         const currentRun = yield* runService.get({ runId });
         if (currentRun.status !== "running") {
           yield* Effect.logInfo(
@@ -329,7 +382,7 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
         // failure — including progress updates and post-success activities.
         type TicketResult = "completed" | "blocked" | "paused";
         const ticketResult: TicketResult = yield* Effect.gen(function* () {
-          // 5b. Update progress
+          // 4b. Update progress
           yield* runService.updateRunProgress({
             runId,
             currentTicketIndex: index,
@@ -345,14 +398,14 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
             }),
           );
 
-          // 5c. Post ticket-started activity
+          // 4c. Post ticket-started activity
           yield* postActivity({
             threadId: orchestrationThreadId,
             kind: "orchestration.run.ticket.started",
             summary: `Starting work on ticket ${ticket.identifier}: ${ticket.title}`,
           });
 
-          // 5d. Set ticket to in_progress
+          // 4d. Set ticket to in_progress
           yield* ticketing.update({ id: entry.ticketId, status: "in_progress" }).pipe(
             Effect.mapError(
               (cause) =>
@@ -371,10 +424,12 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
             }),
           );
 
-          // 5e-h. Start subscription, dispatch turn, wait for completion.
-          // The turn completion listener is started BEFORE dispatching the turn
-          // to avoid missing fast completions. Both run inside a shared scope
-          // so the stream subscription fiber is cleaned up after we get a result.
+          // 4e-h. Start subscription, dispatch turn, wait for completion.
+          // Track the active working thread for pause/cancel/takeover.
+          if (activeRunState) {
+            activeRunState.activeWorkingThreadId = workingThreadId;
+          }
+
           const outcome: TurnOutcome = yield* Effect.scoped(
             Effect.gen(function* () {
               const completionFiber = yield* waitForTurnCompletion(workingThreadId).pipe(
@@ -404,6 +459,11 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
             }),
           );
 
+          // Clear active working thread after turn completes
+          if (activeRunState) {
+            activeRunState.activeWorkingThreadId = null;
+          }
+
           yield* Effect.logInfo(
             formatTimelineLog(SCOPE, "runner.ticket.turn-completed", {
               runId,
@@ -414,7 +474,7 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
             }),
           );
 
-          // 5i. Handle outcome
+          // 4i. Handle outcome
           if (outcome.result === "failed") {
             yield* Effect.logWarning(
               formatTimelineLog(SCOPE, "runner.ticket.failed", {
@@ -526,7 +586,7 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
         }
       }
 
-      // 6. All tickets done — mark run completed
+      // 5. All tickets done — mark run completed
       yield* runService.complete({ runId }).pipe(Effect.catch(() => Effect.void));
 
       yield* postActivity({
@@ -543,6 +603,49 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Fork the execution loop as a background fiber. On completion or failure
+   * the active run state is cleared.
+   */
+  const forkExecutionLoop = (
+    runId: OrchestrationRunId,
+    orchestrationThreadId: ThreadId,
+    startIndex: number,
+    isResume: boolean,
+  ) =>
+    Effect.gen(function* () {
+      const fiber = yield* executeRunLoop(runId, startIndex, isResume).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (activeRunState?.runId === runId) {
+              activeRunState = null;
+            }
+          }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* Effect.logWarning(
+              formatTimelineLog(SCOPE, "runner.execute.catastrophic-failure", { runId }),
+            );
+            yield* Effect.logError("Orchestration run failed unexpectedly", { runId, cause });
+            yield* runService.fail({ runId }).pipe(Effect.catch(() => Effect.void));
+          }),
+        ),
+        Effect.forkIn(runnerScope),
+      );
+
+      activeRunState = {
+        runId,
+        orchestrationThreadId,
+        activeWorkingThreadId: null,
+        fiber,
+      };
+    });
+
+  // ---------------------------------------------------------------------------
+  // Public methods
+  // ---------------------------------------------------------------------------
+
   const startRun: OrchestrationRunRunnerShape["startRun"] = (input) =>
     Effect.gen(function* () {
       yield* Effect.logInfo(formatTimelineLog(SCOPE, "runner.start", { runId: input.runId }));
@@ -557,30 +660,242 @@ const makeOrchestrationRunRunner = Effect.gen(function* () {
         }),
       );
 
-      // Fork the execution loop in the runner scope so it outlives startRun.
-      yield* executeRun(input.runId).pipe(
-        Effect.catchCause((cause) =>
-          Effect.gen(function* () {
-            yield* Effect.logWarning(
-              formatTimelineLog(SCOPE, "runner.execute.catastrophic-failure", {
-                runId: input.runId,
-              }),
-            );
-            yield* Effect.logError("Orchestration run failed unexpectedly", {
-              runId: input.runId,
-              cause,
-            });
-            // Try to mark the run as failed
-            yield* runService.fail({ runId: input.runId }).pipe(Effect.catch(() => Effect.void));
-          }),
-        ),
-        Effect.forkIn(runnerScope),
+      yield* forkExecutionLoop(
+        input.runId,
+        run.orchestrationThreadId as ThreadId,
+        run.currentTicketIndex + 1,
+        false,
       );
 
       return run;
     });
 
-  return { startRun } satisfies OrchestrationRunRunnerShape;
+  const pauseRun: OrchestrationRunRunnerShape["pauseRun"] = (input) =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo(formatTimelineLog(SCOPE, "runner.pause", { runId: input.runId }));
+
+      // Transition running → paused
+      const run = yield* runService.pause(input);
+
+      // Interrupt active agent turn if one is running
+      if (activeRunState?.runId === input.runId && activeRunState.activeWorkingThreadId) {
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.pause.interrupting", {
+            runId: input.runId,
+            workingThreadId: activeRunState.activeWorkingThreadId,
+          }),
+        );
+        yield* interruptWorkingThread(activeRunState.activeWorkingThreadId);
+      }
+
+      yield* postActivity({
+        threadId: run.orchestrationThreadId as ThreadId,
+        kind: "orchestration.run.paused",
+        summary: "Orchestration paused",
+      }).pipe(Effect.catch(() => Effect.void));
+
+      return run;
+    });
+
+  const resumeRun: OrchestrationRunRunnerShape["resumeRun"] = (input) =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo(formatTimelineLog(SCOPE, "runner.resume", { runId: input.runId }));
+
+      // Load run to check current state
+      const currentRun = yield* runService.get(input);
+
+      // Idempotent: if already running, return as-is
+      if (currentRun.status === "running") {
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.resume.already-running", { runId: input.runId }),
+        );
+        return currentRun;
+      }
+
+      // Transition paused → running
+      const run = yield* runService.resume(input);
+      const orchestrationThreadId = run.orchestrationThreadId as ThreadId;
+      const ticketOrder = run.ticketOrder;
+
+      // Post resume activity
+      yield* postActivity({
+        threadId: orchestrationThreadId,
+        kind: "orchestration.run.resumed",
+        summary: "Orchestration resumed",
+      }).pipe(Effect.catch(() => Effect.void));
+
+      // Re-evaluate current ticket to determine where to resume
+      let resolvedStartIndex = run.currentTicketIndex;
+      if (resolvedStartIndex >= 0 && resolvedStartIndex < ticketOrder.length) {
+        const currentEntry = ticketOrder[resolvedStartIndex]!;
+        const ticket = yield* ticketing
+          .getById({ id: currentEntry.ticketId })
+          .pipe(Effect.catch(() => Effect.succeed(null as Ticket | null)));
+
+        if (ticket) {
+          if (ticket.status === "done" || ticket.status === "canceled") {
+            // User finished it manually while paused — advance
+            yield* Effect.logInfo(
+              formatTimelineLog(SCOPE, "runner.resume.ticket-already-terminal", {
+                runId: input.runId,
+                ticketId: currentEntry.ticketId,
+                ticketIdentifier: ticket.identifier,
+                status: ticket.status,
+              }),
+            );
+            resolvedStartIndex += 1;
+          }
+          // Otherwise (in_progress, blocked, todo) — re-dispatch from this index
+        }
+      } else {
+        // currentTicketIndex is -1 (never started) — start from 0
+        resolvedStartIndex = 0;
+      }
+
+      yield* Effect.logInfo(
+        formatTimelineLog(SCOPE, "runner.resume.resolved-start", {
+          runId: input.runId,
+          originalIndex: run.currentTicketIndex,
+          resolvedStartIndex,
+        }),
+      );
+
+      // Check if all tickets are already done
+      if (resolvedStartIndex >= ticketOrder.length) {
+        yield* runService.complete({ runId: input.runId }).pipe(Effect.catch(() => Effect.void));
+        yield* postActivity({
+          threadId: orchestrationThreadId,
+          kind: "orchestration.run.completed",
+          summary: `Orchestration complete: ${ticketOrder.length}/${ticketOrder.length} tickets done`,
+        }).pipe(Effect.catch(() => Effect.void));
+        return yield* runService.get(input);
+      }
+
+      // Fork a new execution loop from the resolved index
+      yield* forkExecutionLoop(input.runId, orchestrationThreadId, resolvedStartIndex, true);
+
+      return run;
+    });
+
+  const cancelRun: OrchestrationRunRunnerShape["cancelRun"] = (input) =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo(formatTimelineLog(SCOPE, "runner.cancel", { runId: input.runId }));
+
+      // Transition running/paused → canceled
+      const run = yield* runService.cancel(input);
+
+      // Interrupt active agent turn and stop session if running
+      if (activeRunState?.runId === input.runId && activeRunState.activeWorkingThreadId) {
+        const workingThreadId = activeRunState.activeWorkingThreadId;
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.cancel.interrupting", {
+            runId: input.runId,
+            workingThreadId,
+          }),
+        );
+        yield* interruptWorkingThread(workingThreadId);
+        yield* stopWorkingThread(workingThreadId);
+      }
+
+      // Clear active state
+      if (activeRunState?.runId === input.runId) {
+        activeRunState = null;
+      }
+
+      yield* postActivity({
+        threadId: run.orchestrationThreadId as ThreadId,
+        kind: "orchestration.run.canceled",
+        summary: "Orchestration canceled",
+      }).pipe(Effect.catch(() => Effect.void));
+
+      return run;
+    });
+
+  // ---------------------------------------------------------------------------
+  // User-takeover detection — watches domain events for user-initiated turns
+  // on child threads belonging to an active orchestration run.
+  // ---------------------------------------------------------------------------
+
+  yield* Stream.runForEach(
+    orchestrationEngine.streamDomainEvents.pipe(
+      Stream.filter((event) => event.type === "thread.turn-start-requested"),
+    ),
+    (event) =>
+      Effect.gen(function* () {
+        // Ignore engine-dispatched turns
+        const commandId = event.commandId ?? "";
+        if (commandId.startsWith("runner:")) return;
+
+        const threadId = (event.payload as { threadId?: string }).threadId;
+        if (!threadId) return;
+
+        // Look up the thread to check if it's an orchestration child
+        const readModel = yield* orchestrationEngine.getReadModel();
+        const thread = readModel.threads.find((t) => t.id === threadId);
+        if (!thread || !thread.parentThreadId) return;
+
+        // Check if there's an active run for the parent orchestration thread
+        if (!activeRunState || activeRunState.orchestrationThreadId !== thread.parentThreadId) {
+          return;
+        }
+
+        // Verify the run is still running
+        const currentRun = yield* runService
+          .get({ runId: activeRunState.runId })
+          .pipe(
+            Effect.catch(() =>
+              Effect.succeed(null as import("@t3tools/contracts").OrchestrationRun | null),
+            ),
+          );
+        if (!currentRun || currentRun.status !== "running") return;
+
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.user-takeover.detected", {
+            runId: activeRunState.runId,
+            userThreadId: threadId,
+            activeWorkingThreadId: activeRunState.activeWorkingThreadId,
+          }),
+        );
+
+        // Interrupt the active agent turn (may be same or different thread)
+        if (activeRunState.activeWorkingThreadId) {
+          yield* interruptWorkingThread(activeRunState.activeWorkingThreadId);
+        }
+
+        // Resolve the ticket identifier for the separator message
+        const ticketOrder = currentRun.ticketOrder;
+        const takenOverEntry = ticketOrder.find((e) => e.workingThreadId === threadId);
+        let ticketLabel = "a ticket";
+        if (takenOverEntry) {
+          const ticket = yield* ticketing
+            .getById({ id: takenOverEntry.ticketId })
+            .pipe(Effect.catch(() => Effect.succeed(null as Ticket | null)));
+          if (ticket) {
+            ticketLabel = ticket.identifier;
+          }
+        }
+
+        // Auto-pause the run
+        yield* runService
+          .pause({ runId: activeRunState.runId })
+          .pipe(Effect.catch(() => Effect.void));
+
+        yield* postActivity({
+          threadId: activeRunState.orchestrationThreadId,
+          kind: "orchestration.run.user-takeover",
+          summary: `User took over ${ticketLabel} — orchestration paused`,
+        }).pipe(Effect.catch(() => Effect.void));
+
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.user-takeover.paused", {
+            runId: activeRunState.runId,
+            ticketLabel,
+          }),
+        );
+      }).pipe(Effect.catch(() => Effect.void)),
+  ).pipe(Effect.forkIn(runnerScope));
+
+  return { startRun, pauseRun, resumeRun, cancelRun } satisfies OrchestrationRunRunnerShape;
 });
 
 export const OrchestrationRunRunnerLive = Layer.effect(

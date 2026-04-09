@@ -14,6 +14,7 @@ import { useTerminalStateStore } from "../terminalStateStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
+import { getWsRpcClient } from "../wsRpcClient";
 
 export function useThreadActions() {
   const appSettings = useSettings();
@@ -92,6 +93,55 @@ export function useThreadActions() {
             "Delete the worktree too?",
           ].join("\n"),
         ));
+
+      // If this is an orchestration parent thread, cancel the active run
+      // and delete all child threads first.
+      if (thread.isOrchestrationThread) {
+        const rpc = getWsRpcClient();
+        try {
+          const runs = await rpc.orchestration.listRuns({ projectId: thread.projectId });
+          const activeRun = runs.find(
+            (r) =>
+              r.orchestrationThreadId === threadId &&
+              (r.status === "running" || r.status === "paused" || r.status === "pending"),
+          );
+          if (activeRun) {
+            await rpc.orchestration.cancelRun({ runId: activeRun.id }).catch(() => undefined);
+          }
+        } catch {
+          // Best effort — continue with deletion even if cancel fails.
+        }
+
+        // Delete child threads
+        const childThreads = threads.filter((t) => t.parentThreadId === threadId);
+        await Promise.allSettled(
+          childThreads.map(async (child) => {
+            if (child.session && child.session.status !== "closed") {
+              await api.orchestration
+                .dispatchCommand({
+                  type: "thread.session.stop",
+                  commandId: newCommandId(),
+                  threadId: child.id,
+                  createdAt: new Date().toISOString(),
+                })
+                .catch(() => undefined);
+            }
+            try {
+              await api.terminal.close({ threadId: child.id, deleteHistory: true });
+            } catch {
+              // Terminal may already be closed.
+            }
+            await api.orchestration.dispatchCommand({
+              type: "thread.delete",
+              commandId: newCommandId(),
+              threadId: child.id,
+            });
+            clearComposerDraftForThread(child.id);
+            clearProjectDraftThreadById(child.projectId, child.id);
+            clearTerminalState(child.id);
+          }),
+        );
+      }
 
       if (thread.session && thread.session.status !== "closed") {
         await api.orchestration
@@ -239,6 +289,63 @@ export function useThreadActions() {
             "",
             "Delete them too?",
           ].join("\n"),
+        );
+      }
+
+      // Cancel any active orchestration runs for orchestration parent threads
+      const orchestrationParents = threadIds.filter((id) => threadsById[id]?.isOrchestrationThread);
+      if (orchestrationParents.length > 0) {
+        const rpc = getWsRpcClient();
+        await Promise.allSettled(
+          orchestrationParents.map(async (id) => {
+            const thread = threadsById[id];
+            if (!thread) return;
+            try {
+              const runs = await rpc.orchestration.listRuns({ projectId: thread.projectId });
+              const activeRun = runs.find(
+                (r) =>
+                  r.orchestrationThreadId === id &&
+                  (r.status === "running" || r.status === "paused" || r.status === "pending"),
+              );
+              if (activeRun) {
+                await rpc.orchestration.cancelRun({ runId: activeRun.id }).catch(() => undefined);
+              }
+            } catch {
+              // Best effort
+            }
+
+            // Delete child threads not already in the batch
+            const childThreads = threads.filter(
+              (t) => t.parentThreadId === id && !deletedIdSet.has(t.id),
+            );
+            await Promise.allSettled(
+              childThreads.map(async (child) => {
+                if (child.session && child.session.status !== "closed") {
+                  await api.orchestration
+                    .dispatchCommand({
+                      type: "thread.session.stop",
+                      commandId: newCommandId(),
+                      threadId: child.id,
+                      createdAt: new Date().toISOString(),
+                    })
+                    .catch(() => undefined);
+                }
+                try {
+                  await api.terminal.close({ threadId: child.id, deleteHistory: true });
+                } catch {
+                  // Terminal may already be closed.
+                }
+                await api.orchestration.dispatchCommand({
+                  type: "thread.delete",
+                  commandId: newCommandId(),
+                  threadId: child.id,
+                });
+                clearComposerDraftForThread(child.id);
+                clearProjectDraftThreadById(child.projectId, child.id);
+                clearTerminalState(child.id);
+              }),
+            );
+          }),
         );
       }
 

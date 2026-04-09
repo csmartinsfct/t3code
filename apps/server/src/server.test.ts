@@ -376,6 +376,9 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.succeed(OrchestrationRunRunner, {
             startRun: () => Effect.die(new Error("not mocked")),
+            pauseRun: () => Effect.die(new Error("not mocked")),
+            resumeRun: () => Effect.die(new Error("not mocked")),
+            cancelRun: () => Effect.die(new Error("not mocked")),
           }),
         ),
       ),

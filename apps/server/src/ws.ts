@@ -388,7 +388,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.pauseRun]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.pauseRun,
-          orchestrationRuns.pause(input).pipe(
+          orchestrationRunRunner.pauseRun(input).pipe(
             Effect.mapError((cause) =>
               Schema.is(OrchestrationRunError)(cause)
                 ? cause
@@ -403,7 +403,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.resumeRun]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.resumeRun,
-          orchestrationRuns.resume(input).pipe(
+          orchestrationRunRunner.resumeRun(input).pipe(
             Effect.mapError((cause) =>
               Schema.is(OrchestrationRunError)(cause)
                 ? cause
@@ -418,7 +418,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.cancelRun]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.cancelRun,
-          orchestrationRuns.cancel(input).pipe(
+          orchestrationRunRunner.cancelRun(input).pipe(
             Effect.mapError((cause) =>
               Schema.is(OrchestrationRunError)(cause)
                 ? cause

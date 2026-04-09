@@ -9,6 +9,7 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
   TicketIcon,
+  UserCircle2Icon,
   XCircleIcon,
 } from "lucide-react";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
@@ -45,6 +46,12 @@ function separatorIcon(activityKind: string, tone: OrchestrationThreadActivityTo
   }
   if (activityKind.includes("paused")) {
     return <PauseCircleIcon className="size-3 text-amber-500" />;
+  }
+  if (activityKind.includes("resumed")) {
+    return <PlayCircleIcon className="size-3 text-blue-500" />;
+  }
+  if (activityKind.includes("takeover")) {
+    return <UserCircle2Icon className="size-3 text-amber-500" />;
   }
   if (activityKind.includes("started")) {
     return <PlayCircleIcon className="size-3 text-blue-500" />;
