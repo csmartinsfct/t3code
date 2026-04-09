@@ -34,6 +34,7 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   // navigations (thread switches in management view).
   useEffect(() => {
     if (options?.projectId !== undefined && options.projectId !== selectedProjectId) {
+      setLoading(true);
       setTickets([]);
       setSelectedProjectId(options.projectId);
     }

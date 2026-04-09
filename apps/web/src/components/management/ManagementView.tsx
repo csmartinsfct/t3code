@@ -64,6 +64,13 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
     return () => window.removeEventListener("mousedown", onMouseDown);
   }, []);
 
+  useEffect(() => {
+    const store = useTicketSelectionStore.getState();
+    if (store.selectedTicketIds.size > 0) {
+      store.clearSelection();
+    }
+  }, [projectId, threadId]);
+
   const handleDropOnChat = useCallback(
     (tickets: TicketSummary[]) => {
       if (!threadId) return;
@@ -117,7 +124,12 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
       onDragCancel={handleDragCancel}
     >
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <KanbanBoard ref={boardRef} projectId={projectId} onDropOnChat={handleDropOnChat} />
+        <KanbanBoard
+          ref={boardRef}
+          threadId={threadId}
+          projectId={projectId}
+          onDropOnChat={handleDropOnChat}
+        />
       </SidebarInset>
       <SidebarProvider
         defaultOpen

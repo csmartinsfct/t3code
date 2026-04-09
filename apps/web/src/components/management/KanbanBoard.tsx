@@ -1,23 +1,35 @@
 import type {
   ModelSelection,
+  ProjectId,
   Ticket,
   TicketId,
   TicketStatus,
   TicketSummary,
+  ThreadId,
 } from "@t3tools/contracts";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { ArrowLeftIcon } from "lucide-react";
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
-
-import type { ProjectId } from "@t3tools/contracts";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
+import { useProjectById } from "../../storeSelectors";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
-import { cn } from "~/lib/utils";
+import { useUiStateStore } from "../../uiStateStore";
 import { ensureNativeApi } from "../../nativeApi";
+import { toastManager } from "../ui/toast";
+import { cn } from "~/lib/utils";
+import { Badge } from "../ui/badge";
 import { ALL_STATUSES } from "../settings/ticketUtils";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
@@ -26,6 +38,7 @@ import { KanbanTicketDetail } from "./KanbanTicketDetail";
 import { OrchestrateConfirmDialog } from "./OrchestrateConfirmDialog";
 
 interface KanbanBoardProps {
+  threadId: ThreadId | null;
   projectId: string;
   onDropOnChat?: (tickets: TicketSummary[]) => void;
 }
@@ -38,18 +51,31 @@ export interface KanbanBoardHandle {
 }
 
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(
-  { projectId, onDropOnChat },
+  { threadId, projectId, onDropOnChat },
   ref,
 ) {
-  const { tickets, loading, applyLocalReorder } = useTicketing({ projectId });
-  const [ticketStack, setTicketStack] = useState<TicketId[]>([]);
-  const selectedTicketId = ticketStack.length > 0 ? ticketStack[ticketStack.length - 1] : null;
-
+  const typedProjectId = projectId as ProjectId;
+  const { tickets, loading, selectedProjectId, applyLocalReorder } = useTicketing({ projectId });
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const selectedTickets = useTicketSelectionStore((s) => s.selectedTickets);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
+  const threadBoardContext = useUiStateStore((store) =>
+    threadId ? (store.boardContextByThreadId[threadId] ?? null) : null,
+  );
+  const setThreadBoardRoot = useUiStateStore((store) => store.setThreadBoardRoot);
+  const pushThreadBoardTicket = useUiStateStore((store) => store.pushThreadBoardTicket);
+  const popThreadBoardTicket = useUiStateStore((store) => store.popThreadBoardTicket);
+  const setThreadBoardScrollLeft = useUiStateStore((store) => store.setThreadBoardScrollLeft);
+  const sanitizeThreadBoardContext = useUiStateStore((store) => store.sanitizeThreadBoardContext);
+  const setManagementLastProjectId = useUiStateStore((store) => store.setManagementLastProjectId);
+  const project = useProjectById(typedProjectId);
+  const boardBodyRef = useRef<HTMLDivElement | null>(null);
+  const selectedTicketId =
+    threadId && threadBoardContext?.projectId === typedProjectId
+      ? (threadBoardContext.ticketStack[threadBoardContext.ticketStack.length - 1] ?? null)
+      : null;
 
   const navigate = useNavigate();
 
@@ -58,6 +84,17 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const [orchestrateTickets, setOrchestrateTickets] = useState<
     ReadonlyMap<TicketId, TicketSummary>
   >(new Map());
+
+  useEffect(() => {
+    setManagementLastProjectId(typedProjectId);
+  }, [setManagementLastProjectId, typedProjectId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    if (!threadBoardContext || threadBoardContext.projectId !== typedProjectId) {
+      setThreadBoardRoot(threadId, typedProjectId);
+    }
+  }, [threadBoardContext, threadId, setThreadBoardRoot, typedProjectId]);
 
   const ticketsByStatus = useMemo(() => {
     const grouped: Record<TicketStatus, TicketSummary[]> = {
@@ -119,6 +156,61 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const flatOrderedTickets = useMemo(() => {
     return ALL_STATUSES.flatMap((s) => ticketsByStatus[s]);
   }, [ticketsByStatus]);
+  const validTicketIds = useMemo(() => new Set(tickets.map((ticket) => ticket.id)), [tickets]);
+
+  useEffect(() => {
+    // Wait until the ticket hook has switched over to the active project.
+    // During cross-project thread changes, the previous project's tickets can
+    // remain visible for one render before the hook applies the new projectId.
+    // Sanitizing against that stale ticket set would incorrectly clear the
+    // saved ticket stack for the target thread.
+    if (!threadId || loading || selectedProjectId !== projectId) return;
+    sanitizeThreadBoardContext(threadId, typedProjectId, validTicketIds);
+  }, [
+    loading,
+    projectId,
+    sanitizeThreadBoardContext,
+    selectedProjectId,
+    threadId,
+    typedProjectId,
+    validTicketIds,
+  ]);
+
+  useEffect(() => {
+    if (!threadId || selectedTicketId) return;
+    const element = boardBodyRef.current;
+    if (!element) return;
+
+    const targetScrollLeft =
+      threadBoardContext?.projectId === typedProjectId ? threadBoardContext.boardScrollLeft : 0;
+    if (Math.abs(element.scrollLeft - targetScrollLeft) > 1) {
+      element.scrollLeft = targetScrollLeft;
+    }
+  }, [selectedTicketId, threadBoardContext, threadId, typedProjectId]);
+
+  useEffect(() => {
+    if (!threadId || selectedTicketId) return;
+    const element = boardBodyRef.current;
+    if (!element) return;
+
+    let frameId: number | null = null;
+    const handleScroll = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      frameId = window.requestAnimationFrame(() => {
+        setThreadBoardScrollLeft(threadId, element.scrollLeft);
+      });
+    };
+
+    element.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      element.removeEventListener("scroll", handleScroll);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [selectedTicketId, setThreadBoardScrollLeft, threadId]);
 
   const handleTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, ticket: TicketSummary) => {
@@ -169,28 +261,43 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     setOrchestrateDialogOpen(true);
   }, [selectedTickets]);
 
-  const handleOrchestrateFromDetail = useCallback((ticket: Ticket) => {
-    const summary: TicketSummary = {
-      id: ticket.id,
-      projectId: ticket.projectId,
-      parentId: ticket.parentId,
-      ticketNumber: ticket.ticketNumber,
-      identifier: ticket.identifier,
-      title: ticket.title,
-      status: ticket.status,
-      priority: ticket.priority,
-      sortOrder: ticket.sortOrder,
-      isArchived: ticket.isArchived,
-      worktree: ticket.worktree,
-      labels: ticket.labels,
-      subTicketCount: ticket.subTickets.length,
-      dependencyCount: ticket.dependencies.length,
-      createdAt: ticket.createdAt,
-      updatedAt: ticket.updatedAt,
-    } as TicketSummary;
-    setOrchestrateTickets(new Map([[ticket.id, summary]]));
-    setOrchestrateDialogOpen(true);
-  }, []);
+  const handleOrchestrateFromDetail = useCallback(
+    (ticket: Ticket) => {
+      if (ticket.projectId !== typedProjectId) {
+        toastManager.add({
+          type: "error",
+          title: "Board context changed",
+          description: "That ticket no longer belongs to the active board project.",
+        });
+        if (threadId) {
+          setThreadBoardRoot(threadId, typedProjectId);
+        }
+        return;
+      }
+
+      const summary: TicketSummary = {
+        id: ticket.id,
+        projectId: ticket.projectId,
+        parentId: ticket.parentId,
+        ticketNumber: ticket.ticketNumber,
+        identifier: ticket.identifier,
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        sortOrder: ticket.sortOrder,
+        isArchived: ticket.isArchived,
+        worktree: ticket.worktree,
+        labels: ticket.labels,
+        subTicketCount: ticket.subTickets.length,
+        dependencyCount: ticket.dependencies.length,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+      } as TicketSummary;
+      setOrchestrateTickets(new Map([[ticket.id, summary]]));
+      setOrchestrateDialogOpen(true);
+    },
+    [setThreadBoardRoot, threadId, typedProjectId],
+  );
 
   const handleConfirmOrchestrate = useCallback(
     async (
@@ -198,9 +305,25 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
     ) => {
+      const hasProjectMismatch = [...orchestrateTickets.values()].some(
+        (ticket) => ticket.projectId !== typedProjectId,
+      );
+      if (hasProjectMismatch) {
+        toastManager.add({
+          type: "error",
+          title: "Board context changed",
+          description: "Refresh the board and try starting orchestration again.",
+        });
+        setOrchestrateDialogOpen(false);
+        if (threadId) {
+          setThreadBoardRoot(threadId, typedProjectId);
+        }
+        return;
+      }
+
       const api = ensureNativeApi();
       const result = await api.orchestration.createRun({
-        projectId: projectId as ProjectId,
+        projectId: typedProjectId,
         ticketIdentifiers: ticketIdentifiers as never,
         implementerModelSelection,
         reviewerModelSelection,
@@ -212,7 +335,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         params: { threadId: result.orchestrationThreadId },
       });
     },
-    [projectId, navigate, clearSelection],
+    [clearSelection, navigate, orchestrateTickets, setThreadBoardRoot, threadId, typedProjectId],
   );
 
   // ---------------------------------------------------------------------------
@@ -417,23 +540,26 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const handleTicketClick = useCallback(
     (ticketId: TicketId) => {
+      if (!threadId) return;
       clearSelection();
-      setTicketStack([ticketId]);
+      pushThreadBoardTicket(threadId, typedProjectId, ticketId);
     },
-    [clearSelection],
+    [clearSelection, pushThreadBoardTicket, threadId, typedProjectId],
   );
 
   const handleBack = useCallback(() => {
+    if (!threadId) return;
     clearSelection();
-    setTicketStack((prev) => prev.slice(0, -1));
-  }, [clearSelection]);
+    popThreadBoardTicket(threadId);
+  }, [clearSelection, popThreadBoardTicket, threadId]);
 
   const handleNavigateToTicket = useCallback(
     (ticketId: TicketId) => {
+      if (!threadId) return;
       clearSelection();
-      setTicketStack((prev) => [...prev, ticketId]);
+      pushThreadBoardTicket(threadId, typedProjectId, ticketId);
     },
-    [clearSelection],
+    [clearSelection, pushThreadBoardTicket, threadId, typedProjectId],
   );
 
   return (
@@ -445,18 +571,23 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           isElectron ? "drag-region h-[52px]" : "py-2 sm:py-3",
         )}
       >
-        {selectedTicketId ? (
-          <button
-            type="button"
-            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onClick={handleBack}
-          >
-            <ArrowLeftIcon className="size-3" />
-            Back
-          </button>
-        ) : (
-          <h2 className="text-xs font-medium text-foreground">Board</h2>
-        )}
+        <div className="flex min-w-0 items-center gap-2">
+          {selectedTicketId ? (
+            <button
+              type="button"
+              className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              onClick={handleBack}
+            >
+              <ArrowLeftIcon className="size-3" />
+              Back
+            </button>
+          ) : (
+            <h2 className="text-xs font-medium text-foreground">Board</h2>
+          )}
+          <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
+            <span className="min-w-0 truncate">{project?.name ?? projectId}</span>
+          </Badge>
+        </div>
       </div>
 
       {/* Board body */}
@@ -473,7 +604,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           onOrchestrate={handleOrchestrateFromDetail}
         />
       ) : (
-        <div className="relative flex min-h-0 flex-1 overflow-x-auto">
+        <div ref={boardBodyRef} className="relative flex min-h-0 flex-1 overflow-x-auto">
           {ALL_STATUSES.map((status) => (
             <KanbanColumn
               key={status}

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useMemo } from "react";
 
 import { isElectron } from "../env";
+import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { ManagementView } from "../components/management/ManagementView";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { useStore } from "../store";
@@ -8,10 +10,25 @@ import { useUiStateStore } from "../uiStateStore";
 
 function ChatIndexRouteView() {
   const viewMode = useUiStateStore((store) => store.viewMode);
-  const firstProjectId = useStore((store) => store.projects[0]?.id ?? null);
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const managementLastProjectId = useUiStateStore((store) => store.managementLastProjectId);
+  const projects = useStore((store) => store.projects);
+  const orderedProjects = useMemo(
+    () =>
+      orderItemsByPreferredIds({
+        items: projects,
+        preferredIds: projectOrder,
+        getId: (project) => project.id,
+      }),
+    [projectOrder, projects],
+  );
+  const initialProjectId =
+    orderedProjects.find((project) => project.id === managementLastProjectId)?.id ??
+    orderedProjects[0]?.id ??
+    null;
 
-  if (viewMode === "management" && firstProjectId) {
-    return <ManagementView threadId={null} projectId={firstProjectId} />;
+  if (viewMode === "management" && initialProjectId) {
+    return <ManagementView threadId={null} projectId={initialProjectId} />;
   }
 
   return (

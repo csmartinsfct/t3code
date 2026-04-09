@@ -222,7 +222,9 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 
 ### Data Hook
 
-`useTicketing({ projectId? })` — fetches projects from orchestration snapshot, tickets from `api.ticketing.list()`, subscribes to real-time events. The hook syncs its internal project selection when the caller-supplied `projectId` changes. Project selection persisted in URL search params (`?project=<id>`).
+`useTicketing({ projectId? })` — fetches projects from orchestration snapshot, tickets from `api.ticketing.list()`, subscribes to real-time events. The hook syncs its internal project selection when the caller-supplied `projectId` changes. Current board/project selection is route- and UI-state-driven; it is not persisted via `?project=<id>` in the current web app.
+
+`ticketing.getById({ id, projectId? })` accepts an optional `projectId` validation hint. When provided, the server treats a ticket from a different project as not found. Board mode uses this to prevent stale cross-project ticket detail state from executing actions against the wrong project.
 
 ---
 

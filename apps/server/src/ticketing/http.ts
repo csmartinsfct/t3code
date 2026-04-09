@@ -276,7 +276,9 @@ function createTicketingMcpServer(
     async ({ id }) => {
       try {
         const resolved = await resolve(id);
-        const ticket = await bridge.run(ticketing.getById({ id: resolved }));
+        const ticket = await bridge.run(
+          ticketing.getById({ id: resolved, projectId: context.projectId }),
+        );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
       } catch (error) {
         return mcpError(

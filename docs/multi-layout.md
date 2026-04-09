@@ -38,10 +38,52 @@ The feature has four main parts:
 The toggle lives in the sidebar footer (`Sidebar.tsx`) as a segmented control with "Chat" and "Board" buttons. State is managed by `uiStateStore`:
 
 - **Type:** `ViewMode = "chat" | "management"`
-- **Persisted:** Written to `localStorage` alongside other UI state (sidebar expansion, project order).
-- **Read on hydration:** `hydratePersistedProjectState()` restores the last-used mode.
+- **Persisted:** Written to `localStorage` alongside other UI state (sidebar expansion, project order, and board context).
+- **Read on hydration:** `hydratePersistedUiState()` restores the last-used mode and saved board state.
 
 Both `_chat.$threadId.tsx` and `_chat.index.tsx` check `viewMode` and render `ManagementView` instead of `ChatView` when in `"management"` mode.
+
+## Thread ↔ Board Relationship
+
+Board mode still lives inside the chat routes, so the active thread remains the source of truth for project context.
+
+- In `/_chat/$threadId`, the board project is derived from the selected thread's `projectId`.
+- In `/_chat/`, Board mode uses standalone project context and always shows a project board root, never a thread-specific ticket detail.
+- Board context is stored **per thread**, not per project.
+- Switching threads restores the target thread's saved board context if it is still valid for that thread's project.
+- If a thread has no saved board context, the board opens at that thread's project root.
+- Cross-project thread switches never preserve the previous thread's ticket detail.
+
+This means the board and the right-hand chat panel are intentionally coupled:
+
+- the chat thread chooses the active project
+- the board restores the last relevant board state for that thread
+- the board must never render a ticket from a different project than the active thread
+
+## Board Context Model
+
+Board mode persists a small thread-scoped context in `uiStateStore`:
+
+- `projectId` — the project the saved board state belongs to
+- `ticketStack` — ordered drill-down path for ticket detail navigation
+- `boardScrollLeft` — horizontal scroll position for the root board columns view
+- `updatedAt` — timestamp for the most recent board-context write
+
+Sanitization rules:
+
+- if the saved `projectId` does not match the active thread's project, the saved context is discarded and replaced with that project's board root
+- if a ticket in `ticketStack` no longer exists, it is removed
+- if the top ticket becomes invalid, the stack collapses back to the nearest valid ancestor, or to the board root if none remain
+- no-thread Board mode does not restore ticket detail
+
+## State Ownership
+
+- **Route** owns the active thread identity.
+- **Route** derives the active board project from that thread.
+- **`uiStateStore`** owns persisted per-thread board context plus the last standalone Board project.
+- **`useTicketing`** owns ticket fetches, project-scoped ticket lists, and live ticket stream updates.
+- **`KanbanBoard`** renders from route context, project ticket data, and the saved board context.
+- **`KanbanTicketDetail`** is only valid when the top-of-stack ticket still belongs to the active project.
 
 ## ManagementView
 
@@ -50,6 +92,12 @@ Both `_chat.$threadId.tsx` and `_chat.index.tsx` check `viewMode` and render `Ma
 1. A `SidebarInset` containing the `KanbanBoard` (main content area).
 2. A nested `SidebarProvider` + `Sidebar` on the right for the chat panel (resizable, collapsible via `offcanvas`).
 3. A `DndContext` wrapping both areas so drag-and-drop can cross from board to chat.
+
+`ManagementView` receives both `threadId` and `projectId`. That pair is important:
+
+- `threadId` selects which saved board context should be restored
+- `projectId` defines which ticket data is valid to render
+- changing either clears ephemeral ticket selection and forces the board to realign
 
 ### Nested SidebarProvider
 
@@ -84,6 +132,13 @@ Tickets are fetched and managed by the `useTicketing` hook:
 - **Real-time:** Subscribes to `api.ticketing.onEvent()` stream, filters by `selectedProjectId`, applies `ticket_upserted` and `ticket_deleted` events.
 - **Project sync:** A `useEffect` syncs the hook's internal `selectedProjectId` when the caller-supplied `projectId` prop changes (handles TanStack Router keeping components mounted across thread switches).
 - **Optimistic reorder:** `applyLocalReorder()` updates local ticket sort orders and statuses immediately, since the server's `reorder` endpoint does not emit stream events.
+
+Board state itself is **not** owned by `useTicketing`. `KanbanBoard` reads ticket data from `useTicketing`, then overlays thread-scoped board context from `uiStateStore`:
+
+- root board view uses the active thread's saved `boardScrollLeft`
+- ticket detail uses the active thread's saved `ticketStack`
+- switching threads changes the restored board context even inside the same project
+- invalid stored context is sanitized against the current project's ticket list before detail renders
 
 ### Sort Order Strategy
 
@@ -131,6 +186,13 @@ interface ComposerTicketAttachment {
 - **Rendering:** `ComposerTicketAttachments` component renders removable chips (ticket icon + identifier + title + X button), following the `ComposerCodeSnippets` pattern.
 - **Resolution at send:** `formatTicketAttachmentsForModel()` converts to `Ticket ids: TCO-1, TCO-2` and includes it in the message preamble alongside skill and code-snippet blocks.
 - **Cleanup:** Cleared by `clearComposerContent()` after send.
+
+## Switching Examples
+
+- **Thread A, project X, ticket detail `X-12` → Thread B, project X:** the board restores B's saved context for project X. It does not inherit A's ticket detail.
+- **Thread A, project X, ticket detail `X-12` → Thread C, project Y:** the board restores C's saved context for project Y if valid; otherwise it opens project Y's board root.
+- **Target thread has no saved context:** the board opens that thread's project root.
+- **No active thread (`/_chat/`):** Board mode uses the last standalone Board project if available, otherwise the first ordered project, and always renders the board root only.
 
 ## File Map
 

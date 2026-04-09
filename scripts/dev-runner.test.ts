@@ -5,8 +5,10 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
 import {
+  clearConflictingPorts,
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  getConflictPortsForMode,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
@@ -312,6 +314,101 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 0 });
+      }),
+    );
+
+    it.effect("keeps requested ports when conflict killing is enabled", () =>
+      Effect.gen(function* () {
+        const offsets = yield* resolveModePortOffsets({
+          mode: "dev",
+          startOffset: 4,
+          hasExplicitServerPort: false,
+          hasExplicitDevUrl: false,
+          preferRequestedPorts: true,
+          checkPortAvailability: () => Effect.succeed(false),
+        });
+
+        assert.deepStrictEqual(offsets, { serverOffset: 4, webOffset: 4 });
+      }),
+    );
+  });
+
+  describe("getConflictPortsForMode", () => {
+    it.effect("returns both server and web ports for dev mode", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          getConflictPortsForMode("dev", {
+            PORT: "5733",
+            T3CODE_PORT: "3773",
+          }),
+          [3773, 5733],
+        );
+      }),
+    );
+
+    it.effect("only targets the backend port for dev:server", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          getConflictPortsForMode("dev:server", {
+            PORT: "5733",
+            T3CODE_PORT: "3773",
+          }),
+          [3773],
+        );
+      }),
+    );
+
+    it.effect("only targets the web port for dev:web", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          getConflictPortsForMode("dev:web", {
+            PORT: "5733",
+            T3CODE_PORT: "3773",
+          }),
+          [5733],
+        );
+      }),
+    );
+  });
+
+  describe("clearConflictingPorts", () => {
+    it.effect("deduplicates listeners across ports and escalates stubborn processes", () =>
+      Effect.gen(function* () {
+        const deliveredSignals: string[] = [];
+        const alive = new Set([4101, 4102]);
+
+        const cleared = yield* clearConflictingPorts({
+          ports: [3773, 5733, 3773],
+          listListeningProcessIdsOnPort: (port) =>
+            Effect.succeed(port === 3773 ? [4101, 4102] : [4102]),
+          signalProcess: (pid, signal) =>
+            Effect.sync(() => {
+              deliveredSignals.push(`${signal}:${String(pid)}`);
+
+              if (signal === "SIGTERM" && pid === 4101) {
+                alive.delete(pid);
+              }
+
+              if (signal === "SIGKILL") {
+                alive.delete(pid);
+              }
+            }),
+          waitForProcessExit: (pid) => Effect.succeed(!alive.has(pid)),
+        });
+
+        assert.deepStrictEqual(cleared, [4101, 4102]);
+        assert.deepStrictEqual(deliveredSignals, ["SIGTERM:4101", "SIGTERM:4102", "SIGKILL:4102"]);
+      }),
+    );
+
+    it.effect("returns an empty list when no selected ports are occupied", () =>
+      Effect.gen(function* () {
+        const cleared = yield* clearConflictingPorts({
+          ports: [3773, 5733],
+          listListeningProcessIdsOnPort: () => Effect.succeed([]),
+        });
+
+        assert.deepStrictEqual(cleared, []);
       }),
     );
   });

@@ -276,6 +276,9 @@ const makeTicketingService = Effect.gen(function* () {
   const getById: TicketingServiceShape["getById"] = (input) =>
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(TicketId.makeUnsafe(input.id));
+      if (input.projectId && ticket.projectId !== input.projectId) {
+        return yield* Effect.fail(new TicketNotFoundError({ ticketId: input.id }));
+      }
       return yield* buildFullTicket(ticket);
     });
 

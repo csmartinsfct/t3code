@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { execFile as execFileCallback } from "node:child_process";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,6 +15,9 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const PORT_CONFLICT_WAIT_MS = 1500;
+const PORT_CONFLICT_POLL_INTERVAL_MS = 100;
+const execFile = promisify(execFileCallback);
 
 export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3"),
@@ -290,6 +295,7 @@ interface ResolveModePortOffsetsInput<R = NetService> {
   readonly startOffset: number;
   readonly hasExplicitServerPort: boolean;
   readonly hasExplicitDevUrl: boolean;
+  readonly preferRequestedPorts?: boolean;
   readonly checkPortAvailability?: PortAvailabilityCheck<R>;
 }
 
@@ -298,6 +304,7 @@ export function resolveModePortOffsets<R = NetService>({
   startOffset,
   hasExplicitServerPort,
   hasExplicitDevUrl,
+  preferRequestedPorts = false,
   checkPortAvailability,
 }: ResolveModePortOffsetsInput<R>): Effect.Effect<
   { readonly serverOffset: number; readonly webOffset: number },
@@ -305,6 +312,10 @@ export function resolveModePortOffsets<R = NetService>({
   R
 > {
   return Effect.gen(function* () {
+    if (preferRequestedPorts) {
+      return { serverOffset: startOffset, webOffset: startOffset };
+    }
+
     const checkPort = (checkPortAvailability ??
       defaultCheckPortAvailability) as PortAvailabilityCheck<R>;
 
@@ -351,6 +362,7 @@ interface DevRunnerCliInput {
   readonly mode: DevMode;
   readonly t3Home: string | undefined;
   readonly authToken: string | undefined;
+  readonly killPortConflicts: boolean | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
@@ -390,6 +402,260 @@ const resolveOptionalBooleanOverride = (
   return envValue;
 };
 
+function isErrnoExceptionWithCode(cause: unknown): cause is {
+  readonly code: string;
+} {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    typeof (cause as { readonly code: unknown }).code === "string"
+  );
+}
+
+function isExitCodeError(
+  cause: unknown,
+  expectedCode: number,
+): cause is {
+  readonly code: number;
+} {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    (cause as { readonly code: unknown }).code === expectedCode
+  );
+}
+
+type ProcessSignal = "SIGTERM" | "SIGKILL";
+type PortProcessLookup<R = never> = (
+  port: number,
+) => Effect.Effect<ReadonlyArray<number>, DevRunnerError, R>;
+type ProcessSignalSender = (
+  pid: number,
+  signal: ProcessSignal,
+) => Effect.Effect<void, DevRunnerError>;
+type ProcessExitWaiter<R = never> = (pid: number) => Effect.Effect<boolean, DevRunnerError, R>;
+
+const defaultListListeningProcessIdsOnPort: PortProcessLookup = (port) =>
+  Effect.tryPromise({
+    try: async () => {
+      if (process.platform === "win32") {
+        return [];
+      }
+
+      try {
+        const { stdout } = await execFile("lsof", [
+          "-nP",
+          `-iTCP:${String(port)}`,
+          "-sTCP:LISTEN",
+          "-t",
+        ]);
+
+        return [...new Set(stdout.split(/\s+/u))]
+          .map((value) => Number.parseInt(value, 10))
+          .filter((value) => Number.isInteger(value) && value > 0);
+      } catch (cause) {
+        if (isExitCodeError(cause, 1)) {
+          return [];
+        }
+
+        if (isErrnoExceptionWithCode(cause) && cause.code === "ENOENT") {
+          return [];
+        }
+
+        throw cause;
+      }
+    },
+    catch: (cause) =>
+      new DevRunnerError({
+        message: `Failed to inspect port ${port} listeners.`,
+        cause,
+      }),
+  });
+
+const defaultSignalProcess: ProcessSignalSender = (pid, signal) =>
+  Effect.try({
+    try: () => {
+      try {
+        process.kill(pid, signal);
+      } catch (cause) {
+        if (isErrnoExceptionWithCode(cause) && cause.code === "ESRCH") {
+          return;
+        }
+        throw cause;
+      }
+    },
+    catch: (cause) =>
+      new DevRunnerError({
+        message: `Failed to send ${signal} to process ${pid}.`,
+        cause,
+      }),
+  });
+
+const defaultWaitForProcessExit: ProcessExitWaiter = (pid) =>
+  Effect.gen(function* () {
+    const attempts = Math.max(1, Math.ceil(PORT_CONFLICT_WAIT_MS / PORT_CONFLICT_POLL_INTERVAL_MS));
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const alive = yield* Effect.try({
+        try: () => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch (cause) {
+            if (isErrnoExceptionWithCode(cause)) {
+              if (cause.code === "ESRCH") {
+                return false;
+              }
+
+              if (cause.code === "EPERM") {
+                return true;
+              }
+            }
+
+            throw cause;
+          }
+        },
+        catch: (cause) =>
+          new DevRunnerError({
+            message: `Failed to verify whether process ${pid} is still running.`,
+            cause,
+          }),
+      });
+
+      if (!alive) {
+        return true;
+      }
+
+      yield* Effect.sleep(PORT_CONFLICT_POLL_INTERVAL_MS);
+    }
+
+    return false;
+  });
+
+const parseEnvPort = (value: string | undefined): number | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const port = Number.parseInt(value, 10);
+  if (!Number.isInteger(port) || port <= 0 || port > MAX_PORT) {
+    return undefined;
+  }
+
+  return port;
+};
+
+export function getConflictPortsForMode(
+  mode: DevMode,
+  env: {
+    readonly [key: string]: string | undefined;
+    readonly PORT?: string;
+    readonly T3CODE_PORT?: string;
+  },
+): ReadonlyArray<number> {
+  switch (mode) {
+    case "dev":
+      return [parseEnvPort(env.T3CODE_PORT), parseEnvPort(env.PORT)].filter(
+        (value): value is number => value !== undefined,
+      );
+    case "dev:server": {
+      const port = parseEnvPort(env.T3CODE_PORT);
+      return port === undefined ? [] : [port];
+    }
+    case "dev:web":
+    case "dev:desktop": {
+      const port = parseEnvPort(env.PORT);
+      return port === undefined ? [] : [port];
+    }
+  }
+}
+
+interface ClearConflictingPortsInput<R = never> {
+  readonly ports: ReadonlyArray<number>;
+  readonly listListeningProcessIdsOnPort?: PortProcessLookup<R>;
+  readonly signalProcess?: ProcessSignalSender;
+  readonly waitForProcessExit?: ProcessExitWaiter<R>;
+}
+
+export function clearConflictingPorts<R = never>({
+  ports,
+  listListeningProcessIdsOnPort,
+  signalProcess,
+  waitForProcessExit,
+}: ClearConflictingPortsInput<R>): Effect.Effect<ReadonlyArray<number>, DevRunnerError, R> {
+  return Effect.gen(function* () {
+    const uniquePorts = [...new Set(ports.filter((port) => Number.isInteger(port) && port > 0))];
+    if (uniquePorts.length === 0) {
+      return [];
+    }
+
+    const lookup = (listListeningProcessIdsOnPort ??
+      defaultListListeningProcessIdsOnPort) as PortProcessLookup<R>;
+    const sendSignal = signalProcess ?? defaultSignalProcess;
+    const waitForExit = (waitForProcessExit ?? defaultWaitForProcessExit) as ProcessExitWaiter<R>;
+
+    const seenPids = new Set<number>();
+    const pids: number[] = [];
+
+    for (const port of uniquePorts) {
+      const listeners = yield* lookup(port);
+      for (const pid of listeners) {
+        if (pid === process.pid || seenPids.has(pid)) {
+          continue;
+        }
+
+        seenPids.add(pid);
+        pids.push(pid);
+      }
+    }
+
+    if (pids.length === 0) {
+      return [];
+    }
+
+    yield* Effect.logInfo(
+      `[dev-runner] clearing port conflicts ports=${uniquePorts.join(",")} pids=${pids.join(",")}`,
+    );
+
+    for (const pid of pids) {
+      yield* sendSignal(pid, "SIGTERM");
+    }
+
+    const stubbornPids: number[] = [];
+    for (const pid of pids) {
+      const exited = yield* waitForExit(pid);
+      if (!exited) {
+        stubbornPids.push(pid);
+      }
+    }
+
+    if (stubbornPids.length === 0) {
+      return pids;
+    }
+
+    yield* Effect.logWarning(
+      `[dev-runner] force-killing stubborn port conflicts pids=${stubbornPids.join(",")}`,
+    );
+
+    for (const pid of stubbornPids) {
+      yield* sendSignal(pid, "SIGKILL");
+    }
+
+    for (const pid of stubbornPids) {
+      const exited = yield* waitForExit(pid);
+      if (!exited) {
+        return yield* new DevRunnerError({
+          message: `Failed to stop port-conflicting process ${pid}.`,
+        });
+      }
+    }
+
+    return pids;
+  });
+}
+
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
@@ -412,16 +678,22 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     });
 
     const envOverrides = {
+      killPortConflicts: readOptionalBooleanEnv("T3CODE_KILL_PORT_CONFLICTS"),
       noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
       autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
     };
+
+    const killPortConflicts =
+      resolveOptionalBooleanOverride(input.killPortConflicts, envOverrides.killPortConflicts) ===
+      true;
 
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
       hasExplicitServerPort: input.port !== undefined,
       hasExplicitDevUrl: input.devUrl !== undefined,
+      preferRequestedPorts: killPortConflicts,
     });
 
     const env = yield* createDevRunnerEnv({
@@ -456,6 +728,12 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     if (input.dryRun) {
       return;
+    }
+
+    if (killPortConflicts) {
+      yield* clearConflictingPorts({
+        ports: getConflictPortsForMode(input.mode, env),
+      });
     }
 
     const child = yield* ChildProcess.make(
@@ -507,6 +785,12 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withDescription("Auth token (forwards to T3CODE_AUTH_TOKEN)."),
     Flag.withAlias("token"),
     Flag.withFallbackConfig(optionalStringConfig("T3CODE_AUTH_TOKEN")),
+  ),
+  killPortConflicts: Flag.boolean("kill-port-conflicts").pipe(
+    Flag.withDescription(
+      "Stop any listeners already bound to the selected dev ports before starting.",
+    ),
+    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_KILL_PORT_CONFLICTS")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(
     Flag.withDescription("Browser auto-open toggle (equivalent to T3CODE_NO_BROWSER)."),

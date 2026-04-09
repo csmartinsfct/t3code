@@ -127,7 +127,7 @@ export function KanbanTicketDetail({
   const fetchTicket = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const data = await api.ticketing.getById({ id: ticketId });
+      const data = await api.ticketing.getById({ id: ticketId, projectId: projectId as ProjectId });
       ticketRef.current = data;
       setTicket(data);
     } catch (error) {
@@ -135,7 +135,7 @@ export function KanbanTicketDetail({
     } finally {
       setLoading(false);
     }
-  }, [ticketId]);
+  }, [projectId, ticketId]);
 
   useEffect(() => {
     setLoading(true);
@@ -176,6 +176,12 @@ export function KanbanTicketDetail({
     });
     return unsubscribe;
   }, [ticketId, onBack, fetchTicket]);
+
+  useEffect(() => {
+    if (ticket && ticket.projectId !== (projectId as ProjectId)) {
+      onBack();
+    }
+  }, [onBack, projectId, ticket]);
 
   const handleStatusChange = useCallback(
     async (status: TicketStatus) => {
@@ -354,7 +360,7 @@ export function KanbanTicketDetail({
       addTicketAttachment,
     } = useComposerDraftStore.getState();
 
-    const typedProjectId = projectId as ProjectId;
+    const typedProjectId = ticket.projectId;
 
     clearProjectDraftThreadId(typedProjectId);
 
@@ -374,7 +380,7 @@ export function KanbanTicketDetail({
     setPrompt(threadId, DECOMPOSE_PROMPT);
 
     void navigate({ to: "/$threadId", params: { threadId } });
-  }, [ticket, projectId, navigate]);
+  }, [ticket, navigate]);
 
   if (loading) {
     return (
@@ -679,9 +685,7 @@ export function KanbanTicketDetail({
           globalDefault={resolvedGlobalImplementer}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) =>
-            void handleModelOverrideChange("implementerModelOverride", value)
-          }
+          onChange={(value) => void handleModelOverrideChange("implementerModelOverride", value)}
         />
         <ModelOverrideRow
           label="Reviewer"
@@ -689,14 +693,16 @@ export function KanbanTicketDetail({
           globalDefault={resolvedGlobalReviewer}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) =>
-            void handleModelOverrideChange("reviewerModelOverride", value)
-          }
+          onChange={(value) => void handleModelOverrideChange("reviewerModelOverride", value)}
         />
 
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
-          <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
+          <SubTicketsList
+            projectId={projectId}
+            subTickets={ticket.subTickets}
+            onNavigateToTicket={onNavigateToTicket}
+          />
         )}
 
         {/* Comments */}
@@ -741,9 +747,11 @@ export function KanbanTicketDetail({
 // ---------------------------------------------------------------------------
 
 function SubTicketsList({
+  projectId,
   subTickets,
   onNavigateToTicket,
 }: {
+  projectId: string;
   subTickets: readonly TicketSummary[];
   onNavigateToTicket: (ticketId: TicketId) => void;
 }) {
@@ -782,25 +790,28 @@ function SubTicketsList({
     });
   }, []);
 
-  const fetchPreview = useCallback(async (id: TicketId): Promise<Ticket | null> => {
-    const key = id as string;
-    const cached = cacheRef.current.get(key);
-    if (cached) return cached;
-    const existing = inflightRef.current.get(key);
-    if (existing) return existing;
-    const promise = ensureNativeApi()
-      .ticketing.getById({ id })
-      .then((t) => {
-        cacheRef.current.set(key, t);
-        return t;
-      })
-      .catch(() => null)
-      .finally(() => {
-        inflightRef.current.delete(key);
-      });
-    inflightRef.current.set(key, promise);
-    return promise;
-  }, []);
+  const fetchPreview = useCallback(
+    async (id: TicketId): Promise<Ticket | null> => {
+      const key = id as string;
+      const cached = cacheRef.current.get(key);
+      if (cached) return cached;
+      const existing = inflightRef.current.get(key);
+      if (existing) return existing;
+      const promise = ensureNativeApi()
+        .ticketing.getById({ id, projectId: projectId as ProjectId })
+        .then((t) => {
+          cacheRef.current.set(key, t);
+          return t;
+        })
+        .catch(() => null)
+        .finally(() => {
+          inflightRef.current.delete(key);
+        });
+      inflightRef.current.set(key, promise);
+      return promise;
+    },
+    [projectId],
+  );
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
     return cacheRef.current.get(id as string);
