@@ -55,6 +55,7 @@ Use these as implementation references when designing protocol handling, UX flow
 ## Internal Docs
 
 - [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
+- [Prompts](docs/prompts.md) — Prompt definitions, scope-aware overrides, validation, deterministic preview rendering, and prompt-management MCP APIs.
 - [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
 - [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, MCP tools, and Settings UI.
 - [Agent Tools](docs/t3-agent-tools.md) — How MCP services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
@@ -67,6 +68,7 @@ These docs must be kept up to date as related code changes.
 The dev server listens on `http://localhost:3773` by default (configurable via `T3CODE_PORT` env var or `--port` CLI flag). MCP endpoints are available at:
 
 - `http://localhost:3773/mcp/ticketing`
+- `http://localhost:3773/mcp/prompts`
 - `http://localhost:3773/mcp/managed-runs`
 - `http://localhost:3773/mcp/scheduled-tasks`
 

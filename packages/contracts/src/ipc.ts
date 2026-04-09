@@ -28,6 +28,17 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type {
+  ListPromptDefinitionsInput,
+  ListPromptDefinitionsResult,
+  PreviewPromptDocumentInput,
+  PreviewPromptDocumentResult,
+  PromptDocumentQueryInput,
+  PromptDocumentState,
+  PromptDocumentValidationResult,
+  UpdatePromptDocumentInput,
+  ValidatePromptDocumentInput,
+} from "./promptManagement";
 import type { EnhanceSystemPromptInput, EnhanceSystemPromptResult } from "./rpc";
 import type {
   ServerConfig,
@@ -226,6 +237,15 @@ export interface NativeApi {
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
     listDirectory: (input: ProjectListDirectoryInput) => Promise<ProjectListDirectoryResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
+  };
+  prompts: {
+    listDefinitions: (input: ListPromptDefinitionsInput) => Promise<ListPromptDefinitionsResult>;
+    getDocument: (input: PromptDocumentQueryInput) => Promise<PromptDocumentState>;
+    validateDocument: (
+      input: ValidatePromptDocumentInput,
+    ) => Promise<PromptDocumentValidationResult>;
+    previewDocument: (input: PreviewPromptDocumentInput) => Promise<PreviewPromptDocumentResult>;
+    updateDocument: (input: UpdatePromptDocumentInput) => Promise<PromptDocumentState>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;

@@ -1,16 +1,19 @@
 # T3 Agent Tools
 
-How T3 Code exposes project services (managed runs, scheduled tasks, ticketing) to AI provider sessions.
+How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, and prompt management) to AI provider sessions.
 
 ## Overview
 
-T3 Code runs three internal MCP servers that AI models can use during conversations:
+T3 Code exposes four internal MCP HTTP services that AI models can use during conversations:
 
 | Service         | Endpoint               | Tools | Purpose                                                        |
 | --------------- | ---------------------- | ----- | -------------------------------------------------------------- |
 | Managed Runs    | `/mcp/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose |
 | Scheduled Tasks | `/mcp/scheduled-tasks` | ~9    | Recurring cron-based task automation                           |
 | Ticketing       | `/mcp/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts     |
+| Prompts         | `/mcp/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates    |
+
+Managed runs, scheduled tasks, and ticketing can be injected into provider sessions as native tools. Prompt management is currently an explicit HTTP management surface for the UI and MCP workflows rather than a native provider toolset.
 
 Each endpoint speaks the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) over HTTP using JSON-RPC 2.0. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
@@ -31,7 +34,7 @@ The `mcpDeliveryMode` server setting (Settings > General > "MCP delivery") contr
 
 ### Native Tools (`"tools"` — default)
 
-All three MCP servers are registered as native tool sets in the provider session. Each tool appears individually in the model's tool list.
+Managed runs, scheduled tasks, and ticketing are registered as native tool sets in the provider session. Each tool appears individually in the model's tool list.
 
 **How it works:**
 
@@ -44,11 +47,11 @@ All three MCP servers are registered as native tool sets in the provider session
 - (+) Model has direct tool access — no extra round-trip
 - (+) Tool schemas visible in context — model knows exact inputs
 - (-) 43+ tools injected upfront — context overhead even when unused
-- (-) Each new service adds more tools to every conversation
+- (-) Each injected service adds more tools to every conversation
 
 ### HTTP Endpoints (`"prompt"`)
 
-No MCP tools are registered. Instead, the system prompt provides endpoint URLs, the auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover and call tools on demand.
+No MCP tools are registered. Instead, the system prompt provides endpoint URLs, the auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover and call tools on demand, including the explicit prompt-management endpoint.
 
 **How it works:**
 
@@ -77,7 +80,7 @@ Thread start (with active project)
  Read mcpDeliveryMode from ServerSettings
        │
        ├── "tools" ─────────────────────────────────────┐
-       │   Register 3 MCP servers as native tools       │
+       │   Register native MCP tool sets                 │
        │   Append per-service system prompts             │
        │                                                 │
        ├── "prompt" ────────────────────────────────────┐│
@@ -94,9 +97,11 @@ Thread start (with active project)
 2. Token is scoped to the project + thread
 3. In "tools" mode: token is set in MCP server HTTP headers
 4. In "prompt" mode: token is embedded in the system prompt text
-5. All three MCP endpoints validate the token on each request
+5. All MCP endpoints validate the token on each request
 
 For ticketing specifically, the validated session context may also include `threadId`. The ticketing MCP route forwards that to the ticketing service so `create_ticket` can attach an `origin` ticket-thread link automatically.
+
+For prompts, managed-run bearer tokens are restricted to the issuing `projectId` and may only access project scope. Global prompt scope is only available through privileged contexts such as the dev bypass token.
 
 ### Condition Gate
 
@@ -117,6 +122,7 @@ apps/server/src/provider/mcpPromptModeSystemPrompt.ts   # "prompt" mode system p
 apps/server/src/managedRuns/systemPrompt.ts             # Managed runs "tools" mode prompt
 apps/server/src/scheduledTasks/systemPrompt.ts          # Scheduled tasks "tools" mode prompt
 apps/server/src/ticketing/systemPrompt.ts               # Ticketing "tools" mode prompt
+apps/server/src/prompts/http.ts                         # Prompt-management MCP route
 apps/server/src/ticketing/http.ts                       # Ticketing MCP route + thread-aware request context
 apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (both modes)
 apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (both modes)
@@ -136,3 +142,5 @@ To add a new MCP service to both delivery modes:
 5. Concatenate the new system prompt in both adapters' `"tools"` branch
 6. The `"prompt"` mode prompt (`mcpPromptModeSystemPrompt.ts`) picks up the new endpoint automatically if you add it to the services table — update the table and description there
 7. No UI changes needed — the setting toggle works for all services
+
+If a service should stay HTTP-only, follow the same MCP route and prompt-mode documentation path without adding native-tool registration in the provider adapters.

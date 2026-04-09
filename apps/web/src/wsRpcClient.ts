@@ -5,12 +5,21 @@ import {
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type ManagedRunStreamEvent,
+  type ListPromptDefinitionsInput,
+  type ListPromptDefinitionsResult,
   type NativeApi,
   type OrchestrationEvent,
   type OrchestrationRunStreamEvent,
   ORCHESTRATION_WS_METHODS,
+  type PreviewPromptDocumentInput,
+  type PreviewPromptDocumentResult,
+  type PromptDocumentQueryInput,
+  type PromptDocumentState,
+  type PromptDocumentValidationResult,
   type ProjectId,
   type ServerSettingsPatch,
+  type UpdatePromptDocumentInput,
+  type ValidatePromptDocumentInput,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -111,6 +120,19 @@ export interface WsRpcClient {
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
     readonly listDirectory: RpcUnaryMethod<typeof WS_METHODS.projectsListDirectory>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
+  };
+  readonly prompts: {
+    readonly listDefinitions: (
+      input: ListPromptDefinitionsInput,
+    ) => Promise<ListPromptDefinitionsResult>;
+    readonly getDocument: (input: PromptDocumentQueryInput) => Promise<PromptDocumentState>;
+    readonly validateDocument: (
+      input: ValidatePromptDocumentInput,
+    ) => Promise<PromptDocumentValidationResult>;
+    readonly previewDocument: (
+      input: PreviewPromptDocumentInput,
+    ) => Promise<PreviewPromptDocumentResult>;
+    readonly updateDocument: (input: UpdatePromptDocumentInput) => Promise<PromptDocumentState>;
   };
   readonly managedRuns: {
     readonly launchProjectScript: RpcUnaryMethod<typeof WS_METHODS.managedRunsLaunchProjectScript>;
@@ -277,6 +299,18 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsListDirectory](input)),
       readFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
+    },
+    prompts: {
+      listDefinitions: (input) =>
+        transport.request((client) => client[WS_METHODS.promptsListDefinitions](input)),
+      getDocument: (input) =>
+        transport.request((client) => client[WS_METHODS.promptsGetDocument](input)),
+      validateDocument: (input) =>
+        transport.request((client) => client[WS_METHODS.promptsValidateDocument](input)),
+      previewDocument: (input) =>
+        transport.request((client) => client[WS_METHODS.promptsPreviewDocument](input)),
+      updateDocument: (input) =>
+        transport.request((client) => client[WS_METHODS.promptsUpdateDocument](input)),
     },
     managedRuns: {
       launchProjectScript: (input) =>

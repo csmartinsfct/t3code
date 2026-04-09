@@ -48,6 +48,13 @@ export function createWsNativeApi(): NativeApi {
       listDirectory: rpcClient.projects.listDirectory,
       readFile: rpcClient.projects.readFile,
     },
+    prompts: {
+      listDefinitions: rpcClient.prompts.listDefinitions,
+      getDocument: rpcClient.prompts.getDocument,
+      validateDocument: rpcClient.prompts.validateDocument,
+      previewDocument: rpcClient.prompts.previewDocument,
+      updateDocument: rpcClient.prompts.updateDocument,
+    },
     managedRuns: {
       launchProjectScript: rpcClient.managedRuns.launchProjectScript,
       list: rpcClient.managedRuns.list,

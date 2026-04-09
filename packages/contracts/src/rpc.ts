@@ -130,6 +130,18 @@ import {
   ProjectWriteFileResult,
 } from "./project";
 import {
+  ListPromptDefinitionsInput,
+  ListPromptDefinitionsResult,
+  PreviewPromptDocumentInput,
+  PreviewPromptDocumentResult,
+  PromptDocumentQueryInput,
+  PromptDocumentState,
+  PromptDocumentValidationResult,
+  PromptManagementError,
+  UpdatePromptDocumentInput,
+  ValidatePromptDocumentInput,
+} from "./promptManagement";
+import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
@@ -172,6 +184,13 @@ export const WS_METHODS = {
   projectsWriteFile: "projects.writeFile",
   projectsListDirectory: "projects.listDirectory",
   projectsReadFile: "projects.readFile",
+
+  // Prompt management methods
+  promptsListDefinitions: "prompts.listDefinitions",
+  promptsGetDocument: "prompts.getDocument",
+  promptsValidateDocument: "prompts.validateDocument",
+  promptsPreviewDocument: "prompts.previewDocument",
+  promptsUpdateDocument: "prompts.updateDocument",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -364,6 +383,36 @@ export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   payload: ProjectReadFileInput,
   success: ProjectReadFileResult,
   error: ProjectReadFileError,
+});
+
+export const WsPromptsListDefinitionsRpc = Rpc.make(WS_METHODS.promptsListDefinitions, {
+  payload: ListPromptDefinitionsInput,
+  success: ListPromptDefinitionsResult,
+  error: PromptManagementError,
+});
+
+export const WsPromptsGetDocumentRpc = Rpc.make(WS_METHODS.promptsGetDocument, {
+  payload: PromptDocumentQueryInput,
+  success: PromptDocumentState,
+  error: PromptManagementError,
+});
+
+export const WsPromptsValidateDocumentRpc = Rpc.make(WS_METHODS.promptsValidateDocument, {
+  payload: ValidatePromptDocumentInput,
+  success: PromptDocumentValidationResult,
+  error: PromptManagementError,
+});
+
+export const WsPromptsPreviewDocumentRpc = Rpc.make(WS_METHODS.promptsPreviewDocument, {
+  payload: PreviewPromptDocumentInput,
+  success: PreviewPromptDocumentResult,
+  error: PromptManagementError,
+});
+
+export const WsPromptsUpdateDocumentRpc = Rpc.make(WS_METHODS.promptsUpdateDocument, {
+  payload: UpdatePromptDocumentInput,
+  success: PromptDocumentState,
+  error: PromptManagementError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -895,6 +944,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsProjectsListDirectoryRpc,
   WsProjectsReadFileRpc,
+  WsPromptsListDefinitionsRpc,
+  WsPromptsGetDocumentRpc,
+  WsPromptsValidateDocumentRpc,
+  WsPromptsPreviewDocumentRpc,
+  WsPromptsUpdateDocumentRpc,
   WsShellOpenInEditorRpc,
   WsGitStatusRpc,
   WsGitPullRpc,

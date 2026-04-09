@@ -46,10 +46,18 @@ const rpcClientMock = {
     ),
   },
   projects: {
+    enhanceSystemPrompt: vi.fn(),
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
     listDirectory: vi.fn(),
     readFile: vi.fn(),
+  },
+  prompts: {
+    listDefinitions: vi.fn(),
+    getDocument: vi.fn(),
+    validateDocument: vi.fn(),
+    previewDocument: vi.fn(),
+    updateDocument: vi.fn(),
   },
   managedRuns: {
     launchProjectScript: vi.fn(),
@@ -342,6 +350,29 @@ describe("wsNativeApi", () => {
       cwd: "/tmp/project",
       relativePath: "plan.md",
       contents: "# Plan\n",
+    });
+  });
+
+  it("forwards prompt management requests directly to the RPC client", async () => {
+    const response = {
+      scope: { scope: "project" as const, projectId: ProjectId.makeUnsafe("project-1") },
+      groups: [],
+      definitions: [],
+    };
+    rpcClientMock.prompts.listDefinitions.mockResolvedValue(response);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(
+      api.prompts.listDefinitions({
+        scope: "project",
+        projectId: ProjectId.makeUnsafe("project-1"),
+      }),
+    ).resolves.toEqual(response);
+    expect(rpcClientMock.prompts.listDefinitions).toHaveBeenCalledWith({
+      scope: "project",
+      projectId: "project-1",
     });
   });
 

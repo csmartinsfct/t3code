@@ -45,6 +45,10 @@ import {
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
+import {
+  PromptManagementService,
+  type PromptManagementShape,
+} from "./prompts/Services/PromptManagement.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
@@ -152,6 +156,7 @@ const buildAppUnderTest = (options?: {
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
+    promptManagement?: Partial<PromptManagementShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -190,246 +195,264 @@ const buildAppUnderTest = (options?: {
     const appLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
       disableLogger: true,
-    }).pipe(
-      Layer.provide(
-        Layer.mock(Keybindings)({
-          streamChanges: Stream.empty,
-          ...options?.layers?.keybindings,
-        }),
-      ),
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.mock(ProviderRegistry)({
-            getProviders: Effect.succeed([]),
-            refresh: () => Effect.succeed([]),
+    })
+      .pipe(
+        Layer.provide(
+          Layer.mock(Keybindings)({
             streamChanges: Stream.empty,
-            ...options?.layers?.providerRegistry,
-          }),
-          Layer.mock(ProviderService)({
-            startSession: () => Effect.die(new Error("not mocked")),
-            sendTurn: () => Effect.die(new Error("not mocked")),
-            interruptTurn: () => Effect.void,
-            respondToRequest: () => Effect.die(new Error("not mocked")),
-            respondToUserInput: () => Effect.die(new Error("not mocked")),
-            stopSession: () => Effect.void,
-            listSessions: () => Effect.succeed([]),
-            getCapabilities: () => Effect.die(new Error("not mocked")),
-            rollbackConversation: () => Effect.die(new Error("not mocked")),
-            streamEvents: Stream.empty,
-            probeAllRateLimits: () => Effect.succeed([]),
+            ...options?.layers?.keybindings,
           }),
         ),
-      ),
-      Layer.provide(
-        Layer.mock(ProviderRateLimitsCache)({
-          set: () => Effect.void,
-          getAll: Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRateLimitsCache,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(ServerSettingsService)({
-          start: Effect.void,
-          ready: Effect.void,
-          getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
-          updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
-          streamChanges: Stream.empty,
-          ...options?.layers?.serverSettings,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(Open)({
-          ...options?.layers?.open,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(GitCore)({
-          ...options?.layers?.gitCore,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(GitManager)({
-          ...options?.layers?.gitManager,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(TerminalManager)({
-          ...options?.layers?.terminalManager,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(OrchestrationEngineService)({
-          getReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          readEvents: () => Stream.empty,
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          ...options?.layers?.orchestrationEngine,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(ProjectionSnapshotQuery)({
-          getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          ...options?.layers?.projectionSnapshotQuery,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ProviderRegistry)({
+              getProviders: Effect.succeed([]),
+              refresh: () => Effect.succeed([]),
+              streamChanges: Stream.empty,
+              ...options?.layers?.providerRegistry,
             }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
+            Layer.mock(ProviderService)({
+              startSession: () => Effect.die(new Error("not mocked")),
+              sendTurn: () => Effect.die(new Error("not mocked")),
+              interruptTurn: () => Effect.void,
+              respondToRequest: () => Effect.die(new Error("not mocked")),
+              respondToUserInput: () => Effect.die(new Error("not mocked")),
+              stopSession: () => Effect.void,
+              listSessions: () => Effect.succeed([]),
+              getCapabilities: () => Effect.die(new Error("not mocked")),
+              rollbackConversation: () => Effect.die(new Error("not mocked")),
+              streamEvents: Stream.empty,
+              probeAllRateLimits: () => Effect.succeed([]),
             }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(ServerLifecycleEvents)({
-          publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),
-          snapshot: Effect.succeed({ sequence: 0, events: [] }),
-          stream: Stream.empty,
-          ...options?.layers?.serverLifecycleEvents,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(ServerRuntimeStartup)({
-          awaitCommandReady: Effect.void,
-          markHttpListening: Effect.void,
-          enqueueCommand: (effect) => effect,
-          ...options?.layers?.serverRuntimeStartup,
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(ManagedRunService, {
-          launchProjectScript: () => Effect.die(new Error("not mocked")),
-          list: () => Effect.succeed([]),
-          get: () => Effect.die(new Error("not mocked")),
-          getLogs: () => Effect.succeed([]),
-          listInferenceRecords: () => Effect.succeed([]),
-          getInferenceRecord: () => Effect.die(new Error("not mocked")),
-          stop: () => Effect.void,
-          streamEvents: () => Stream.empty,
-          issueMcpAccess: () =>
-            Effect.succeed({
-              token: "test",
-              projectId: ProjectId.makeUnsafe("test"),
-              threadId: "test" as any,
-            }),
-          resolveContextForToken: () => Effect.succeed(null),
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(ScheduledTaskService, {
-          list: () => Effect.succeed([]),
-          get: () => Effect.die(new Error("not mocked")),
-          create: () => Effect.die(new Error("not mocked")),
-          update: () => Effect.die(new Error("not mocked")),
-          delete: () => Effect.void,
-          toggle: () => Effect.die(new Error("not mocked")),
-          runNow: () => Effect.die(new Error("not mocked")),
-          listRuns: () => Effect.succeed([]),
-          executeJob: () => Effect.die(new Error("not mocked")),
-          executeDueJobs: () => Effect.void,
-          catchUpMissedRuns: () => Effect.void,
-          streamEvents: Stream.empty,
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(TicketingService, {
-          resolveId: () => Effect.die(new Error("not mocked")),
-          resolveIdentifiers: () => Effect.succeed(new Map()),
-          list: () => Effect.succeed([]),
-          getById: () => Effect.die(new Error("not mocked")),
-          getByIdentifier: () => Effect.die(new Error("not mocked")),
-          getThreadLinks: ({ ticketId }) =>
-            Effect.succeed({ ticketId, originThread: null, relatedThreads: [] }),
-          create: () => Effect.die(new Error("not mocked")),
-          update: () => Effect.die(new Error("not mocked")),
-          delete: () => Effect.void,
-          reorder: () => Effect.void,
-          search: () => Effect.succeed([]),
-          getTree: () => Effect.succeed([]),
-          setDependencies: () => Effect.void,
-          addDependency: () => Effect.void,
-          removeDependency: () => Effect.void,
-          updateCriterionStatus: () => Effect.die(new Error("not mocked")),
-          getHistory: () => Effect.succeed([]),
-          listLabels: () => Effect.succeed([]),
-          createLabel: () => Effect.die(new Error("not mocked")),
-          updateLabel: () => Effect.die(new Error("not mocked")),
-          deleteLabel: () => Effect.void,
-          addTicketLabel: () => Effect.void,
-          removeTicketLabel: () => Effect.void,
-          listComments: () => Effect.succeed([]),
-          createComment: () => Effect.die(new Error("not mocked")),
-          updateComment: () => Effect.die(new Error("not mocked")),
-          deleteComment: () => Effect.void,
-          listArtifacts: () => Effect.succeed([]),
-          createArtifact: () => Effect.die(new Error("not mocked")),
-          deleteArtifact: () => Effect.void,
-          streamEvents: Stream.empty,
-        }),
-      ),
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(OrchestrationRunService, {
-            create: () => Effect.die(new Error("not mocked")),
-            get: () => Effect.die(new Error("not mocked")),
+          ),
+        ),
+        Layer.provide(
+          Layer.mock(ProviderRateLimitsCache)({
+            set: () => Effect.void,
+            getAll: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRateLimitsCache,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ServerSettingsService)({
+            start: Effect.void,
+            ready: Effect.void,
+            getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+            updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
+            streamChanges: Stream.empty,
+            ...options?.layers?.serverSettings,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(Open)({
+            ...options?.layers?.open,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(GitCore)({
+            ...options?.layers?.gitCore,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(GitManager)({
+            ...options?.layers?.gitManager,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(TerminalManager)({
+            ...options?.layers?.terminalManager,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(OrchestrationEngineService)({
+            getReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            readEvents: () => Stream.empty,
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+            streamDomainEvents: Stream.empty,
+            ...options?.layers?.orchestrationEngine,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ProjectionSnapshotQuery)({
+            getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            ...options?.layers?.projectionSnapshotQuery,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ServerLifecycleEvents)({
+            publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),
+            snapshot: Effect.succeed({ sequence: 0, events: [] }),
+            stream: Stream.empty,
+            ...options?.layers?.serverLifecycleEvents,
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ServerRuntimeStartup)({
+            awaitCommandReady: Effect.void,
+            markHttpListening: Effect.void,
+            enqueueCommand: (effect) => effect,
+            ...options?.layers?.serverRuntimeStartup,
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(PromptManagementService, {
+            listPromptDefinitions: () =>
+              Effect.succeed({
+                scope: { scope: "global" as const },
+                groups: [],
+                definitions: [],
+              }),
+            getPromptDocument: () => Effect.die(new Error("not mocked")),
+            validatePromptDocument: () => Effect.die(new Error("not mocked")),
+            previewPromptDocument: () => Effect.die(new Error("not mocked")),
+            updatePromptDocument: () => Effect.die(new Error("not mocked")),
+            ...options?.layers?.promptManagement,
+          }),
+        ),
+      )
+      .pipe(
+        Layer.provide(
+          Layer.succeed(ManagedRunService, {
+            launchProjectScript: () => Effect.die(new Error("not mocked")),
             list: () => Effect.succeed([]),
-            getChildThreads: () => Effect.succeed([]),
-            pause: () => Effect.die(new Error("not mocked")),
-            resume: () => Effect.die(new Error("not mocked")),
-            cancel: () => Effect.die(new Error("not mocked")),
-            start: () => Effect.die(new Error("not mocked")),
-            complete: () => Effect.die(new Error("not mocked")),
-            fail: () => Effect.die(new Error("not mocked")),
-            updateRunProgress: () => Effect.die(new Error("not mocked")),
+            get: () => Effect.die(new Error("not mocked")),
+            getLogs: () => Effect.succeed([]),
+            listInferenceRecords: () => Effect.succeed([]),
+            getInferenceRecord: () => Effect.die(new Error("not mocked")),
+            stop: () => Effect.void,
             streamEvents: () => Stream.empty,
-          }),
-          Layer.succeed(OrchestrationRunRunner, {
-            startRun: () => Effect.die(new Error("not mocked")),
-            pauseRun: () => Effect.die(new Error("not mocked")),
-            resumeRun: () => Effect.die(new Error("not mocked")),
-            cancelRun: () => Effect.die(new Error("not mocked")),
-          }),
-          Layer.succeed(OrchestrationRunRepository, {
-            create: () => Effect.void,
-            update: () => Effect.void,
-            getById: () => Effect.succeed(Option.none()),
-            getByOrchestrationThreadId: () => Effect.succeed(Option.none()),
-            listByProject: () => Effect.succeed([]),
-            deleteById: () => Effect.void,
-          }),
-          Layer.succeed(ProjectionThreadRepository, {
-            upsert: () => Effect.void,
-            getById: () => Effect.succeed(Option.none()),
-            listByProjectId: () => Effect.succeed([]),
-            listByParentThreadId: () => Effect.succeed([]),
-            deleteById: () => Effect.void,
+            issueMcpAccess: () =>
+              Effect.succeed({
+                token: "test",
+                projectId: ProjectId.makeUnsafe("test"),
+                threadId: "test" as any,
+              }),
+            resolveContextForToken: () => Effect.succeed(null),
           }),
         ),
-      ),
-      Layer.provide(
-        Layer.mock(TextGeneration)({
-          generateCommitMessage: () => Effect.die(new Error("not mocked")),
-          generatePrContent: () => Effect.die(new Error("not mocked")),
-          generateBranchName: () => Effect.die(new Error("not mocked")),
-          generateThreadTitle: () => Effect.die(new Error("not mocked")),
-          enhanceSystemPrompt: () => Effect.die(new Error("not mocked")),
-        }),
-      ),
-      Layer.provide(workspaceAndProjectServicesLayer),
-      Layer.provide(layerConfig),
-    );
+        Layer.provide(
+          Layer.succeed(ScheduledTaskService, {
+            list: () => Effect.succeed([]),
+            get: () => Effect.die(new Error("not mocked")),
+            create: () => Effect.die(new Error("not mocked")),
+            update: () => Effect.die(new Error("not mocked")),
+            delete: () => Effect.void,
+            toggle: () => Effect.die(new Error("not mocked")),
+            runNow: () => Effect.die(new Error("not mocked")),
+            listRuns: () => Effect.succeed([]),
+            executeJob: () => Effect.die(new Error("not mocked")),
+            executeDueJobs: () => Effect.void,
+            catchUpMissedRuns: () => Effect.void,
+            streamEvents: Stream.empty,
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(TicketingService, {
+            resolveId: () => Effect.die(new Error("not mocked")),
+            resolveIdentifiers: () => Effect.succeed(new Map()),
+            list: () => Effect.succeed([]),
+            getById: () => Effect.die(new Error("not mocked")),
+            getByIdentifier: () => Effect.die(new Error("not mocked")),
+            getThreadLinks: ({ ticketId }) =>
+              Effect.succeed({ ticketId, originThread: null, relatedThreads: [] }),
+            create: () => Effect.die(new Error("not mocked")),
+            update: () => Effect.die(new Error("not mocked")),
+            delete: () => Effect.void,
+            reorder: () => Effect.void,
+            search: () => Effect.succeed([]),
+            getTree: () => Effect.succeed([]),
+            setDependencies: () => Effect.void,
+            addDependency: () => Effect.void,
+            removeDependency: () => Effect.void,
+            updateCriterionStatus: () => Effect.die(new Error("not mocked")),
+            getHistory: () => Effect.succeed([]),
+            listLabels: () => Effect.succeed([]),
+            createLabel: () => Effect.die(new Error("not mocked")),
+            updateLabel: () => Effect.die(new Error("not mocked")),
+            deleteLabel: () => Effect.void,
+            addTicketLabel: () => Effect.void,
+            removeTicketLabel: () => Effect.void,
+            listComments: () => Effect.succeed([]),
+            createComment: () => Effect.die(new Error("not mocked")),
+            updateComment: () => Effect.die(new Error("not mocked")),
+            deleteComment: () => Effect.void,
+            listArtifacts: () => Effect.succeed([]),
+            createArtifact: () => Effect.die(new Error("not mocked")),
+            deleteArtifact: () => Effect.void,
+            streamEvents: Stream.empty,
+          }),
+        ),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(OrchestrationRunService, {
+              create: () => Effect.die(new Error("not mocked")),
+              get: () => Effect.die(new Error("not mocked")),
+              list: () => Effect.succeed([]),
+              getChildThreads: () => Effect.succeed([]),
+              pause: () => Effect.die(new Error("not mocked")),
+              resume: () => Effect.die(new Error("not mocked")),
+              cancel: () => Effect.die(new Error("not mocked")),
+              start: () => Effect.die(new Error("not mocked")),
+              complete: () => Effect.die(new Error("not mocked")),
+              fail: () => Effect.die(new Error("not mocked")),
+              updateRunProgress: () => Effect.die(new Error("not mocked")),
+              streamEvents: () => Stream.empty,
+            }),
+            Layer.succeed(OrchestrationRunRunner, {
+              startRun: () => Effect.die(new Error("not mocked")),
+              pauseRun: () => Effect.die(new Error("not mocked")),
+              resumeRun: () => Effect.die(new Error("not mocked")),
+              cancelRun: () => Effect.die(new Error("not mocked")),
+            }),
+            Layer.succeed(OrchestrationRunRepository, {
+              create: () => Effect.void,
+              update: () => Effect.void,
+              getById: () => Effect.succeed(Option.none()),
+              getByOrchestrationThreadId: () => Effect.succeed(Option.none()),
+              listByProject: () => Effect.succeed([]),
+              deleteById: () => Effect.void,
+            }),
+            Layer.succeed(ProjectionThreadRepository, {
+              upsert: () => Effect.void,
+              getById: () => Effect.succeed(Option.none()),
+              listByProjectId: () => Effect.succeed([]),
+              listByParentThreadId: () => Effect.succeed([]),
+              deleteById: () => Effect.void,
+            }),
+          ),
+        ),
+        Layer.provide(
+          Layer.mock(TextGeneration)({
+            generateCommitMessage: () => Effect.die(new Error("not mocked")),
+            generatePrContent: () => Effect.die(new Error("not mocked")),
+            generateBranchName: () => Effect.die(new Error("not mocked")),
+            generateThreadTitle: () => Effect.die(new Error("not mocked")),
+            enhanceSystemPrompt: () => Effect.die(new Error("not mocked")),
+          }),
+        ),
+        Layer.provide(workspaceAndProjectServicesLayer),
+        Layer.provide(layerConfig),
+      );
 
     yield* Layer.build(appLayer);
     return config;
@@ -940,6 +963,93 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         result.failure.message,
         "Workspace file path must stay within the project root.",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc prompt management methods", () =>
+    Effect.gen(function* () {
+      const documentState = {
+        scope: { scope: "global" as const },
+        definition: {
+          groupId: "orchestration" as const,
+          promptId: "implement" as const,
+          label: "Implement",
+          description: "Used when orchestration dispatches a ticket implementation turn.",
+          supportedVariables: [],
+          constraints: {
+            documentVersion: 1 as const,
+            supportedConditionTypes: ["exists"] as const,
+            interpolationSyntax: "${variable}" as const,
+            orderedBlocksMatter: true,
+            supportsGlobalScope: true,
+            supportsProjectScope: true,
+          },
+        },
+        shippedDefaultDocument: DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration.implement,
+        globalDocument: DEFAULT_SERVER_SETTINGS.prompts.orchestration.implement,
+        projectOverrideDocument: null,
+        effectiveDocument: DEFAULT_SERVER_SETTINGS.prompts.orchestration.implement,
+        effectiveSource: "shipped_default" as const,
+        scopeState: "default" as const,
+      };
+
+      yield* buildAppUnderTest({
+        layers: {
+          promptManagement: {
+            getPromptDocument: () => Effect.succeed(documentState),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.promptsGetDocument]({
+            scope: "global",
+            promptId: "implement",
+          }),
+        ),
+      );
+
+      assert.deepEqual(response, documentState);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves the prompts MCP tool list with the dev bypass token", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/mcp/prompts");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            accept: "application/json, text/event-stream",
+            "content-type": "application/json",
+            authorization: "Bearer t3-dev-bypass",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/list",
+            params: {},
+          }),
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      const payload = yield* Effect.promise(
+        () => response.json() as Promise<{ result?: { tools?: Array<{ name: string }> } }>,
+      );
+      const toolNames = (payload.result?.tools ?? []).map((tool) => tool.name).toSorted();
+
+      assert.deepEqual(toolNames, [
+        "get_prompt_document",
+        "list_prompt_definitions",
+        "preview_prompt_document",
+        "update_prompt_document",
+        "validate_prompt_document",
+      ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -20,6 +20,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   OrchestrationRunError,
+  PromptManagementError,
   ProjectListDirectoryError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
@@ -62,6 +63,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
+import { PromptManagementService } from "./prompts/Services/PromptManagement";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks";
 import { TicketingService } from "./ticketing/Services/Ticketing";
 import { TerminalManager } from "./terminal/Services/Manager";
@@ -102,6 +104,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
     const managedRuns = yield* ManagedRunService;
+    const promptManagement = yield* PromptManagementService;
     const scheduledTasks = yield* ScheduledTaskService;
     const ticketing = yield* TicketingService;
     const repoDiscovery = yield* RepoDiscovery;
@@ -754,6 +757,86 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             }),
           ),
           { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.promptsListDefinitions]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.promptsListDefinitions,
+          promptManagement.listPromptDefinitions(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(PromptManagementError)(cause)
+                ? cause
+                : new PromptManagementError({
+                    code: "operation_failed",
+                    message: "Failed to list prompt definitions",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "prompts" },
+        ),
+      [WS_METHODS.promptsGetDocument]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.promptsGetDocument,
+          promptManagement.getPromptDocument(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(PromptManagementError)(cause)
+                ? cause
+                : new PromptManagementError({
+                    code: "operation_failed",
+                    message: "Failed to load prompt document",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "prompts" },
+        ),
+      [WS_METHODS.promptsValidateDocument]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.promptsValidateDocument,
+          promptManagement.validatePromptDocument(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(PromptManagementError)(cause)
+                ? cause
+                : new PromptManagementError({
+                    code: "operation_failed",
+                    message: "Failed to validate prompt document",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "prompts" },
+        ),
+      [WS_METHODS.promptsPreviewDocument]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.promptsPreviewDocument,
+          promptManagement.previewPromptDocument(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(PromptManagementError)(cause)
+                ? cause
+                : new PromptManagementError({
+                    code: "operation_failed",
+                    message: "Failed to preview prompt document",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "prompts" },
+        ),
+      [WS_METHODS.promptsUpdateDocument]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.promptsUpdateDocument,
+          promptManagement.updatePromptDocument(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(PromptManagementError)(cause)
+                ? cause
+                : new PromptManagementError({
+                    code: "operation_failed",
+                    message: "Failed to update prompt document",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "prompts" },
         ),
       [WS_METHODS.shellOpenInEditor]: (input) =>
         observeRpcEffect(WS_METHODS.shellOpenInEditor, open.openInEditor(input), {

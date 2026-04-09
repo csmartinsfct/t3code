@@ -55,6 +55,8 @@ import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
 import { TicketThreadLinkRepositoryLive } from "./persistence/Layers/TicketThreadLinks";
 import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingMcpRouteLayer } from "./ticketing/http";
+import { PromptManagementLive } from "./prompts/Layers/PromptManagement";
+import { promptsMcpRouteLayer } from "./prompts/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 
@@ -208,7 +210,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
   RepoDiscoveryLive,
 );
 
-const RuntimeServicesLive = Layer.empty.pipe(
+const RuntimeCoreServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerRuntimeStartupLive),
   Layer.provideMerge(ReactorLayerLive),
 
@@ -267,12 +269,18 @@ const RuntimeServicesLive = Layer.empty.pipe(
   ),
 );
 
+const RuntimeServicesLive = Layer.mergeAll(
+  RuntimeCoreServicesLive,
+  PromptManagementLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
+);
+
 export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   projectFaviconRouteLayer,
   managedRunsMcpRouteLayer,
   scheduledTasksMcpRouteLayer,
   ticketingMcpRouteLayer,
+  promptsMcpRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );
