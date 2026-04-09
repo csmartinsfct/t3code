@@ -948,14 +948,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
     orchestrationSwitcher.items.find((i) => i.isActive)?.isStarted === false;
   const onOrchestrationPause = useCallback(() => {
     if (!orchestrationTimeline.run) return;
+    logWebTimeline("orchestration.ui.pause", {
+      runId: orchestrationTimeline.run.id,
+      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+    });
     void getWsRpcClient().orchestration.pauseRun({ runId: orchestrationTimeline.run.id });
   }, [orchestrationTimeline.run]);
   const onOrchestrationResume = useCallback(() => {
     if (!orchestrationTimeline.run) return;
+    logWebTimeline("orchestration.ui.resume", {
+      runId: orchestrationTimeline.run.id,
+      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+    });
     void getWsRpcClient().orchestration.resumeRun({ runId: orchestrationTimeline.run.id });
   }, [orchestrationTimeline.run]);
   const onOrchestrationCancel = useCallback(() => {
     if (!orchestrationTimeline.run) return;
+    logWebTimeline("orchestration.ui.cancel", {
+      runId: orchestrationTimeline.run.id,
+      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+    });
     void getWsRpcClient().orchestration.cancelRun({ runId: orchestrationTimeline.run.id });
   }, [orchestrationTimeline.run]);
   const onNavigateToChildThread = useCallback(

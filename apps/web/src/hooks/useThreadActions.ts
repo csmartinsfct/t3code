@@ -13,6 +13,7 @@ import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { toastManager } from "../components/ui/toast";
+import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 import { useSettings } from "./useSettings";
 import { getWsRpcClient } from "../wsRpcClient";
 
@@ -97,6 +98,10 @@ export function useThreadActions() {
       // If this is an orchestration parent thread, cancel the active run
       // and delete all child threads first.
       if (thread.isOrchestrationThread) {
+        logWebTimeline("orchestration.delete.cascade.start", {
+          threadId,
+          projectId: thread.projectId,
+        });
         const rpc = getWsRpcClient();
         try {
           const runs = await rpc.orchestration.listRuns({ projectId: thread.projectId });
@@ -106,14 +111,24 @@ export function useThreadActions() {
               (r.status === "running" || r.status === "paused" || r.status === "pending"),
           );
           if (activeRun) {
+            logWebTimeline("orchestration.delete.cancel-run", {
+              threadId,
+              runId: activeRun.id,
+              runStatus: activeRun.status,
+            });
             await rpc.orchestration.cancelRun({ runId: activeRun.id }).catch(() => undefined);
           }
         } catch {
           // Best effort — continue with deletion even if cancel fails.
+          warnWebTimeline("orchestration.delete.cancel-run.error", { threadId });
         }
 
         // Delete child threads
         const childThreads = threads.filter((t) => t.parentThreadId === threadId);
+        logWebTimeline("orchestration.delete.child-threads", {
+          threadId,
+          childCount: childThreads.length,
+        });
         await Promise.allSettled(
           childThreads.map(async (child) => {
             if (child.session && child.session.status !== "closed") {
@@ -295,6 +310,9 @@ export function useThreadActions() {
       // Cancel any active orchestration runs for orchestration parent threads
       const orchestrationParents = threadIds.filter((id) => threadsById[id]?.isOrchestrationThread);
       if (orchestrationParents.length > 0) {
+        logWebTimeline("orchestration.delete-batch.cascade.start", {
+          orchestrationParentCount: orchestrationParents.length,
+        });
         const rpc = getWsRpcClient();
         await Promise.allSettled(
           orchestrationParents.map(async (id) => {
@@ -308,10 +326,16 @@ export function useThreadActions() {
                   (r.status === "running" || r.status === "paused" || r.status === "pending"),
               );
               if (activeRun) {
+                logWebTimeline("orchestration.delete-batch.cancel-run", {
+                  threadId: id,
+                  runId: activeRun.id,
+                  runStatus: activeRun.status,
+                });
                 await rpc.orchestration.cancelRun({ runId: activeRun.id }).catch(() => undefined);
               }
             } catch {
               // Best effort
+              warnWebTimeline("orchestration.delete-batch.cancel-run.error", { threadId: id });
             }
 
             // Delete child threads not already in the batch

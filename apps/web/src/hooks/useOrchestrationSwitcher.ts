@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
+import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 import type { Thread } from "../types";
 import { getWsRpcClient } from "../wsRpcClient";
 
@@ -111,9 +112,20 @@ export function useOrchestrationSwitcher(
       setRun(fullRun);
       setChildThreadIds(children.map((c) => c.id));
       setTickets(ticketList);
+
+      logWebTimeline("orchestration.switcher.fetch.success", {
+        parentThreadId,
+        runId: fullRun.id,
+        runStatus: fullRun.status,
+        childThreadCount: children.length,
+        ticketCount: ticketList.length,
+      });
     } catch (err) {
       if (fetchIdRef.current !== currentFetchId) return;
-      console.error("useOrchestrationSwitcher: fetch failed", err);
+      warnWebTimeline("orchestration.switcher.fetch.error", {
+        parentThreadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       if (fetchIdRef.current === currentFetchId) {
         setLoading(false);
@@ -140,11 +152,19 @@ export function useOrchestrationSwitcher(
       projectId as ProjectId,
       (event: OrchestrationRunStreamEvent) => {
         if (event.type === "run.updated" && event.run.orchestrationThreadId === parentThreadId) {
+          logWebTimeline("orchestration.switcher.run-updated", {
+            runId: event.run.id,
+            status: event.run.status,
+            currentTicketIndex: event.run.currentTicketIndex,
+          });
           setRun(event.run);
         } else if (
           event.type === "run.created" &&
           event.run.orchestrationThreadId === parentThreadId
         ) {
+          logWebTimeline("orchestration.switcher.run-created", {
+            runId: event.run.id,
+          });
           setRun(event.run);
           void fetchData();
         }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getWsRpcClient } from "../wsRpcClient";
 import { useStore } from "../store";
+import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 import type { Thread } from "../types";
 import {
   buildOrchestrationTimelineRows,
@@ -60,6 +61,11 @@ export function useOrchestrationTimeline(
     try {
       const rpc = getWsRpcClient();
 
+      logWebTimeline("orchestration.timeline.fetch.start", {
+        threadId: thread.id,
+        projectId,
+      });
+
       // Find the run for this orchestration thread
       const runs = await rpc.orchestration.listRuns({
         projectId: projectId as ProjectId,
@@ -68,6 +74,7 @@ export function useOrchestrationTimeline(
 
       const matchingRun = runs.find((r) => r.orchestrationThreadId === thread.id);
       if (!matchingRun) {
+        logWebTimeline("orchestration.timeline.fetch.no-run", { threadId: thread.id });
         setRun(null);
         setChildThreadIds([]);
         setLoading(false);
@@ -85,9 +92,22 @@ export function useOrchestrationTimeline(
       });
       if (fetchIdRef.current !== currentFetchId) return;
       setChildThreadIds(children.map((c) => c.id));
+
+      logWebTimeline("orchestration.timeline.fetch.success", {
+        threadId: thread.id,
+        runId: fullRun.id,
+        runStatus: fullRun.status,
+        childThreadCount: children.length,
+        currentTicketIndex: fullRun.currentTicketIndex,
+      });
     } catch (err) {
       if (fetchIdRef.current !== currentFetchId) return;
-      setError(err instanceof Error ? err.message : "Failed to load orchestration data");
+      const message = err instanceof Error ? err.message : "Failed to load orchestration data";
+      warnWebTimeline("orchestration.timeline.fetch.error", {
+        threadId: thread.id,
+        error: message,
+      });
+      setError(message);
     } finally {
       if (fetchIdRef.current === currentFetchId) {
         setLoading(false);
@@ -113,12 +133,22 @@ export function useOrchestrationTimeline(
           thread &&
           event.run.orchestrationThreadId === thread.id
         ) {
+          logWebTimeline("orchestration.timeline.run-updated", {
+            runId: event.run.id,
+            status: event.run.status,
+            currentTicketIndex: event.run.currentTicketIndex,
+            currentPhase: event.run.currentPhase,
+          });
           setRun(event.run);
         } else if (
           event.type === "run.created" &&
           thread &&
           event.run.orchestrationThreadId === thread.id
         ) {
+          logWebTimeline("orchestration.timeline.run-created", {
+            runId: event.run.id,
+            status: event.run.status,
+          });
           setRun(event.run);
           // Re-fetch child threads when a new run is created
           void fetchData();
