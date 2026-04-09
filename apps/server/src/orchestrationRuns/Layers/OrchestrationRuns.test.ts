@@ -70,6 +70,8 @@ const makeTicket = (
     sortOrder: 0,
     isArchived: false,
     worktree: null,
+    implementerModelOverride: null,
+    reviewerModelOverride: null,
     acceptanceCriteria: null,
     labels: [],
     dependencies: [],
@@ -265,7 +267,8 @@ describe("OrchestrationRunService", () => {
         service.create({
           projectId,
           ticketIdentifiers: [ticket.identifier],
-          modelSelection: baseModelSelection,
+          implementerModelSelection: baseModelSelection,
+          reviewerModelSelection: baseModelSelection,
         }),
       ),
     );
@@ -309,7 +312,8 @@ describe("OrchestrationRunService", () => {
           service.create({
             projectId,
             ticketIdentifiers: [foreignTicket.identifier],
-            modelSelection: baseModelSelection,
+            implementerModelSelection: baseModelSelection,
+            reviewerModelSelection: baseModelSelection,
           }),
         ),
       ),
@@ -365,7 +369,8 @@ describe("OrchestrationRunService", () => {
           service.create({
             projectId,
             ticketIdentifiers: tickets.map((ticket) => ticket.identifier),
-            modelSelection: baseModelSelection,
+            implementerModelSelection: baseModelSelection,
+            reviewerModelSelection: baseModelSelection,
           }),
         ),
       ),

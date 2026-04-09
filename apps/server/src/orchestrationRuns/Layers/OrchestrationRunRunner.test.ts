@@ -59,6 +59,8 @@ const makeTicket = (overrides: { id: string; identifier: string; title: string }
   sortOrder: 0,
   isArchived: false,
   worktree: null,
+  implementerModelOverride: null,
+  reviewerModelOverride: null,
   acceptanceCriteria: null,
   labels: [],
   dependencies: [],

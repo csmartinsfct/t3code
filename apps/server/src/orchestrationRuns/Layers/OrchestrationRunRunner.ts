@@ -16,11 +16,7 @@ import {
   OrchestrationRunError,
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
-import {
-  buildReviewPrompt,
-  parseReviewOutputJsonCandidates,
-  selectReviewModel,
-} from "@t3tools/shared/review";
+import { buildReviewPrompt, parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
@@ -32,10 +28,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../../orchestration/Services/OrchestrationEngine.ts";
-import {
-  ProviderRateLimitsCache,
-  type ProviderRateLimitsCacheShape,
-} from "../../provider/Services/ProviderRateLimitsCache.ts";
+import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -163,7 +156,6 @@ interface OrchestrationRunRunnerDeps {
   readonly orchestrationEngine: OrchestrationEngineShape;
   readonly providerService: ProviderServiceShape;
   readonly providerRegistry: ProviderRegistryShape;
-  readonly providerRateLimits: ProviderRateLimitsCacheShape;
   readonly checkpointDiffQuery: CheckpointDiffQueryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
@@ -176,7 +168,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       orchestrationEngine,
       providerService,
       providerRegistry,
-      providerRateLimits,
       checkpointDiffQuery,
       ticketing,
       startup,
@@ -342,32 +333,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           });
         }
 
-        if (reviewThread.latestTurn !== null || reviewThread.session !== null) {
-          return reviewThread.modelSelection;
-        }
-
-        const reviewModelSelection = selectReviewModel({
-          availableProviders: yield* providerRegistry.getProviders,
-          rateLimits: yield* providerRateLimits.getAll,
-          implementationModelSelection: input.implementationModelSelection,
-        });
-
-        const sameProvider =
-          reviewThread.modelSelection.provider === reviewModelSelection.provider &&
-          reviewThread.modelSelection.model === reviewModelSelection.model;
-        if (!sameProvider) {
-          yield* dispatchCommand(
-            {
-              type: "thread.meta.update",
-              commandId: runnerCommandId("review-model"),
-              threadId: input.reviewThreadId,
-              modelSelection: reviewModelSelection,
-            },
-            `Failed to update review thread ${input.reviewThreadId} model`,
-          );
-        }
-
-        return reviewModelSelection;
+        // Model selection is deterministic — the review thread was created
+        // with the correct model from global settings or ticket overrides.
+        return reviewThread.modelSelection;
       });
 
     /**
@@ -921,6 +889,30 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
             // 4c. Post ticket-started activity for fresh ticket dispatches only.
             if (!shouldResumeExistingTicket) {
+              // Apply ticket-level model overrides if present
+              if (ticket.implementerModelOverride) {
+                yield* dispatchCommand(
+                  {
+                    type: "thread.meta.update",
+                    commandId: runnerCommandId("ticket-implementer-model"),
+                    threadId: workingThreadId,
+                    modelSelection: ticket.implementerModelOverride as ModelSelection,
+                  },
+                  `Failed to apply implementer model override for ${ticket.identifier}`,
+                );
+              }
+              if (ticket.reviewerModelOverride && entry.reviewThreadId) {
+                yield* dispatchCommand(
+                  {
+                    type: "thread.meta.update",
+                    commandId: runnerCommandId("ticket-reviewer-model"),
+                    threadId: entry.reviewThreadId as ThreadId,
+                    modelSelection: ticket.reviewerModelOverride as ModelSelection,
+                  },
+                  `Failed to apply reviewer model override for ${ticket.identifier}`,
+                );
+              }
+
               yield* postActivity({
                 threadId: orchestrationThreadId,
                 kind: "orchestration.run.ticket.started",
@@ -1627,7 +1619,10 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
-  const providerRateLimits = yield* ProviderRateLimitsCache;
+  // ProviderRateLimitsCache is still required by the layer signature but no
+  // longer consumed inside the runner — keep the yield* so the Effect
+  // dependency graph stays satisfied for existing wiring.
+  yield* ProviderRateLimitsCache;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
@@ -1637,7 +1632,6 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
     orchestrationEngine,
     providerService,
     providerRegistry,
-    providerRateLimits,
     checkpointDiffQuery,
     ticketing,
     startup,

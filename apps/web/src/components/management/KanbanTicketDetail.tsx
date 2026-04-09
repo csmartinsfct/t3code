@@ -5,12 +5,13 @@ import type {
   TicketStatus,
   TicketSummary,
   TicketingStreamEvent,
+  ModelSelection,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
-import { EllipsisVerticalIcon, ListTreeIcon, PlayIcon, TrashIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { EllipsisVerticalIcon, ListTreeIcon, PlayIcon, TrashIcon, XIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
+import { baseProviderKind, DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -32,6 +33,14 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
+import { useSettings } from "../../hooks/useSettings";
+import { useServerProviders } from "../../rpc/serverState";
+import {
+  getCustomModelOptionsByProvider,
+  resolveAppModelSelectionState,
+} from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
@@ -89,6 +98,31 @@ export function KanbanTicketDetail({
   const descriptionRef = useRef<HTMLDivElement>(null);
   /** Set to true when Escape is pressed so the blur handler skips saving. */
   const cancelEditRef = useRef(false);
+  const settings = useSettings();
+  const serverProviders = useServerProviders();
+
+  const resolvedGlobalImplementer = useMemo(
+    () =>
+      resolveAppModelSelectionState(
+        {
+          ...settings,
+          textGenerationModelSelection: settings.orchestrationImplementerModelSelection,
+        },
+        serverProviders,
+      ),
+    [settings, serverProviders],
+  );
+  const resolvedGlobalReviewer = useMemo(
+    () =>
+      resolveAppModelSelectionState(
+        {
+          ...settings,
+          textGenerationModelSelection: settings.orchestrationReviewerModelSelection,
+        },
+        serverProviders,
+      ),
+    [settings, serverProviders],
+  );
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -266,6 +300,36 @@ export function KanbanTicketDetail({
       }
     }
   }, [ticketId, worktreeDraft]);
+
+  const handleModelOverrideChange = useCallback(
+    async (
+      field: "implementerModelOverride" | "reviewerModelOverride",
+      value: ModelSelection | null,
+    ) => {
+      const previous = ticketRef.current;
+      if (previous) {
+        const optimistic = { ...previous, [field]: value };
+        ticketRef.current = optimistic;
+        setTicket(optimistic);
+      }
+      try {
+        const api = ensureNativeApi();
+        const updated = await api.ticketing.update({
+          id: ticketId,
+          [field]: value,
+        });
+        ticketRef.current = updated;
+        setTicket(updated);
+      } catch (error) {
+        console.error(`Failed to update ${field}:`, error);
+        if (previous) {
+          ticketRef.current = previous;
+          setTicket(previous);
+        }
+      }
+    },
+    [ticketId],
+  );
 
   const handleDelete = useCallback(async () => {
     try {
@@ -608,6 +672,28 @@ export function KanbanTicketDetail({
           />
         </div>
 
+        {/* Model overrides */}
+        <ModelOverrideRow
+          label="Implementer"
+          override={ticket.implementerModelOverride as ModelSelection | null}
+          globalDefault={resolvedGlobalImplementer}
+          serverProviders={serverProviders}
+          settings={settings}
+          onChange={(value) =>
+            void handleModelOverrideChange("implementerModelOverride", value)
+          }
+        />
+        <ModelOverrideRow
+          label="Reviewer"
+          override={ticket.reviewerModelOverride as ModelSelection | null}
+          globalDefault={resolvedGlobalReviewer}
+          serverProviders={serverProviders}
+          settings={settings}
+          onChange={(value) =>
+            void handleModelOverrideChange("reviewerModelOverride", value)
+          }
+        />
+
         {/* Sub-tickets */}
         {ticket.subTickets.length > 0 && (
           <SubTicketsList subTickets={ticket.subTickets} onNavigateToTicket={onNavigateToTicket} />
@@ -812,5 +898,87 @@ function DraggableSubTicket({
         />
       </PopoverPopup>
     </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Model override row for ticket detail
+// ---------------------------------------------------------------------------
+
+function ModelOverrideRow({
+  label,
+  override,
+  globalDefault,
+  serverProviders,
+  settings,
+  onChange,
+}: {
+  label: string;
+  override: ModelSelection | null | undefined;
+  globalDefault: ModelSelection;
+  serverProviders: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
+  settings: import("@t3tools/contracts").UnifiedSettings;
+  onChange: (value: ModelSelection | null) => void;
+}) {
+  const hasOverride = override != null;
+  const effective = hasOverride ? override : globalDefault;
+  const optionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    effective.provider,
+    effective.model,
+  );
+  const models = serverProviders.find((p) => p.provider === effective.provider)?.models ?? [];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
+        {hasOverride && (
+          <button
+            type="button"
+            className="text-[10px] text-muted-foreground/50 hover:text-foreground transition-colors"
+            onClick={() => onChange(null)}
+            aria-label={`Reset ${label} to default`}
+          >
+            <XIcon className="size-3" />
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <ProviderModelPicker
+          provider={effective.provider}
+          model={effective.model}
+          lockedProvider={null}
+          providers={serverProviders}
+          modelOptionsByProvider={optionsByProvider}
+          triggerVariant="ghost"
+          triggerClassName={`h-6 text-[11px] px-1.5 ${hasOverride ? "text-foreground" : "text-muted-foreground"}`}
+          onProviderModelChange={(provider, model) => {
+            onChange({
+              provider: baseProviderKind(provider),
+              model,
+            } as ModelSelection);
+          }}
+        />
+        <TraitsPicker
+          provider={effective.provider}
+          models={models}
+          model={effective.model}
+          prompt=""
+          onPromptChange={() => {}}
+          modelOptions={(effective as Record<string, unknown>).options as never}
+          allowPromptInjectedEffort={false}
+          triggerVariant="ghost"
+          triggerClassName={`h-6 text-[11px] px-1.5 ${hasOverride ? "text-foreground" : "text-muted-foreground"}`}
+          onModelOptionsChange={(nextOptions) => {
+            onChange({
+              ...effective,
+              ...(nextOptions ? { options: nextOptions } : {}),
+            } as ModelSelection);
+          }}
+        />
+      </div>
+    </div>
   );
 }

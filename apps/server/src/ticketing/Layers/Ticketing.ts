@@ -135,6 +135,12 @@ const makeTicketingService = Effect.gen(function* () {
         sortOrder: ticket.sortOrder,
         isArchived: ticket.isArchived,
         worktree: ticket.worktree,
+        implementerModelOverride: ticket.implementerModelJson
+          ? JSON.parse(ticket.implementerModelJson)
+          : null,
+        reviewerModelOverride: ticket.reviewerModelJson
+          ? JSON.parse(ticket.reviewerModelJson)
+          : null,
         acceptanceCriteria: ticket.acceptanceCriteria,
         labels: labels as Label[],
         dependencies: deps as TicketDependency[],
@@ -310,6 +316,12 @@ const makeTicketingService = Effect.gen(function* () {
         sortOrder: input.sortOrder ?? 0,
         isArchived: false,
         worktree: input.worktree ?? null,
+        implementerModelJson: input.implementerModelOverride
+          ? JSON.stringify(input.implementerModelOverride)
+          : null,
+        reviewerModelJson: input.reviewerModelOverride
+          ? JSON.stringify(input.reviewerModelOverride)
+          : null,
         createdAt: now,
         updatedAt: now,
       };
@@ -404,6 +416,30 @@ const makeTicketingService = Effect.gen(function* () {
       if (input.worktree !== undefined) {
         changes.worktree = { old: existing.worktree, new: input.worktree };
         patch.worktree = input.worktree ?? null;
+      }
+      if (input.implementerModelOverride !== undefined) {
+        const oldParsed = existing.implementerModelJson
+          ? JSON.parse(existing.implementerModelJson)
+          : null;
+        changes.implementerModelOverride = {
+          old: oldParsed,
+          new: input.implementerModelOverride,
+        };
+        patch.implementerModelJson = input.implementerModelOverride
+          ? JSON.stringify(input.implementerModelOverride)
+          : null;
+      }
+      if (input.reviewerModelOverride !== undefined) {
+        const oldParsed = existing.reviewerModelJson
+          ? JSON.parse(existing.reviewerModelJson)
+          : null;
+        changes.reviewerModelOverride = {
+          old: oldParsed,
+          new: input.reviewerModelOverride,
+        };
+        patch.reviewerModelJson = input.reviewerModelOverride
+          ? JSON.stringify(input.reviewerModelOverride)
+          : null;
       }
 
       const updated = { ...existing, ...patch } as PersistedTicket;

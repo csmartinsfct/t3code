@@ -35,6 +35,8 @@ export const PersistedTicket = Schema.Struct({
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
   worktree: Schema.NullOr(Schema.String),
+  implementerModelJson: Schema.NullOr(Schema.String),
+  reviewerModelJson: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -94,6 +96,10 @@ export const TicketRow = Schema.Struct({
   isArchived: Schema.Number,
   /** Kept as raw string | null — parsed in toPersistedTicket */
   acceptanceCriteria: Schema.NullOr(Schema.String),
+  /** Override: kept as raw JSON string | null — parsed in toPersistedTicket */
+  implementerModelJson: Schema.NullOr(Schema.String),
+  /** Override: kept as raw JSON string | null — parsed in toPersistedTicket */
+  reviewerModelJson: Schema.NullOr(Schema.String),
 });
 
 export const LabelRow = Schema.Struct({

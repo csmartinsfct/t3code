@@ -1300,7 +1300,8 @@ export type OrchestrationRunStreamEvent = typeof OrchestrationRunStreamEvent.Typ
 export const OrchestrationCreateRunInput = Schema.Struct({
   projectId: ProjectId,
   ticketIdentifiers: Schema.Array(TrimmedNonEmptyString),
-  modelSelection: ModelSelection,
+  implementerModelSelection: ModelSelection,
+  reviewerModelSelection: ModelSelection,
   runtimeMode: Schema.optional(RuntimeMode),
   maxReviewIterations: Schema.optional(NonNegativeInt),
 });

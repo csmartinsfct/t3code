@@ -631,6 +631,46 @@ export function GeneralSettingsPanel() {
     settings.managedRunInferenceModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.managedRunInferenceModelSelection ?? null,
   );
+  const orchestrationImplementerSelection = resolveAppModelSelectionState(
+    {
+      ...settings,
+      textGenerationModelSelection: settings.orchestrationImplementerModelSelection,
+    },
+    serverProviders,
+  );
+  const orchImplProvider = orchestrationImplementerSelection.provider;
+  const orchImplModel = orchestrationImplementerSelection.model;
+  const orchImplModelOptions = orchestrationImplementerSelection.options;
+  const orchImplOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    orchImplProvider,
+    orchImplModel,
+  );
+  const isOrchImplModelDirty = !Equal.equals(
+    settings.orchestrationImplementerModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.orchestrationImplementerModelSelection ?? null,
+  );
+  const orchestrationReviewerSelection = resolveAppModelSelectionState(
+    {
+      ...settings,
+      textGenerationModelSelection: settings.orchestrationReviewerModelSelection,
+    },
+    serverProviders,
+  );
+  const orchRevProvider = orchestrationReviewerSelection.provider;
+  const orchRevModel = orchestrationReviewerSelection.model;
+  const orchRevModelOptions = orchestrationReviewerSelection.options;
+  const orchRevOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    orchRevProvider,
+    orchRevModel,
+  );
+  const isOrchRevModelDirty = !Equal.equals(
+    settings.orchestrationReviewerModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.orchestrationReviewerModelSelection ?? null,
+  );
 
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
@@ -1045,50 +1085,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Automated review cycles"
-          description="Set how many automated review-requested fix cycles orchestration can attempt. 0 disables automated review."
-          resetAction={
-            settings.maxReviewIterations !== DEFAULT_UNIFIED_SETTINGS.maxReviewIterations ? (
-              <SettingResetButton
-                label="automated review cycles"
-                onClick={() =>
-                  updateSettings({
-                    maxReviewIterations: DEFAULT_UNIFIED_SETTINGS.maxReviewIterations,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <label className="flex items-center gap-2">
-              <Input
-                aria-label="Maximum automated review iterations"
-                className="w-24"
-                min={0}
-                max={MAX_REVIEW_ITERATIONS_UI_MAX}
-                step={1}
-                type="number"
-                value={settings.maxReviewIterations}
-                onChange={(event) => {
-                  const rawValue = Number(event.target.value);
-                  if (!Number.isFinite(rawValue)) {
-                    return;
-                  }
-                  const nextValue = Math.max(
-                    0,
-                    Math.min(MAX_REVIEW_ITERATIONS_UI_MAX, Math.trunc(rawValue)),
-                  );
-                  updateSettings({ maxReviewIterations: nextValue });
-                }}
-              />
-              <span className="text-xs text-muted-foreground">
-                0-{MAX_REVIEW_ITERATIONS_UI_MAX}
-              </span>
-            </label>
-          }
-        />
-
-        <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1286,6 +1282,200 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Orchestration">
+        <SettingsRow
+          title="Implementer model"
+          description="Configure the model used for implementation work during ticket orchestration."
+          resetAction={
+            isOrchImplModelDirty ? (
+              <SettingResetButton
+                label="implementer model"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationImplementerModelSelection:
+                      DEFAULT_UNIFIED_SETTINGS.orchestrationImplementerModelSelection,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                provider={orchImplProvider}
+                model={orchImplModel}
+                lockedProvider={null}
+                providers={serverProviders}
+                modelOptionsByProvider={orchImplOptionsByProvider}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onProviderModelChange={(provider, model) => {
+                  updateSettings({
+                    orchestrationImplementerModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: baseProviderKind(provider),
+                          model,
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={orchImplProvider}
+                models={
+                  serverProviders.find((provider) => provider.provider === orchImplProvider)
+                    ?.models ?? []
+                }
+                model={orchImplModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={orchImplModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    orchestrationImplementerModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: orchImplProvider,
+                          model: orchImplModel,
+                          ...(nextOptions ? { options: nextOptions } : {}),
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Reviewer model"
+          description="Configure the model used for automated code review during orchestration."
+          resetAction={
+            isOrchRevModelDirty ? (
+              <SettingResetButton
+                label="reviewer model"
+                onClick={() =>
+                  updateSettings({
+                    orchestrationReviewerModelSelection:
+                      DEFAULT_UNIFIED_SETTINGS.orchestrationReviewerModelSelection,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                provider={orchRevProvider}
+                model={orchRevModel}
+                lockedProvider={null}
+                providers={serverProviders}
+                modelOptionsByProvider={orchRevOptionsByProvider}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onProviderModelChange={(provider, model) => {
+                  updateSettings({
+                    orchestrationReviewerModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: baseProviderKind(provider),
+                          model,
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={orchRevProvider}
+                models={
+                  serverProviders.find((provider) => provider.provider === orchRevProvider)
+                    ?.models ?? []
+                }
+                model={orchRevModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={orchRevModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    orchestrationReviewerModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: {
+                          provider: orchRevProvider,
+                          model: orchRevModel,
+                          ...(nextOptions ? { options: nextOptions } : {}),
+                        },
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Automated review cycles"
+          description="Set how many automated review-requested fix cycles orchestration can attempt. 0 disables automated review."
+          resetAction={
+            settings.maxReviewIterations !== DEFAULT_UNIFIED_SETTINGS.maxReviewIterations ? (
+              <SettingResetButton
+                label="automated review cycles"
+                onClick={() =>
+                  updateSettings({
+                    maxReviewIterations: DEFAULT_UNIFIED_SETTINGS.maxReviewIterations,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <label className="flex items-center gap-2">
+              <Input
+                aria-label="Maximum automated review iterations"
+                className="w-24"
+                min={0}
+                max={MAX_REVIEW_ITERATIONS_UI_MAX}
+                step={1}
+                type="number"
+                value={settings.maxReviewIterations}
+                onChange={(event) => {
+                  const rawValue = Number(event.target.value);
+                  if (!Number.isFinite(rawValue)) {
+                    return;
+                  }
+                  const nextValue = Math.max(
+                    0,
+                    Math.min(MAX_REVIEW_ITERATIONS_UI_MAX, Math.trunc(rawValue)),
+                  );
+                  updateSettings({ maxReviewIterations: nextValue });
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                0-{MAX_REVIEW_ITERATIONS_UI_MAX}
+              </span>
+            </label>
           }
         />
       </SettingsSection>

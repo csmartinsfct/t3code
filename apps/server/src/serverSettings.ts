@@ -127,9 +127,19 @@ function resolveModelSelectionProviders(settings: ServerSettings): ServerSetting
     settings,
     settings.managedRunInferenceModelSelection,
   );
+  const nextOrchImplementer = resolveModelSelectionProvider(
+    settings,
+    settings.orchestrationImplementerModelSelection,
+  );
+  const nextOrchReviewer = resolveModelSelectionProvider(
+    settings,
+    settings.orchestrationReviewerModelSelection,
+  );
   if (
     Equal.equals(nextTextGeneration, settings.textGenerationModelSelection) &&
-    Equal.equals(nextManagedRunInference, settings.managedRunInferenceModelSelection)
+    Equal.equals(nextManagedRunInference, settings.managedRunInferenceModelSelection) &&
+    Equal.equals(nextOrchImplementer, settings.orchestrationImplementerModelSelection) &&
+    Equal.equals(nextOrchReviewer, settings.orchestrationReviewerModelSelection)
   ) {
     return settings;
   }
@@ -138,6 +148,8 @@ function resolveModelSelectionProviders(settings: ServerSettings): ServerSetting
     ...settings,
     textGenerationModelSelection: nextTextGeneration,
     managedRunInferenceModelSelection: nextManagedRunInference,
+    orchestrationImplementerModelSelection: nextOrchImplementer,
+    orchestrationReviewerModelSelection: nextOrchReviewer,
   };
 }
 
@@ -145,6 +157,8 @@ function resolveModelSelectionProviders(settings: ServerSettings): ServerSetting
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "textGenerationModelSelection",
   "managedRunInferenceModelSelection",
+  "orchestrationImplementerModelSelection",
+  "orchestrationReviewerModelSelection",
 ]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {

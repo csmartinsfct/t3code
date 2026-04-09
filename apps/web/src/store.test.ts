@@ -293,7 +293,7 @@ describe("store read model sync", () => {
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
       bootstrapComplete: true,
-    orchestrationRunStatusByThreadId: {},
+      orchestrationRunStatusByThreadId: {},
     };
     const readModel: OrchestrationReadModel = {
       snapshotSequence: 2,
@@ -388,7 +388,7 @@ describe("incremental orchestration updates", () => {
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
       bootstrapComplete: true,
-    orchestrationRunStatusByThreadId: {},
+      orchestrationRunStatusByThreadId: {},
     };
 
     const next = applyOrchestrationEvent(
@@ -454,7 +454,7 @@ describe("incremental orchestration updates", () => {
         [originalProjectId]: [threadId],
       },
       bootstrapComplete: true,
-    orchestrationRunStatusByThreadId: {},
+      orchestrationRunStatusByThreadId: {},
     };
 
     const next = applyOrchestrationEvent(

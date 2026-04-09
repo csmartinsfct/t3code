@@ -193,12 +193,17 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   }, []);
 
   const handleConfirmOrchestrate = useCallback(
-    async (ticketIdentifiers: string[], modelSelection: ModelSelection) => {
+    async (
+      ticketIdentifiers: string[],
+      implementerModelSelection: ModelSelection,
+      reviewerModelSelection: ModelSelection,
+    ) => {
       const api = ensureNativeApi();
       const result = await api.orchestration.createRun({
         projectId: projectId as ProjectId,
         ticketIdentifiers: ticketIdentifiers as never,
-        modelSelection,
+        implementerModelSelection,
+        reviewerModelSelection,
       });
       await api.orchestration.startRun({ runId: result.runId });
       clearSelection();

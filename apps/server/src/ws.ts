@@ -123,7 +123,6 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       orchestrationEngine,
       providerService,
       providerRegistry,
-      providerRateLimits: rateLimitsCache,
       checkpointDiffQuery,
       ticketing,
       startup,

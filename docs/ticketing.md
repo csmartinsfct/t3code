@@ -86,6 +86,8 @@ Ticket {
   sortOrder: number                         // REAL for fractional indexing
   isArchived: boolean
   worktree: string | null                   // git worktree/branch name
+  implementerModelOverride: ModelSelection | null  // per-ticket implementer model override
+  reviewerModelOverride: ModelSelection | null      // per-ticket reviewer model override
   acceptanceCriteria: AcceptanceCriterion[] | null
   labels: Label[]
   dependencies: TicketDependency[]
@@ -165,6 +167,8 @@ Every mutation records a `TicketHistoryEntry` with:
 **Comments**: `list_ticket_comments`, `create_comment`, `update_comment`, `delete_comment`
 
 **Artifacts**: `list_ticket_artifacts`, `create_artifact`, `delete_artifact`
+
+Both `create_ticket` and `update_ticket` accept optional `implementerModel` and `reviewerModel` parameters to set per-ticket orchestration model overrides. Each is an object with `{ provider, model, profileId? }`. Pass `null` on `update_ticket` to clear an override.
 
 All tools are authenticated via the managed run token system (same as scheduled tasks). Dev bypass token `t3-dev-bypass` works with `?projectId=` query param.
 

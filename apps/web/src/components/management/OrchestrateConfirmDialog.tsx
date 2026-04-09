@@ -1,5 +1,4 @@
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   type ModelSelection,
   type TicketId,
   type TicketSummary,
@@ -17,7 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
 
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { useSettings } from "../../hooks/useSettings";
 import { buildOrchestrationPlan, type OrchestrationPlan } from "../../lib/orchestrationValidation";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
@@ -44,31 +43,11 @@ interface OrchestrateConfirmDialogProps {
   selectedTickets: ReadonlyMap<TicketId, TicketSummary>;
   allTickets: readonly TicketSummary[];
   projectId: string;
-  onConfirm: (ticketIdentifiers: string[], modelSelection: ModelSelection) => Promise<void> | void;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function resolveModelSelection(): { modelSelection: ModelSelection; displayName: string } {
-  const state = useComposerDraftStore.getState();
-  const provider = state.stickyActiveProvider ?? "codex";
-  const selection = state.stickyModelSelectionByProvider[provider];
-
-  if (selection) {
-    return {
-      modelSelection: selection,
-      displayName: `${selection.provider} / ${selection.model}`,
-    };
-  }
-
-  // Fallback: construct a default codex selection.
-  const fallback: ModelSelection = {
-    provider: "codex",
-    model: DEFAULT_MODEL_BY_PROVIDER.codex,
-  } as ModelSelection;
-  return { modelSelection: fallback, displayName: `codex / ${DEFAULT_MODEL_BY_PROVIDER.codex}` };
+  onConfirm: (
+    ticketIdentifiers: string[],
+    implementerModelSelection: ModelSelection,
+    reviewerModelSelection: ModelSelection,
+  ) => Promise<void> | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +102,11 @@ export function OrchestrateConfirmDialog({
     };
   }, [open, selectedTickets, allTickets, projectId]);
 
-  const { modelSelection, displayName: modelDisplayName } = resolveModelSelection();
+  const settings = useSettings();
+  const implSel = settings.orchestrationImplementerModelSelection;
+  const revSel = settings.orchestrationReviewerModelSelection;
+  const implDisplayName = `${implSel.provider} / ${implSel.model}`;
+  const revDisplayName = `${revSel.provider} / ${revSel.model}`;
 
   const handleConfirm = useCallback(async () => {
     if (plan?.kind !== "valid" || isSubmitting) return;
@@ -133,14 +116,14 @@ export function OrchestrateConfirmDialog({
     setIsSubmitting(true);
     setError(null);
     try {
-      await onConfirm(identifiers, modelSelection);
+      await onConfirm(identifiers, implSel, revSel);
       onOpenChange(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to start orchestration");
     } finally {
       setIsSubmitting(false);
     }
-  }, [isSubmitting, plan, modelSelection, onConfirm, onOpenChange]);
+  }, [isSubmitting, plan, implSel, revSel, onConfirm, onOpenChange]);
 
   const runnableCount =
     plan?.kind === "valid"
@@ -180,7 +163,8 @@ export function OrchestrateConfirmDialog({
                     Run configuration
                   </p>
                   <div className="flex flex-col gap-1 text-xs text-foreground/80">
-                    <ConfigRow label="Model" value={modelDisplayName} />
+                    <ConfigRow label="Implementer" value={implDisplayName} />
+                    <ConfigRow label="Reviewer" value={revDisplayName} />
                     <ConfigRow
                       label="Runtime"
                       value={

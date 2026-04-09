@@ -328,6 +328,22 @@ function createTicketingMcpServer(
           )
           .optional()
           .describe("Acceptance criteria for the ticket."),
+        implementerModel: z
+          .object({
+            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
+            model: z.string().describe("Model slug."),
+            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
+          })
+          .optional()
+          .describe("Optional model override for the implementer agent during orchestration."),
+        reviewerModel: z
+          .object({
+            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
+            model: z.string().describe("Model slug."),
+            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
+          })
+          .optional()
+          .describe("Optional model override for the reviewer agent during orchestration."),
       },
     },
     async ({
@@ -340,6 +356,8 @@ function createTicketingMcpServer(
       dependencyIds,
       worktree,
       acceptanceCriteria,
+      implementerModel,
+      reviewerModel,
     }) => {
       try {
         const resolvedParentId = parentId ? await resolve(parentId) : undefined;
@@ -368,6 +386,8 @@ function createTicketingMcpServer(
                   })),
                 }
               : {}),
+            ...(implementerModel ? { implementerModelOverride: implementerModel as never } : {}),
+            ...(reviewerModel ? { reviewerModelOverride: reviewerModel as never } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
@@ -421,6 +441,24 @@ function createTicketingMcpServer(
           .optional()
           .nullable()
           .describe("Replace acceptance criteria. Pass null to clear."),
+        implementerModel: z
+          .object({
+            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
+            model: z.string().describe("Model slug."),
+            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
+          })
+          .optional()
+          .nullable()
+          .describe("Model override for the implementer agent. Pass null to clear."),
+        reviewerModel: z
+          .object({
+            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
+            model: z.string().describe("Model slug."),
+            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
+          })
+          .optional()
+          .nullable()
+          .describe("Model override for the reviewer agent. Pass null to clear."),
       },
     },
     async ({
@@ -433,6 +471,8 @@ function createTicketingMcpServer(
       sortOrder,
       worktree,
       acceptanceCriteria,
+      implementerModel,
+      reviewerModel,
     }) => {
       try {
         const resolvedId = await resolve(id);
@@ -465,6 +505,12 @@ function createTicketingMcpServer(
             ...(sortOrder !== undefined ? { sortOrder } : {}),
             ...(worktree !== undefined ? { worktree } : {}),
             ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
+            ...(implementerModel !== undefined
+              ? { implementerModelOverride: implementerModel as never }
+              : {}),
+            ...(reviewerModel !== undefined
+              ? { reviewerModelOverride: reviewerModel as never }
+              : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };

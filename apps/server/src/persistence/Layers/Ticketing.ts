@@ -58,6 +58,8 @@ const TICKET_SELECT = `
   title,
   description,
   worktree,
+  implementer_model_json AS "implementerModelJson",
+  reviewer_model_json AS "reviewerModelJson",
   acceptance_criteria_json AS "acceptanceCriteria",
   status,
   priority,
@@ -133,13 +135,16 @@ const makeTicketingRepository = Effect.gen(function* () {
       sql`
         INSERT INTO tickets (
           id, project_id, parent_id, ticket_number, identifier,
-          title, description, worktree, acceptance_criteria_json,
+          title, description, worktree,
+          implementer_model_json, reviewer_model_json,
+          acceptance_criteria_json,
           status, priority, sort_order, is_archived,
           created_at, updated_at
         )
         VALUES (
           ${row.id}, ${row.projectId}, ${row.parentId}, ${row.ticketNumber}, ${row.identifier},
           ${row.title}, ${row.description}, ${row.worktree},
+          ${row.implementerModelJson}, ${row.reviewerModelJson},
           ${row.acceptanceCriteria ? JSON.stringify(row.acceptanceCriteria) : null},
           ${row.status}, ${row.priority}, ${row.sortOrder}, ${row.isArchived ? 1 : 0},
           ${row.createdAt}, ${row.updatedAt}
@@ -149,6 +154,8 @@ const makeTicketingRepository = Effect.gen(function* () {
           title = excluded.title,
           description = excluded.description,
           worktree = excluded.worktree,
+          implementer_model_json = excluded.implementer_model_json,
+          reviewer_model_json = excluded.reviewer_model_json,
           acceptance_criteria_json = excluded.acceptance_criteria_json,
           status = excluded.status,
           priority = excluded.priority,

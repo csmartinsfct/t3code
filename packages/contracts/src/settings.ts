@@ -117,6 +117,18 @@ export const ServerSettings = Schema.Struct({
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
     })),
   ),
+  orchestrationImplementerModelSelection: ModelSelection.pipe(
+    Schema.withDecodingDefault(() => ({
+      provider: "codex" as const,
+      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+    })),
+  ),
+  orchestrationReviewerModelSelection: ModelSelection.pipe(
+    Schema.withDecodingDefault(() => ({
+      provider: "codex" as const,
+      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+    })),
+  ),
 
   // Provider specific settings
   providers: Schema.Struct({
@@ -199,6 +211,8 @@ export const ServerSettingsPatch = Schema.Struct({
   mcpDeliveryMode: Schema.optionalKey(McpDeliveryMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   managedRunInferenceModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  orchestrationImplementerModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  orchestrationReviewerModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),

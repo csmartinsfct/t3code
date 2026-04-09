@@ -2,6 +2,22 @@ import { Schema } from "effect";
 
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
 
+// ModelSelection is re-declared here to avoid a circular import with orchestration.ts
+// (orchestration.ts imports TicketId from this file). The shape must stay in sync.
+const TicketModelSelection = Schema.Union([
+  Schema.Struct({
+    provider: Schema.Literal("codex"),
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(Schema.Unknown),
+  }),
+  Schema.Struct({
+    provider: Schema.Literal("claudeAgent"),
+    profileId: Schema.optionalKey(Schema.String),
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(Schema.Unknown),
+  }),
+]);
+
 // ---------------------------------------------------------------------------
 // Branded IDs
 // ---------------------------------------------------------------------------
@@ -187,6 +203,8 @@ export const Ticket = Schema.Struct({
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
   worktree: Schema.NullOr(Schema.String),
+  implementerModelOverride: Schema.NullOr(TicketModelSelection),
+  reviewerModelOverride: Schema.NullOr(TicketModelSelection),
   acceptanceCriteria: Schema.NullOr(Schema.Array(AcceptanceCriterion)),
   labels: Schema.Array(Label),
   dependencies: Schema.Array(TicketDependency),
@@ -233,6 +251,8 @@ export const TicketCreateInput = Schema.Struct({
   priority: Schema.optional(TicketPriority),
   sortOrder: Schema.optional(Schema.Number),
   worktree: Schema.optional(Schema.NullOr(Schema.String)),
+  implementerModelOverride: Schema.optional(Schema.NullOr(TicketModelSelection)),
+  reviewerModelOverride: Schema.optional(Schema.NullOr(TicketModelSelection)),
   labelIds: Schema.optional(Schema.Array(LabelId)),
   dependencyIds: Schema.optional(Schema.Array(TicketId)),
 });
@@ -248,6 +268,8 @@ export const TicketUpdateInput = Schema.Struct({
   parentId: Schema.optional(Schema.NullOr(TicketId)),
   sortOrder: Schema.optional(Schema.Number),
   worktree: Schema.optional(Schema.NullOr(Schema.String)),
+  implementerModelOverride: Schema.optional(Schema.NullOr(TicketModelSelection)),
+  reviewerModelOverride: Schema.optional(Schema.NullOr(TicketModelSelection)),
 });
 export type TicketUpdateInput = typeof TicketUpdateInput.Type;
 

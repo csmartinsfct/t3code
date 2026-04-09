@@ -258,6 +258,7 @@ function toModelSelection(provider: ProviderKind, model: string): ModelSelection
   };
 }
 
+/** @deprecated Model selection is now deterministic via orchestration settings and ticket overrides. */
 export function selectReviewModel(input: SelectReviewModelInput): ModelSelection {
   const implementationProvider = modelSelectionProviderKind(input.implementationModelSelection);
   const implementationBaseProvider = baseProviderKind(implementationProvider);
