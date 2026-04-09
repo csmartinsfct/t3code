@@ -9,6 +9,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import { ORCHESTRATION_PROMPT_DEFAULTS, renderPromptTemplate } from "./promptTemplates";
 
 export interface ReviewPromptTemplateInput {
   readonly ticketIdentifier: string;
@@ -138,38 +139,15 @@ export function parseReviewOutputJson(text: string): unknown {
 }
 
 export function buildReviewUserPrompt(input: ReviewPromptTemplateInput): string {
-  return `Review the completed work for ticket ${input.ticketIdentifier}: ${input.ticketTitle}.
-
-Ticket description:
-${input.ticketDescription}
-
-Acceptance criteria:
-${input.acceptanceCriteria}
-
-Worktree:
-${input.ticketWorktree ?? "null"}
-
-Diff:
-${input.diffSummaryOrPatch}
-
-Review iteration: ${input.iteration}
-
-Return a JSON object matching this shape exactly:
-{
-  "changesNeeded": boolean,
-  "summary": string,
-  "comments": [
-    {
-      "file": string | null,
-      "line": number | null,
-      "severity": "critical" | "suggestion" | "nit",
-      "body": string
-    }
-  ],
-  "suggestions": string[]
-}
-
-If the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.`;
+  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.review, {
+    ticketId: input.ticketIdentifier,
+    ticketTitle: input.ticketTitle,
+    ticketDescription: input.ticketDescription,
+    acceptanceCriteria: input.acceptanceCriteria,
+    worktree: input.ticketWorktree ?? "null",
+    commitDiff: input.diffSummaryOrPatch,
+    reviewIteration: String(input.iteration),
+  });
 }
 
 export function buildReviewPrompt(input: ReviewPromptTemplateInput): {

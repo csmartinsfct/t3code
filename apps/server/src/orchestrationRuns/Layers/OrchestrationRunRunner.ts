@@ -17,6 +17,10 @@ import {
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
 import { buildReviewPrompt, parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
+import {
+  ORCHESTRATION_PROMPT_DEFAULTS,
+  renderPromptTemplate,
+} from "@t3tools/shared/promptTemplates";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
@@ -104,45 +108,40 @@ const terminalReasonFromRuntimeEvent = (event: ProviderTurnTerminalEvent): strin
 };
 
 const buildWorkPrompt = (ticket: Ticket): string => {
-  const worktreePart = ticket.worktree ?? "default";
-  return `Work on ticket ${ticket.title} - ${ticket.identifier}. Worktree: ${worktreePart}. Pull the ticket details and any other context you need yourself. If you get blocked, update the ticket status to blocked and stop. Try to complete the acceptance criteria mentioned in the ticket, if defined. Otherwise try to comply with the specifications in the ticket.`;
+  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.implement, {
+    ticketId: ticket.identifier,
+    ticketTitle: ticket.title,
+    worktree: ticket.worktree ?? "default",
+  });
 };
 
-const buildResumePrompt = (): string => "Continue.";
+const buildResumePrompt = (): string =>
+  renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.resume, {});
 
 const buildReviewFeedbackPrompt = (input: {
   readonly ticketIdentifier: string;
   readonly review: ReviewOutput;
 }): string => {
-  const lines = [
-    `Address the automated review feedback for ticket ${input.ticketIdentifier}.`,
-    "",
-    `Review summary: ${input.review.summary}`,
-  ];
-
-  if (input.review.comments.length > 0) {
-    lines.push("", "Review comments:");
-    for (const comment of input.review.comments) {
+  const reviewComments = input.review.comments
+    .map((comment) => {
       const location =
         comment.file !== null
           ? `${comment.file}${comment.line !== null ? `:${comment.line}` : ""}`
           : "general";
-      lines.push(`- [${comment.severity}] ${location} - ${comment.body}`);
-    }
-  }
+      return `- [${comment.severity}] ${location} - ${comment.body}`;
+    })
+    .join("\n");
 
-  if (input.review.suggestions.length > 0) {
-    lines.push("", "Requested follow-up:");
-    for (const suggestion of input.review.suggestions) {
-      lines.push(`- ${suggestion}`);
-    }
-  }
+  const reviewSuggestions = input.review.suggestions
+    .map((suggestion) => `- ${suggestion}`)
+    .join("\n");
 
-  lines.push(
-    "",
-    "Apply the needed fixes, then continue until the ticket is ready for review again.",
-  );
-  return lines.join("\n");
+  return renderPromptTemplate(ORCHESTRATION_PROMPT_DEFAULTS.reviewFeedback, {
+    ticketId: input.ticketIdentifier,
+    reviewSummary: input.review.summary,
+    reviewComments,
+    reviewSuggestions,
+  });
 };
 
 const buildOrchestrationTitle = (tickets: ReadonlyArray<Ticket>): string => {

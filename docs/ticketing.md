@@ -156,6 +156,45 @@ Each ticket entry in the orchestration run plan stores both `workingThreadId` an
 
 The chat UI uses that explicit `reviewThreadId` identity to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
+### Orchestration Prompt Templates
+
+The orchestration runner now has a shared prompt-template domain model for its four logical prompt ids:
+
+- `orchestration/implement`
+- `orchestration/resume`
+- `orchestration/review`
+- `orchestration/reviewFeedback`
+
+Prompt documents use this exact persisted shape:
+
+```json
+{
+  "version": 1,
+  "blocks": [
+    {
+      "when": null,
+      "text": "Work on ticket ${ticketId}: ${ticketTitle}"
+    },
+    {
+      "when": { "type": "exists", "variable": "acceptanceCriteria" },
+      "text": "\nAcceptance criteria:\n${acceptanceCriteria}"
+    }
+  ]
+}
+```
+
+Rules:
+
+- `version` must be exactly `1`
+- `blocks` render in array order
+- `when: null` always renders
+- v1 only supports `{ "type": "exists", "variable": "<canonicalKey>" }`
+- block text supports `${variableName}` interpolation only
+- aliases are normalized to canonical keys during validation/save
+- validation returns structured errors with block context so the UI can identify the failing block
+
+The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts` and currently covers shared ticket/project variables plus review-only and review-feedback-only variables. The review flow is modeled as one logical prompt id (`review`) even though the runtime still keeps a fixed review system prompt alongside the rendered user prompt text.
+
 ### History Recording
 
 Every mutation records a `TicketHistoryEntry` with:

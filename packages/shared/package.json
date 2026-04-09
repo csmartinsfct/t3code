@@ -60,6 +60,10 @@
       "types": "./src/review.ts",
       "import": "./src/review.ts"
     },
+    "./promptTemplates": {
+      "types": "./src/promptTemplates.ts",
+      "import": "./src/promptTemplates.ts"
+    },
     "./toposort": {
       "types": "./src/toposort.ts",
       "import": "./src/toposort.ts"

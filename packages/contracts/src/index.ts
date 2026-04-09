@@ -15,3 +15,4 @@ export * from "./managedRuns";
 export * from "./scheduledTasks";
 export * from "./ticketing";
 export * from "./rpc";
+export * from "./promptTemplates";
