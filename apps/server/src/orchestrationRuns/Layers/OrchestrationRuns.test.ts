@@ -25,6 +25,7 @@ import {
   type ProjectionThreadRepositoryShape,
 } from "../../persistence/Services/ProjectionThreads.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   TicketingService,
   type TicketingServiceShape,
@@ -204,6 +205,7 @@ const makeServiceLayer = ({
         enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) => effect,
       }),
     ),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provide(
       Layer.succeed(OrchestrationEngineService, {
         getReadModel: () =>
@@ -234,6 +236,55 @@ const serviceEffect = <A, E>(
   );
 
 describe("OrchestrationRunService", () => {
+  it("creates paired working and review threads and defaults maxReviewIterations from server settings", async () => {
+    const ticket = makeTicket({ id: "ticket-1", identifier: "T3CO-1", title: "First ticket" });
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const createdRuns: PersistedOrchestrationRun[] = [];
+    const layer = makeServiceLayer({
+      repository: makeRunRepository({
+        create: (input) =>
+          Effect.sync(() => {
+            createdRuns.push(input);
+          }),
+      }),
+      ticketing: makeTicketingService({
+        getByIdentifier: ({ identifier }) =>
+          identifier === ticket.identifier
+            ? Effect.succeed(ticket)
+            : Effect.die(new Error("unexpected ticket lookup")),
+      }),
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatchedCommands.push(command);
+          return { sequence: dispatchedCommands.length };
+        }),
+    });
+
+    const result = await Effect.runPromise(
+      serviceEffect(layer, (service) =>
+        service.create({
+          projectId,
+          ticketIdentifiers: [ticket.identifier],
+          modelSelection: baseModelSelection,
+        }),
+      ),
+    );
+
+    expect(createdRuns[0]?.maxReviewIterations).toBe(3);
+    expect(createdRuns[0]?.ticketOrderJson).toContain('"reviewThreadId"');
+
+    const threadCreates = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.create" }> =>
+        command.type === "thread.create",
+    );
+    expect(threadCreates).toHaveLength(3);
+    expect(threadCreates[1]?.title).toBe(ticket.title);
+    expect(threadCreates[2]?.title).toBe(`${ticket.title} Review`);
+    expect(threadCreates[1]?.ticketId).toBe(ticket.id);
+    expect(threadCreates[2]?.ticketId).toBe(ticket.id);
+    expect(result.workingThreadIds).toHaveLength(1);
+  });
+
   it("rejects tickets that belong to a different project", async () => {
     const foreignTicket = makeTicket({
       id: "ticket-foreign",
@@ -318,7 +369,7 @@ describe("OrchestrationRunService", () => {
           }),
         ),
       ),
-    ).rejects.toThrow("Failed to create working thread");
+    ).rejects.toThrow("Failed to create review thread");
 
     const deleteCommands = dispatchedCommands.filter(
       (command): command is Extract<OrchestrationCommand, { type: "thread.delete" }> =>

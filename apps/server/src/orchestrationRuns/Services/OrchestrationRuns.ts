@@ -63,6 +63,7 @@ export interface OrchestrationRunServiceShape {
     readonly runId: import("@t3tools/contracts").OrchestrationRunId;
     readonly currentTicketIndex: number;
     readonly currentPhase?: OrchestrationRunPhase;
+    readonly reviewIteration?: number;
   }) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;
 
   readonly streamEvents: (projectId: string) => Stream.Stream<OrchestrationRunStreamEvent, never>;

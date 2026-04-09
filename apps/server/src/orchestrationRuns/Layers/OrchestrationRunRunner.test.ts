@@ -1,8 +1,10 @@
 import {
   EventId,
+  MessageId,
   type OrchestrationCommand,
   OrchestrationRunId,
   ProjectId,
+  type OrchestrationThread,
   type ProviderRuntimeEvent,
   ThreadId,
   TicketId,
@@ -14,7 +16,10 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { CheckpointDiffQuery } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -36,6 +41,8 @@ const runId = OrchestrationRunId.makeUnsafe("run-1");
 const orchestrationThreadId = ThreadId.makeUnsafe("thread-orch");
 const workingThread1 = ThreadId.makeUnsafe("thread-work-1");
 const workingThread2 = ThreadId.makeUnsafe("thread-work-2");
+const reviewThread1 = ThreadId.makeUnsafe("thread-review-1");
+const reviewThread2 = ThreadId.makeUnsafe("thread-review-2");
 const ticket1Id = TicketId.makeUnsafe("ticket-1");
 const ticket2Id = TicketId.makeUnsafe("ticket-2");
 
@@ -77,13 +84,13 @@ const makeRun = (overrides: Partial<OrchestrationRun> = {}): OrchestrationRun =>
   projectId,
   status: "running",
   ticketOrder: [
-    { ticketId: ticket1Id, workingThreadId: workingThread1 },
-    { ticketId: ticket2Id, workingThreadId: workingThread2 },
+    { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+    { ticketId: ticket2Id, workingThreadId: workingThread2, reviewThreadId: reviewThread2 },
   ],
   currentTicketIndex: -1,
   currentPhase: "working",
   reviewIteration: 0,
-  maxReviewIterations: 1,
+  maxReviewIterations: 0,
   createdAt: "2026-04-09T10:00:00.000Z",
   updatedAt: "2026-04-09T10:00:00.000Z",
   ...overrides,
@@ -219,8 +226,105 @@ const makeLayer = (opts: {
   providerService?: Partial<ProviderServiceShape>;
   providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
+  readModelThreads?: ReadonlyArray<OrchestrationThread>;
 }) => {
   const dispatchedCommands = opts.dispatchedCommands ?? [];
+  const readModelThreads =
+    opts.readModelThreads ??
+    ([
+      {
+        id: workingThread1,
+        projectId,
+        title: ticket1.title,
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        parentThreadId: orchestrationThreadId,
+        isOrchestrationThread: false,
+        ticketId: ticket1Id,
+        latestTurn: null,
+        createdAt: "2026-04-09T10:00:00.000Z",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        messages: [],
+        proposedPlans: [],
+        activities: [],
+        checkpoints: [],
+        session: null,
+      },
+      {
+        id: workingThread2,
+        projectId,
+        title: ticket2.title,
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        parentThreadId: orchestrationThreadId,
+        isOrchestrationThread: false,
+        ticketId: ticket2Id,
+        latestTurn: null,
+        createdAt: "2026-04-09T10:00:00.000Z",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        messages: [],
+        proposedPlans: [],
+        activities: [],
+        checkpoints: [],
+        session: null,
+      },
+      {
+        id: reviewThread1,
+        projectId,
+        title: `${ticket1.title} Review`,
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        parentThreadId: orchestrationThreadId,
+        isOrchestrationThread: false,
+        ticketId: ticket1Id,
+        latestTurn: null,
+        createdAt: "2026-04-09T10:00:00.000Z",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        messages: [],
+        proposedPlans: [],
+        activities: [],
+        checkpoints: [],
+        session: null,
+      },
+      {
+        id: reviewThread2,
+        projectId,
+        title: `${ticket2.title} Review`,
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        parentThreadId: orchestrationThreadId,
+        isOrchestrationThread: false,
+        ticketId: ticket2Id,
+        latestTurn: null,
+        createdAt: "2026-04-09T10:00:00.000Z",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        messages: [],
+        proposedPlans: [],
+        activities: [],
+        checkpoints: [],
+        session: null,
+      },
+    ] as const satisfies ReadonlyArray<OrchestrationThread>);
   return OrchestrationRunRunnerLive.pipe(
     Layer.provide(Layer.succeed(OrchestrationRunService, makeRunService(opts.runService))),
     Layer.provide(Layer.succeed(TicketingService, makeTicketingService(opts.ticketing))),
@@ -247,7 +351,7 @@ const makeLayer = (opts: {
             snapshotSequence: 0,
             updatedAt: "2026-04-09T10:00:00.000Z",
             projects: [],
-            threads: [],
+            threads: [...readModelThreads],
           }),
         readEvents: () => Stream.empty,
         dispatch: (command: OrchestrationCommand) => {
@@ -255,6 +359,33 @@ const makeLayer = (opts: {
           return Effect.succeed({ sequence: dispatchedCommands.length });
         },
         streamDomainEvents: Stream.empty,
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(ProviderRegistry, {
+        getProviders: Effect.succeed([]),
+        refresh: () => Effect.succeed([]),
+        streamChanges: Stream.empty,
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(ProviderRateLimitsCache, {
+        set: () => Effect.void,
+        setOAuthTiers: () => Effect.void,
+        getAll: Effect.succeed([]),
+        streamChanges: Stream.empty,
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(CheckpointDiffQuery, {
+        getTurnDiff: () => Effect.die(new Error("not mocked")),
+        getFullThreadDiff: () =>
+          Effect.succeed({
+            threadId: workingThread1,
+            fromTurnCount: 0,
+            toTurnCount: 1,
+            diff: "patch",
+          }),
       }),
     ),
   );
@@ -317,7 +448,9 @@ describe("OrchestrationRunRunner", () => {
   it("finalizes instead of pausing when the last ticket already completed", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const runningSingleTicketRun = makeRun({
-      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
       currentTicketIndex: 0,
       status: "running",
     });
@@ -385,7 +518,9 @@ describe("OrchestrationRunRunner", () => {
   it("resumes the in-flight ticket with a continue prompt instead of restarting it", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const pausedSingleTicketRun = makeRun({
-      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
       currentTicketIndex: 0,
       status: "paused",
     });
@@ -461,7 +596,9 @@ describe("OrchestrationRunRunner", () => {
   it("includes ticket metadata in parent orchestration activities", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const singleTicketRun = makeRun({
-      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
     });
     const layer = makeLayer({
       dispatchedCommands,
@@ -516,7 +653,9 @@ describe("OrchestrationRunRunner", () => {
   it("treats an aborted provider turn as paused instead of completed", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const singleTicketRun = makeRun({
-      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
     });
     const pausedSingleTicketRun = makeRun({
       ...singleTicketRun,
@@ -568,6 +707,277 @@ describe("OrchestrationRunRunner", () => {
     );
     expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
       "orchestration.run.completed",
+    );
+  });
+
+  it("routes successful work through the review thread before completing the ticket", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+      readModelThreads: [
+        {
+          id: workingThread1,
+          projectId,
+          title: ticket1.title,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-work"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:00.000Z",
+            startedAt: "2026-04-09T10:00:00.000Z",
+            completedAt: "2026-04-09T10:00:01.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:01.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [
+            {
+              turnId: TurnId.makeUnsafe("turn-work"),
+              checkpointTurnCount: 1,
+              checkpointRef: "checkpoint:work-1" as never,
+              status: "ready",
+              files: [],
+              assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+              completedAt: "2026-04-09T10:00:01.000Z",
+            },
+          ],
+          session: null,
+        },
+        {
+          id: reviewThread1,
+          projectId,
+          title: `${ticket1.title} Review`,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-review"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:02.000Z",
+            startedAt: "2026-04-09T10:00:02.000Z",
+            completedAt: "2026-04-09T10:00:03.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-review"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:03.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [
+            {
+              id: MessageId.makeUnsafe("assistant-review"),
+              role: "assistant",
+              text: JSON.stringify({
+                changesNeeded: false,
+                summary: "Looks good.",
+                comments: [],
+                suggestions: [],
+              }),
+              turnId: TurnId.makeUnsafe("turn-review"),
+              streaming: false,
+              createdAt: "2026-04-09T10:00:03.000Z",
+              updatedAt: "2026-04-09T10:00:03.000Z",
+            },
+          ],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+      ],
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const reviewTurnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === reviewThread1,
+    );
+
+    expect(reviewTurnStarts).toHaveLength(1);
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.review.started",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.review.approved",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.completed",
+    );
+  });
+
+  it("blocks and pauses when the review output is invalid JSON", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+    const pausedRun = makeRun({
+      ...singleTicketRun,
+      status: "paused",
+      currentPhase: "reviewing",
+      currentTicketIndex: 0,
+    });
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        pause: () => Effect.succeed(pausedRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+      readModelThreads: [
+        {
+          id: workingThread1,
+          projectId,
+          title: ticket1.title,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-work"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:00.000Z",
+            startedAt: "2026-04-09T10:00:00.000Z",
+            completedAt: "2026-04-09T10:00:01.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:01.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [
+            {
+              turnId: TurnId.makeUnsafe("turn-work"),
+              checkpointTurnCount: 1,
+              checkpointRef: "checkpoint:work-1" as never,
+              status: "ready",
+              files: [],
+              assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+              completedAt: "2026-04-09T10:00:01.000Z",
+            },
+          ],
+          session: null,
+        },
+        {
+          id: reviewThread1,
+          projectId,
+          title: `${ticket1.title} Review`,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-review"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:02.000Z",
+            startedAt: "2026-04-09T10:00:02.000Z",
+            completedAt: "2026-04-09T10:00:03.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-review"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:03.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [
+            {
+              id: MessageId.makeUnsafe("assistant-review"),
+              role: "assistant",
+              text: "not json",
+              turnId: TurnId.makeUnsafe("turn-review"),
+              streaming: false,
+              createdAt: "2026-04-09T10:00:03.000Z",
+              updatedAt: "2026-04-09T10:00:03.000Z",
+            },
+          ],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+      ],
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.paused",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.ticket.review.approved",
     );
   });
 });

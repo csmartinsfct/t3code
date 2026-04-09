@@ -1,20 +1,41 @@
 import type {
   CommandId,
+  ModelSelection,
   OrchestrationCommand,
   OrchestrationRun,
   OrchestrationRunId,
+  OrchestrationThread,
   ProviderRuntimeEvent,
+  ReviewOutput,
   Ticket,
   ThreadId,
 } from "@t3tools/contracts";
-import { EventId, MessageId, OrchestrationRunError } from "@t3tools/contracts";
-import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Stream } from "effect";
+import {
+  EventId,
+  MessageId,
+  OrchestrationRunError,
+  ReviewOutput as ReviewOutputSchema,
+} from "@t3tools/contracts";
+import { buildReviewPrompt, selectReviewModel } from "@t3tools/shared/review";
+import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
+import {
+  CheckpointDiffQuery,
+  type CheckpointDiffQueryShape,
+} from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../../orchestration/Services/OrchestrationEngine.ts";
+import {
+  ProviderRateLimitsCache,
+  type ProviderRateLimitsCacheShape,
+} from "../../provider/Services/ProviderRateLimitsCache.ts";
+import {
+  ProviderRegistry,
+  type ProviderRegistryShape,
+} from "../../provider/Services/ProviderRegistry.ts";
 import {
   ServerRuntimeStartup,
   type ServerRuntimeStartupShape,
@@ -63,7 +84,7 @@ type ActiveRunState = {
   runId: OrchestrationRunId;
   orchestrationThreadId: ThreadId;
   /** Set when dispatching a turn, cleared on turn completion. */
-  activeWorkingThreadId: ThreadId | null;
+  activeChildThreadId: ThreadId | null;
   /** Background fiber running the sequential execution loop. */
   fiber: Fiber.Fiber<void, never>;
 };
@@ -92,6 +113,41 @@ const buildWorkPrompt = (ticket: Ticket): string => {
 
 const buildResumePrompt = (): string => "Continue.";
 
+const buildReviewFeedbackPrompt = (input: {
+  readonly ticketIdentifier: string;
+  readonly review: ReviewOutput;
+}): string => {
+  const lines = [
+    `Address the automated review feedback for ticket ${input.ticketIdentifier}.`,
+    "",
+    `Review summary: ${input.review.summary}`,
+  ];
+
+  if (input.review.comments.length > 0) {
+    lines.push("", "Review comments:");
+    for (const comment of input.review.comments) {
+      const location =
+        comment.file !== null
+          ? `${comment.file}${comment.line !== null ? `:${comment.line}` : ""}`
+          : "general";
+      lines.push(`- [${comment.severity}] ${location} - ${comment.body}`);
+    }
+  }
+
+  if (input.review.suggestions.length > 0) {
+    lines.push("", "Requested follow-up:");
+    for (const suggestion of input.review.suggestions) {
+      lines.push(`- ${suggestion}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "Apply the needed fixes, then continue until the ticket is ready for review again.",
+  );
+  return lines.join("\n");
+};
+
 const buildOrchestrationTitle = (tickets: ReadonlyArray<Ticket>): string => {
   const parts = tickets.map((t) => `${t.identifier}: ${t.title}`);
   const title = `Orchestrate: ${parts.join(", ")}`;
@@ -102,13 +158,25 @@ interface OrchestrationRunRunnerDeps {
   readonly runService: OrchestrationRunServiceShape;
   readonly orchestrationEngine: OrchestrationEngineShape;
   readonly providerService: ProviderServiceShape;
+  readonly providerRegistry: ProviderRegistryShape;
+  readonly providerRateLimits: ProviderRateLimitsCacheShape;
+  readonly checkpointDiffQuery: CheckpointDiffQueryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
 }
 
 export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerDeps) =>
   Effect.gen(function* () {
-    const { runService, orchestrationEngine, providerService, ticketing, startup } = deps;
+    const {
+      runService,
+      orchestrationEngine,
+      providerService,
+      providerRegistry,
+      providerRateLimits,
+      checkpointDiffQuery,
+      ticketing,
+      startup,
+    } = deps;
 
     // Background orchestration work must outlive the individual RPC request
     // that triggered it, so keep these fibers in their own detached scope
@@ -117,6 +185,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
     // Mutable in-memory state for the currently active run.
     let activeRunState: ActiveRunState | null = null;
+
+    const decodeReviewOutput = Schema.decodeUnknownEffect(ReviewOutputSchema);
 
     const dispatchCommand = (
       command: import("@t3tools/contracts").OrchestrationCommand,
@@ -164,12 +234,140 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       );
     };
 
+    const getThread = (threadId: ThreadId) =>
+      orchestrationEngine
+        .getReadModel()
+        .pipe(
+          Effect.map(
+            (readModel) => readModel.threads.find((thread) => thread.id === threadId) ?? null,
+          ),
+        );
+
+    const waitForThread = <A>(
+      threadId: ThreadId,
+      resolve: (thread: OrchestrationThread) => A | null,
+      message: string,
+    ) =>
+      Effect.gen(function* () {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const thread = yield* getThread(threadId);
+          if (thread) {
+            const value = resolve(thread);
+            if (value !== null) {
+              return value;
+            }
+          }
+
+          if (attempt < 19) {
+            yield* Effect.sleep(Duration.millis(100));
+          }
+        }
+
+        return yield* new OrchestrationRunError({ message });
+      });
+
+    const getCompletedTurnCount = (threadId: ThreadId) =>
+      waitForThread(
+        threadId,
+        (thread) => {
+          const latestTurn = thread.latestTurn;
+          if (!latestTurn || latestTurn.state !== "completed") {
+            return null;
+          }
+          const turnCheckpoint = thread.checkpoints.find(
+            (checkpoint) => checkpoint.turnId === latestTurn.turnId,
+          );
+          return turnCheckpoint?.checkpointTurnCount ?? null;
+        },
+        `Timed out waiting for completed checkpoint state on thread ${threadId}`,
+      );
+
+    const getLatestAssistantMessageText = (threadId: ThreadId) =>
+      waitForThread(
+        threadId,
+        (thread) => {
+          const assistantMessageId = thread.latestTurn?.assistantMessageId;
+          const assistantMessage =
+            (assistantMessageId
+              ? thread.messages.find((message) => message.id === assistantMessageId)
+              : undefined) ??
+            thread.messages.toReversed().find((message) => message.role === "assistant");
+          return typeof assistantMessage?.text === "string" && assistantMessage.text.length > 0
+            ? assistantMessage.text
+            : null;
+        },
+        `Timed out waiting for assistant output on thread ${threadId}`,
+      );
+
+    const parseReviewOutput = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const rawText = yield* getLatestAssistantMessageText(threadId);
+        const parsedJson = yield* Effect.try({
+          try: () => JSON.parse(rawText),
+          catch: (cause) =>
+            new OrchestrationRunError({
+              message: `Review output for thread ${threadId} was not valid JSON`,
+              cause,
+            }),
+        });
+
+        return yield* decodeReviewOutput(parsedJson).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: `Review output for thread ${threadId} did not match ReviewOutput`,
+                cause,
+              }),
+          ),
+        );
+      });
+
+    const ensureReviewThreadModel = (input: {
+      readonly reviewThreadId: ThreadId;
+      readonly implementationModelSelection: ModelSelection;
+    }) =>
+      Effect.gen(function* () {
+        const reviewThread = yield* getThread(input.reviewThreadId);
+        if (!reviewThread) {
+          return yield* new OrchestrationRunError({
+            message: `Review thread ${input.reviewThreadId} was not found`,
+          });
+        }
+
+        if (reviewThread.latestTurn !== null || reviewThread.session !== null) {
+          return reviewThread.modelSelection;
+        }
+
+        const reviewModelSelection = selectReviewModel({
+          availableProviders: yield* providerRegistry.getProviders,
+          rateLimits: yield* providerRateLimits.getAll,
+          implementationModelSelection: input.implementationModelSelection,
+        });
+
+        const sameProvider =
+          reviewThread.modelSelection.provider === reviewModelSelection.provider &&
+          reviewThread.modelSelection.model === reviewModelSelection.model;
+        if (!sameProvider) {
+          yield* dispatchCommand(
+            {
+              type: "thread.meta.update",
+              commandId: runnerCommandId("review-model"),
+              threadId: input.reviewThreadId,
+              modelSelection: reviewModelSelection,
+            },
+            `Failed to update review thread ${input.reviewThreadId} model`,
+          );
+        }
+
+        return reviewModelSelection;
+      });
+
     /**
      * Wait for a turn to settle on a working thread by observing the canonical
      * provider runtime stream. This gives us an explicit terminal outcome
      * instead of inferring success from session lifecycle state.
      */
-    const waitForTurnCompletion = (workingThreadId: ThreadId) =>
+    const waitForTurnCompletion = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const turnDone = yield* Deferred.make<TurnOutcome>();
         let activeTurnId: string | null = null;
@@ -178,14 +376,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           providerService.streamEvents.pipe(
             Stream.filter(
               (event): event is ProviderTurnWatcherEvent =>
-                event.threadId === workingThreadId && isProviderTurnWatcherEvent(event),
+                event.threadId === threadId && isProviderTurnWatcherEvent(event),
             ),
           ),
           (event) =>
             Effect.gen(function* () {
               yield* Effect.logInfo(
                 formatTimelineLog(SCOPE, "runner.turn-watcher.runtime-event", {
-                  workingThreadId,
+                  threadId,
                   eventType: event.type,
                   turnId: event.turnId ?? null,
                   activeTurnId,
@@ -196,7 +394,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 activeTurnId = event.turnId ?? null;
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.saw-start", {
-                    workingThreadId,
+                    threadId,
                     turnId: activeTurnId,
                   }),
                 );
@@ -206,7 +404,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               if (activeTurnId === null) {
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.ignored-before-start", {
-                    workingThreadId,
+                    threadId,
                     eventType: event.type,
                     turnId: event.turnId ?? null,
                   }),
@@ -217,7 +415,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               if (event.turnId && event.turnId !== activeTurnId) {
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.ignored-foreign-turn", {
-                    workingThreadId,
+                    threadId,
                     eventType: event.type,
                     turnId: event.turnId,
                     activeTurnId,
@@ -229,7 +427,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               if (event.type === "turn.aborted") {
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.resolved", {
-                    workingThreadId,
+                    threadId,
                     result: "interrupted",
                     reason: event.payload.reason,
                   }),
@@ -244,7 +442,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               if (event.payload.state === "completed") {
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.resolved", {
-                    workingThreadId,
+                    threadId,
                     result: "completed",
                     turnId: activeTurnId,
                   }),
@@ -257,7 +455,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 const reason = terminalReasonFromRuntimeEvent(event);
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.resolved", {
-                    workingThreadId,
+                    threadId,
                     result: "interrupted",
                     turnId: activeTurnId,
                     reason,
@@ -274,7 +472,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               const error = terminalReasonFromRuntimeEvent(event);
               yield* Effect.logInfo(
                 formatTimelineLog(SCOPE, "runner.turn-watcher.resolved", {
-                  workingThreadId,
+                  threadId,
                   result: "failed",
                   turnId: activeTurnId,
                   error,
@@ -301,7 +499,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         });
         if (Option.isNone(maybeOutcome)) {
           yield* Effect.logWarning(
-            formatTimelineLog(SCOPE, "runner.turn-watcher.timeout", { workingThreadId }),
+            formatTimelineLog(SCOPE, "runner.turn-watcher.timeout", { threadId }),
           );
         }
 
@@ -311,38 +509,104 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         return outcome;
       });
 
-    type DispatchWorkTurnMode = "start" | "resume";
-
-    /**
-     * Dispatch the next work turn for a ticket on its working thread.
-     */
-    const dispatchWorkTurn = (
-      workingThreadId: ThreadId,
-      ticket: Ticket,
-      mode: DispatchWorkTurnMode,
-    ) => {
+    const dispatchThreadTurn = (input: {
+      readonly threadId: ThreadId;
+      readonly text: string;
+      readonly modelSelection?: ModelSelection;
+    }) => {
       const now = new Date().toISOString();
       const messageId = MessageId.makeUnsafe(crypto.randomUUID());
-      const text = mode === "resume" ? buildResumePrompt() : buildWorkPrompt(ticket);
       // The thread.turn.start command has fields with Schema defaults (runtimeMode,
       // interactionMode) that make structural typing awkward. Cast via unknown.
       const command = {
         type: "thread.turn.start",
         commandId: runnerCommandId("orchestration-turn"),
-        threadId: workingThreadId,
+        threadId: input.threadId,
         message: {
           messageId,
           role: "user",
-          text,
+          text: input.text,
           attachments: [],
         },
+        ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
         createdAt: now,
       } as unknown as OrchestrationCommand;
-      return dispatchCommand(
-        command,
-        `Failed to dispatch work turn for ticket ${ticket.identifier}`,
+      return dispatchCommand(command, `Failed to dispatch turn for thread ${input.threadId}`);
+    };
+
+    type DispatchWorkTurnMode = "start" | "resume" | "feedback";
+
+    /**
+     * Dispatch the next work turn for a ticket on its working thread.
+     */
+    const dispatchWorkTurn = (input: {
+      readonly workingThreadId: ThreadId;
+      readonly ticket: Ticket;
+      readonly mode: DispatchWorkTurnMode;
+      readonly reviewFeedback?: ReviewOutput;
+    }) => {
+      const text =
+        input.mode === "resume"
+          ? buildResumePrompt()
+          : input.mode === "feedback" && input.reviewFeedback
+            ? buildReviewFeedbackPrompt({
+                ticketIdentifier: input.ticket.identifier,
+                review: input.reviewFeedback,
+              })
+            : buildWorkPrompt(input.ticket);
+      return dispatchThreadTurn({
+        threadId: input.workingThreadId,
+        text,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationRunError({
+              message: `Failed to dispatch work turn for ticket ${input.ticket.identifier}`,
+              cause,
+            }),
+        ),
       );
     };
+
+    const dispatchReviewTurn = (input: {
+      readonly reviewThreadId: ThreadId;
+      readonly ticket: Ticket;
+      readonly workingThreadId: ThreadId;
+      readonly reviewIteration: number;
+      readonly modelSelection: ModelSelection;
+    }) =>
+      Effect.gen(function* () {
+        const turnCount = yield* getCompletedTurnCount(input.workingThreadId);
+        const fullDiff = yield* checkpointDiffQuery.getFullThreadDiff({
+          threadId: input.workingThreadId,
+          toTurnCount: turnCount,
+        });
+        const prompt = buildReviewPrompt({
+          ticketIdentifier: input.ticket.identifier,
+          ticketTitle: input.ticket.title,
+          ticketDescription: input.ticket.description ?? "No description provided.",
+          acceptanceCriteria:
+            input.ticket.acceptanceCriteria?.map((criterion) => criterion.text).join("\n") ??
+            "No acceptance criteria provided.",
+          diffSummaryOrPatch: fullDiff.diff,
+          iteration: input.reviewIteration + 1,
+          ticketWorktree: input.ticket.worktree,
+        });
+
+        yield* dispatchThreadTurn({
+          threadId: input.reviewThreadId,
+          text: `${prompt.systemPrompt}\n\n${prompt.userPrompt}`,
+          modelSelection: input.modelSelection,
+        });
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationRunError({
+              message: `Failed to dispatch review turn for ticket ${input.ticket.identifier}`,
+              cause,
+            }),
+        ),
+      );
 
     const pauseRunWithReason = (
       runId: OrchestrationRunId,
@@ -450,6 +714,72 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         },
         `Failed to stop session on thread ${threadId}`,
       ).pipe(Effect.catch(() => Effect.void));
+
+    const runChildTurn = (input: {
+      readonly threadId: ThreadId;
+      readonly dispatch: Effect.Effect<unknown, OrchestrationRunError>;
+      readonly runId: OrchestrationRunId;
+      readonly ticketId: Ticket["id"];
+      readonly ticketIdentifier: Ticket["identifier"];
+      readonly phase: "working" | "reviewing";
+      readonly dispatchMode: string;
+    }) =>
+      Effect.gen(function* () {
+        if (activeRunState) {
+          activeRunState.activeChildThreadId = input.threadId;
+        }
+
+        const outcome: TurnOutcome = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const completionFiber = yield* waitForTurnCompletion(input.threadId).pipe(
+              Effect.forkScoped,
+            );
+
+            yield* input.dispatch;
+
+            yield* Effect.logInfo(
+              formatTimelineLog(SCOPE, "runner.ticket.turn-dispatched", {
+                runId: input.runId,
+                ticketId: input.ticketId,
+                ticketIdentifier: input.ticketIdentifier,
+                threadId: input.threadId,
+                phase: input.phase,
+                dispatchMode: input.dispatchMode,
+              }),
+            );
+
+            yield* Effect.logInfo(
+              formatTimelineLog(SCOPE, "runner.ticket.awaiting-completion", {
+                runId: input.runId,
+                ticketId: input.ticketId,
+                ticketIdentifier: input.ticketIdentifier,
+                threadId: input.threadId,
+                phase: input.phase,
+              }),
+            );
+
+            return yield* Fiber.join(completionFiber);
+          }),
+        );
+
+        if (activeRunState) {
+          activeRunState.activeChildThreadId = null;
+        }
+
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.ticket.turn-completed", {
+            runId: input.runId,
+            ticketId: input.ticketId,
+            ticketIdentifier: input.ticketIdentifier,
+            threadId: input.threadId,
+            phase: input.phase,
+            outcome: outcome.result,
+            ...(outcome.result === "failed" ? { error: outcome.error } : {}),
+          }),
+        );
+
+        return outcome;
+      });
 
     // ---------------------------------------------------------------------------
     // Sequential execution loop — extracted so both startRun and resumeRun
@@ -561,29 +891,25 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           // failure — including progress updates and post-success activities.
           type TicketResult = "completed" | "blocked" | "paused";
           const ticketResult: TicketResult = yield* Effect.gen(function* () {
-            // 4b. Update progress
-            yield* withRunService((runService) =>
-              runService.updateRunProgress({
-                runId,
-                currentTicketIndex: index,
-                currentPhase: "working",
-              }),
-            );
-
-            yield* Effect.logInfo(
-              formatTimelineLog(SCOPE, "runner.ticket.progress-updated", {
-                runId,
-                index,
-                ticketId: entry.ticketId,
-                ticketIdentifier: ticket.identifier,
-              }),
-            );
-
             const shouldResumeExistingTicket =
               isResume &&
               resumeCurrentTicketIndex !== null &&
               index === startIndex &&
               index === resumeCurrentTicketIndex;
+            const workingThread = yield* getThread(workingThreadId);
+            if (!workingThread) {
+              return yield* new OrchestrationRunError({
+                message: `Working thread ${workingThreadId} for ticket ${ticket.identifier} was not found`,
+              });
+            }
+            let reviewIteration = shouldResumeExistingTicket ? currentRun.reviewIteration : 0;
+            let nextWorkMode: DispatchWorkTurnMode =
+              shouldResumeExistingTicket && currentRun.currentPhase === "working"
+                ? "resume"
+                : "start";
+            let pendingReviewFeedback: ReviewOutput | undefined;
+            let resumeReviewTurn =
+              shouldResumeExistingTicket && currentRun.currentPhase === "reviewing";
 
             // 4c. Post ticket-started activity for fresh ticket dispatches only.
             if (!shouldResumeExistingTicket) {
@@ -599,186 +925,305 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               });
             }
 
-            // 4d. Set ticket to in_progress
-            yield* ticketing.update({ id: entry.ticketId, status: "in_progress" }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationRunError({
-                    message: `Failed to update ticket ${ticket.identifier} status`,
-                    cause,
-                  }),
-              ),
-            );
-
-            yield* Effect.logInfo(
-              formatTimelineLog(SCOPE, "runner.ticket.set-in-progress", {
-                runId,
-                ticketId: entry.ticketId,
-                ticketIdentifier: ticket.identifier,
-              }),
-            );
-
-            // 4e-h. Start subscription, dispatch turn, wait for completion.
-            // Track the active working thread for pause/cancel/takeover.
-            if (activeRunState) {
-              activeRunState.activeWorkingThreadId = workingThreadId;
-            }
-
-            const outcome: TurnOutcome = yield* Effect.scoped(
-              Effect.gen(function* () {
-                const completionFiber = yield* waitForTurnCompletion(workingThreadId).pipe(
-                  Effect.forkScoped,
-                );
-
-                yield* dispatchWorkTurn(
-                  workingThreadId,
-                  ticket,
-                  shouldResumeExistingTicket ? "resume" : "start",
-                );
-
-                yield* Effect.logInfo(
-                  formatTimelineLog(SCOPE, "runner.ticket.turn-dispatched", {
+            while (true) {
+              if (!resumeReviewTurn) {
+                yield* withRunService((service) =>
+                  service.updateRunProgress({
                     runId,
+                    currentTicketIndex: index,
+                    currentPhase: "working",
+                    reviewIteration,
+                  }),
+                );
+
+                yield* ticketing.update({ id: entry.ticketId, status: "in_progress" }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationRunError({
+                        message: `Failed to update ticket ${ticket.identifier} status`,
+                        cause,
+                      }),
+                  ),
+                );
+
+                const workOutcome = yield* runChildTurn({
+                  threadId: workingThreadId,
+                  dispatch: dispatchWorkTurn({
+                    workingThreadId,
+                    ticket,
+                    mode: nextWorkMode,
+                    ...(pendingReviewFeedback ? { reviewFeedback: pendingReviewFeedback } : {}),
+                  }),
+                  runId,
+                  ticketId: entry.ticketId,
+                  ticketIdentifier: ticket.identifier,
+                  phase: "working",
+                  dispatchMode: nextWorkMode,
+                });
+
+                if (workOutcome.result === "failed") {
+                  yield* ticketing
+                    .update({ id: entry.ticketId, status: "blocked" })
+                    .pipe(Effect.catch(() => Effect.void));
+                  yield* pauseRunWithReason(
+                    runId,
+                    orchestrationThreadId,
+                    `Ticket ${ticket.identifier} failed: ${workOutcome.error ?? "unknown error"}`,
+                  );
+                  return "blocked" as const;
+                }
+
+                if (workOutcome.result === "interrupted") {
+                  const latestRun = yield* withRunService((service) => service.get({ runId }));
+                  if (latestRun.status !== "running") {
+                    return "paused" as const;
+                  }
+
+                  yield* pauseRunWithReason(
+                    runId,
+                    orchestrationThreadId,
+                    `Ticket ${ticket.identifier} was interrupted${workOutcome.reason ? `: ${workOutcome.reason}` : ""}`,
+                  );
+                  return "paused" as const;
+                }
+
+                const updatedTicket = yield* ticketing.getById({ id: entry.ticketId }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationRunError({
+                        message: `Failed to reload ticket ${ticket.identifier}`,
+                        cause,
+                      }),
+                  ),
+                );
+                if (updatedTicket.status === "blocked") {
+                  yield* pauseRunWithReason(
+                    runId,
+                    orchestrationThreadId,
+                    `Ticket ${ticket.identifier} is blocked`,
+                  );
+                  return "blocked" as const;
+                }
+
+                if (currentRun.maxReviewIterations === 0) {
+                  if (updatedTicket.status !== "done" && updatedTicket.status !== "canceled") {
+                    yield* ticketing
+                      .update({ id: entry.ticketId, status: "done" })
+                      .pipe(Effect.catch(() => Effect.void));
+                  }
+
+                  yield* postActivity({
+                    threadId: orchestrationThreadId,
+                    kind: "orchestration.run.ticket.completed",
+                    summary: `Completed ticket ${ticket.identifier}`,
+                    payload: {
+                      ticketId: entry.ticketId,
+                      ticketIdentifier: ticket.identifier,
+                      workingThreadId,
+                    },
+                  });
+
+                  return "completed" as const;
+                }
+
+                yield* ticketing.update({ id: entry.ticketId, status: "in_review" }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationRunError({
+                        message: `Failed to move ticket ${ticket.identifier} into review`,
+                        cause,
+                      }),
+                  ),
+                );
+                const reviewThreadId = entry.reviewThreadId;
+                if (!reviewThreadId) {
+                  return yield* new OrchestrationRunError({
+                    message: `Ticket ${ticket.identifier} is missing a review thread`,
+                  });
+                }
+                yield* withRunService((service) =>
+                  service.updateRunProgress({
+                    runId,
+                    currentTicketIndex: index,
+                    currentPhase: "reviewing",
+                    reviewIteration,
+                  }),
+                );
+                yield* postActivity({
+                  threadId: orchestrationThreadId,
+                  kind: "orchestration.run.ticket.review.started",
+                  summary: `Reviewing ticket ${ticket.identifier}`,
+                  payload: {
                     ticketId: entry.ticketId,
                     ticketIdentifier: ticket.identifier,
                     workingThreadId,
-                    dispatchMode: shouldResumeExistingTicket ? "resume" : "start",
-                  }),
-                );
+                    reviewThreadId,
+                    reviewIteration: reviewIteration + 1,
+                  },
+                });
+              }
 
-                yield* Effect.logInfo(
-                  formatTimelineLog(SCOPE, "runner.ticket.awaiting-completion", {
-                    runId,
-                    ticketId: entry.ticketId,
-                    workingThreadId,
-                  }),
-                );
+              const reviewThreadId = entry.reviewThreadId;
+              if (!reviewThreadId) {
+                return yield* new OrchestrationRunError({
+                  message: `Ticket ${ticket.identifier} is missing a review thread`,
+                });
+              }
+              yield* withRunService((service) =>
+                service.updateRunProgress({
+                  runId,
+                  currentTicketIndex: index,
+                  currentPhase: "reviewing",
+                  reviewIteration,
+                }),
+              );
 
-                return yield* Fiber.join(completionFiber);
-              }),
-            );
+              const reviewModelSelection = yield* ensureReviewThreadModel({
+                reviewThreadId,
+                implementationModelSelection: workingThread.modelSelection,
+              });
 
-            // Clear active working thread after turn completes
-            if (activeRunState) {
-              activeRunState.activeWorkingThreadId = null;
-            }
-
-            yield* Effect.logInfo(
-              formatTimelineLog(SCOPE, "runner.ticket.turn-completed", {
+              const reviewOutcome = yield* runChildTurn({
+                threadId: reviewThreadId,
+                dispatch: resumeReviewTurn
+                  ? dispatchThreadTurn({
+                      threadId: reviewThreadId,
+                      text: buildResumePrompt(),
+                      modelSelection: reviewModelSelection,
+                    })
+                  : dispatchReviewTurn({
+                      reviewThreadId,
+                      ticket,
+                      workingThreadId,
+                      reviewIteration,
+                      modelSelection: reviewModelSelection,
+                    }),
                 runId,
                 ticketId: entry.ticketId,
                 ticketIdentifier: ticket.identifier,
-                outcome: outcome.result,
-                ...(outcome.result === "failed" ? { error: outcome.error } : {}),
-              }),
-            );
+                phase: "reviewing",
+                dispatchMode: resumeReviewTurn ? "resume" : "review",
+              });
 
-            // 4i. Handle outcome
-            if (outcome.result === "failed") {
-              yield* Effect.logWarning(
-                formatTimelineLog(SCOPE, "runner.ticket.failed", {
+              resumeReviewTurn = false;
+              pendingReviewFeedback = undefined;
+
+              if (reviewOutcome.result === "failed") {
+                yield* ticketing
+                  .update({ id: entry.ticketId, status: "blocked" })
+                  .pipe(Effect.catch(() => Effect.void));
+                yield* pauseRunWithReason(
                   runId,
-                  ticketId: entry.ticketId,
-                  ticketIdentifier: ticket.identifier,
-                  error: outcome.error,
-                }),
-              );
-              yield* ticketing
-                .update({ id: entry.ticketId, status: "blocked" })
-                .pipe(Effect.catch(() => Effect.void));
-              yield* pauseRunWithReason(
-                runId,
-                orchestrationThreadId,
-                `Ticket ${ticket.identifier} failed: ${outcome.error ?? "unknown error"}`,
-              );
-              return "blocked" as const;
-            }
+                  orchestrationThreadId,
+                  `Review failed for ticket ${ticket.identifier}: ${reviewOutcome.error ?? "unknown error"}`,
+                );
+                return "blocked" as const;
+              }
 
-            if (outcome.result === "interrupted") {
-              const latestRun = yield* withRunService((service) => service.get({ runId }));
-              yield* Effect.logInfo(
-                formatTimelineLog(SCOPE, "runner.ticket.interrupted", {
+              if (reviewOutcome.result === "interrupted") {
+                const latestRun = yield* withRunService((service) => service.get({ runId }));
+                if (latestRun.status !== "running") {
+                  return "paused" as const;
+                }
+
+                yield* pauseRunWithReason(
                   runId,
-                  ticketId: entry.ticketId,
-                  ticketIdentifier: ticket.identifier,
-                  reason: outcome.reason,
-                  runStatus: latestRun.status,
-                }),
-              );
-
-              if (latestRun.status !== "running") {
+                  orchestrationThreadId,
+                  `Review for ticket ${ticket.identifier} was interrupted${reviewOutcome.reason ? `: ${reviewOutcome.reason}` : ""}`,
+                );
                 return "paused" as const;
               }
 
-              yield* pauseRunWithReason(
-                runId,
-                orchestrationThreadId,
-                `Ticket ${ticket.identifier} was interrupted${outcome.reason ? `: ${outcome.reason}` : ""}`,
-              );
-              return "paused" as const;
-            }
-
-            // Turn completed — check if agent set ticket to blocked
-            const updatedTicket = yield* ticketing.getById({ id: entry.ticketId }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationRunError({
-                    message: `Failed to reload ticket ${ticket.identifier}`,
-                    cause,
-                  }),
-              ),
-            );
-
-            if (updatedTicket.status === "blocked") {
-              yield* Effect.logWarning(
-                formatTimelineLog(SCOPE, "runner.ticket.agent-blocked", {
+              const reviewExit = yield* Effect.exit(parseReviewOutput(reviewThreadId));
+              if (reviewExit._tag === "Failure") {
+                yield* ticketing
+                  .update({ id: entry.ticketId, status: "blocked" })
+                  .pipe(Effect.catch(() => Effect.void));
+                yield* pauseRunWithReason(
                   runId,
+                  orchestrationThreadId,
+                  `Review output for ticket ${ticket.identifier} was invalid`,
+                );
+                return "blocked" as const;
+              }
+              const review = reviewExit.value;
+
+              if (!review.changesNeeded) {
+                yield* ticketing
+                  .update({ id: entry.ticketId, status: "done" })
+                  .pipe(Effect.catch(() => Effect.void));
+                yield* postActivity({
+                  threadId: orchestrationThreadId,
+                  kind: "orchestration.run.ticket.review.approved",
+                  summary: `Review approved ticket ${ticket.identifier}`,
+                  payload: {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                    reviewThreadId,
+                    workingThreadId,
+                    reviewIteration: reviewIteration + 1,
+                  },
+                });
+                yield* postActivity({
+                  threadId: orchestrationThreadId,
+                  kind: "orchestration.run.ticket.completed",
+                  summary: `Completed ticket ${ticket.identifier}`,
+                  payload: {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                    workingThreadId,
+                    reviewThreadId,
+                  },
+                });
+                return "completed" as const;
+              }
+
+              if (reviewIteration < currentRun.maxReviewIterations) {
+                reviewIteration += 1;
+                nextWorkMode = "feedback";
+                pendingReviewFeedback = review;
+                yield* ticketing
+                  .update({ id: entry.ticketId, status: "in_progress" })
+                  .pipe(Effect.catch(() => Effect.void));
+                yield* postActivity({
+                  threadId: orchestrationThreadId,
+                  kind: "orchestration.run.ticket.review.requested-changes",
+                  summary: `Review requested changes for ticket ${ticket.identifier}`,
+                  payload: {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                    workingThreadId,
+                    reviewThreadId,
+                    reviewIteration,
+                    reviewSummary: review.summary,
+                  },
+                });
+                continue;
+              }
+
+              yield* ticketing
+                .update({ id: entry.ticketId, status: "blocked" })
+                .pipe(Effect.catch(() => Effect.void));
+              yield* postActivity({
+                threadId: orchestrationThreadId,
+                kind: "orchestration.run.ticket.review.exhausted",
+                summary: `Review budget exhausted for ticket ${ticket.identifier}`,
+                tone: "error",
+                payload: {
                   ticketId: entry.ticketId,
                   ticketIdentifier: ticket.identifier,
-                }),
-              );
+                  workingThreadId,
+                  reviewThreadId,
+                  reviewIteration,
+                },
+              });
               yield* pauseRunWithReason(
                 runId,
                 orchestrationThreadId,
-                `Ticket ${ticket.identifier} is blocked`,
+                `Ticket ${ticket.identifier} still needs changes after exhausting the review budget`,
               );
               return "blocked" as const;
             }
-
-            // Success — move ticket to done (unless agent already moved it to a terminal state)
-            if (updatedTicket.status !== "done" && updatedTicket.status !== "canceled") {
-              yield* ticketing
-                .update({ id: entry.ticketId, status: "done" })
-                .pipe(Effect.catch(() => Effect.void));
-              yield* Effect.logInfo(
-                formatTimelineLog(SCOPE, "runner.ticket.set-done", {
-                  runId,
-                  ticketId: entry.ticketId,
-                  ticketIdentifier: ticket.identifier,
-                }),
-              );
-            } else {
-              yield* Effect.logInfo(
-                formatTimelineLog(SCOPE, "runner.ticket.already-terminal", {
-                  runId,
-                  ticketId: entry.ticketId,
-                  status: updatedTicket.status,
-                }),
-              );
-            }
-
-            yield* postActivity({
-              threadId: orchestrationThreadId,
-              kind: "orchestration.run.ticket.completed",
-              summary: `Completed ticket ${ticket.identifier}`,
-              payload: {
-                ticketId: entry.ticketId,
-                ticketIdentifier: ticket.identifier,
-                workingThreadId,
-              },
-            });
-
-            return "completed" as const;
           }).pipe(
             // Catch any unexpected error during the ticket processing and treat
             // it as a blocked ticket + paused run, matching the ticket spec.
@@ -864,7 +1309,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         activeRunState = {
           runId,
           orchestrationThreadId,
-          activeWorkingThreadId: null,
+          activeChildThreadId: null,
           fiber,
         };
       });
@@ -947,14 +1392,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         const run = yield* withRunService((runService) => runService.pause(input));
 
         // Interrupt active agent turn if one is running
-        if (activeRunState?.runId === input.runId && activeRunState.activeWorkingThreadId) {
+        if (activeRunState?.runId === input.runId && activeRunState.activeChildThreadId) {
           yield* Effect.logInfo(
             formatTimelineLog(SCOPE, "runner.pause.interrupting", {
               runId: input.runId,
-              workingThreadId: activeRunState.activeWorkingThreadId,
+              childThreadId: activeRunState.activeChildThreadId,
             }),
           );
-          yield* interruptWorkingThread(activeRunState.activeWorkingThreadId);
+          yield* interruptWorkingThread(activeRunState.activeChildThreadId);
         }
 
         yield* postActivity({
@@ -1051,8 +1496,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         const run = yield* withRunService((runService) => runService.cancel(input));
 
         // Interrupt active agent turn and stop session if running
-        if (activeRunState?.runId === input.runId && activeRunState.activeWorkingThreadId) {
-          const workingThreadId = activeRunState.activeWorkingThreadId;
+        if (activeRunState?.runId === input.runId && activeRunState.activeChildThreadId) {
+          const workingThreadId = activeRunState.activeChildThreadId;
           yield* Effect.logInfo(
             formatTimelineLog(SCOPE, "runner.cancel.interrupting", {
               runId: input.runId,
@@ -1122,13 +1567,13 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             formatTimelineLog(SCOPE, "runner.user-takeover.detected", {
               runId: currentActiveRunState.runId,
               userThreadId: threadId,
-              activeWorkingThreadId: currentActiveRunState.activeWorkingThreadId,
+              activeChildThreadId: currentActiveRunState.activeChildThreadId,
             }),
           );
 
           // Interrupt the active agent turn (may be same or different thread)
-          if (currentActiveRunState.activeWorkingThreadId) {
-            yield* interruptWorkingThread(currentActiveRunState.activeWorkingThreadId);
+          if (currentActiveRunState.activeChildThreadId) {
+            yield* interruptWorkingThread(currentActiveRunState.activeChildThreadId);
           }
 
           // Resolve the ticket identifier for the separator message
@@ -1173,6 +1618,9 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
   const runService = yield* OrchestrationRunService;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const providerRegistry = yield* ProviderRegistry;
+  const providerRateLimits = yield* ProviderRateLimitsCache;
+  const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
 
@@ -1180,6 +1628,9 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
     runService,
     orchestrationEngine,
     providerService,
+    providerRegistry,
+    providerRateLimits,
+    checkpointDiffQuery,
     ticketing,
     startup,
   });

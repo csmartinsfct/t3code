@@ -116,11 +116,15 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       projectionThreadRepo,
       ticketing,
       startup,
+      serverSettings,
     });
     const orchestrationRunRunner = yield* makeOrchestrationRunRunnerFromDeps({
       runService: orchestrationRuns,
       orchestrationEngine,
       providerService,
+      providerRegistry,
+      providerRateLimits: rateLimitsCache,
+      checkpointDiffQuery,
       ticketing,
       startup,
     });

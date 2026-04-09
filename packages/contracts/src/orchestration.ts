@@ -1246,6 +1246,7 @@ export type OrchestrationRunPhase = typeof OrchestrationRunPhase.Type;
 export const OrchestrationTicketEntry = Schema.Struct({
   ticketId: TicketId,
   workingThreadId: ThreadId,
+  reviewThreadId: Schema.optionalKey(ThreadId),
 });
 export type OrchestrationTicketEntry = typeof OrchestrationTicketEntry.Type;
 

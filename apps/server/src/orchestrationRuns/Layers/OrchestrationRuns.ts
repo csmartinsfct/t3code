@@ -37,6 +37,7 @@ import {
   OrchestrationRunService,
   type OrchestrationRunServiceShape,
 } from "../Services/OrchestrationRuns.ts";
+import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 
 const SCOPE = "server.orchestration-runs";
 
@@ -91,11 +92,13 @@ interface OrchestrationRunServiceDeps {
   readonly projectionThreadRepo: ProjectionThreadRepositoryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
+  readonly serverSettings: ServerSettingsShape;
 }
 
 export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServiceDeps) =>
   Effect.gen(function* () {
-    const { repo, orchestrationEngine, projectionThreadRepo, ticketing, startup } = deps;
+    const { repo, orchestrationEngine, projectionThreadRepo, ticketing, startup, serverSettings } =
+      deps;
 
     const eventsPubSub =
       yield* PubSub.unbounded<import("@t3tools/contracts").OrchestrationRunStreamEvent>();
@@ -190,10 +193,21 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         const runId = crypto.randomUUID() as import("@t3tools/contracts").OrchestrationRunId;
         const orchestrationThreadId = crypto.randomUUID() as ThreadId;
         const workingThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
+        const reviewThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
         const ticketOrder: OrchestrationTicketEntry[] = tickets.map((ticket, index) => ({
           ticketId: ticket.id,
           workingThreadId: workingThreadIds[index]!,
+          reviewThreadId: reviewThreadIds[index]!,
         }));
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: "Failed to load server settings for orchestration run creation",
+                cause,
+              }),
+          ),
+        );
         const persisted: PersistedOrchestrationRun = {
           id: runId,
           orchestrationThreadId,
@@ -203,7 +217,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           currentTicketIndex: -1 as const,
           currentPhase: "working",
           reviewIteration: 0 as const,
-          maxReviewIterations: input.maxReviewIterations ?? 1,
+          maxReviewIterations: input.maxReviewIterations ?? settings.maxReviewIterations,
           createdAt: now,
           updatedAt: now,
         };
@@ -242,6 +256,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
 
           for (const [index, ticket] of tickets.entries()) {
             const workingThreadId = workingThreadIds[index]!;
+            const reviewThreadId = reviewThreadIds[index]!;
             yield* dispatchQueuedCommand(
               {
                 type: "thread.create",
@@ -261,6 +276,26 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
               `Failed to create working thread for ticket ${ticket.identifier}`,
             );
             createdThreadIds.push(workingThreadId);
+
+            yield* dispatchQueuedCommand(
+              {
+                type: "thread.create",
+                commandId: crypto.randomUUID() as CommandId,
+                threadId: reviewThreadId,
+                projectId: input.projectId,
+                title: `${ticket.title} Review`,
+                modelSelection: input.modelSelection,
+                runtimeMode,
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                parentThreadId: orchestrationThreadId,
+                ticketId: ticket.id,
+                createdAt: now,
+              },
+              `Failed to create review thread for ticket ${ticket.identifier}`,
+            );
+            createdThreadIds.push(reviewThreadId);
           }
         });
 
@@ -389,9 +424,19 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         const ticketOrder = JSON.parse(
           run.value.ticketOrderJson,
         ) as Array<OrchestrationTicketEntry>;
-        const orderedIds = new Set(ticketOrder.map((entry) => entry.workingThreadId));
+        const orderedIds = new Set(
+          ticketOrder.flatMap((entry) =>
+            entry.reviewThreadId !== undefined
+              ? [entry.workingThreadId, entry.reviewThreadId]
+              : [entry.workingThreadId],
+          ),
+        );
         const orderedChildren = ticketOrder
-          .map((entry) => threadById.get(entry.workingThreadId))
+          .flatMap((entry) =>
+            entry.reviewThreadId !== undefined
+              ? [threadById.get(entry.workingThreadId), threadById.get(entry.reviewThreadId)]
+              : [threadById.get(entry.workingThreadId)],
+          )
           .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined);
         const extraChildren = childThreads
           .filter((thread) => !orderedIds.has(thread.id))
@@ -541,6 +586,9 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           ...current,
           currentTicketIndex: input.currentTicketIndex,
           ...(input.currentPhase !== undefined ? { currentPhase: input.currentPhase } : {}),
+          ...(input.reviewIteration !== undefined
+            ? { reviewIteration: input.reviewIteration }
+            : {}),
           updatedAt: now,
         };
 
@@ -568,6 +616,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
             previousIndex: current.currentTicketIndex,
             currentTicketIndex: input.currentTicketIndex,
             currentPhase: input.currentPhase ?? current.currentPhase,
+            reviewIteration: input.reviewIteration ?? current.reviewIteration,
           }),
         );
 
@@ -599,6 +648,7 @@ export const makeOrchestrationRunService = Effect.gen(function* () {
   const projectionThreadRepo = yield* ProjectionThreadRepository;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
+  const serverSettings = yield* ServerSettingsService;
 
   return yield* makeOrchestrationRunServiceFromDeps({
     repo,
@@ -606,6 +656,7 @@ export const makeOrchestrationRunService = Effect.gen(function* () {
     projectionThreadRepo,
     ticketing,
     startup,
+    serverSettings,
   });
 });
 
