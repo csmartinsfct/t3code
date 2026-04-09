@@ -801,12 +801,16 @@ describe("OrchestrationRunRunner", () => {
             {
               id: MessageId.makeUnsafe("assistant-review"),
               role: "assistant",
-              text: JSON.stringify({
-                changesNeeded: false,
-                summary: "Looks good.",
-                comments: [],
-                suggestions: [],
-              }),
+              text: `The only "Projects" string used as a UI label was the one changed.
+
+\`\`\`json
+{
+  "changesNeeded": false,
+  "summary": "Looks good.",
+  "comments": [],
+  "suggestions": []
+}
+\`\`\``,
               turnId: TurnId.makeUnsafe("turn-review"),
               streaming: false,
               createdAt: "2026-04-09T10:00:03.000Z",

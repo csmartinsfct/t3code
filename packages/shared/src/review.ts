@@ -23,6 +23,94 @@ export interface ReviewPromptTemplateInput {
 export const REVIEW_SYSTEM_PROMPT =
   "You are reviewing completed work for a ticket in an automated orchestration workflow. Evaluate the implementation against the ticket requirements and the provided diff. Return valid JSON only. Do not include markdown fences, commentary, or any text outside the JSON object.";
 
+function tryParseJson(text: string): { readonly ok: true; readonly value: unknown } | null {
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(text),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractBalancedJsonObject(text: string): string | null {
+  let depth = 0;
+  let objectStart = -1;
+  let inString = false;
+  let isEscaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (character === "{") {
+      if (depth === 0) {
+        objectStart = index;
+      }
+      depth += 1;
+      continue;
+    }
+
+    if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && objectStart >= 0) {
+        return text.slice(objectStart, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+export function parseReviewOutputJson(text: string): unknown {
+  const trimmedText = text.trim();
+  const directJson = tryParseJson(trimmedText);
+  if (directJson) {
+    return directJson.value;
+  }
+
+  const fencedJsonBlocks = [...trimmedText.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)];
+  for (const match of fencedJsonBlocks) {
+    const candidate = match[1]?.trim();
+    if (!candidate) {
+      continue;
+    }
+    const parsedCandidate = tryParseJson(candidate);
+    if (parsedCandidate) {
+      return parsedCandidate.value;
+    }
+  }
+
+  const embeddedObject = extractBalancedJsonObject(trimmedText);
+  if (embeddedObject) {
+    const parsedObject = tryParseJson(embeddedObject);
+    if (parsedObject) {
+      return parsedObject.value;
+    }
+  }
+
+  throw new SyntaxError("Review output did not contain valid JSON");
+}
+
 export function buildReviewUserPrompt(input: ReviewPromptTemplateInput): string {
   return `Review the completed work for ticket ${input.ticketIdentifier}: ${input.ticketTitle}.
 

@@ -16,7 +16,11 @@ import {
   OrchestrationRunError,
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
-import { buildReviewPrompt, selectReviewModel } from "@t3tools/shared/review";
+import {
+  buildReviewPrompt,
+  parseReviewOutputJson,
+  selectReviewModel,
+} from "@t3tools/shared/review";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
@@ -303,7 +307,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       Effect.gen(function* () {
         const rawText = yield* getLatestAssistantMessageText(threadId);
         const parsedJson = yield* Effect.try({
-          try: () => JSON.parse(rawText),
+          try: () => parseReviewOutputJson(rawText),
           catch: (cause) =>
             new OrchestrationRunError({
               message: `Review output for thread ${threadId} was not valid JSON`,

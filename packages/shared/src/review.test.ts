@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderKind, ProviderRateLimitsSnapshot, ServerProvider } from "@t3tools/contracts";
 
-import { buildReviewPrompt, REVIEW_SYSTEM_PROMPT, selectReviewModel } from "./review";
+import {
+  buildReviewPrompt,
+  parseReviewOutputJson,
+  REVIEW_SYSTEM_PROMPT,
+  selectReviewModel,
+} from "./review";
 
 function makeProvider(
   input: Omit<Partial<ServerProvider>, "provider"> & { provider: ProviderKind },
@@ -97,6 +102,52 @@ If the ticket worktree is not null, treat it as part of the task context while r
         ticketWorktree: null,
       }).userPrompt,
     ).toContain("Worktree:\nnull");
+  });
+});
+
+describe("parseReviewOutputJson", () => {
+  it("parses review JSON wrapped in prose and fenced code", () => {
+    expect(
+      parseReviewOutputJson(`The change looks good overall.
+
+\`\`\`json
+{
+  "changesNeeded": false,
+  "summary": "Ready to accept.",
+  "comments": [],
+  "suggestions": []
+}
+\`\`\`
+
+No further action needed.`),
+    ).toEqual({
+      changesNeeded: false,
+      summary: "Ready to accept.",
+      comments: [],
+      suggestions: [],
+    });
+  });
+
+  it("parses a single embedded JSON object without fences", () => {
+    expect(
+      parseReviewOutputJson(`I checked the work carefully. {
+  "changesNeeded": true,
+  "summary": "One fix is still needed.",
+  "comments": [],
+  "suggestions": ["Update the label in the secondary view too."]
+}`),
+    ).toEqual({
+      changesNeeded: true,
+      summary: "One fix is still needed.",
+      comments: [],
+      suggestions: ["Update the label in the secondary view too."],
+    });
+  });
+
+  it("throws when the response does not contain valid JSON", () => {
+    expect(() => parseReviewOutputJson("This is not JSON at all.")).toThrow(
+      "Review output did not contain valid JSON",
+    );
   });
 });
 
