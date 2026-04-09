@@ -34,7 +34,10 @@ function tryParseJson(text: string): { readonly ok: true; readonly value: unknow
   }
 }
 
-function extractBalancedJsonObject(text: string): string | null {
+function extractBalancedJsonObjects(
+  text: string,
+): Array<{ readonly index: number; readonly text: string }> {
+  const objects: Array<{ readonly index: number; readonly text: string }> = [];
   let depth = 0;
   let objectStart = -1;
   let inString = false;
@@ -73,42 +76,65 @@ function extractBalancedJsonObject(text: string): string | null {
     if (character === "}" && depth > 0) {
       depth -= 1;
       if (depth === 0 && objectStart >= 0) {
-        return text.slice(objectStart, index + 1);
+        objects.push({
+          index: objectStart,
+          text: text.slice(objectStart, index + 1),
+        });
+        objectStart = -1;
       }
     }
   }
 
-  return null;
+  return objects;
+}
+
+export function parseReviewOutputJsonCandidates(text: string): ReadonlyArray<unknown> {
+  const trimmedText = text.trim();
+  const candidates: Array<{ readonly index: number; readonly text: string }> = [];
+
+  const pushCandidate = (candidateText: string, index: number) => {
+    candidates.push({
+      index,
+      text: candidateText,
+    });
+  };
+
+  pushCandidate(trimmedText, 0);
+
+  const fencedJsonBlocks = trimmedText.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi);
+  for (const match of fencedJsonBlocks) {
+    const candidate = match[1]?.trim();
+    if (candidate) {
+      pushCandidate(candidate, match.index ?? 0);
+    }
+  }
+
+  for (const candidate of extractBalancedJsonObjects(trimmedText)) {
+    pushCandidate(candidate.text, candidate.index);
+  }
+
+  const parsedCandidates: unknown[] = [];
+  const seenCandidateTexts = new Set<string>();
+  for (const candidate of candidates.toSorted((left, right) => left.index - right.index)) {
+    if (seenCandidateTexts.has(candidate.text)) {
+      continue;
+    }
+    seenCandidateTexts.add(candidate.text);
+    const parsedCandidate = tryParseJson(candidate.text);
+    if (parsedCandidate) {
+      parsedCandidates.push(parsedCandidate.value);
+    }
+  }
+
+  if (parsedCandidates.length === 0) {
+    throw new SyntaxError("Review output did not contain valid JSON");
+  }
+
+  return parsedCandidates;
 }
 
 export function parseReviewOutputJson(text: string): unknown {
-  const trimmedText = text.trim();
-  const directJson = tryParseJson(trimmedText);
-  if (directJson) {
-    return directJson.value;
-  }
-
-  const fencedJsonBlocks = [...trimmedText.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)];
-  for (const match of fencedJsonBlocks) {
-    const candidate = match[1]?.trim();
-    if (!candidate) {
-      continue;
-    }
-    const parsedCandidate = tryParseJson(candidate);
-    if (parsedCandidate) {
-      return parsedCandidate.value;
-    }
-  }
-
-  const embeddedObject = extractBalancedJsonObject(trimmedText);
-  if (embeddedObject) {
-    const parsedObject = tryParseJson(embeddedObject);
-    if (parsedObject) {
-      return parsedObject.value;
-    }
-  }
-
-  throw new SyntaxError("Review output did not contain valid JSON");
+  return parseReviewOutputJsonCandidates(text)[0];
 }
 
 export function buildReviewUserPrompt(input: ReviewPromptTemplateInput): string {

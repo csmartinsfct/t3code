@@ -3,6 +3,7 @@ import type { ProviderKind, ProviderRateLimitsSnapshot, ServerProvider } from "@
 
 import {
   buildReviewPrompt,
+  parseReviewOutputJsonCandidates,
   parseReviewOutputJson,
   REVIEW_SYSTEM_PROMPT,
   selectReviewModel,
@@ -148,6 +149,25 @@ No further action needed.`),
     expect(() => parseReviewOutputJson("This is not JSON at all.")).toThrow(
       "Review output did not contain valid JSON",
     );
+  });
+
+  it("returns all parseable JSON candidates in order", () => {
+    expect(
+      parseReviewOutputJsonCandidates(`Context:
+{"kind":"metadata"}
+
+\`\`\`json
+{"changesNeeded":false,"summary":"Ready.","comments":[],"suggestions":[]}
+\`\`\``),
+    ).toEqual([
+      { kind: "metadata" },
+      {
+        changesNeeded: false,
+        summary: "Ready.",
+        comments: [],
+        suggestions: [],
+      },
+    ]);
   });
 });
 

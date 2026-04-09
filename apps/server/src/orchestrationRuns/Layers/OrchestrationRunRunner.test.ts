@@ -984,4 +984,132 @@ describe("OrchestrationRunRunner", () => {
       "orchestration.run.ticket.review.approved",
     );
   });
+
+  it("approves a review when metadata JSON appears before the review payload", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        pause: () => Effect.die("pause should not be called"),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+      readModelThreads: [
+        {
+          id: workingThread1,
+          projectId,
+          title: ticket1.title,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-work"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:00.000Z",
+            startedAt: "2026-04-09T10:00:00.000Z",
+            completedAt: "2026-04-09T10:00:01.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:01.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [
+            {
+              turnId: TurnId.makeUnsafe("turn-work"),
+              checkpointTurnCount: 1,
+              checkpointRef: "checkpoint:work-1" as never,
+              status: "ready",
+              files: [],
+              assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+              completedAt: "2026-04-09T10:00:01.000Z",
+            },
+          ],
+          session: null,
+        },
+        {
+          id: reviewThread1,
+          projectId,
+          title: `${ticket1.title} Review`,
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          parentThreadId: orchestrationThreadId,
+          isOrchestrationThread: false,
+          ticketId: ticket1Id,
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-review"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:02.000Z",
+            startedAt: "2026-04-09T10:00:02.000Z",
+            completedAt: "2026-04-09T10:00:03.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-review"),
+          },
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:03.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [
+            {
+              id: MessageId.makeUnsafe("assistant-review"),
+              role: "assistant",
+              text: `{"kind":"metadata"}
+
+{"changesNeeded":false,"summary":"Looks good.","comments":[],"suggestions":[]}`,
+              turnId: TurnId.makeUnsafe("turn-review"),
+              streaming: false,
+              createdAt: "2026-04-09T10:00:03.000Z",
+              updatedAt: "2026-04-09T10:00:03.000Z",
+            },
+          ],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+      ],
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.review.approved",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.paused",
+    );
+  });
 });

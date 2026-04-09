@@ -18,7 +18,7 @@ import {
 } from "@t3tools/contracts";
 import {
   buildReviewPrompt,
-  parseReviewOutputJson,
+  parseReviewOutputJsonCandidates,
   selectReviewModel,
 } from "@t3tools/shared/review";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
@@ -306,8 +306,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
     const parseReviewOutput = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const rawText = yield* getLatestAssistantMessageText(threadId);
-        const parsedJson = yield* Effect.try({
-          try: () => parseReviewOutputJson(rawText),
+        const parsedCandidates = yield* Effect.try({
+          try: () => parseReviewOutputJsonCandidates(rawText),
           catch: (cause) =>
             new OrchestrationRunError({
               message: `Review output for thread ${threadId} was not valid JSON`,
@@ -315,15 +315,19 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             }),
         });
 
-        return yield* decodeReviewOutput(parsedJson).pipe(
-          Effect.mapError(
-            (cause) =>
-              new OrchestrationRunError({
-                message: `Review output for thread ${threadId} did not match ReviewOutput`,
-                cause,
-              }),
-          ),
-        );
+        let lastDecodeCause: unknown = null;
+        for (const parsedCandidate of parsedCandidates) {
+          const decodedExit = yield* Effect.exit(decodeReviewOutput(parsedCandidate));
+          if (decodedExit._tag === "Success") {
+            return decodedExit.value;
+          }
+          lastDecodeCause = decodedExit.cause;
+        }
+
+        return yield* new OrchestrationRunError({
+          message: `Review output for thread ${threadId} did not match ReviewOutput`,
+          cause: lastDecodeCause,
+        });
       });
 
     const ensureReviewThreadModel = (input: {
