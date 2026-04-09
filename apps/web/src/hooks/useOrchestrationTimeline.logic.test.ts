@@ -3,6 +3,7 @@ import type {
   OrchestrationThreadActivity,
   TicketId,
   ThreadId,
+  ReviewOutput,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -83,6 +84,7 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
       {
         ticketId: "ticket-1" as TicketId,
         workingThreadId: "thread-1" as ThreadId,
+        reviewThreadId: "thread-review-1" as ThreadId,
       },
     ],
     currentTicketIndex: 0,
@@ -122,16 +124,24 @@ describe("buildOrchestrationTimelineRows", () => {
           workingThreadId: "thread-1",
         }),
       ],
-      childThreadsByTicketId: new Map([["ticket-1", childThread]]),
+      childThreadsById: new Map([[childThread.id, childThread]]),
       run: makeRun(),
     });
 
     expect(rows.filter((row) => row.kind === "ticket-group")).toHaveLength(1);
     expect(rows.filter((row) => row.kind === "separator")).toHaveLength(1);
     const ticketGroup = rows.find((row) => row.kind === "ticket-group");
-    expect(ticketGroup && ticketGroup.kind === "ticket-group" ? ticketGroup.messages : []).toEqual(
-      childThread.messages,
-    );
+    expect(ticketGroup && ticketGroup.kind === "ticket-group" ? ticketGroup.sections : []).toEqual([
+      {
+        id: "section:thread-1",
+        kind: "working",
+        threadId: "thread-1",
+        title: "ticket-1",
+        messages: childThread.messages,
+        isActive: true,
+        isStarted: true,
+      },
+    ]);
   });
 
   it("marks the ticket group completed when a completion activity exists", () => {
@@ -154,9 +164,9 @@ describe("buildOrchestrationTimelineRows", () => {
           workingThreadId: "thread-1",
         }),
       ],
-      childThreadsByTicketId: new Map([
+      childThreadsById: new Map([
         [
-          "ticket-1",
+          "thread-1",
           makeChildThread({
             id: "thread-1",
             ticketId: "ticket-1",
@@ -170,5 +180,100 @@ describe("buildOrchestrationTimelineRows", () => {
     expect(
       ticketGroup && ticketGroup.kind === "ticket-group" ? ticketGroup.isCompleted : false,
     ).toBe(true);
+  });
+
+  it("keeps working and review sections distinct for the same ticket", () => {
+    const reviewOutput: ReviewOutput = {
+      changesNeeded: true,
+      summary: "Tests still need coverage",
+      comments: [{ file: "src/review.ts", line: 18, severity: "suggestion", body: "Add coverage" }],
+      suggestions: ["Cover invalid review output handling"],
+    };
+
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "started-1",
+          kind: "orchestration.run.ticket.started",
+          summary: "Starting work on ticket T3CO-24",
+          createdAt: "2026-04-09T10:00:00.000Z",
+          ticketId: "ticket-1",
+          workingThreadId: "thread-1",
+        }),
+        {
+          ...makeActivity({
+            id: "review-1",
+            kind: "orchestration.run.ticket.review.requested-changes",
+            summary: "Review requested changes for ticket T3CO-24",
+            createdAt: "2026-04-09T10:00:02.000Z",
+            ticketId: "ticket-1",
+            workingThreadId: "thread-1",
+          }),
+          payload: {
+            ticketId: "ticket-1" as TicketId,
+            ticketIdentifier: "T3CO-24",
+            workingThreadId: "thread-1" as ThreadId,
+            reviewThreadId: "thread-review-1" as ThreadId,
+            reviewIteration: 1,
+          },
+        } as OrchestrationThreadActivity,
+      ],
+      childThreadsById: new Map([
+        [
+          "thread-1",
+          makeChildThread({
+            id: "thread-1",
+            ticketId: "ticket-1",
+            messages: [makeMessage("message-1", "Implemented the review UI")],
+          }),
+        ],
+        [
+          "thread-review-1",
+          makeChildThread({
+            id: "thread-review-1",
+            ticketId: "ticket-1",
+            messages: [makeMessage("message-2", JSON.stringify(reviewOutput))],
+          }),
+        ],
+      ]),
+      run: makeRun({
+        currentPhase: "reviewing",
+      }),
+    });
+
+    const ticketGroup = rows.find((row) => row.kind === "ticket-group");
+    expect(ticketGroup && ticketGroup.kind === "ticket-group" ? ticketGroup.sections : []).toEqual([
+      {
+        id: "section:thread-1",
+        kind: "working",
+        threadId: "thread-1",
+        title: "ticket-1",
+        messages: [makeMessage("message-1", "Implemented the review UI")],
+        isActive: false,
+        isStarted: true,
+      },
+      {
+        id: "section:thread-review-1",
+        kind: "review",
+        threadId: "thread-review-1",
+        title: "ticket-1",
+        messages: [makeMessage("message-2", JSON.stringify(reviewOutput))],
+        isActive: true,
+        isStarted: true,
+      },
+    ]);
+
+    const reviewSeparator = rows.find(
+      (row) =>
+        row.kind === "separator" &&
+        row.activityKind === "orchestration.run.ticket.review.requested-changes",
+    );
+    expect(reviewSeparator).toMatchObject({
+      kind: "separator",
+      summary: "Changes requested",
+      ticketIdentifier: "T3CO-24",
+      reviewIteration: 1,
+      reviewState: "requested-changes",
+    });
   });
 });

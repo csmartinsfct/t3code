@@ -12,6 +12,7 @@ import { useStore } from "../store";
 import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 import type { Thread } from "../types";
 import { getWsRpcClient } from "../wsRpcClient";
+import { buildOrchestrationSwitcherItems } from "./useOrchestrationSwitcher.logic";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -19,7 +20,7 @@ import { getWsRpcClient } from "../wsRpcClient";
 
 export interface OrchestrationSwitcherItem {
   id: string;
-  kind: "timeline" | "working-thread";
+  kind: "timeline" | "working-thread" | "review-thread";
   label: string;
   sublabel: string;
   isActive: boolean;
@@ -185,38 +186,15 @@ export function useOrchestrationSwitcher(
 
   // ── Build items ──────────────────────────────────────────────────
   const items = useMemo((): OrchestrationSwitcherItem[] => {
-    if (!run || !parentThreadId) return [];
-
-    const result: OrchestrationSwitcherItem[] = [
-      {
-        id: "timeline",
-        kind: "timeline",
-        label: "Timeline",
-        sublabel: parentTitle,
-        isActive: isParent,
-        isStarted: true,
-        threadId: parentThreadId,
-      },
-    ];
-
-    for (let i = 0; i < run.ticketOrder.length; i++) {
-      const entry = run.ticketOrder[i]!;
-      const child = childThreads.find((t) => t.id === entry.workingThreadId);
-      const ticket = ticketById.get(entry.ticketId);
-      const isStarted = i <= run.currentTicketIndex && run.status !== "pending";
-
-      result.push({
-        id: entry.workingThreadId,
-        kind: "working-thread",
-        label: ticket?.identifier ?? `Ticket ${i + 1}`,
-        sublabel: child?.title ?? ticket?.title ?? "",
-        isActive: activeThread?.id === entry.workingThreadId,
-        isStarted,
-        threadId: entry.workingThreadId,
-      });
-    }
-
-    return result;
+    return buildOrchestrationSwitcherItems({
+      run,
+      parentThreadId,
+      parentTitle,
+      isParent,
+      childThreads,
+      ticketById,
+      activeThreadId: activeThread?.id,
+    });
   }, [run, parentThreadId, parentTitle, isParent, childThreads, ticketById, activeThread?.id]);
 
   // ── Determine current label ──────────────────────────────────────

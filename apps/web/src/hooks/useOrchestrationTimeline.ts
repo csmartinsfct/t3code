@@ -169,12 +169,10 @@ export function useOrchestrationTimeline(
   }, [projectId, thread?.id, fetchData]);
 
   // ── Build timeline rows ───────────────────────────────────────────
-  const childThreadsByTicketId = useMemo(() => {
+  const childThreadsById = useMemo(() => {
     const map = new Map<string, Thread>();
     for (const child of childThreads) {
-      if (child.ticketId) {
-        map.set(child.ticketId, child);
-      }
+      map.set(child.id, child);
     }
     return map;
   }, [childThreads]);
@@ -185,12 +183,12 @@ export function useOrchestrationTimeline(
 
     const rows = buildOrchestrationTimelineRows({
       parentActivities: parentThread?.activities ?? thread?.activities ?? [],
-      childThreadsByTicketId,
+      childThreadsById,
       run,
     });
 
     return rows.length > 0 ? rows : [{ kind: "empty", id: "empty" }];
-  }, [loading, run, parentThread?.activities, thread?.activities, childThreadsByTicketId]);
+  }, [loading, run, parentThread?.activities, thread?.activities, childThreadsById]);
 
   return {
     loading,

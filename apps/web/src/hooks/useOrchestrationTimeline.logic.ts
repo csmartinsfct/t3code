@@ -16,17 +16,28 @@ export interface SeparatorRow {
   summary: string;
   tone: OrchestrationThreadActivityTone;
   createdAt: string;
+  ticketIdentifier?: string | undefined;
+  reviewIteration?: number | undefined;
+  reviewState?: "started" | "approved" | "requested-changes" | "blocked" | undefined;
+}
+
+export interface TicketThreadSection {
+  id: string;
+  kind: "working" | "review";
+  threadId: string;
+  title: string;
+  messages: ChatMessage[];
+  isActive: boolean;
+  isStarted: boolean;
 }
 
 export interface TicketGroupRow {
   kind: "ticket-group";
   id: string;
   ticketId: string;
-  threadId: string;
   ticketIndex: number;
   totalTickets: number;
-  messages: ChatMessage[];
-  activities: OrchestrationThreadActivity[];
+  sections: TicketThreadSection[];
   isActive: boolean;
   isCompleted: boolean;
 }
@@ -67,12 +78,73 @@ function ticketIdFromActivity(activity: OrchestrationThreadActivity): string | n
   return null;
 }
 
+function ticketIdentifierFromActivity(activity: OrchestrationThreadActivity): string | null {
+  const payload = activity.payload as Record<string, unknown> | null | undefined;
+  if (payload && typeof payload === "object" && typeof payload.ticketIdentifier === "string") {
+    return payload.ticketIdentifier;
+  }
+  return null;
+}
+
+function reviewIterationFromActivity(activity: OrchestrationThreadActivity): number | null {
+  const payload = activity.payload as Record<string, unknown> | null | undefined;
+  if (
+    payload &&
+    typeof payload === "object" &&
+    typeof payload.reviewIteration === "number" &&
+    Number.isInteger(payload.reviewIteration)
+  ) {
+    return payload.reviewIteration;
+  }
+  return null;
+}
+
+function reviewStateFromActivity(activityKind: string): SeparatorRow["reviewState"] | undefined {
+  switch (activityKind) {
+    case "orchestration.run.ticket.review.started":
+      return "started";
+    case "orchestration.run.ticket.review.approved":
+      return "approved";
+    case "orchestration.run.ticket.review.requested-changes":
+      return "requested-changes";
+    case "orchestration.run.ticket.review.exhausted":
+      return "blocked";
+    default:
+      return undefined;
+  }
+}
+
+function reviewSummaryFromActivity(activity: OrchestrationThreadActivity): string {
+  switch (activity.kind) {
+    case "orchestration.run.ticket.review.started":
+      return "Review started";
+    case "orchestration.run.ticket.review.approved":
+      return "Review passed";
+    case "orchestration.run.ticket.review.requested-changes":
+      return "Changes requested";
+    case "orchestration.run.ticket.review.exhausted":
+      return "Review blocked";
+    default:
+      return activity.summary;
+  }
+}
+
+function threadHasContent(thread: Thread | undefined): boolean {
+  if (!thread) return false;
+  return (
+    thread.messages.length > 0 ||
+    thread.activities.length > 0 ||
+    thread.latestTurn !== null ||
+    thread.session !== null
+  );
+}
+
 export function buildOrchestrationTimelineRows(input: {
   parentActivities: ReadonlyArray<OrchestrationThreadActivity>;
-  childThreadsByTicketId: ReadonlyMap<string, Thread>;
+  childThreadsById: ReadonlyMap<string, Thread>;
   run: OrchestrationRun | null;
 }): OrchestrationTimelineRow[] {
-  const { parentActivities, childThreadsByTicketId, run } = input;
+  const { parentActivities, childThreadsById, run } = input;
 
   if (!run) return [];
 
@@ -104,11 +176,26 @@ export function buildOrchestrationTimelineRows(input: {
         summary: activity.summary,
         tone: activity.tone,
         createdAt: activity.createdAt,
+        ...(ticketIdentifierFromActivity(activity)
+          ? { ticketIdentifier: ticketIdentifierFromActivity(activity)! }
+          : {}),
       });
 
       // Emit the ticket group
-      const childThread = childThreadsByTicketId.get(ticketId);
       const ticketIndex = run.ticketOrder.findIndex((e) => e.ticketId === ticketId);
+      const ticketEntry = ticketIndex >= 0 ? run.ticketOrder[ticketIndex] : undefined;
+      const workingThread = ticketEntry
+        ? childThreadsById.get(ticketEntry.workingThreadId)
+        : undefined;
+      const reviewThread =
+        ticketEntry?.reviewThreadId !== undefined
+          ? childThreadsById.get(ticketEntry.reviewThreadId)
+          : undefined;
+      const hasReviewLifecycle = orchestrationActivities.some(
+        (candidate) =>
+          candidate.kind.startsWith("orchestration.run.ticket.review.") &&
+          ticketIdFromActivity(candidate) === ticketId,
+      );
       const isLastStarted =
         orchestrationActivities.findLast((a) => a.kind === "orchestration.run.ticket.started")
           ?.id === activity.id;
@@ -116,16 +203,53 @@ export function buildOrchestrationTimelineRows(input: {
         (a) =>
           a.kind === "orchestration.run.ticket.completed" && ticketIdFromActivity(a) === ticketId,
       );
+      const resolvedTicketIndex = ticketIndex >= 0 ? ticketIndex : 0;
+      const sections: TicketThreadSection[] = [];
+
+      if (ticketEntry) {
+        sections.push({
+          id: `section:${ticketEntry.workingThreadId}`,
+          kind: "working",
+          threadId: ticketEntry.workingThreadId,
+          title: workingThread?.title ?? "Implementation",
+          messages: workingThread?.messages ?? [],
+          isActive:
+            run.status === "running" &&
+            run.currentTicketIndex === resolvedTicketIndex &&
+            run.currentPhase === "working",
+          isStarted:
+            threadHasContent(workingThread) ||
+            (run.status !== "pending" && run.currentTicketIndex >= resolvedTicketIndex),
+        });
+
+        if (ticketEntry.reviewThreadId) {
+          const reviewIsActive =
+            run.status === "running" &&
+            run.currentTicketIndex === resolvedTicketIndex &&
+            run.currentPhase === "reviewing";
+          const reviewIsStarted =
+            threadHasContent(reviewThread) || hasReviewLifecycle || reviewIsActive;
+          if (reviewIsStarted) {
+            sections.push({
+              id: `section:${ticketEntry.reviewThreadId}`,
+              kind: "review",
+              threadId: ticketEntry.reviewThreadId,
+              title: reviewThread?.title ?? "Review",
+              messages: reviewThread?.messages ?? [],
+              isActive: reviewIsActive,
+              isStarted: reviewIsStarted,
+            });
+          }
+        }
+      }
 
       rows.push({
         kind: "ticket-group",
         id: `ticket-${ticketId}`,
         ticketId,
-        threadId: childThread?.id ?? "",
-        ticketIndex: ticketIndex >= 0 ? ticketIndex : 0,
+        ticketIndex: resolvedTicketIndex,
         totalTickets,
-        messages: childThread?.messages ?? [],
-        activities: childThread?.activities ?? [],
+        sections,
         isActive: isLastStarted && !hasCompletedActivity && run.status === "running",
         isCompleted: hasCompletedActivity,
       });
@@ -138,16 +262,26 @@ export function buildOrchestrationTimelineRows(input: {
         summary: activity.summary,
         tone: activity.tone,
         createdAt: activity.createdAt,
+        ...(ticketIdentifierFromActivity(activity)
+          ? { ticketIdentifier: ticketIdentifierFromActivity(activity)! }
+          : {}),
       });
     } else {
       // Generic orchestration separator (started, paused, completed, etc.)
+      const reviewState = reviewStateFromActivity(actKind);
+      const reviewIteration = reviewIterationFromActivity(activity);
       rows.push({
         kind: "separator",
         id: `sep-${activity.id}`,
         activityKind: actKind,
-        summary: activity.summary,
+        summary: reviewState ? reviewSummaryFromActivity(activity) : activity.summary,
         tone: activity.tone,
         createdAt: activity.createdAt,
+        ...(ticketIdentifierFromActivity(activity)
+          ? { ticketIdentifier: ticketIdentifierFromActivity(activity)! }
+          : {}),
+        ...(reviewIteration !== null ? { reviewIteration } : {}),
+        ...(reviewState ? { reviewState } : {}),
       });
     }
   }
@@ -173,7 +307,11 @@ export function estimateOrchestrationTimelineRowHeight(row: OrchestrationTimelin
     case "separator":
       return SEPARATOR_ROW_HEIGHT;
     case "ticket-group":
-      return TICKET_GROUP_BASE_HEIGHT + row.messages.length * MESSAGE_HEIGHT_ESTIMATE;
+      return (
+        TICKET_GROUP_BASE_HEIGHT +
+        row.sections.reduce((total, section) => total + section.messages.length, 0) *
+          MESSAGE_HEIGHT_ESTIMATE
+      );
     case "loading":
       return LOADING_ROW_HEIGHT;
     case "empty":

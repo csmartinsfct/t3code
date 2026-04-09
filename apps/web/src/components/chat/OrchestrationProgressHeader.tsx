@@ -124,9 +124,11 @@ export function OrchestrationProgressHeader({
     run.status === "completed" || run.status === "failed" || run.status === "canceled";
 
   const phaseLabel = run.currentPhase === "reviewing" ? "Reviewing" : "Working on";
+  const reviewIterationLabel =
+    run.currentPhase === "reviewing" ? `Review ${run.reviewIteration + 1}` : null;
   const progressLabel = isTerminal
     ? `${ticketCount} ticket${ticketCount !== 1 ? "s" : ""}`
-    : `${phaseLabel} ticket ${currentIndex + 1} of ${ticketCount}`;
+    : `${phaseLabel} ticket ${currentIndex + 1} of ${ticketCount}${reviewIterationLabel ? ` • ${reviewIterationLabel}` : ""}`;
 
   return (
     <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm px-3 sm:px-5 py-2">

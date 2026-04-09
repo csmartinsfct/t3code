@@ -138,6 +138,8 @@ Each ticket entry in the orchestration run plan stores both `workingThreadId` an
 - moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
 
+The chat UI uses that explicit `reviewThreadId` identity to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
+
 ### History Recording
 
 Every mutation records a `TicketHistoryEntry` with:

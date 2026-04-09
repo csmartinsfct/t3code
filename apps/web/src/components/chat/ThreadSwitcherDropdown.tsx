@@ -1,5 +1,11 @@
 import { memo } from "react";
-import { CheckIcon, ChevronDownIcon, LayoutListIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  FileCode2Icon,
+  LayoutListIcon,
+  SearchCheckIcon,
+} from "lucide-react";
 
 import type { OrchestrationSwitcherItem } from "../../hooks/useOrchestrationSwitcher";
 import { cn } from "~/lib/utils";
@@ -21,9 +27,13 @@ interface ThreadSwitcherDropdownProps {
 
 function statusDotClass(item: OrchestrationSwitcherItem): string {
   if (item.kind === "timeline") return "";
+  if (item.kind === "review-thread") {
+    if (!item.isStarted) return "bg-muted-foreground/20";
+    if (item.isActive) return "bg-sky-500";
+    return "bg-sky-500/75";
+  }
   if (!item.isStarted) return "bg-muted-foreground/30";
   if (item.isActive) return "bg-amber-500";
-  // Started but not active — either completed or waiting
   return "bg-emerald-500";
 }
 
@@ -37,7 +47,7 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
   onNavigate,
 }: ThreadSwitcherDropdownProps) {
   const timelineItem = items.find((i) => i.kind === "timeline");
-  const threadItems = items.filter((i) => i.kind === "working-thread");
+  const threadItems = items.filter((i) => i.kind !== "timeline");
 
   return (
     <Menu>
@@ -81,13 +91,23 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
               "gap-2.5",
               item.isActive && "bg-accent/60",
               !item.isStarted && "opacity-55",
+              item.kind === "review-thread" && "pl-7",
             )}
             onClick={() => onNavigate(item.threadId)}
           >
-            <span className={cn("mt-px size-1.5 shrink-0 rounded-full", statusDotClass(item))} />
+            {item.kind === "review-thread" ? (
+              <SearchCheckIcon className="size-3.5 shrink-0 text-sky-500/80" />
+            ) : (
+              <FileCode2Icon className="size-3.5 shrink-0 text-emerald-500/80" />
+            )}
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-medium sm:text-xs">{item.label}</span>
+                {item.kind === "review-thread" && (
+                  <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-sky-700 dark:text-sky-300">
+                    Review
+                  </span>
+                )}
               </div>
               {item.sublabel && (
                 <span className="min-w-0 truncate text-xs text-muted-foreground/50 sm:text-[10px]">
@@ -95,6 +115,7 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
                 </span>
               )}
             </div>
+            <span className={cn("mt-px size-1.5 shrink-0 rounded-full", statusDotClass(item))} />
             {item.isActive && <CheckIcon className="size-3 shrink-0 text-foreground/70" />}
           </MenuItem>
         ))}

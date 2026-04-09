@@ -936,6 +936,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isOrchestrationThread || isOrchestrationChild ? activeThread : null,
     activeThread?.projectId ?? null,
   );
+  const activeOrchestrationItem = orchestrationSwitcher.visible
+    ? (orchestrationSwitcher.items.find((item) => item.isActive) ?? null)
+    : null;
+  const isReviewOrchestrationChild = activeOrchestrationItem?.kind === "review-thread";
   const onSwitchThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/$threadId", params: { threadId } });
@@ -5008,6 +5012,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     onOpenFileLink={handleOpenFileLink}
                     onMessageContextMenu={onMessageContextMenu}
                     onMessageSelectionClick={onMessageSelectionClick}
+                    isReviewThread={isReviewOrchestrationChild}
                   />
                 </div>
 
