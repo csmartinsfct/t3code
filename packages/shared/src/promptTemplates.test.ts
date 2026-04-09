@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyOrchestrationPromptOverridePatch,
+  hasOrchestrationPromptOverrides,
   listPromptTemplateVariables,
   normalizePromptTemplateVariableReference,
   ORCHESTRATION_PROMPT_DEFAULTS,
   ORCHESTRATION_PROMPT_VARIABLE_REGISTRY,
   renderPromptTemplate,
+  resolveOrchestrationPromptDocuments,
   validatePromptTemplateDocument,
 } from "./promptTemplates";
 
@@ -51,6 +54,70 @@ describe("prompt template variable registry", () => {
     expect(normalizePromptTemplateVariableReference("ticketName")).toBe("ticketTitle");
     expect(normalizePromptTemplateVariableReference("diff")).toBe("commitDiff");
     expect(normalizePromptTemplateVariableReference("missing")).toBeNull();
+  });
+});
+
+describe("orchestration prompt resolution", () => {
+  it("resolves project overrides over current global prompts over shipped defaults", () => {
+    const resolved = resolveOrchestrationPromptDocuments({
+      globalPrompts: {
+        review: {
+          version: 1,
+          blocks: [{ when: null, text: "Global review ${ticketId}" }],
+        },
+      },
+      projectOverrides: {
+        implement: {
+          version: 1,
+          blocks: [{ when: null, text: "Project implement ${ticketId}" }],
+        },
+      },
+    });
+
+    expect(resolved.implement).toEqual({
+      version: 1,
+      blocks: [{ when: null, text: "Project implement ${ticketId}" }],
+    });
+    expect(resolved.review).toEqual({
+      version: 1,
+      blocks: [{ when: null, text: "Global review ${ticketId}" }],
+    });
+    expect(resolved.resume).toEqual(ORCHESTRATION_PROMPT_DEFAULTS.resume);
+  });
+
+  it("applies sparse override patches and removes cleared prompt ids", () => {
+    const next = applyOrchestrationPromptOverridePatch({
+      current: {
+        implement: {
+          version: 1,
+          blocks: [{ when: null, text: "Project implement ${ticketId}" }],
+        },
+        review: {
+          version: 1,
+          blocks: [{ when: null, text: "Project review ${ticketId}" }],
+        },
+      },
+      patch: {
+        implement: null,
+        reviewFeedback: {
+          version: 1,
+          blocks: [{ when: null, text: "Project feedback ${ticketId}" }],
+        },
+      },
+    });
+
+    expect(next).toEqual({
+      review: {
+        version: 1,
+        blocks: [{ when: null, text: "Project review ${ticketId}" }],
+      },
+      reviewFeedback: {
+        version: 1,
+        blocks: [{ when: null, text: "Project feedback ${ticketId}" }],
+      },
+    });
+    expect(hasOrchestrationPromptOverrides(next)).toBe(true);
+    expect(hasOrchestrationPromptOverrides({})).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import {
   MessageId,
   DEFAULT_SERVER_SETTINGS,
   type OrchestrationCommand,
+  type OrchestrationProject,
   OrchestrationRunId,
   ProjectId,
   type OrchestrationThread,
@@ -17,6 +18,7 @@ import {
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { type DeepPartial } from "@t3tools/shared/Struct";
 import { CheckpointDiffQuery } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
@@ -232,10 +234,27 @@ const makeLayer = (opts: {
   providerService?: Partial<ProviderServiceShape>;
   providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
+  readModelProjects?: ReadonlyArray<OrchestrationProject>;
   readModelThreads?: ReadonlyArray<OrchestrationThread>;
-  serverSettingsOverrides?: Partial<typeof DEFAULT_SERVER_SETTINGS>;
+  serverSettingsOverrides?: DeepPartial<typeof DEFAULT_SERVER_SETTINGS>;
 }) => {
   const dispatchedCommands = opts.dispatchedCommands ?? [];
+  const readModelProjects =
+    opts.readModelProjects ??
+    ([
+      {
+        id: projectId,
+        title: "Runner project",
+        workspaceRoot: "/tmp/runner-project",
+        defaultModelSelection: null,
+        systemPrompt: null,
+        promptOverrides: { orchestration: {} },
+        scripts: [],
+        createdAt: "2026-04-09T10:00:00.000Z",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        deletedAt: null,
+      },
+    ] as const satisfies ReadonlyArray<OrchestrationProject>);
   const readModelThreads =
     opts.readModelThreads ??
     ([
@@ -358,7 +377,7 @@ const makeLayer = (opts: {
           Effect.succeed({
             snapshotSequence: 0,
             updatedAt: "2026-04-09T10:00:00.000Z",
-            projects: [],
+            projects: [...readModelProjects],
             threads: [...readModelThreads],
           }),
         readEvents: () => Stream.empty,
@@ -691,6 +710,106 @@ describe("OrchestrationRunRunner", () => {
     );
     expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
       "Review custom T3CO-1 :: patch",
+    );
+  });
+
+  it("prefers project prompt overrides over global orchestration prompt settings", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+    });
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      readModelProjects: [
+        {
+          id: projectId,
+          title: "Runner project",
+          workspaceRoot: "/tmp/runner-project",
+          defaultModelSelection: null,
+          systemPrompt: null,
+          promptOverrides: {
+            orchestration: {
+              implement: {
+                version: 1,
+                blocks: [
+                  {
+                    when: null,
+                    text: "Project implement ${ticketId} in ${projectTitle} @ ${projectPath}",
+                  },
+                ],
+              },
+              review: {
+                version: 1,
+                blocks: [
+                  {
+                    when: null,
+                    text: "Project review ${ticketId} :: ${commitDiff}",
+                  },
+                ],
+              },
+            },
+          },
+          scripts: [],
+          createdAt: "2026-04-09T10:00:00.000Z",
+          updatedAt: "2026-04-09T10:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            implement: {
+              version: 1,
+              blocks: [{ when: null, text: "Global implement ${ticketId}" }],
+            },
+            review: {
+              version: 1,
+              blocks: [{ when: null, text: "Global review ${ticketId}" }],
+            },
+          },
+        },
+      },
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...singleTicketRun,
+              currentTicketIndex: 0,
+              currentPhase: "reviewing",
+            }),
+          ),
+        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+
+    expect(turnStarts.find((command) => command.threadId === workingThread1)?.message.text).toBe(
+      "Project implement T3CO-1 in Runner project @ /tmp/runner-project",
+    );
+    expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
+      "Project review T3CO-1 :: patch",
     );
   });
 

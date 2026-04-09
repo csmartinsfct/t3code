@@ -187,6 +187,7 @@ export function projectEvent(
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
             systemPrompt: payload.systemPrompt,
+            promptOverrides: payload.promptOverrides,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -222,6 +223,9 @@ export function projectEvent(
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   ...(payload.systemPrompt !== undefined
                     ? { systemPrompt: payload.systemPrompt }
+                    : {}),
+                  ...(payload.promptOverrides !== undefined
+                    ? { promptOverrides: payload.promptOverrides }
                     : {}),
                   updatedAt: payload.updatedAt,
                 }

@@ -3,6 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
+import { applyOrchestrationPromptOverridePatch } from "@t3tools/shared/promptTemplates";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -80,6 +81,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
           systemPrompt: null,
+          promptOverrides: { orchestration: {} },
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -92,6 +94,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      const existingProject = readModel.projects.find(
+        (project) => project.id === command.projectId,
+      )!;
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -110,6 +115,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           ...(command.systemPrompt !== undefined ? { systemPrompt: command.systemPrompt } : {}),
+          ...(command.promptOverrides !== undefined
+            ? {
+                promptOverrides: {
+                  orchestration: applyOrchestrationPromptOverridePatch({
+                    current: existingProject.promptOverrides.orchestration,
+                    patch: command.promptOverrides.orchestration,
+                  }),
+                },
+              }
+            : {}),
           updatedAt: occurredAt,
         },
       };

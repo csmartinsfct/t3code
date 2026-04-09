@@ -4,6 +4,7 @@ import type {
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
+  ProjectPromptOverrides,
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
@@ -84,6 +85,7 @@ export interface Project {
   cwd: string;
   defaultModelSelection: ModelSelection | null;
   systemPrompt: string | null;
+  promptOverrides: ProjectPromptOverrides;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];

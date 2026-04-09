@@ -256,6 +256,7 @@ function createSnapshotForTargetUser(options: {
         },
         scripts: [],
         systemPrompt: null,
+        promptOverrides: { orchestration: {} },
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         deletedAt: null,

@@ -390,6 +390,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
             systemPrompt: event.payload.systemPrompt ?? null,
+            promptOverrides: event.payload.promptOverrides,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -415,6 +416,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
             ...(event.payload.systemPrompt !== undefined
               ? { systemPrompt: event.payload.systemPrompt }
+              : {}),
+            ...(event.payload.promptOverrides !== undefined
+              ? { promptOverrides: event.payload.promptOverrides }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

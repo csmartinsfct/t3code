@@ -198,6 +198,7 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
       ? normalizeModelSelection(project.defaultModelSelection)
       : null,
     systemPrompt: project.systemPrompt ?? null,
+    promptOverrides: project.promptOverrides,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
@@ -633,6 +634,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         workspaceRoot: event.payload.workspaceRoot,
         defaultModelSelection: event.payload.defaultModelSelection,
         systemPrompt: event.payload.systemPrompt,
+        promptOverrides: event.payload.promptOverrides,
         scripts: event.payload.scripts,
         createdAt: event.payload.createdAt,
         updatedAt: event.payload.updatedAt,
@@ -664,6 +666,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           : {}),
         ...(event.payload.systemPrompt !== undefined
           ? { systemPrompt: event.payload.systemPrompt }
+          : {}),
+        ...(event.payload.promptOverrides !== undefined
+          ? { promptOverrides: event.payload.promptOverrides }
           : {}),
         updatedAt: event.payload.updatedAt,
       }));

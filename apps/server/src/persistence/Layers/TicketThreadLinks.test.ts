@@ -30,6 +30,7 @@ const seedProject = (projectId: ProjectId, title: string) =>
       defaultModelSelection: null,
       scripts: [],
       systemPrompt: null,
+      promptOverrides: { orchestration: {} },
       createdAt: "2026-04-09T10:00:00.000Z",
       updatedAt: "2026-04-09T10:00:00.000Z",
       deletedAt: null,

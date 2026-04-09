@@ -6,6 +6,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
+  ProjectPromptOverrides,
   ProjectScript,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -52,6 +53,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    promptOverrides: Schema.fromJsonString(ProjectPromptOverrides),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -135,6 +137,8 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const;
 
+const EMPTY_PROJECT_PROMPT_OVERRIDES = { orchestration: {} } satisfies ProjectPromptOverrides;
+
 function maxIso(left: string | null, right: string): string {
   if (left === null) {
     return right;
@@ -188,6 +192,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           system_prompt AS "systemPrompt",
+          COALESCE(
+            prompt_overrides_json,
+            ${JSON.stringify(EMPTY_PROJECT_PROMPT_OVERRIDES)}
+          ) AS "promptOverrides",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -384,6 +392,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           system_prompt AS "systemPrompt",
+          COALESCE(
+            prompt_overrides_json,
+            ${JSON.stringify(EMPTY_PROJECT_PROMPT_OVERRIDES)}
+          ) AS "promptOverrides",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -677,6 +689,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             workspaceRoot: row.workspaceRoot,
             defaultModelSelection: row.defaultModelSelection,
             systemPrompt: row.systemPrompt,
+            promptOverrides: row.promptOverrides,
             scripts: row.scripts,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
@@ -764,6 +777,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               defaultModelSelection: row.defaultModelSelection,
               scripts: row.scripts,
               systemPrompt: row.systemPrompt,
+              promptOverrides: row.promptOverrides,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
               deletedAt: row.deletedAt,

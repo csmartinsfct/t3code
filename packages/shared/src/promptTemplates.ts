@@ -1,11 +1,14 @@
 import type {
   CanonicalPromptVariableKey,
   OrchestrationPromptId,
+  OrchestrationPromptOverrides,
+  OrchestrationPromptOverridesPatch,
   PromptTemplateDocument,
   PromptTemplateValidationError,
   PromptTemplateVariableDefinition,
 } from "@t3tools/contracts";
 import {
+  ORCHESTRATION_PROMPT_IDS,
   ORCHESTRATION_PROMPT_GROUP_ID,
   ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
   PROMPT_TEMPLATE_VERSION,
@@ -133,6 +136,47 @@ export const ORCHESTRATION_PROMPT_DEFAULTS = ORCHESTRATION_PROMPT_SHIPPED_DEFAUL
   OrchestrationPromptId,
   PromptTemplateDocument
 >;
+
+export function resolveOrchestrationPromptDocuments(input?: {
+  readonly projectOverrides?: OrchestrationPromptOverrides | null | undefined;
+  readonly globalPrompts?: Partial<Record<OrchestrationPromptId, PromptTemplateDocument>> | null;
+  readonly shippedDefaults?: Readonly<Record<OrchestrationPromptId, PromptTemplateDocument>>;
+}): Record<OrchestrationPromptId, PromptTemplateDocument> {
+  return {
+    ...(input?.shippedDefaults ?? ORCHESTRATION_PROMPT_DEFAULTS),
+    ...(input?.globalPrompts ?? {}),
+    ...(input?.projectOverrides ?? {}),
+  };
+}
+
+export function applyOrchestrationPromptOverridePatch(input: {
+  readonly current?: OrchestrationPromptOverrides | null | undefined;
+  readonly patch?: OrchestrationPromptOverridesPatch | null | undefined;
+}): OrchestrationPromptOverrides {
+  const next: Partial<Record<OrchestrationPromptId, PromptTemplateDocument>> = {
+    ...(input.current ?? {}),
+  };
+
+  for (const promptId of ORCHESTRATION_PROMPT_IDS) {
+    const value = input.patch?.[promptId];
+    if (value === undefined) {
+      continue;
+    }
+    if (value === null) {
+      delete next[promptId];
+      continue;
+    }
+    next[promptId] = value;
+  }
+
+  return next;
+}
+
+export function hasOrchestrationPromptOverrides(
+  overrides?: OrchestrationPromptOverrides | null | undefined,
+): boolean {
+  return ORCHESTRATION_PROMPT_IDS.some((promptId) => overrides?.[promptId] !== undefined);
+}
 
 export function listPromptTemplateVariables(
   promptId?: OrchestrationPromptId,

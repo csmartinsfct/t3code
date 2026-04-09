@@ -32,6 +32,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           model: "gpt-5.4",
         },
         systemPrompt: null,
+        promptOverrides: { orchestration: {} },
         scripts: [],
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
@@ -40,8 +41,11 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
       const rows = yield* sql<{
         readonly defaultModelSelection: string | null;
+        readonly promptOverrides: string | null;
       }>`
-        SELECT default_model_selection_json AS "defaultModelSelection"
+        SELECT
+          default_model_selection_json AS "defaultModelSelection",
+          prompt_overrides_json AS "promptOverrides"
         FROM projection_projects
         WHERE project_id = 'project-null-options'
       `;
@@ -57,6 +61,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           model: "gpt-5.4",
         }),
       );
+      assert.strictEqual(row.promptOverrides, null);
 
       const persisted = yield* projects.getById({
         projectId: ProjectId.makeUnsafe("project-null-options"),
@@ -64,6 +69,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.deepStrictEqual(Option.getOrNull(persisted)?.defaultModelSelection, {
         provider: "codex",
         model: "gpt-5.4",
+      });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.promptOverrides, {
+        orchestration: {},
       });
     }),
   );

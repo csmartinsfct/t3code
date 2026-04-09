@@ -1,5 +1,6 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
 import { ClaudeModelOptions, CodexModelOptions } from "./model";
+import { OrchestrationPromptOverrides, OrchestrationPromptOverridesPatch } from "./promptTemplates";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -231,6 +232,16 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const ProjectPromptOverrides = Schema.Struct({
+  orchestration: OrchestrationPromptOverrides.pipe(Schema.withDecodingDefault(() => ({}))),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type ProjectPromptOverrides = typeof ProjectPromptOverrides.Type;
+
+export const ProjectPromptOverridesPatch = Schema.Struct({
+  orchestration: Schema.optionalKey(OrchestrationPromptOverridesPatch),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type ProjectPromptOverridesPatch = typeof ProjectPromptOverridesPatch.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -238,6 +249,7 @@ export const OrchestrationProject = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   systemPrompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+  promptOverrides: ProjectPromptOverrides.pipe(Schema.withDecodingDefault(() => ({}))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -424,6 +436,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   systemPrompt: Schema.optional(Schema.NullOr(Schema.String)),
+  promptOverrides: Schema.optional(ProjectPromptOverridesPatch),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -766,6 +779,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   systemPrompt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+  promptOverrides: ProjectPromptOverrides.pipe(Schema.withDecodingDefault(() => ({}))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -777,6 +791,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   systemPrompt: Schema.optional(Schema.NullOr(Schema.String)),
+  promptOverrides: Schema.optional(ProjectPromptOverrides),
   updatedAt: IsoDateTime,
 });
 

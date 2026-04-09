@@ -2,6 +2,7 @@ import type {
   CommandId,
   ModelSelection,
   OrchestrationCommand,
+  OrchestrationProject,
   OrchestrationRun,
   OrchestrationRunId,
   OrchestrationThread,
@@ -18,7 +19,10 @@ import {
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
 import { buildReviewPrompt, parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
-import { renderPromptTemplate } from "@t3tools/shared/promptTemplates";
+import {
+  renderPromptTemplate,
+  resolveOrchestrationPromptDocuments,
+} from "@t3tools/shared/promptTemplates";
 import { Deferred, Duration, Effect, Fiber, Layer, Option, Scope, Schema, Stream } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
@@ -106,11 +110,17 @@ const terminalReasonFromRuntimeEvent = (event: ProviderTurnTerminalEvent): strin
   );
 };
 
-const buildWorkPrompt = (promptDocument: PromptTemplateDocument, ticket: Ticket): string => {
-  return renderPromptTemplate(promptDocument, {
-    ticketId: ticket.identifier,
-    ticketTitle: ticket.title,
-    worktree: ticket.worktree ?? "default",
+const buildWorkPrompt = (input: {
+  readonly promptDocument: PromptTemplateDocument;
+  readonly ticket: Ticket;
+  readonly project: Pick<OrchestrationProject, "title" | "workspaceRoot">;
+}): string => {
+  return renderPromptTemplate(input.promptDocument, {
+    ticketId: input.ticket.identifier,
+    ticketTitle: input.ticket.title,
+    worktree: input.ticket.worktree ?? "default",
+    projectTitle: input.project.title,
+    projectPath: input.project.workspaceRoot,
   });
 };
 
@@ -173,10 +183,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       startup,
       serverSettings,
     } = deps;
-
-    const getOrchestrationPrompts = serverSettings.getSettings.pipe(
-      Effect.map((settings) => settings.prompts.orchestration),
-    );
 
     // Background orchestration work must outlive the individual RPC request
     // that triggered it, so keep these fibers in their own detached scope
@@ -242,6 +248,38 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             (readModel) => readModel.threads.find((thread) => thread.id === threadId) ?? null,
           ),
         );
+
+    const getProject = (projectId: OrchestrationProject["id"]) =>
+      orchestrationEngine
+        .getReadModel()
+        .pipe(
+          Effect.map(
+            (readModel) => readModel.projects.find((project) => project.id === projectId) ?? null,
+          ),
+        );
+
+    const getResolvedProjectPromptContext = (projectId: OrchestrationProject["id"]) =>
+      Effect.gen(function* () {
+        const [project, settings] = yield* Effect.all([
+          getProject(projectId),
+          serverSettings.getSettings,
+        ]);
+
+        if (!project) {
+          return yield* new OrchestrationRunError({
+            message: `Project ${projectId} was not found while resolving orchestration prompts`,
+          });
+        }
+
+        return {
+          project,
+          prompts: resolveOrchestrationPromptDocuments({
+            projectOverrides: project.promptOverrides.orchestration,
+            globalPrompts: settings.prompts.orchestration,
+            shippedDefaults: settings.promptDefaults.orchestration,
+          }),
+        };
+      });
 
     const waitForThread = <A>(
       threadId: ThreadId,
@@ -521,13 +559,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
      * Dispatch the next work turn for a ticket on its working thread.
      */
     const dispatchWorkTurn = (input: {
+      readonly projectId: OrchestrationProject["id"];
       readonly workingThreadId: ThreadId;
       readonly ticket: Ticket;
       readonly mode: DispatchWorkTurnMode;
       readonly reviewFeedback?: ReviewOutput;
     }) => {
-      return getOrchestrationPrompts.pipe(
-        Effect.flatMap((prompts) => {
+      return getResolvedProjectPromptContext(input.projectId).pipe(
+        Effect.flatMap(({ project, prompts }) => {
           const text =
             input.mode === "resume"
               ? buildResumePrompt(prompts.resume)
@@ -537,7 +576,11 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     ticketIdentifier: input.ticket.identifier,
                     review: input.reviewFeedback,
                   })
-                : buildWorkPrompt(prompts.implement, input.ticket);
+                : buildWorkPrompt({
+                    promptDocument: prompts.implement,
+                    ticket: input.ticket,
+                    project,
+                  });
           return dispatchThreadTurn({
             threadId: input.workingThreadId,
             text,
@@ -554,6 +597,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
     };
 
     const dispatchReviewTurn = (input: {
+      readonly projectId: OrchestrationProject["id"];
       readonly reviewThreadId: ThreadId;
       readonly ticket: Ticket;
       readonly workingThreadId: ThreadId;
@@ -566,7 +610,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           threadId: input.workingThreadId,
           toTurnCount: turnCount,
         });
-        const prompts = yield* getOrchestrationPrompts;
+        const { prompts } = yield* getResolvedProjectPromptContext(input.projectId);
         const prompt = buildReviewPrompt(prompts.review, {
           ticketIdentifier: input.ticket.identifier,
           ticketTitle: input.ticket.title,
@@ -959,6 +1003,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 const workOutcome = yield* runChildTurn({
                   threadId: workingThreadId,
                   dispatch: dispatchWorkTurn({
+                    projectId: run.projectId,
                     workingThreadId,
                     ticket,
                     mode: nextWorkMode,
@@ -1096,8 +1141,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               const reviewOutcome = yield* runChildTurn({
                 threadId: reviewThreadId,
                 dispatch: resumeReviewTurn
-                  ? getOrchestrationPrompts.pipe(
-                      Effect.flatMap((prompts) =>
+                  ? getResolvedProjectPromptContext(run.projectId).pipe(
+                      Effect.flatMap(({ prompts }) =>
                         dispatchThreadTurn({
                           threadId: reviewThreadId,
                           text: buildResumePrompt(prompts.resume),
@@ -1113,6 +1158,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                       ),
                     )
                   : dispatchReviewTurn({
+                      projectId: run.projectId,
                       reviewThreadId,
                       ticket,
                       workingThreadId,

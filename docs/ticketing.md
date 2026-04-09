@@ -202,6 +202,19 @@ Global prompt storage is now server-authoritative through `settings.json`:
 - persisted settings stay sparse by stripping prompt ids that match the shipped default exactly
 - `server.updateSettings` accepts `null` for a prompt id in `settings.prompts.orchestration` to reset that prompt back to its shipped default
 
+Projects can now also store sparse orchestration prompt overrides in the orchestration read model:
+
+- `project.promptOverrides.orchestration.<promptId>` stores only the prompt ids explicitly overridden for that project
+- supported project override ids are the same four orchestration prompt ids: `implement`, `resume`, `review`, and `reviewFeedback`
+- clearing a project override removes that prompt id from project storage instead of copying any global/default value into the project row
+- project payloads continue to expose `promptOverrides` separately from server settings so consumers can distinguish stored project overrides from the currently effective prompt document
+
+Effective prompt resolution is:
+
+1. project override
+2. current global prompt from `settings.prompts`
+3. immutable shipped default from `settings.promptDefaults`
+
 The `review` shipped default is one logical prompt document that includes both the fixed review instructions and the ticket-specific review body, so downstream consumers can fully customize or reset review behavior using one prompt id.
 
 ### History Recording

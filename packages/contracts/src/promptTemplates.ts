@@ -14,6 +14,22 @@ export const ORCHESTRATION_PROMPT_IDS = [
 export type OrchestrationPromptId = (typeof ORCHESTRATION_PROMPT_IDS)[number];
 export const OrchestrationPromptId = Schema.Literals(ORCHESTRATION_PROMPT_IDS);
 
+export const OrchestrationPromptOverrides = Schema.Struct({
+  implement: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+  resume: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+  review: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+  reviewFeedback: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type OrchestrationPromptOverrides = typeof OrchestrationPromptOverrides.Type;
+
+export const OrchestrationPromptOverridesPatch = Schema.Struct({
+  implement: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+  resume: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+  review: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+  reviewFeedback: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type OrchestrationPromptOverridesPatch = typeof OrchestrationPromptOverridesPatch.Type;
+
 export const PROMPT_TEMPLATE_VERSION = 1 as const;
 export const PromptTemplateVersion = Schema.Literal(PROMPT_TEMPLATE_VERSION);
 export type PromptTemplateVersion = typeof PromptTemplateVersion.Type;

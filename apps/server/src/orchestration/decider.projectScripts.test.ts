@@ -61,6 +61,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/scripts",
           defaultModelSelection: null,
           systemPrompt: null,
+          promptOverrides: { orchestration: {} },
           scripts: [],
           createdAt: now,
           updatedAt: now,
@@ -95,6 +96,89 @@ describe("decider project scripts", () => {
     expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
   });
 
+  it("stores sparse project prompt overrides and clears removed prompt ids", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const createdReadModel = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-prompts"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-prompts"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-prompts"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-prompts"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-prompts"),
+          title: "Prompts",
+          workspaceRoot: "/tmp/prompts",
+          defaultModelSelection: null,
+          systemPrompt: null,
+          promptOverrides: { orchestration: {} },
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const overrideDocument = {
+      version: 1,
+      blocks: [{ when: null, text: "Project implement ${ticketId}" }],
+    } as const;
+
+    const writeResult = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-project-update-prompts"),
+          projectId: asProjectId("project-prompts"),
+          promptOverrides: {
+            orchestration: {
+              implement: overrideDocument,
+            },
+          },
+        },
+        readModel: createdReadModel,
+      }),
+    );
+
+    const writeEvent = Array.isArray(writeResult) ? writeResult[0] : writeResult;
+    expect(writeEvent.type).toBe("project.meta-updated");
+    expect((writeEvent.payload as { promptOverrides?: unknown }).promptOverrides).toEqual({
+      orchestration: {
+        implement: overrideDocument,
+      },
+    });
+
+    const updatedReadModel = await Effect.runPromise(projectEvent(createdReadModel, writeEvent));
+
+    const clearResult = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-project-clear-prompts"),
+          projectId: asProjectId("project-prompts"),
+          promptOverrides: {
+            orchestration: {
+              implement: null,
+            },
+          },
+        },
+        readModel: updatedReadModel,
+      }),
+    );
+
+    const clearEvent = Array.isArray(clearResult) ? clearResult[0] : clearResult;
+    expect(clearEvent.type).toBe("project.meta-updated");
+    expect((clearEvent.payload as { promptOverrides?: unknown }).promptOverrides).toEqual({
+      orchestration: {},
+    });
+  });
+
   it("emits user message and turn-start-requested events for thread.turn.start", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);
@@ -116,6 +200,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,
+          promptOverrides: { orchestration: {} },
           scripts: [],
           createdAt: now,
           updatedAt: now,
@@ -226,6 +311,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,
+          promptOverrides: { orchestration: {} },
           scripts: [],
           createdAt: now,
           updatedAt: now,
@@ -309,6 +395,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,
+          promptOverrides: { orchestration: {} },
           scripts: [],
           createdAt: now,
           updatedAt: now,
