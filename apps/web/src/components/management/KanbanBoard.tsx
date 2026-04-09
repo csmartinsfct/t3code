@@ -1,8 +1,17 @@
-import type { TicketId, TicketStatus, TicketSummary } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  Ticket,
+  TicketId,
+  TicketStatus,
+  TicketSummary,
+} from "@t3tools/contracts";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { ArrowLeftIcon } from "lucide-react";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
+
+import type { ProjectId } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
@@ -12,7 +21,9 @@ import { ensureNativeApi } from "../../nativeApi";
 import { ALL_STATUSES } from "../settings/ticketUtils";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
+import { KanbanSelectionBar } from "./KanbanSelectionBar";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
+import { OrchestrateConfirmDialog } from "./OrchestrateConfirmDialog";
 
 interface KanbanBoardProps {
   projectId: string;
@@ -35,9 +46,18 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const selectedTicketId = ticketStack.length > 0 ? ticketStack[ticketStack.length - 1] : null;
 
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
+  const selectedTickets = useTicketSelectionStore((s) => s.selectedTickets);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
+
+  const navigate = useNavigate();
+
+  // Orchestration dialog state
+  const [orchestrateDialogOpen, setOrchestrateDialogOpen] = useState(false);
+  const [orchestrateTickets, setOrchestrateTickets] = useState<
+    ReadonlyMap<TicketId, TicketSummary>
+  >(new Map());
 
   const ticketsByStatus = useMemo(() => {
     const grouped: Record<TicketStatus, TicketSummary[]> = {
@@ -114,6 +134,79 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       }
     },
     [toggleTicket, rangeSelectTo, flatOrderedTickets],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Context menu & orchestration handlers
+  // ---------------------------------------------------------------------------
+
+  const handleCardContextMenu = useCallback(
+    async (e: React.MouseEvent, ticket: TicketSummary) => {
+      const api = ensureNativeApi();
+      const isInSelection = selectedTicketIds.has(ticket.id);
+      const count = isInSelection ? selectedTicketIds.size : 1;
+      const label = count > 1 ? `Orchestrate (${count})` : "Orchestrate";
+
+      const clicked = await api.contextMenu.show([{ id: "orchestrate", label }], {
+        x: e.clientX,
+        y: e.clientY,
+      });
+
+      if (clicked === "orchestrate") {
+        if (isInSelection && selectedTicketIds.size > 0) {
+          setOrchestrateTickets(new Map(selectedTickets));
+        } else {
+          setOrchestrateTickets(new Map([[ticket.id, ticket]]));
+        }
+        setOrchestrateDialogOpen(true);
+      }
+    },
+    [selectedTicketIds, selectedTickets],
+  );
+
+  const openOrchestrateForSelection = useCallback(() => {
+    setOrchestrateTickets(new Map(selectedTickets));
+    setOrchestrateDialogOpen(true);
+  }, [selectedTickets]);
+
+  const handleOrchestrateFromDetail = useCallback((ticket: Ticket) => {
+    const summary: TicketSummary = {
+      id: ticket.id,
+      projectId: ticket.projectId,
+      parentId: ticket.parentId,
+      ticketNumber: ticket.ticketNumber,
+      identifier: ticket.identifier,
+      title: ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      sortOrder: ticket.sortOrder,
+      isArchived: ticket.isArchived,
+      worktree: ticket.worktree,
+      labels: ticket.labels,
+      subTicketCount: ticket.subTickets.length,
+      dependencyCount: ticket.dependencies.length,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+    } as TicketSummary;
+    setOrchestrateTickets(new Map([[ticket.id, summary]]));
+    setOrchestrateDialogOpen(true);
+  }, []);
+
+  const handleConfirmOrchestrate = useCallback(
+    async (ticketIdentifiers: string[], modelSelection: ModelSelection) => {
+      const api = ensureNativeApi();
+      const result = await api.orchestration.createRun({
+        projectId: projectId as ProjectId,
+        ticketIdentifiers: ticketIdentifiers as never,
+        modelSelection,
+      });
+      clearSelection();
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: result.orchestrationThreadId },
+      });
+    },
+    [projectId, navigate, clearSelection],
   );
 
   // ---------------------------------------------------------------------------
@@ -371,9 +464,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           projectId={projectId}
           onBack={handleBack}
           onNavigateToTicket={handleNavigateToTicket}
+          onOrchestrate={handleOrchestrateFromDetail}
         />
       ) : (
-        <div className="flex min-h-0 flex-1 overflow-x-auto">
+        <div className="relative flex min-h-0 flex-1 overflow-x-auto">
           {ALL_STATUSES.map((status) => (
             <KanbanColumn
               key={status}
@@ -382,11 +476,28 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               epicProgressMap={epicProgressMap}
               selectedTicketIds={selectedTicketIds}
               onMultiSelectClick={handleTicketMultiSelectClick}
+              onCardContextMenu={handleCardContextMenu}
               onTicketClick={handleTicketClick}
             />
           ))}
+          {selectedTicketIds.size > 0 && (
+            <KanbanSelectionBar
+              selectedCount={selectedTicketIds.size}
+              onOrchestrate={openOrchestrateForSelection}
+              onClear={clearSelection}
+            />
+          )}
         </div>
       )}
+
+      <OrchestrateConfirmDialog
+        open={orchestrateDialogOpen}
+        onOpenChange={setOrchestrateDialogOpen}
+        selectedTickets={orchestrateTickets}
+        allTickets={tickets}
+        projectId={projectId}
+        onConfirm={handleConfirmOrchestrate}
+      />
     </div>
   );
 });

@@ -15,6 +15,7 @@ interface KanbanCardProps {
   epicProgress?: EpicProgress | undefined;
   isSelected?: boolean | undefined;
   onMultiSelectClick?: ((e: React.MouseEvent, ticket: TicketSummary) => void) | undefined;
+  onContextMenu?: ((e: React.MouseEvent, ticket: TicketSummary) => void) | undefined;
   onClick: () => void;
 }
 
@@ -24,6 +25,7 @@ export function KanbanCard({
   epicProgress,
   isSelected,
   onMultiSelectClick,
+  onContextMenu,
   onClick,
 }: KanbanCardProps) {
   const priorityCfg = PRIORITY_CONFIG[ticket.priority];
@@ -48,6 +50,12 @@ export function KanbanCard({
           : "border-border/70 bg-card hover:bg-accent/50"
       } ${isDragging ? "opacity-40" : ""}`}
       style={style}
+      onContextMenu={(e) => {
+        if (onContextMenu) {
+          e.preventDefault();
+          onContextMenu(e, ticket);
+        }
+      }}
       onClick={(e) => {
         if ((e.altKey || e.metaKey || e.shiftKey) && onMultiSelectClick) {
           onMultiSelectClick(e, ticket);

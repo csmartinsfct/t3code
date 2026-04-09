@@ -55,6 +55,10 @@
     "./proposedPlan": {
       "types": "./src/proposedPlan.ts",
       "import": "./src/proposedPlan.ts"
+    },
+    "./toposort": {
+      "types": "./src/toposort.ts",
+      "import": "./src/toposort.ts"
     }
   },
   "scripts": {
