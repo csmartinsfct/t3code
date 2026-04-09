@@ -182,7 +182,7 @@ function transformForMcp(obj: unknown, idMap: IdMap): unknown {
 function createTicketingMcpServer(
   ticketing: TicketingServiceShape,
   bridge: ReturnType<typeof createEffectBridge>,
-  context: { projectId: ProjectId },
+  context: { projectId: ProjectId; threadId?: ThreadId | undefined },
 ) {
   const server = new McpServer(
     { name: "t3-ticketing", version: "0.0.1" },
@@ -390,6 +390,7 @@ function createTicketingMcpServer(
               : {}),
             ...(implementerModel ? { implementerModelOverride: implementerModel as never } : {}),
             ...(reviewerModel ? { reviewerModelOverride: reviewerModel as never } : {}),
+            ...(context.threadId ? { originThreadId: context.threadId } : {}),
           }),
         );
         return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
@@ -1164,6 +1165,7 @@ const handleTicketingMcpRequest = Effect.gen(function* () {
   const bridge = createEffectBridge();
   const server = createTicketingMcpServer(ticketing, bridge, {
     projectId: mcpContext.projectId,
+    threadId: mcpContext.threadId,
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 

@@ -25,6 +25,7 @@ import { parsePullRequestReference } from "../pullRequestReference";
 import {
   deriveLocalBranchNameFromRemoteRef,
   EnvMode,
+  filterVisibleBranchPickerBranches,
   resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
   shouldIncludeBranchPickerItem,
@@ -113,12 +114,13 @@ export function BranchToolbarBranchSelector({
       enabled: isBranchMenuOpen,
     }),
   );
-  const branches = useMemo(
+  const allBranches = useMemo(
     () => branchesSearchData?.pages.flatMap((page) => page.branches) ?? [],
     [branchesSearchData?.pages],
   );
+  const branches = useMemo(() => filterVisibleBranchPickerBranches(allBranches), [allBranches]);
   const currentGitBranch =
-    branchStatusQuery.data?.branch ?? branches.find((branch) => branch.current)?.name ?? null;
+    branchStatusQuery.data?.branch ?? allBranches.find((branch) => branch.current)?.name ?? null;
   const canonicalActiveBranch = resolveBranchToolbarValue({
     envMode: effectiveEnvMode,
     activeWorktreePath,
@@ -176,13 +178,12 @@ export function BranchToolbarBranchSelector({
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
-  const totalBranchCount = branchesSearchData?.pages[0]?.totalCount ?? 0;
   const branchStatusText = isBranchesSearchPending
     ? "Loading branches..."
     : isFetchingNextPage
       ? "Loading more branches..."
-      : hasNextPage
-        ? `Showing ${branches.length} of ${totalBranchCount} branches`
+      : hasNextPage && branches.length > 0
+        ? `Showing ${branches.length} branches`
         : null;
 
   const runBranchAction = (action: () => Promise<void>) => {
@@ -404,7 +405,7 @@ export function BranchToolbarBranchSelector({
 
   useEffect(() => {
     maybeFetchNextBranchPage();
-  }, [branches.length, maybeFetchNextBranchPage]);
+  }, [allBranches.length, maybeFetchNextBranchPage]);
 
   const triggerLabel = getBranchTriggerLabel({
     activeWorktreePath,

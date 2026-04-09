@@ -142,6 +142,7 @@ export interface WsRpcClient {
     readonly list: RpcUnaryMethod<typeof WS_METHODS.ticketingList>;
     readonly getById: RpcUnaryMethod<typeof WS_METHODS.ticketingGetById>;
     readonly getByIdentifier: RpcUnaryMethod<typeof WS_METHODS.ticketingGetByIdentifier>;
+    readonly getThreadLinks: RpcUnaryMethod<typeof WS_METHODS.ticketingGetThreadLinks>;
     readonly create: RpcUnaryMethod<typeof WS_METHODS.ticketingCreate>;
     readonly update: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdate>;
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.ticketingDelete>;
@@ -321,6 +322,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getById: (input) => transport.request((client) => client[WS_METHODS.ticketingGetById](input)),
       getByIdentifier: (input) =>
         transport.request((client) => client[WS_METHODS.ticketingGetByIdentifier](input)),
+      getThreadLinks: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetThreadLinks](input)),
       create: (input) => transport.request((client) => client[WS_METHODS.ticketingCreate](input)),
       update: (input) => transport.request((client) => client[WS_METHODS.ticketingUpdate](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.ticketingDelete](input)),

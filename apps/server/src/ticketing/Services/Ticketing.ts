@@ -23,6 +23,8 @@ import type {
   TicketGetByIdentifierInput,
   TicketHistoryEntry,
   TicketHistoryInput,
+  TicketThreadLinks,
+  TicketThreadLinksInput,
   TicketId,
   TicketingError,
   TicketingStreamEvent,
@@ -55,6 +57,9 @@ export interface TicketingServiceShape {
   readonly getByIdentifier: (
     input: TicketGetByIdentifierInput,
   ) => Effect.Effect<Ticket, TicketingError>;
+  readonly getThreadLinks: (
+    input: TicketThreadLinksInput,
+  ) => Effect.Effect<TicketThreadLinks, TicketingError>;
   readonly create: (input: TicketCreateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly update: (input: TicketUpdateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly delete: (input: TicketDeleteInput) => Effect.Effect<void, TicketingError>;

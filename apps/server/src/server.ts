@@ -52,6 +52,7 @@ import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks
 import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
 import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
 import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
+import { TicketThreadLinkRepositoryLive } from "./persistence/Layers/TicketThreadLinks";
 import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingMcpRouteLayer } from "./ticketing/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
@@ -243,6 +244,8 @@ const RuntimeServicesLive = Layer.empty.pipe(
   ),
   Layer.provideMerge(
     TicketingServiceLive.pipe(
+      Layer.provide(TicketThreadLinkRepositoryLive),
+      Layer.provide(ProjectionThreadRepositoryLive),
       Layer.provide(TicketingRepositoryLive),
       Layer.provide(PersistenceLayerLive),
     ),

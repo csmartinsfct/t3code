@@ -2924,7 +2924,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             },
             t3_ticketing: {
               type: "http",
-              url: `http://127.0.0.1:${serverConfig.port}/mcp/ticketing`,
+              url: `http://127.0.0.1:${serverConfig.port}/mcp/ticketing?projectId=${encodeURIComponent(
+                checkpointContext.value.projectId,
+              )}&threadId=${encodeURIComponent(input.threadId)}`,
               headers: { Authorization: `Bearer ${access.token}` },
             },
           };

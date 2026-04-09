@@ -76,6 +76,12 @@ export function resolveBranchSelectionTarget(input: {
   };
 }
 
+export function filterVisibleBranchPickerBranches(
+  branches: ReadonlyArray<GitBranch>,
+): ReadonlyArray<GitBranch> {
+  return branches.filter((branch) => !branch.isRemote);
+}
+
 export function shouldIncludeBranchPickerItem(input: {
   itemValue: string;
   normalizedQuery: string;

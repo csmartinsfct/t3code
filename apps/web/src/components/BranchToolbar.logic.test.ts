@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
+  filterVisibleBranchPickerBranches,
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,
   resolveBranchToolbarValue,
@@ -195,6 +196,38 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
     expect(dedupeRemoteBranchesWithLocalMatches(input).map((branch) => branch.name)).toEqual([
       "upstream/feature",
       "my-org/upstream/feature",
+    ]);
+  });
+});
+
+describe("filterVisibleBranchPickerBranches", () => {
+  it("hides remote refs from the branch picker", () => {
+    const input: GitBranch[] = [
+      {
+        name: "main",
+        current: true,
+        isDefault: true,
+        worktreePath: null,
+      },
+      {
+        name: "feature/local-only",
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      },
+      {
+        name: "upstream/main",
+        isRemote: true,
+        remoteName: "upstream",
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      },
+    ];
+
+    expect(filterVisibleBranchPickerBranches(input).map((branch) => branch.name)).toEqual([
+      "main",
+      "feature/local-only",
     ]);
   });
 });

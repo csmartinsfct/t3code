@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 // ModelSelection is re-declared here to avoid a circular import with orchestration.ts
 // (orchestration.ts imports TicketId from this file). The shape must stay in sync.
@@ -216,6 +216,29 @@ export const Ticket = Schema.Struct({
 });
 export type Ticket = typeof Ticket.Type;
 
+export const TicketThreadLinkType = Schema.Literals(["origin", "bound", "mention"]);
+export type TicketThreadLinkType = typeof TicketThreadLinkType.Type;
+
+export const TicketLinkedThread = Schema.Struct({
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  isOrchestrationThread: Schema.Boolean,
+  parentThreadId: Schema.NullOr(ThreadId),
+  sources: Schema.Array(TicketThreadLinkType),
+  lastRelatedAt: IsoDateTime,
+});
+export type TicketLinkedThread = typeof TicketLinkedThread.Type;
+
+export const TicketThreadLinks = Schema.Struct({
+  ticketId: TicketId,
+  originThread: Schema.NullOr(TicketLinkedThread),
+  relatedThreads: Schema.Array(TicketLinkedThread),
+});
+export type TicketThreadLinks = typeof TicketThreadLinks.Type;
+
 export interface TicketTreeNode {
   readonly ticket: TicketSummary;
   readonly children: ReadonlyArray<TicketTreeNode>;
@@ -244,6 +267,7 @@ export const TicketTreeNode = TicketTreeNodeWire as unknown as Schema.Schema<Tic
 export const TicketCreateInput = Schema.Struct({
   projectId: ProjectId,
   parentId: Schema.optional(Schema.NullOr(TicketId)),
+  originThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   description: Schema.optional(Schema.NullOr(Schema.String)),
   acceptanceCriteria: Schema.optional(Schema.NullOr(Schema.Array(AcceptanceCriterion))),
@@ -257,6 +281,11 @@ export const TicketCreateInput = Schema.Struct({
   dependencyIds: Schema.optional(Schema.Array(TicketId)),
 });
 export type TicketCreateInput = typeof TicketCreateInput.Type;
+
+export const TicketThreadLinksInput = Schema.Struct({
+  ticketId: TicketId,
+});
+export type TicketThreadLinksInput = typeof TicketThreadLinksInput.Type;
 
 export const TicketUpdateInput = Schema.Struct({
   id: TicketId,

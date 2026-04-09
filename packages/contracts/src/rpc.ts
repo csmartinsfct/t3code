@@ -106,6 +106,8 @@ import {
   TicketReorderInput,
   TicketSearchInput,
   TicketSummary,
+  TicketThreadLinks,
+  TicketThreadLinksInput,
   TicketTreeInput,
   TicketTreeNodeWire,
   UpdateCriterionStatusInput,
@@ -230,6 +232,7 @@ export const WS_METHODS = {
   ticketingList: "ticketing.list",
   ticketingGetById: "ticketing.getById",
   ticketingGetByIdentifier: "ticketing.getByIdentifier",
+  ticketingGetThreadLinks: "ticketing.getThreadLinks",
   ticketingCreate: "ticketing.create",
   ticketingUpdate: "ticketing.update",
   ticketingDelete: "ticketing.delete",
@@ -728,6 +731,12 @@ export const WsTicketingGetByIdentifierRpc = Rpc.make(WS_METHODS.ticketingGetByI
   error: TicketingError,
 });
 
+export const WsTicketingGetThreadLinksRpc = Rpc.make(WS_METHODS.ticketingGetThreadLinks, {
+  payload: TicketThreadLinksInput,
+  success: TicketThreadLinks,
+  error: TicketingError,
+});
+
 export const WsTicketingCreateRpc = Rpc.make(WS_METHODS.ticketingCreate, {
   payload: TicketCreateInput,
   success: Ticket,
@@ -929,6 +938,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingListRpc,
   WsTicketingGetByIdRpc,
   WsTicketingGetByIdentifierRpc,
+  WsTicketingGetThreadLinksRpc,
   WsTicketingCreateRpc,
   WsTicketingUpdateRpc,
   WsTicketingDeleteRpc,

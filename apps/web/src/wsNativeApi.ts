@@ -73,6 +73,7 @@ export function createWsNativeApi(): NativeApi {
       list: rpcClient.ticketing.list,
       getById: rpcClient.ticketing.getById,
       getByIdentifier: rpcClient.ticketing.getByIdentifier,
+      getThreadLinks: rpcClient.ticketing.getThreadLinks,
       create: rpcClient.ticketing.create,
       update: rpcClient.ticketing.update,
       delete: rpcClient.ticketing.delete,

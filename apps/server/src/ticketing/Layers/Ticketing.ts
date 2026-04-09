@@ -15,7 +15,10 @@ import {
   type Label,
   type Ticket,
   type TicketDependency,
+  type TicketLinkedThread,
   type TicketSummary,
+  type TicketThreadLinks,
+  type TicketThreadLinkType,
   type TicketTreeNode,
   type TicketingError,
   type TicketingStreamEvent,
@@ -23,8 +26,11 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, PubSub, Stream } from "effect";
 
+import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { TicketingRepository } from "../../persistence/Services/Ticketing.ts";
 import type { PersistedTicket } from "../../persistence/Services/Ticketing.ts";
+import { TicketThreadLinkRepository } from "../../persistence/Services/TicketThreadLinks.ts";
+import type { TicketThreadLinkLookupRow } from "../../persistence/Services/TicketThreadLinks.ts";
 import { TicketingService, type TicketingServiceShape } from "../Services/Ticketing.ts";
 
 const nowIso = () => new Date().toISOString();
@@ -51,6 +57,8 @@ const deriveEpicStatus = (children: ReadonlyArray<{ status: TicketStatus }>): Ti
 
 const makeTicketingService = Effect.gen(function* () {
   const repo = yield* TicketingRepository;
+  const projectionThreadRepository = yield* ProjectionThreadRepository;
+  const ticketThreadLinkRepository = yield* TicketThreadLinkRepository;
   const eventsPubSub = yield* PubSub.unbounded<TicketingStreamEvent>();
 
   const publishEvent = (event: TicketingStreamEvent) =>
@@ -157,6 +165,46 @@ const makeTicketingService = Effect.gen(function* () {
         updatedAt: ticket.updatedAt,
       } satisfies Ticket;
     }).pipe(Effect.mapError(toOperationError("buildFullTicket")));
+
+  const TICKET_THREAD_LINK_SOURCE_ORDER: ReadonlyArray<TicketThreadLinkType> = [
+    "origin",
+    "bound",
+    "mention",
+  ];
+
+  const toLinkedThread = (
+    rows: ReadonlyArray<TicketThreadLinkLookupRow>,
+  ): TicketLinkedThread | null => {
+    const firstRow = rows[0];
+    if (!firstRow || firstRow.threadDeletedAt !== null) {
+      return null;
+    }
+    const uniqueSources = new Set(rows.map((row) => row.linkType));
+    const sources = TICKET_THREAD_LINK_SOURCE_ORDER.filter((source) =>
+      uniqueSources.has(source),
+    ) as TicketThreadLinkType[];
+    const lastRelatedAt = rows.reduce(
+      (latest, row) => (row.updatedAt > latest ? row.updatedAt : latest),
+      firstRow.updatedAt,
+    );
+
+    return {
+      threadId: firstRow.threadId,
+      title: firstRow.title as TicketLinkedThread["title"],
+      createdAt: firstRow.threadCreatedAt,
+      updatedAt: firstRow.threadUpdatedAt,
+      archivedAt: firstRow.threadArchivedAt,
+      isOrchestrationThread: firstRow.isOrchestrationThread,
+      parentThreadId: firstRow.parentThreadId,
+      sources,
+      lastRelatedAt,
+    };
+  };
+
+  const compareLinkedThreads = (left: TicketLinkedThread, right: TicketLinkedThread): number =>
+    right.lastRelatedAt.localeCompare(left.lastRelatedAt) ||
+    right.updatedAt.localeCompare(left.updatedAt) ||
+    left.threadId.localeCompare(right.threadId);
 
   /** Re-publish a parent ticket's summary so clients see updated subTicketCount. */
   const notifyParent = (parentId: TicketId): Effect.Effect<void, TicketingError> =>
@@ -297,10 +345,100 @@ const makeTicketingService = Effect.gen(function* () {
       return yield* buildFullTicket(ticket);
     });
 
+  const getThreadLinks: TicketingServiceShape["getThreadLinks"] = (input) =>
+    Effect.gen(function* () {
+      yield* resolveTicketOrFail(input.ticketId);
+      const rows = yield* ticketThreadLinkRepository
+        .listByTicketId({ ticketId: input.ticketId })
+        .pipe(Effect.mapError(toOperationError("getThreadLinks")));
+
+      const rowsByThreadId = new Map<string, TicketThreadLinkLookupRow[]>();
+      for (const row of rows) {
+        if (row.threadDeletedAt !== null) continue;
+        const existing = rowsByThreadId.get(row.threadId) ?? [];
+        existing.push(row);
+        rowsByThreadId.set(row.threadId, existing);
+      }
+
+      const originCandidates = [...rowsByThreadId.values()]
+        .map((threadRows) => ({
+          threadId: threadRows[0]?.threadId ?? null,
+          originRow: threadRows
+            .filter((row) => row.linkType === "origin")
+            .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0],
+        }))
+        .filter((candidate) => candidate.threadId !== null && candidate.originRow !== undefined)
+        .toSorted((left, right) =>
+          left.originRow!.createdAt.localeCompare(right.originRow!.createdAt),
+        );
+      if (originCandidates.length > 1) {
+        yield* Effect.logWarning(
+          "multiple origin-thread links found for ticket; choosing earliest",
+          {
+            ticketId: input.ticketId,
+            threadIds: originCandidates.map((candidate) => candidate.threadId!),
+          },
+        );
+      }
+      const selectedOriginThreadId = originCandidates[0]?.threadId ?? null;
+      const originThread = selectedOriginThreadId
+        ? toLinkedThread(rowsByThreadId.get(selectedOriginThreadId) ?? [])
+        : null;
+      const relatedThreads: TicketLinkedThread[] = [];
+
+      for (const threadRows of rowsByThreadId.values()) {
+        const linkedThread = toLinkedThread(threadRows);
+        if (linkedThread === null) continue;
+        if (linkedThread.threadId === selectedOriginThreadId) {
+          continue;
+        }
+        relatedThreads.push(linkedThread);
+      }
+
+      return {
+        ticketId: input.ticketId,
+        originThread,
+        relatedThreads: relatedThreads
+          .filter((thread) => thread.threadId !== originThread?.threadId)
+          .toSorted(compareLinkedThreads),
+      } satisfies TicketThreadLinks;
+    });
+
   const create: TicketingServiceShape["create"] = (input) =>
     Effect.gen(function* () {
       const now = nowIso();
       const id = TicketId.makeUnsafe(crypto.randomUUID());
+      if (input.originThreadId) {
+        const originThread = yield* projectionThreadRepository
+          .getById({ threadId: input.originThreadId })
+          .pipe(Effect.mapError(toOperationError("create")));
+        const resolvedOriginThread = yield* Option.match(originThread, {
+          onNone: () =>
+            Effect.fail<TicketingError>(
+              new TicketingValidationError({
+                field: "originThreadId",
+                message: `Unknown origin thread: ${input.originThreadId}`,
+              }),
+            ),
+          onSome: Effect.succeed,
+        });
+        if (resolvedOriginThread.projectId !== input.projectId) {
+          return yield* Effect.fail<TicketingError>(
+            new TicketingValidationError({
+              field: "originThreadId",
+              message: "Origin thread must belong to the same project as the ticket",
+            }),
+          );
+        }
+        if (resolvedOriginThread.deletedAt !== null) {
+          return yield* Effect.fail<TicketingError>(
+            new TicketingValidationError({
+              field: "originThreadId",
+              message: "Origin thread has been deleted",
+            }),
+          );
+        }
+      }
       const { ticketNumber, identifier } = yield* repo
         .allocateTicketNumber({ projectId: input.projectId })
         .pipe(Effect.mapError(toOperationError("create")));
@@ -350,6 +488,16 @@ const makeTicketingService = Effect.gen(function* () {
             .addDependency({ ticketId: id, dependsOnTicketId: depId })
             .pipe(Effect.mapError(toOperationError("create")));
         }
+      }
+      if (input.originThreadId) {
+        yield* ticketThreadLinkRepository
+          .upsertStructuredLink({
+            ticketId: id,
+            threadId: input.originThreadId,
+            linkType: "origin",
+            occurredAt: now,
+          })
+          .pipe(Effect.mapError(toOperationError("create")));
       }
 
       const full = yield* buildFullTicket(ticket);
@@ -1002,6 +1150,7 @@ const makeTicketingService = Effect.gen(function* () {
     list,
     getById,
     getByIdentifier,
+    getThreadLinks,
     create,
     update,
     delete: del,

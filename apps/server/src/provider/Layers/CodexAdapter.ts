@@ -1462,7 +1462,9 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           configOverrides.push(
             `mcp_servers.t3_scheduled_tasks.http_headers.Authorization="Bearer ${access.token}"`,
           );
-          const ticketingUrl = `http://127.0.0.1:${serverConfig.port}/mcp/ticketing`;
+          const ticketingUrl = `http://127.0.0.1:${serverConfig.port}/mcp/ticketing?projectId=${encodeURIComponent(
+            checkpointContext.value.projectId,
+          )}&threadId=${encodeURIComponent(input.threadId)}`;
           configOverrides.push(`mcp_servers.t3_ticketing.url="${ticketingUrl}"`);
           configOverrides.push(
             `mcp_servers.t3_ticketing.http_headers.Authorization="Bearer ${access.token}"`,

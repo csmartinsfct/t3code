@@ -84,6 +84,8 @@ import type {
   TicketListInput,
   TicketReorderInput,
   TicketSearchInput,
+  TicketThreadLinks,
+  TicketThreadLinksInput,
   TicketSummary,
   TicketTreeInput,
   TicketTreeNode,
@@ -296,6 +298,7 @@ export interface NativeApi {
     list: (input: TicketListInput) => Promise<ReadonlyArray<TicketSummary>>;
     getById: (input: TicketGetByIdInput) => Promise<Ticket>;
     getByIdentifier: (input: TicketGetByIdentifierInput) => Promise<Ticket>;
+    getThreadLinks: (input: TicketThreadLinksInput) => Promise<TicketThreadLinks>;
     create: (input: TicketCreateInput) => Promise<Ticket>;
     update: (input: TicketUpdateInput) => Promise<Ticket>;
     delete: (input: TicketDeleteInput) => Promise<void>;

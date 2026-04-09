@@ -14,6 +14,8 @@ T3 Code runs three internal MCP servers that AI models can use during conversati
 
 Each endpoint speaks the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) over HTTP using JSON-RPC 2.0. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
+Ticketing MCP sessions can also be scoped to a live thread. When a provider session has thread context, T3 injects `threadId` alongside `projectId` into the ticketing endpoint URL / auth context so server-side ticket creation can persist an origin-thread relationship without exposing any extra public MCP arguments.
+
 The chat composer's MCP picker also mirrors provider-side config on disk so the UI reflects what a session should be able to use:
 
 - Codex: global `~/.codex/config.toml` plus project-scoped `.codex/config.toml`
@@ -94,6 +96,8 @@ Thread start (with active project)
 4. In "prompt" mode: token is embedded in the system prompt text
 5. All three MCP endpoints validate the token on each request
 
+For ticketing specifically, the validated session context may also include `threadId`. The ticketing MCP route forwards that to the ticketing service so `create_ticket` can attach an `origin` ticket-thread link automatically.
+
 ### Condition Gate
 
 MCP injection (in either mode) only happens when:
@@ -113,6 +117,7 @@ apps/server/src/provider/mcpPromptModeSystemPrompt.ts   # "prompt" mode system p
 apps/server/src/managedRuns/systemPrompt.ts             # Managed runs "tools" mode prompt
 apps/server/src/scheduledTasks/systemPrompt.ts          # Scheduled tasks "tools" mode prompt
 apps/server/src/ticketing/systemPrompt.ts               # Ticketing "tools" mode prompt
+apps/server/src/ticketing/http.ts                       # Ticketing MCP route + thread-aware request context
 apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (both modes)
 apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (both modes)
 apps/web/src/components/settings/SettingsPanels.tsx      # UI toggle in General settings

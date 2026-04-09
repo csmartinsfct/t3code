@@ -5,10 +5,19 @@ import type {
   TicketStatus,
   TicketSummary,
   TicketingStreamEvent,
+  TicketThreadLinks,
   ModelSelection,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
-import { EllipsisVerticalIcon, ListTreeIcon, PlayIcon, TrashIcon, XIcon } from "lucide-react";
+import {
+  EllipsisVerticalIcon,
+  FileCode2Icon,
+  ListTreeIcon,
+  PlayIcon,
+  SearchCheckIcon,
+  TrashIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { baseProviderKind, DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
@@ -88,6 +97,7 @@ export function KanbanTicketDetail({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
   const ticketRef = useRef<Ticket | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
@@ -127,11 +137,16 @@ export function KanbanTicketDetail({
   const fetchTicket = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const data = await api.ticketing.getById({ id: ticketId, projectId: projectId as ProjectId });
+      const [data, relatedThreads] = await Promise.all([
+        api.ticketing.getById({ id: ticketId, projectId: projectId as ProjectId }),
+        api.ticketing.getThreadLinks({ ticketId }),
+      ]);
       ticketRef.current = data;
       setTicket(data);
+      setThreadLinks(relatedThreads);
     } catch (error) {
       console.error("Failed to fetch ticket:", error);
+      setThreadLinks(null);
     } finally {
       setLoading(false);
     }
@@ -678,6 +693,29 @@ export function KanbanTicketDetail({
           />
         </div>
 
+        {(threadLinks?.originThread || (threadLinks?.relatedThreads.length ?? 0) > 0) && (
+          <div className="flex flex-col gap-4">
+            {threadLinks?.originThread && (
+              <ThreadLinkSection
+                title="Origin Thread"
+                threads={[threadLinks.originThread]}
+                onOpenThread={(nextThreadId) =>
+                  void navigate({ to: "/$threadId", params: { threadId: nextThreadId } })
+                }
+              />
+            )}
+            {(threadLinks?.relatedThreads.length ?? 0) > 0 && (
+              <ThreadLinkSection
+                title="Related Threads"
+                threads={threadLinks?.relatedThreads ?? []}
+                onOpenThread={(nextThreadId) =>
+                  void navigate({ to: "/$threadId", params: { threadId: nextThreadId } })
+                }
+              />
+            )}
+          </div>
+        )}
+
         {/* Model overrides */}
         <ModelOverrideRow
           label="Implementer"
@@ -740,6 +778,82 @@ export function KanbanTicketDetail({
       </AlertDialog>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Ticket-thread relationship UI
+// ---------------------------------------------------------------------------
+
+function ThreadLinkSection({
+  title,
+  threads,
+  onOpenThread,
+}: {
+  title: string;
+  threads: TicketThreadLinks["relatedThreads"];
+  onOpenThread: (threadId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+      <div className="flex flex-col gap-1.5">
+        {threads.map((thread) => (
+          <button
+            key={thread.threadId}
+            type="button"
+            className="flex items-start gap-2.5 rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-accent/30"
+            onClick={() => onOpenThread(thread.threadId)}
+          >
+            {thread.isOrchestrationThread ? (
+              <SearchCheckIcon className="mt-0.5 size-3.5 shrink-0 text-info-foreground" />
+            ) : (
+              <FileCode2Icon className="mt-0.5 size-3.5 shrink-0 text-success-foreground" />
+            )}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-foreground">{thread.title}</span>
+                {thread.archivedAt && (
+                  <Badge size="sm" variant="outline">
+                    Archived
+                  </Badge>
+                )}
+                {thread.isOrchestrationThread && (
+                  <Badge size="sm" variant="info">
+                    Review
+                  </Badge>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {thread.sources.map((source) => (
+                  <Badge
+                    key={`${thread.threadId}-${source}`}
+                    size="sm"
+                    variant={source === "origin" ? "secondary" : "outline"}
+                  >
+                    {formatThreadLinkSource(source)}
+                  </Badge>
+                ))}
+                <span className="text-[11px] text-muted-foreground">
+                  {formatRelativeDate(thread.lastRelatedAt)}
+                </span>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function formatThreadLinkSource(source: "origin" | "bound" | "mention"): string {
+  switch (source) {
+    case "origin":
+      return "Origin";
+    case "bound":
+      return "Ticket thread";
+    case "mention":
+      return "Mentioned";
+  }
 }
 
 // ---------------------------------------------------------------------------

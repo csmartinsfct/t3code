@@ -27,6 +27,7 @@ import {
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
+import { TicketThreadLinkRepository } from "../../persistence/Services/TicketThreadLinks.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -36,6 +37,7 @@ import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/La
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
+import { TicketThreadLinkRepositoryLive } from "../../persistence/Layers/TicketThreadLinks.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -48,6 +50,7 @@ import {
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
 import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
+import { extractCanonicalTicketIdentifierCandidates } from "../../ticketing/ticketThreadLinking.ts";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -363,6 +366,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionStateRepository = yield* ProjectionStateRepository;
     const projectionProjectRepository = yield* ProjectionProjectRepository;
     const projectionThreadRepository = yield* ProjectionThreadRepository;
+    const ticketThreadLinkRepository = yield* TicketThreadLinkRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
@@ -460,6 +464,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             archivedAt: null,
             deletedAt: null,
           });
+          if (event.payload.ticketId) {
+            yield* ticketThreadLinkRepository.upsertStructuredLink({
+              ticketId: event.payload.ticketId,
+              threadId: event.payload.threadId,
+              linkType: "bound",
+              occurredAt: event.payload.createdAt,
+            });
+          }
           return;
 
         case "thread.archived": {
@@ -649,6 +661,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
         case "thread.message-sent": {
+          const threadRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(threadRow)) {
+            return;
+          }
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
             messageId: event.payload.messageId,
           });
@@ -693,11 +711,37 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               replacedExisting: previousMessage !== undefined,
             }),
           );
+          if (event.payload.role === "system") {
+            yield* ticketThreadLinkRepository.deleteLinksByMessageId({
+              threadId: event.payload.threadId,
+              messageIds: [event.payload.messageId],
+            });
+            return;
+          }
+          const candidateIdentifiers = extractCanonicalTicketIdentifierCandidates(nextText);
+          const matchedTicketIds =
+            candidateIdentifiers.length === 0
+              ? []
+              : (yield* ticketThreadLinkRepository.lookupTicketIdsByIdentifiers({
+                  projectId: threadRow.value.projectId,
+                  identifiers: candidateIdentifiers,
+                })).map((row) => row.ticketId);
+          yield* ticketThreadLinkRepository.replaceMentionLinksForMessage({
+            projectId: threadRow.value.projectId,
+            ticketIds: matchedTicketIds,
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
+            occurredAt: event.payload.updatedAt,
+          });
           return;
         }
 
         case "thread.messages-deleted": {
           if (event.payload.messageIds.length === 0) return;
+          yield* ticketThreadLinkRepository.deleteLinksByMessageId({
+            threadId: event.payload.threadId,
+            messageIds: event.payload.messageIds,
+          });
           yield* projectionThreadMessageRepository.deleteByMessageIds({
             threadId: event.payload.threadId,
             messageIds: event.payload.messageIds,
@@ -1389,6 +1433,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
 ).pipe(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
+  Layer.provideMerge(TicketThreadLinkRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),

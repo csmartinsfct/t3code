@@ -901,6 +901,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.ticketingGetByIdentifier, ticketing.getByIdentifier(input), {
           "rpc.aggregate": "ticketing",
         }),
+      [WS_METHODS.ticketingGetThreadLinks]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetThreadLinks, ticketing.getThreadLinks(input), {
+          "rpc.aggregate": "ticketing",
+        }),
       [WS_METHODS.ticketingCreate]: (input) =>
         observeRpcEffect(WS_METHODS.ticketingCreate, ticketing.create(input), {
           "rpc.aggregate": "ticketing",

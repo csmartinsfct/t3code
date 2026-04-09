@@ -1,6 +1,6 @@
 # T3 Ticketing
 
-Ticketing adds project management capabilities to T3 Code — tickets with hierarchy (parent/child for epics), dependencies with cycle detection, project-scoped labels, threaded comments (human + LLM), polymorphic artifacts, acceptance criteria with verification tracking, and full audit history.
+Ticketing adds project management capabilities to T3 Code — tickets with hierarchy (parent/child for epics), dependencies with cycle detection, project-scoped labels, threaded comments (human + LLM), polymorphic artifacts, acceptance criteria with verification tracking, full audit history, and ticket-to-thread relationships.
 
 ## Overview
 
@@ -56,6 +56,7 @@ The system has five main moving parts:
 | `comments`            | Threaded comments — top-level and single-depth replies                                |
 | `artifacts`           | Polymorphic attachments (figma_url, mermaid, image) on tickets or comments            |
 | `ticket_history`      | Audit log — every mutation recorded with action, changes JSON, and performer          |
+| `ticket_thread_links` | Ticket ↔ thread relationship rows for origin, explicit thread binding, and mentions   |
 
 ### Key Columns on `projection_projects`
 
@@ -67,6 +68,19 @@ The system has five main moving parts:
 ### Ticket Identifiers
 
 Each ticket gets a human-readable identifier like `T3CO-42` composed of `{prefix}-{number}`. The prefix is derived from the project title (or set explicitly via `ticket_prefix`). Numbers are allocated atomically inside a SQLite transaction.
+
+### Ticket-To-Thread Relationships
+
+Tickets can be linked to threads in three ways:
+
+- `origin`
+  The ticket was created from inside that thread via the ticketing MCP server.
+- `bound`
+  The thread was explicitly associated to the ticket through `thread.ticketId`.
+- `mention`
+  A user or assistant message in the thread contains the canonical ticket identifier, case-insensitively.
+
+`mention` links are stored per message so the projection pipeline can reconcile them during streaming updates and remove them when messages are deleted. Ticket detail queries aggregate multiple rows back into a single linked-thread entry with source badges and a `lastRelatedAt` timestamp.
 
 ---
 
@@ -172,6 +186,8 @@ Both `create_ticket` and `update_ticket` accept optional `implementerModel` and 
 
 All tools are authenticated via the managed run token system (same as scheduled tasks). Dev bypass token `t3-dev-bypass` works with `?projectId=` query param.
 
+When the ticketing MCP server is injected into a live thread session, the request context also carries `threadId`. `create_ticket` uses that server-side context to persist an `origin` link automatically; `originThreadId` is not exposed as a public MCP tool argument.
+
 ### MCP Delivery Modes
 
 The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) controls how these tools reach the AI model:
@@ -181,9 +197,14 @@ The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) control
 
 ---
 
-## WebSocket RPC (28 methods)
+## WebSocket RPC (29 methods)
 
 All ticket operations are exposed as WebSocket RPC methods under the `ticketing.*` namespace, plus `subscribeTicketingEvents` for real-time streaming. The stream is global (no project filter) — clients filter by `projectId` on each event.
+
+Relationship reads use a dedicated RPC:
+
+- `ticketing.getThreadLinks({ ticketId })`
+  Returns `{ ticketId, originThread, relatedThreads }` without inflating the core `Ticket` payload.
 
 ### Stream Events
 
@@ -218,7 +239,24 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 | `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata              |
 | `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                |
 | `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                     |
-| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                |
+| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with origin/related thread sections    |
+
+### Ticket Detail Thread Sections
+
+The ticket detail panel shows two thread relationship sections when data exists:
+
+- `Origin Thread`
+  The single thread that created the ticket, if any.
+- `Related Threads`
+  Other threads connected through explicit binding or canonical identifier mentions.
+
+Behavior:
+
+- archived threads stay visible and show an `Archived` badge
+- deleted threads are filtered out at read time
+- repeated mentions from the same thread are deduped into one row
+- source badges render as `Origin`, `Ticket thread`, and `Mentioned`
+  | `ticketUtils` | `ticketUtils.ts` | Status/priority color maps, date formatters |
 
 ### Data Hook
 
