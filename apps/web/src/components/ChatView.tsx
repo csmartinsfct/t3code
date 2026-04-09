@@ -111,7 +111,6 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import PlanSidebar from "./PlanSidebar";
 import { OrchestrationTimeline } from "./chat/OrchestrationTimeline";
 import { OrchestrationProgressHeader } from "./chat/OrchestrationProgressHeader";
-import { OrchestrationReadOnlyComposer } from "./chat/OrchestrationReadOnlyComposer";
 import { useOrchestrationTimeline } from "../hooks/useOrchestrationTimeline";
 import { useOrchestrationSwitcher } from "../hooks/useOrchestrationSwitcher";
 import { getWsRpcClient } from "../wsRpcClient";
@@ -4902,6 +4901,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
             <>
               <OrchestrationProgressHeader
                 run={orchestrationTimeline.run}
+                currentTicketLabel={(() => {
+                  if (!orchestrationSwitcher.visible || !orchestrationTimeline.run) return null;
+                  const item = orchestrationSwitcher.items
+                    .filter((i) => i.kind === "working-thread")
+                    .at(orchestrationTimeline.run.currentTicketIndex);
+                  return item ? `${item.label} — ${item.sublabel}` : null;
+                })()}
                 onPause={onOrchestrationPause}
                 onResume={onOrchestrationResume}
                 onCancel={onOrchestrationCancel}
@@ -4935,11 +4941,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     </button>
                   </div>
                 )}
-              </div>
-              <div
-                className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
-              >
-                <OrchestrationReadOnlyComposer run={orchestrationTimeline.run} />
               </div>
             </>
           ) : isWaitingForAgentStart ? (

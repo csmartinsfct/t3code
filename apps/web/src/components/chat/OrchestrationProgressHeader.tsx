@@ -7,6 +7,7 @@ import {
   XCircleIcon,
   XIcon,
 } from "lucide-react";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { cn } from "~/lib/utils";
 
@@ -16,52 +17,44 @@ import { cn } from "~/lib/utils";
 
 interface OrchestrationProgressHeaderProps {
   run: OrchestrationRun | null;
+  /** Current ticket label, e.g. "ORCH-7 — Rename sidebar label" */
+  currentTicketLabel: string | null;
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
 }
 
 // ---------------------------------------------------------------------------
-// Status styling
+// Status badge variant
 // ---------------------------------------------------------------------------
 
-function statusBadge(status: OrchestrationRunStatus) {
+type BadgeVariant = "info" | "success" | "warning" | "error" | "outline";
+
+function statusBadgeProps(status: OrchestrationRunStatus): {
+  label: string;
+  variant: BadgeVariant;
+  icon: React.ReactNode;
+} {
   switch (status) {
     case "running":
       return {
         label: "Running",
-        className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-        icon: <Loader2Icon className="size-3 animate-spin" />,
+        variant: "warning",
+        icon: <Loader2Icon className="animate-spin" />,
       };
     case "paused":
-      return {
-        label: "Paused",
-        className: "bg-muted text-muted-foreground border-border",
-        icon: <PauseIcon className="size-3" />,
-      };
+      return { label: "Paused", variant: "outline", icon: <PauseIcon /> };
     case "completed":
-      return {
-        label: "Completed",
-        className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-        icon: <CheckCircle2Icon className="size-3" />,
-      };
+      return { label: "Completed", variant: "success", icon: <CheckCircle2Icon /> };
     case "failed":
-      return {
-        label: "Failed",
-        className: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
-        icon: <XCircleIcon className="size-3" />,
-      };
+      return { label: "Failed", variant: "error", icon: <XCircleIcon /> };
     case "canceled":
-      return {
-        label: "Canceled",
-        className: "bg-muted text-muted-foreground/60 border-border",
-        icon: <XIcon className="size-3" />,
-      };
+      return { label: "Canceled", variant: "outline", icon: <XIcon /> };
     case "pending":
       return {
         label: "Pending",
-        className: "bg-muted text-muted-foreground border-border",
-        icon: <Loader2Icon className="size-3 animate-spin" />,
+        variant: "outline",
+        icon: <Loader2Icon className="animate-spin" />,
       };
   }
 }
@@ -84,7 +77,7 @@ function SegmentedProgressBar({
   const isTerminal = status === "completed" || status === "failed" || status === "canceled";
 
   return (
-    <div className="flex gap-0.5">
+    <div className="flex gap-0.5 opacity-50">
       {Array.from({ length: ticketCount }, (_, i) => {
         const isCompleted = isTerminal ? status === "completed" : i < currentIndex;
         const isCurrent = !isTerminal && i === currentIndex;
@@ -93,9 +86,9 @@ function SegmentedProgressBar({
           <div
             key={i}
             className={cn(
-              "h-1 flex-1 rounded-full transition-colors duration-300",
+              "h-0.5 flex-1 rounded-full transition-colors duration-300",
               isCompleted && "bg-emerald-500",
-              isCurrent && "bg-amber-500 animate-pulse",
+              isCurrent && "bg-amber-500",
               !isCompleted && !isCurrent && "bg-muted",
             )}
           />
@@ -111,41 +104,47 @@ function SegmentedProgressBar({
 
 export function OrchestrationProgressHeader({
   run,
+  currentTicketLabel,
   onPause,
   onResume,
   onCancel,
 }: OrchestrationProgressHeaderProps) {
   if (!run) return null;
 
-  const badge = statusBadge(run.status);
+  const badge = statusBadgeProps(run.status);
   const ticketCount = run.ticketOrder.length;
   const currentIndex = run.currentTicketIndex;
   const isTerminal =
     run.status === "completed" || run.status === "failed" || run.status === "canceled";
 
-  const phaseLabel = run.currentPhase === "reviewing" ? "Reviewing" : "Working on";
-  const reviewIterationLabel =
-    run.currentPhase === "reviewing" ? `Review ${run.reviewIteration + 1}` : null;
-  const progressLabel = isTerminal
-    ? `${ticketCount} ticket${ticketCount !== 1 ? "s" : ""}`
-    : `${phaseLabel} ticket ${currentIndex + 1} of ${ticketCount}${reviewIterationLabel ? ` • ${reviewIterationLabel}` : ""}`;
+  const completedCount = isTerminal
+    ? run.status === "completed"
+      ? ticketCount
+      : currentIndex
+    : currentIndex;
 
   return (
-    <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur-sm px-3 sm:px-5 py-2">
-      <div className="mx-auto flex max-w-3xl items-center gap-3">
+    <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 backdrop-blur-sm sm:px-5 py-2">
+      <div className="mx-auto flex max-w-3xl items-center gap-2.5">
         {/* Status badge */}
-        <span
-          className={cn(
-            "flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
-            badge.className,
-          )}
-        >
+        <Badge variant={badge.variant} size="sm">
           {badge.icon}
           {badge.label}
-        </span>
+        </Badge>
 
-        {/* Progress text */}
-        <span className="flex-1 text-xs text-muted-foreground/70">{progressLabel}</span>
+        {/* Current ticket — truncates or hides when space is tight */}
+        {currentTicketLabel && !isTerminal && (
+          <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block">
+            {currentTicketLabel}
+          </span>
+        )}
+
+        <span className="flex-1" />
+
+        {/* Ticket progress counter */}
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {completedCount}/{ticketCount}
+        </span>
 
         {/* Action buttons */}
         {run.status === "running" && (

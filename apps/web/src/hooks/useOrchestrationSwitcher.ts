@@ -199,10 +199,10 @@ export function useOrchestrationSwitcher(
 
   // ── Determine current label ──────────────────────────────────────
   const currentLabel = useMemo(() => {
-    if (isParent) return "Timeline";
+    if (isParent) return parentTitle || "Timeline";
     const active = items.find((i) => i.isActive);
-    return active?.label ?? "Timeline";
-  }, [isParent, items]);
+    return active?.label ?? (parentTitle || "Timeline");
+  }, [isParent, parentTitle, items]);
 
   if (!isInOrchestration || !run) return EMPTY;
 

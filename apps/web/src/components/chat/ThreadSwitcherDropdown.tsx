@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -9,7 +9,8 @@ import {
 
 import type { OrchestrationSwitcherItem } from "../../hooks/useOrchestrationSwitcher";
 import { cn } from "~/lib/utils";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Badge } from "../ui/badge";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -22,22 +23,6 @@ interface ThreadSwitcherDropdownProps {
 }
 
 // ---------------------------------------------------------------------------
-// Status dot colors
-// ---------------------------------------------------------------------------
-
-function statusDotClass(item: OrchestrationSwitcherItem): string {
-  if (item.kind === "timeline") return "";
-  if (item.kind === "review-thread") {
-    if (!item.isStarted) return "bg-muted-foreground/20";
-    if (item.isActive) return "bg-sky-500";
-    return "bg-sky-500/75";
-  }
-  if (!item.isStarted) return "bg-muted-foreground/30";
-  if (item.isActive) return "bg-amber-500";
-  return "bg-emerald-500";
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -46,8 +31,18 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
   currentLabel,
   onNavigate,
 }: ThreadSwitcherDropdownProps) {
-  const timelineItem = items.find((i) => i.kind === "timeline");
-  const threadItems = items.filter((i) => i.kind !== "timeline");
+  const timelineItem = useMemo(() => items.find((i) => i.kind === "timeline"), [items]);
+  const threadItems = useMemo(() => items.filter((i) => i.kind !== "timeline"), [items]);
+
+  // Scroll the active item into view when the menu mounts it
+  const activeRefCallback = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      // Defer so the popup is fully laid out before scrolling
+      requestAnimationFrame(() => {
+        node.scrollIntoView({ block: "center" });
+      });
+    }
+  }, []);
 
   return (
     <Menu>
@@ -63,62 +58,67 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
 
-      <MenuPopup align="start" className="w-[300px]">
-        {/* Timeline item */}
+      <MenuPopup align="start" className="w-[320px] [&>div]:max-h-[400px]">
         {timelineItem && (
           <MenuItem
-            className={cn("gap-2.5", timelineItem.isActive && "bg-accent/60")}
+            className={cn("mb-1.5 gap-2", timelineItem.isActive && "bg-accent")}
             onClick={() => onNavigate(timelineItem.threadId)}
           >
-            <LayoutListIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="text-sm font-medium sm:text-xs">Timeline</span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground/50 sm:text-[10px]">
-                {timelineItem.sublabel}
-              </span>
-            </div>
-            {timelineItem.isActive && <CheckIcon className="size-3 shrink-0 text-foreground/70" />}
+            <LayoutListIcon className="size-3.5 shrink-0 sm:size-3" />
+            <span className="text-base font-medium sm:text-sm">Timeline</span>
+            <span className="flex-1" />
+            {timelineItem.isActive && (
+              <CheckIcon className="size-3.5 shrink-0 text-foreground/70 sm:size-3" />
+            )}
           </MenuItem>
         )}
+        {threadItems.length > 0 && (
+          <>
+            {threadItems.map((item) => {
+              const isReview = item.kind === "review-thread";
 
-        {threadItems.length > 0 && <MenuSeparator />}
+              return (
+                <MenuItem
+                  key={item.id}
+                  ref={item.isActive ? activeRefCallback : undefined}
+                  className={cn(
+                    "items-start gap-2",
+                    item.isActive && "bg-accent",
+                    !item.isStarted && "opacity-50",
+                    isReview && "pl-6",
+                  )}
+                  onClick={() => onNavigate(item.threadId)}
+                >
+                  {isReview ? (
+                    <SearchCheckIcon className="mt-[5px] size-3.5 shrink-0 text-info-foreground sm:mt-1 sm:size-3" />
+                  ) : (
+                    <FileCode2Icon className="mt-[5px] size-3.5 shrink-0 text-success-foreground sm:mt-1 sm:size-3" />
+                  )}
 
-        {/* Working thread items */}
-        {threadItems.map((item) => (
-          <MenuItem
-            key={item.id}
-            className={cn(
-              "gap-2.5",
-              item.isActive && "bg-accent/60",
-              !item.isStarted && "opacity-55",
-              item.kind === "review-thread" && "pl-7",
-            )}
-            onClick={() => onNavigate(item.threadId)}
-          >
-            {item.kind === "review-thread" ? (
-              <SearchCheckIcon className="size-3.5 shrink-0 text-sky-500/80" />
-            ) : (
-              <FileCode2Icon className="size-3.5 shrink-0 text-emerald-500/80" />
-            )}
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-medium sm:text-xs">{item.label}</span>
-                {item.kind === "review-thread" && (
-                  <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-sky-700 dark:text-sky-300">
-                    Review
-                  </span>
-                )}
-              </div>
-              {item.sublabel && (
-                <span className="min-w-0 truncate text-xs text-muted-foreground/50 sm:text-[10px]">
-                  {item.sublabel}
-                </span>
-              )}
-            </div>
-            <span className={cn("mt-px size-1.5 shrink-0 rounded-full", statusDotClass(item))} />
-            {item.isActive && <CheckIcon className="size-3 shrink-0 text-foreground/70" />}
-          </MenuItem>
-        ))}
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base font-medium sm:text-sm">{item.label}</span>
+                      {isReview && (
+                        <Badge variant="info" size="sm">
+                          Review
+                        </Badge>
+                      )}
+                    </div>
+                    {item.sublabel && (
+                      <span className="min-w-0 truncate text-xs text-muted-foreground sm:text-[11px]">
+                        {item.sublabel}
+                      </span>
+                    )}
+                  </div>
+
+                  {item.isActive && (
+                    <CheckIcon className="mt-[5px] size-3.5 shrink-0 text-foreground/70 sm:mt-1 sm:size-3" />
+                  )}
+                </MenuItem>
+              );
+            })}
+          </>
+        )}
       </MenuPopup>
     </Menu>
   );

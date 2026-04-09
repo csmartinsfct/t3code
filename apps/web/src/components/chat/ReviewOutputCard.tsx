@@ -1,6 +1,8 @@
 import type { ReviewCommentSeverity, ReviewOutput } from "@t3tools/contracts";
 import { CheckCircle2Icon, LightbulbIcon, SparklesIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { Badge, type badgeVariants } from "../ui/badge";
+import type { VariantProps } from "class-variance-authority";
 
 interface ReviewOutputCardProps {
   output: ReviewOutput;
@@ -8,24 +10,17 @@ interface ReviewOutputCardProps {
   className?: string;
 }
 
-function severityBadgeMeta(severity: ReviewCommentSeverity) {
+function severityBadgeVariant(severity: ReviewCommentSeverity): {
+  label: string;
+  variant: VariantProps<typeof badgeVariants>["variant"];
+} {
   switch (severity) {
     case "critical":
-      return {
-        label: "Critical",
-        className: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300",
-      };
+      return { label: "Critical", variant: "error" };
     case "suggestion":
-      return {
-        label: "Suggestion",
-        className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-      };
+      return { label: "Suggestion", variant: "warning" };
     case "nit":
-      return {
-        label: "Nit",
-        className:
-          "border-muted-foreground/20 bg-muted text-muted-foreground dark:text-muted-foreground",
-      };
+      return { label: "Nit", variant: "outline" };
   }
 }
 
@@ -53,36 +48,24 @@ export function ReviewOutputCard({ output, heading, className }: ReviewOutputCar
           </div>
           <p className="mt-1.5 text-sm leading-6 text-foreground/90">{output.summary}</p>
         </div>
-        <span
-          className={cn(
-            "shrink-0 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em]",
-            output.changesNeeded
-              ? "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-              : "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-          )}
-        >
+        <Badge variant={output.changesNeeded ? "warning" : "success"} size="sm">
           {output.changesNeeded ? "Changes needed" : "Approved"}
-        </span>
+        </Badge>
       </div>
 
       {output.comments.length > 0 && (
         <div className="mt-3 space-y-2">
           {output.comments.map((comment) => {
-            const badge = severityBadgeMeta(comment.severity);
+            const badge = severityBadgeVariant(comment.severity);
             return (
               <div
                 key={`${comment.file ?? "general"}:${comment.line ?? "line"}:${comment.severity}:${comment.body}`}
                 className="rounded-lg border border-border/65 bg-background/70 p-2.5"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]",
-                      badge.className,
-                    )}
-                  >
+                  <Badge variant={badge.variant} size="sm">
                     {badge.label}
-                  </span>
+                  </Badge>
                   <span className="text-[11px] text-muted-foreground/65">
                     {commentLocation(comment)}
                   </span>

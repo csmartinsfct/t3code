@@ -28,17 +28,34 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
 }
 
 describe("OrchestrationProgressHeader", () => {
-  it("shows review iteration context while review is active", () => {
+  it("renders status badge and progress counter", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationProgressHeader
         run={makeRun()}
+        currentTicketLabel="ORCH-1 — Fix sidebar"
         onPause={() => {}}
         onResume={() => {}}
         onCancel={() => {}}
       />,
     );
 
-    expect(markup).toContain("Reviewing ticket 1 of 1");
-    expect(markup).toContain("Review 2");
+    expect(markup).toContain("Running");
+    expect(markup).toContain("0/1");
+    expect(markup).toContain("ORCH-1");
+  });
+
+  it("shows completed count when finished", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun({ status: "completed", currentTicketIndex: 0 })}
+        currentTicketLabel={null}
+        onPause={() => {}}
+        onResume={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Completed");
+    expect(markup).toContain("1/1");
   });
 });

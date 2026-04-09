@@ -29,6 +29,7 @@ export interface TicketThreadSection {
   messages: ChatMessage[];
   isActive: boolean;
   isStarted: boolean;
+  reviewOutcome?: "approved" | "requested-changes" | "blocked" | undefined;
 }
 
 export interface TicketGroupRow {
@@ -111,21 +112,6 @@ function reviewStateFromActivity(activityKind: string): SeparatorRow["reviewStat
       return "blocked";
     default:
       return undefined;
-  }
-}
-
-function reviewSummaryFromActivity(activity: OrchestrationThreadActivity): string {
-  switch (activity.kind) {
-    case "orchestration.run.ticket.review.started":
-      return "Review started";
-    case "orchestration.run.ticket.review.approved":
-      return "Review passed";
-    case "orchestration.run.ticket.review.requested-changes":
-      return "Changes requested";
-    case "orchestration.run.ticket.review.exhausted":
-      return "Review blocked";
-    default:
-      return activity.summary;
   }
 }
 
@@ -230,6 +216,21 @@ export function buildOrchestrationTimelineRows(input: {
           const reviewIsStarted =
             threadHasContent(reviewThread) || hasReviewLifecycle || reviewIsActive;
           if (reviewIsStarted) {
+            // Find the last review outcome from activities
+            const lastReviewState = orchestrationActivities.findLast(
+              (a) =>
+                a.kind.startsWith("orchestration.run.ticket.review.") &&
+                ticketIdFromActivity(a) === ticketId &&
+                reviewStateFromActivity(a.kind) !== "started" &&
+                reviewStateFromActivity(a.kind) !== undefined,
+            );
+            const reviewOutcome = lastReviewState
+              ? (reviewStateFromActivity(lastReviewState.kind) as
+                  | "approved"
+                  | "requested-changes"
+                  | "blocked")
+              : undefined;
+
             sections.push({
               id: `section:${ticketEntry.reviewThreadId}`,
               kind: "review",
@@ -238,6 +239,7 @@ export function buildOrchestrationTimelineRows(input: {
               messages: reviewThread?.messages ?? [],
               isActive: reviewIsActive,
               isStarted: reviewIsStarted,
+              reviewOutcome,
             });
           }
         }
@@ -267,21 +269,26 @@ export function buildOrchestrationTimelineRows(input: {
           : {}),
       });
     } else {
-      // Generic orchestration separator (started, paused, completed, etc.)
+      // Skip review lifecycle separators — the review output card shows the result
       const reviewState = reviewStateFromActivity(actKind);
+      if (reviewState) continue;
+
+      // Skip the top-level "run started" event — redundant with the progress header
+      if (actKind === "orchestration.run.started") continue;
+
+      // Generic orchestration separator (started, paused, completed, etc.)
       const reviewIteration = reviewIterationFromActivity(activity);
       rows.push({
         kind: "separator",
         id: `sep-${activity.id}`,
         activityKind: actKind,
-        summary: reviewState ? reviewSummaryFromActivity(activity) : activity.summary,
+        summary: activity.summary,
         tone: activity.tone,
         createdAt: activity.createdAt,
         ...(ticketIdentifierFromActivity(activity)
           ? { ticketIdentifier: ticketIdentifierFromActivity(activity)! }
           : {}),
         ...(reviewIteration !== null ? { reviewIteration } : {}),
-        ...(reviewState ? { reviewState } : {}),
       });
     }
   }
