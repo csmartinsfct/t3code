@@ -21,6 +21,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
+import * as Transformation from "effect/SchemaTransformation";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
@@ -63,6 +64,15 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    isOrchestrationThread: Schema.Number.pipe(
+      Schema.decodeTo(
+        Schema.Boolean,
+        Transformation.transform({
+          decode: (n) => n !== 0,
+          encode: (b) => (b ? 1 : 0),
+        }),
+      ),
+    ),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -200,6 +210,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          parent_thread_id AS "parentThreadId",
+          is_orchestration_thread AS "isOrchestrationThread",
+          ticket_id AS "ticketId",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -679,6 +692,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             interactionMode: row.interactionMode,
             branch: row.branch,
             worktreePath: row.worktreePath,
+            parentThreadId: row.parentThreadId,
+            isOrchestrationThread: row.isOrchestrationThread,
+            ticketId: row.ticketId,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,

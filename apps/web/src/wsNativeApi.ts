@@ -158,6 +158,8 @@ export function createWsNativeApi(): NativeApi {
           .replayEvents({ fromSequenceExclusive })
           .then((events) => [...events]),
       onDomainEvent: (callback) => rpcClient.orchestration.onDomainEvent(callback),
+      createRun: rpcClient.orchestration.createRun,
+      startRun: rpcClient.orchestration.startRun,
     },
   };
 

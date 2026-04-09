@@ -118,12 +118,16 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationCreateRunInput,
+  OrchestrationCreateRunResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationRun,
+  OrchestrationStartRunInput,
 } from "./orchestration";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
@@ -327,5 +331,7 @@ export interface NativeApi {
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
+    createRun: (input: OrchestrationCreateRunInput) => Promise<OrchestrationCreateRunResult>;
+    startRun: (input: OrchestrationStartRunInput) => Promise<OrchestrationRun>;
   };
 }

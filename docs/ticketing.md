@@ -125,6 +125,21 @@ Comments support single-depth threading: top-level comments (`parentId === null`
 
 Each criterion tracks `status` (pending/met/not_met), optional `reason`, and `verifiedBy`/`verifiedAt` metadata. The `updateCriterionStatus` API stamps the verifier and timestamp server-side — callers never provide these fields.
 
+### Automated Review Orchestration
+
+When an orchestration run is created with `maxReviewIterations > 0`, the server creates a paired child-thread layout per ticket:
+
+- a working thread for implementation turns
+- a review thread for automated review turns
+
+Each ticket entry in the orchestration run plan stores both `workingThreadId` and `reviewThreadId`, so consumers can identify the dedicated review thread explicitly. After a successful work turn, the runner moves the ticket to `in_review`, executes the review thread with the ticket context and working-thread diff, and then:
+
+- marks the ticket `done` when the review returns `changesNeeded: false`
+- moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
+- marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
+
+The chat UI uses that explicit `reviewThreadId` identity to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
+
 ### History Recording
 
 Every mutation records a `TicketHistoryEntry` with:

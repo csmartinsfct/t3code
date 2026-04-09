@@ -41,6 +41,9 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    isOrchestrationThread: false,
+    parentThreadId: null,
+    ticketId: null,
   };
 }
 

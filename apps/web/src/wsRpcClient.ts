@@ -7,7 +7,9 @@ import {
   type ManagedRunStreamEvent,
   type NativeApi,
   type OrchestrationEvent,
+  type OrchestrationRunStreamEvent,
   ORCHESTRATION_WS_METHODS,
+  type ProjectId,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -216,9 +218,21 @@ export interface WsRpcClient {
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
+    readonly createRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.createRun>;
+    readonly getRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getRun>;
+    readonly listRuns: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.listRuns>;
+    readonly getChildThreads: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getChildThreads>;
+    readonly pauseRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.pauseRun>;
+    readonly resumeRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.resumeRun>;
+    readonly cancelRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.cancelRun>;
+    readonly startRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.startRun>;
     readonly onDomainEvent: (
       listener: (event: OrchestrationEvent) => void,
       options?: OrchestrationDomainEventSubscriptionOptions,
+    ) => () => void;
+    readonly onRunEvent: (
+      projectId: ProjectId,
+      listener: (event: OrchestrationRunStreamEvent) => void,
     ) => () => void;
   };
 }
@@ -448,6 +462,74 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport
           .request((client) => client[ORCHESTRATION_WS_METHODS.replayEvents](input))
           .then((events) => [...events]),
+      createRun: async (input) => {
+        logWebTimeline("orchestration.run.create.start", { projectId: input.projectId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.createRun](input),
+        );
+        logWebTimeline("orchestration.run.create.success", {
+          runId: result.runId,
+          orchestrationThreadId: result.orchestrationThreadId,
+          workingThreadCount: result.workingThreadIds.length,
+        });
+        return result;
+      },
+      getRun: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getRun](input)),
+      listRuns: (input) =>
+        transport
+          .request((client) => client[ORCHESTRATION_WS_METHODS.listRuns](input))
+          .then((runs) => [...runs]),
+      getChildThreads: (input) =>
+        transport
+          .request((client) => client[ORCHESTRATION_WS_METHODS.getChildThreads](input))
+          .then((threads) => [...threads]),
+      pauseRun: async (input) => {
+        logWebTimeline("orchestration.run.pause.start", { runId: input.runId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.pauseRun](input),
+        );
+        logWebTimeline("orchestration.run.pause.success", {
+          runId: input.runId,
+          status: result.status,
+        });
+        return result;
+      },
+      resumeRun: async (input) => {
+        logWebTimeline("orchestration.run.resume.start", { runId: input.runId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.resumeRun](input),
+        );
+        logWebTimeline("orchestration.run.resume.success", {
+          runId: input.runId,
+          status: result.status,
+          currentTicketIndex: result.currentTicketIndex,
+        });
+        return result;
+      },
+      cancelRun: async (input) => {
+        logWebTimeline("orchestration.run.cancel.start", { runId: input.runId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.cancelRun](input),
+        );
+        logWebTimeline("orchestration.run.cancel.success", {
+          runId: input.runId,
+          status: result.status,
+        });
+        return result;
+      },
+      startRun: async (input) => {
+        logWebTimeline("orchestration.run.start.start", { runId: input.runId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.startRun](input),
+        );
+        logWebTimeline("orchestration.run.start.success", {
+          runId: input.runId,
+          status: result.status,
+          currentTicketIndex: result.currentTicketIndex,
+        });
+        return result;
+      },
       onDomainEvent: (listener, options) =>
         transport.subscribe(
           (client) => {
@@ -465,6 +547,26 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
               "orchestration.domain-event.received",
               summarizeOrchestrationEvent(event),
             );
+            listener(event);
+          },
+        ),
+      onRunEvent: (projectId, listener) =>
+        transport.subscribe(
+          (client) => {
+            logWebTimeline("orchestration.run-event.subscribe", { projectId });
+            return client[WS_METHODS.subscribeOrchestrationRunEvents]({ projectId });
+          },
+          (event) => {
+            if (event.type === "run.created" || event.type === "run.updated") {
+              logWebTimeline("orchestration.run-event.received", {
+                type: event.type,
+                runId: event.run.id,
+                status: event.run.status,
+                currentTicketIndex: event.run.currentTicketIndex,
+              });
+            } else {
+              logWebTimeline("orchestration.run-event.received", { type: event.type });
+            }
             listener(event);
           },
         ),

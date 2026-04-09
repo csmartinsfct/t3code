@@ -54,6 +54,8 @@ import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
 import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
 import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingMcpRouteLayer } from "./ticketing/http";
+import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
+import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -103,6 +105,8 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
@@ -124,11 +128,16 @@ const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationProjectionSnapshotQueryLive,
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationProjectionPipelineLayerLive,
+).pipe(Layer.provide(PersistenceLayerLive));
+
+const OrchestrationEngineLayerLive = OrchestrationEngineLive.pipe(
+  Layer.provide(OrchestrationInfrastructureLayerLive),
+  Layer.provide(PersistenceLayerLive),
 );
 
 const OrchestrationLayerLive = Layer.mergeAll(
   OrchestrationInfrastructureLayerLive,
-  OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+  OrchestrationEngineLayerLive,
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
@@ -174,8 +183,6 @@ const ProviderLayerLive = Layer.unwrap(
     ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
   }),
 );
-
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(
@@ -240,17 +247,21 @@ const RuntimeServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
-  Layer.provideMerge(KeybindingsLive),
-  Layer.provideMerge(ProviderRegistryLive),
-  Layer.provideMerge(ProviderRateLimitsCacheLive),
-  Layer.provideMerge(ServerSettingsLive),
-  Layer.provideMerge(WorkspaceLayerLive),
-  Layer.provideMerge(ProjectFaviconResolverLive),
-
-  // Misc.
-  Layer.provideMerge(AnalyticsServiceLayerLive),
-  Layer.provideMerge(OpenLive),
-  Layer.provideMerge(ServerLifecycleEventsLive),
+  Layer.provideMerge(OrchestrationRunRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+  Layer.provideMerge(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+  Layer.provideMerge(
+    Layer.empty.pipe(
+      Layer.provideMerge(KeybindingsLive),
+      Layer.provideMerge(ProviderRegistryLive),
+      Layer.provideMerge(ProviderRateLimitsCacheLive),
+      Layer.provideMerge(ServerSettingsLive),
+      Layer.provideMerge(WorkspaceLayerLive),
+      Layer.provideMerge(ProjectFaviconResolverLive),
+      Layer.provideMerge(AnalyticsServiceLayerLive),
+      Layer.provideMerge(OpenLive),
+      Layer.provideMerge(ServerLifecycleEventsLive),
+    ),
+  ),
 );
 
 export const makeRoutesLayer = Layer.mergeAll(

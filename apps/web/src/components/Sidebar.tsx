@@ -882,7 +882,7 @@ export default function Sidebar() {
           projectId,
           threadIdsByProjectId,
           threadsById: sidebarThreadsById,
-        }),
+        }).filter((thread) => thread.parentThreadId === null),
         appSettings.sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
@@ -1624,7 +1624,10 @@ export default function Sidebar() {
   );
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+    () =>
+      sidebarThreads.filter(
+        (thread) => thread.archivedAt === null && thread.parentThreadId === null,
+      ),
     [sidebarThreads],
   );
   const sortedProjects = useMemo(
@@ -1648,7 +1651,7 @@ export default function Sidebar() {
             projectId: project.id,
             threadIdsByProjectId,
             threadsById: sidebarThreadsById,
-          }),
+          }).filter((thread) => thread.parentThreadId === null),
           appSettings.sidebarThreadSortOrder,
         );
         const projectStatus = resolveProjectStatusIndicator(

@@ -27,6 +27,9 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    isOrchestrationThread: false,
+    parentThreadId: null,
+    ticketId: null,
     ...overrides,
   };
 }

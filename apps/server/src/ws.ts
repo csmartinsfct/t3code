@@ -19,6 +19,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  OrchestrationRunError,
   ProjectListDirectoryError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
@@ -56,6 +57,7 @@ import {
 } from "./observability/RpcInstrumentation";
 import { ProviderRateLimitsCache } from "./provider/Services/ProviderRateLimitsCache";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import { ProviderService } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -68,6 +70,10 @@ import { TextGeneration } from "./git/Services/TextGeneration";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
+import { OrchestrationRunRepository } from "./persistence/Services/OrchestrationRuns";
+import { ProjectionThreadRepository } from "./persistence/Services/ProjectionThreads";
+import { makeOrchestrationRunServiceFromDeps } from "./orchestrationRuns/Layers/OrchestrationRuns";
+import { makeOrchestrationRunRunnerFromDeps } from "./orchestrationRuns/Layers/OrchestrationRunRunner";
 import {
   resolveClaudeMcpServerNames,
   resolveCodexMcpServerNames,
@@ -89,6 +95,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const git = yield* GitCore;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const providerService = yield* ProviderService;
     const rateLimitsCache = yield* ProviderRateLimitsCache;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -101,6 +108,26 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const textGeneration = yield* TextGeneration;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
+    const orchestrationRunRepo = yield* OrchestrationRunRepository;
+    const projectionThreadRepo = yield* ProjectionThreadRepository;
+    const orchestrationRuns = yield* makeOrchestrationRunServiceFromDeps({
+      repo: orchestrationRunRepo,
+      orchestrationEngine,
+      projectionThreadRepo,
+      ticketing,
+      startup,
+      serverSettings,
+    });
+    const orchestrationRunRunner = yield* makeOrchestrationRunRunnerFromDeps({
+      runService: orchestrationRuns,
+      orchestrationEngine,
+      providerService,
+      providerRegistry,
+      providerRateLimits: rateLimitsCache,
+      checkpointDiffQuery,
+      ticketing,
+      startup,
+    });
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -319,6 +346,128 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           ),
           { "rpc.aggregate": "orchestration" },
         ),
+
+      // Orchestration Runs
+      [ORCHESTRATION_WS_METHODS.createRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.createRun,
+          orchestrationRuns.create(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to create orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.getRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getRun,
+          orchestrationRuns.get(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to get orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.listRuns]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.listRuns,
+          orchestrationRuns.list(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to list orchestration runs",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.getChildThreads]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getChildThreads,
+          orchestrationRuns
+            .getChildThreads(input)
+            .pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationRunError)(cause)
+                  ? cause
+                  : new OrchestrationRunError({ message: "Failed to get child threads", cause }),
+              ),
+            ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.pauseRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.pauseRun,
+          orchestrationRunRunner.pauseRun(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to pause orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.resumeRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.resumeRun,
+          orchestrationRunRunner.resumeRun(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to resume orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.cancelRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.cancelRun,
+          orchestrationRunRunner.cancelRun(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to cancel orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.startRun]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.startRun,
+          orchestrationRunRunner.startRun(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to start orchestration run",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+
       [WS_METHODS.subscribeOrchestrationDomainEvents]: (input) =>
         observeRpcStreamEffect(
           WS_METHODS.subscribeOrchestrationDomainEvents,
@@ -908,6 +1057,30 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             ),
           ),
           { "rpc.aggregate": "terminal" },
+        ),
+      [WS_METHODS.subscribeOrchestrationRunEvents]: ({ projectId }) =>
+        observeRpcStreamEffect(
+          WS_METHODS.subscribeOrchestrationRunEvents,
+          Effect.gen(function* () {
+            const snapshotRuns = yield* orchestrationRuns
+              .list({ projectId })
+              .pipe(
+                Effect.catch(() =>
+                  Effect.succeed(
+                    [] as ReadonlyArray<import("@t3tools/contracts").OrchestrationRunSummary>,
+                  ),
+                ),
+              );
+            return Stream.concat(
+              Stream.make({
+                type: "snapshot" as const,
+                projectId,
+                runs: Array.from(snapshotRuns),
+              }),
+              orchestrationRuns.streamEvents(projectId),
+            );
+          }),
+          { "rpc.aggregate": "orchestration" },
         ),
       [WS_METHODS.subscribeManagedRunEvents]: ({ projectId }) =>
         observeRpcStreamEffect(

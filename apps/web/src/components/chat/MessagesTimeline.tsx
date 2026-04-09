@@ -49,10 +49,12 @@ import {
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import ReviewOutputCard from "./ReviewOutputCard";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
+import { parseReviewOutputText } from "../../lib/reviewOutput";
 import { cn } from "~/lib/utils";
 import { useMessageSelectionStore } from "~/messageSelectionStore";
 import { Checkbox } from "../ui/checkbox";
@@ -109,6 +111,7 @@ interface MessagesTimelineProps {
     position: { x: number; y: number },
   ) => void;
   onMessageSelectionClick?: (messageId: MessageId, shiftKey: boolean) => void;
+  isReviewThread?: boolean;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -140,6 +143,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onVirtualizerSnapshot,
   onMessageContextMenu,
   onMessageSelectionClick,
+  isReviewThread = false,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -502,6 +506,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const reviewOutput = isReviewThread ? parseReviewOutputText(messageText) : null;
           return (
             <div
               className={cn(messageSelectionMode && "flex items-start gap-2")}
@@ -528,15 +533,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   </div>
                 )}
                 <div className="min-w-0 px-1 py-0.5">
-                  <ChatMarkdown
-                    text={messageText}
-                    cwd={markdownCwd}
-                    isStreaming={Boolean(row.message.streaming)}
-                    {...(onProposeAction ? { onProposeAction } : {})}
-                    {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
-                    {...(resolveProjectName ? { resolveProjectName } : {})}
-                    {...(onOpenFileLink ? { onOpenFileLink } : {})}
-                  />
+                  {reviewOutput ? (
+                    <ReviewOutputCard output={reviewOutput} />
+                  ) : (
+                    <ChatMarkdown
+                      text={messageText}
+                      cwd={markdownCwd}
+                      isStreaming={Boolean(row.message.streaming)}
+                      {...(onProposeAction ? { onProposeAction } : {})}
+                      {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
+                      {...(resolveProjectName ? { resolveProjectName } : {})}
+                      {...(onOpenFileLink ? { onOpenFileLink } : {})}
+                    />
+                  )}
                   {(() => {
                     const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
                     if (!turnSummary) return null;

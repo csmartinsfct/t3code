@@ -253,6 +253,9 @@ const makeThread = (input?: {
   worktreePath: null,
   turnDiffSummaries: [],
   activities: [],
+  isOrchestrationThread: false,
+  parentThreadId: null,
+  ticketId: null,
 });
 
 function threadState(threads: Thread[]) {
@@ -412,6 +415,9 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      isOrchestrationThread: false,
+      parentThreadId: null,
+      ticketId: null,
     });
 
     expect(
@@ -448,6 +454,9 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      isOrchestrationThread: false,
+      parentThreadId: null,
+      ticketId: null,
     });
 
     expect(
@@ -493,6 +502,9 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      isOrchestrationThread: false,
+      parentThreadId: null,
+      ticketId: null,
     });
 
     expect(

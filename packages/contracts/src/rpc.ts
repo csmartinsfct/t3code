@@ -44,6 +44,8 @@ import {
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
+  OrchestrationRunError,
+  OrchestrationRunStreamEvent,
 } from "./orchestration";
 import {
   ManagedRunError,
@@ -105,6 +107,7 @@ import {
   TicketSearchInput,
   TicketSummary,
   TicketTreeInput,
+  TicketTreeNodeWire,
   UpdateCriterionStatusInput,
   Artifact,
   Comment,
@@ -254,6 +257,7 @@ export const WS_METHODS = {
 
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
+  subscribeOrchestrationRunEvents: "subscribeOrchestrationRunEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeManagedRunEvents: "subscribeManagedRunEvents",
   subscribeScheduledTaskEvents: "subscribeScheduledTaskEvents",
@@ -551,6 +555,57 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: OrchestrationReplayEventsError,
 });
 
+export const WsOrchestrationCreateRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.createRun, {
+  payload: OrchestrationRpcSchemas.createRun.input,
+  success: OrchestrationRpcSchemas.createRun.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationGetRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getRun, {
+  payload: OrchestrationRpcSchemas.getRun.input,
+  success: OrchestrationRpcSchemas.getRun.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationListRunsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listRuns, {
+  payload: OrchestrationRpcSchemas.listRuns.input,
+  success: OrchestrationRpcSchemas.listRuns.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationGetChildThreadsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getChildThreads,
+  {
+    payload: OrchestrationRpcSchemas.getChildThreads.input,
+    success: OrchestrationRpcSchemas.getChildThreads.output,
+    error: OrchestrationRunError,
+  },
+);
+
+export const WsOrchestrationPauseRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.pauseRun, {
+  payload: OrchestrationRpcSchemas.pauseRun.input,
+  success: OrchestrationRpcSchemas.pauseRun.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationResumeRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.resumeRun, {
+  payload: OrchestrationRpcSchemas.resumeRun.input,
+  success: OrchestrationRpcSchemas.resumeRun.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationCancelRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.cancelRun, {
+  payload: OrchestrationRpcSchemas.cancelRun.input,
+  success: OrchestrationRpcSchemas.cancelRun.output,
+  error: OrchestrationRunError,
+});
+
+export const WsOrchestrationStartRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.startRun, {
+  payload: OrchestrationRpcSchemas.startRun.input,
+  success: OrchestrationRpcSchemas.startRun.output,
+  error: OrchestrationRunError,
+});
+
 export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
   WS_METHODS.subscribeOrchestrationDomainEvents,
   {
@@ -558,6 +613,17 @@ export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
       fromSequenceExclusive: Schema.optional(NonNegativeInt),
     }),
     success: OrchestrationEvent,
+    stream: true,
+  },
+);
+
+export const WsSubscribeOrchestrationRunEventsRpc = Rpc.make(
+  WS_METHODS.subscribeOrchestrationRunEvents,
+  {
+    payload: Schema.Struct({
+      projectId: ProjectId,
+    }),
+    success: OrchestrationRunStreamEvent,
     stream: true,
   },
 );
@@ -692,7 +758,7 @@ export const WsTicketingSearchRpc = Rpc.make(WS_METHODS.ticketingSearch, {
 
 export const WsTicketingGetTreeRpc = Rpc.make(WS_METHODS.ticketingGetTree, {
   payload: TicketTreeInput,
-  success: Schema.Array(Schema.Struct({ ticket: TicketSummary })),
+  success: Schema.Array(TicketTreeNodeWire),
   error: TicketingError,
 });
 
@@ -893,4 +959,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
+  WsOrchestrationCreateRunRpc,
+  WsOrchestrationGetRunRpc,
+  WsOrchestrationListRunsRpc,
+  WsOrchestrationGetChildThreadsRpc,
+  WsOrchestrationPauseRunRpc,
+  WsOrchestrationResumeRunRpc,
+  WsOrchestrationCancelRunRpc,
+  WsOrchestrationStartRunRpc,
+  WsSubscribeOrchestrationRunEventsRpc,
 );

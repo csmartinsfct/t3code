@@ -140,4 +140,65 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work log");
   });
+
+  it("renders structured review output as a review card for review threads", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-review-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.makeUnsafe("message-review-1"),
+              role: "assistant",
+              text: JSON.stringify({
+                changesNeeded: true,
+                summary: "A couple of follow-ups remain before this is ready.",
+                comments: [
+                  {
+                    file: "apps/web/src/components/chat/OrchestrationTimeline.tsx",
+                    line: 42,
+                    severity: "critical",
+                    body: "Render the review state badge distinctly.",
+                  },
+                ],
+                suggestions: ["Add a regression test for review thread grouping."],
+              }),
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+        isReviewThread
+      />,
+    );
+
+    expect(markup).toContain("Automated review");
+    expect(markup).toContain("Changes needed");
+    expect(markup).toContain("Critical");
+    expect(markup).toContain("Add a regression test for review thread grouping.");
+    expect(markup).not.toContain("&quot;changesNeeded&quot;");
+  });
 });

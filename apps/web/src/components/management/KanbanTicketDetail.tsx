@@ -7,7 +7,7 @@ import type {
   TicketingStreamEvent,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
-import { EllipsisVerticalIcon, ListTreeIcon, TrashIcon } from "lucide-react";
+import { EllipsisVerticalIcon, ListTreeIcon, PlayIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
@@ -66,6 +66,7 @@ interface KanbanTicketDetailProps {
   projectId: string;
   onBack: () => void;
   onNavigateToTicket: (ticketId: TicketId) => void;
+  onOrchestrate?: (ticket: Ticket) => void;
 }
 
 export function KanbanTicketDetail({
@@ -73,6 +74,7 @@ export function KanbanTicketDetail({
   projectId,
   onBack,
   onNavigateToTicket,
+  onOrchestrate,
 }: KanbanTicketDetailProps) {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -382,6 +384,10 @@ export function KanbanTicketDetail({
                 <EllipsisVerticalIcon className="size-3.5" />
               </MenuTrigger>
               <MenuPopup align="end">
+                <MenuItem onClick={() => ticket && onOrchestrate?.(ticket)}>
+                  <PlayIcon className="size-3.5" />
+                  Orchestrate
+                </MenuItem>
                 <MenuItem onClick={handleDecompose}>
                   <ListTreeIcon className="size-3.5" />
                   Decompose

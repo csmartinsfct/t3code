@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
+import { NonNegativeInt, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
@@ -46,6 +46,9 @@ export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 
 export const McpDeliveryMode = Schema.Literals(["tools", "prompt"]);
 export type McpDeliveryMode = typeof McpDeliveryMode.Type;
+
+export const DEFAULT_MAX_REVIEW_ITERATIONS = 3;
+export const MAX_REVIEW_ITERATIONS_UI_MAX = 10;
 
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
@@ -93,6 +96,9 @@ export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  maxReviewIterations: NonNegativeInt.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_MAX_REVIEW_ITERATIONS),
+  ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
@@ -188,6 +194,7 @@ const ClaudeSettingsPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
+  maxReviewIterations: Schema.optionalKey(NonNegativeInt),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   mcpDeliveryMode: Schema.optionalKey(McpDeliveryMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),

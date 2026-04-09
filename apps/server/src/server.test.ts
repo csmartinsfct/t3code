@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Path, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
@@ -47,10 +47,15 @@ import {
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
+import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
+import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner.ts";
+import { OrchestrationRunRepository } from "./persistence/Services/OrchestrationRuns.ts";
+import { ProjectionThreadRepository } from "./persistence/Services/ProjectionThreads.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import {
   ProviderRateLimitsCache,
   type ProviderRateLimitsCacheShape,
@@ -101,6 +106,9 @@ const makeDefaultOrchestrationReadModel = () => {
         runtimeMode: "full-access" as const,
         branch: null,
         worktreePath: null,
+        parentThreadId: null,
+        isOrchestrationThread: false,
+        ticketId: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
@@ -189,12 +197,27 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRegistry,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            refresh: () => Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRegistry,
+          }),
+          Layer.mock(ProviderService)({
+            startSession: () => Effect.die(new Error("not mocked")),
+            sendTurn: () => Effect.die(new Error("not mocked")),
+            interruptTurn: () => Effect.void,
+            respondToRequest: () => Effect.die(new Error("not mocked")),
+            respondToUserInput: () => Effect.die(new Error("not mocked")),
+            stopSession: () => Effect.void,
+            listSessions: () => Effect.succeed([]),
+            getCapabilities: () => Effect.die(new Error("not mocked")),
+            rollbackConversation: () => Effect.die(new Error("not mocked")),
+            streamEvents: Stream.empty,
+            probeAllRateLimits: () => Effect.succeed([]),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProviderRateLimitsCache)({
@@ -352,6 +375,45 @@ const buildAppUnderTest = (options?: {
           deleteArtifact: () => Effect.void,
           streamEvents: Stream.empty,
         }),
+      ),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(OrchestrationRunService, {
+            create: () => Effect.die(new Error("not mocked")),
+            get: () => Effect.die(new Error("not mocked")),
+            list: () => Effect.succeed([]),
+            getChildThreads: () => Effect.succeed([]),
+            pause: () => Effect.die(new Error("not mocked")),
+            resume: () => Effect.die(new Error("not mocked")),
+            cancel: () => Effect.die(new Error("not mocked")),
+            start: () => Effect.die(new Error("not mocked")),
+            complete: () => Effect.die(new Error("not mocked")),
+            fail: () => Effect.die(new Error("not mocked")),
+            updateRunProgress: () => Effect.die(new Error("not mocked")),
+            streamEvents: () => Stream.empty,
+          }),
+          Layer.succeed(OrchestrationRunRunner, {
+            startRun: () => Effect.die(new Error("not mocked")),
+            pauseRun: () => Effect.die(new Error("not mocked")),
+            resumeRun: () => Effect.die(new Error("not mocked")),
+            cancelRun: () => Effect.die(new Error("not mocked")),
+          }),
+          Layer.succeed(OrchestrationRunRepository, {
+            create: () => Effect.void,
+            update: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            getByOrchestrationThreadId: () => Effect.succeed(Option.none()),
+            listByProject: () => Effect.succeed([]),
+            deleteById: () => Effect.void,
+          }),
+          Layer.succeed(ProjectionThreadRepository, {
+            upsert: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            listByProjectId: () => Effect.succeed([]),
+            listByParentThreadId: () => Effect.succeed([]),
+            deleteById: () => Effect.void,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(TextGeneration)({
@@ -1218,6 +1280,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             runtimeMode: "full-access" as const,
             branch: null,
             worktreePath: null,
+            parentThreadId: null,
+            isOrchestrationThread: false,
+            ticketId: null,
             createdAt: now,
             updatedAt: now,
             archivedAt: null,

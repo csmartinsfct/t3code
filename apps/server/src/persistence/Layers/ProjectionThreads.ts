@@ -1,11 +1,13 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as Transformation from "effect/SchemaTransformation";
 import { Effect, Layer, Schema, Struct } from "effect";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionThreadInput,
   GetProjectionThreadInput,
+  ListProjectionThreadsByParentInput,
   ListProjectionThreadsByProjectInput,
   ProjectionThread,
   ProjectionThreadRepository,
@@ -16,6 +18,15 @@ import { ModelSelection } from "@t3tools/contracts";
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    isOrchestrationThread: Schema.Number.pipe(
+      Schema.decodeTo(
+        Schema.Boolean,
+        Transformation.transform({
+          decode: (n) => n !== 0,
+          encode: (b) => (b ? 1 : 0),
+        }),
+      ),
+    ),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -36,6 +47,9 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           interaction_mode,
           branch,
           worktree_path,
+          parent_thread_id,
+          is_orchestration_thread,
+          ticket_id,
           latest_turn_id,
           created_at,
           updated_at,
@@ -51,6 +65,9 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.interactionMode},
           ${row.branch},
           ${row.worktreePath},
+          ${row.parentThreadId},
+          ${row.isOrchestrationThread ? 1 : 0},
+          ${row.ticketId},
           ${row.latestTurnId},
           ${row.createdAt},
           ${row.updatedAt},
@@ -66,6 +83,9 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
           worktree_path = excluded.worktree_path,
+          parent_thread_id = excluded.parent_thread_id,
+          is_orchestration_thread = excluded.is_orchestration_thread,
+          ticket_id = excluded.ticket_id,
           latest_turn_id = excluded.latest_turn_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
@@ -74,25 +94,31 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       `,
   });
 
+  const THREAD_SELECT = `
+    thread_id AS "threadId",
+    project_id AS "projectId",
+    title,
+    model_selection_json AS "modelSelection",
+    runtime_mode AS "runtimeMode",
+    interaction_mode AS "interactionMode",
+    branch,
+    worktree_path AS "worktreePath",
+    parent_thread_id AS "parentThreadId",
+    is_orchestration_thread AS "isOrchestrationThread",
+    ticket_id AS "ticketId",
+    latest_turn_id AS "latestTurnId",
+    created_at AS "createdAt",
+    updated_at AS "updatedAt",
+    archived_at AS "archivedAt",
+    deleted_at AS "deletedAt"
+  `;
+
   const getProjectionThreadRow = SqlSchema.findOneOption({
     Request: GetProjectionThreadInput,
     Result: ProjectionThreadDbRow,
     execute: ({ threadId }) =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${sql.literal(THREAD_SELECT)}
         FROM projection_threads
         WHERE thread_id = ${threadId}
       `,
@@ -103,22 +129,21 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
     Result: ProjectionThreadDbRow,
     execute: ({ projectId }) =>
       sql`
-        SELECT
-          thread_id AS "threadId",
-          project_id AS "projectId",
-          title,
-          model_selection_json AS "modelSelection",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          branch,
-          worktree_path AS "worktreePath",
-          latest_turn_id AS "latestTurnId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          archived_at AS "archivedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${sql.literal(THREAD_SELECT)}
         FROM projection_threads
         WHERE project_id = ${projectId}
+        ORDER BY created_at ASC, thread_id ASC
+      `,
+  });
+
+  const listProjectionThreadsByParent = SqlSchema.findAll({
+    Request: ListProjectionThreadsByParentInput,
+    Result: ProjectionThreadDbRow,
+    execute: ({ parentThreadId }) =>
+      sql`
+        SELECT ${sql.literal(THREAD_SELECT)}
+        FROM projection_threads
+        WHERE parent_thread_id = ${parentThreadId}
         ORDER BY created_at ASC, thread_id ASC
       `,
   });
@@ -147,6 +172,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.listByProjectId:query")),
     );
 
+  const listByParentThreadId: ProjectionThreadRepositoryShape["listByParentThreadId"] = (input) =>
+    listProjectionThreadsByParent(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionThreadRepository.listByParentThreadId:query"),
+      ),
+    );
+
   const deleteById: ProjectionThreadRepositoryShape["deleteById"] = (input) =>
     deleteProjectionThreadRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.deleteById:query")),
@@ -156,6 +188,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
     upsert,
     getById,
     listByProjectId,
+    listByParentThreadId,
     deleteById,
   } satisfies ProjectionThreadRepositoryShape;
 });

@@ -117,6 +117,9 @@ export interface Thread {
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
   initialDraft?: ThreadInitialDraft | undefined;
+  isOrchestrationThread: boolean;
+  parentThreadId: string | null;
+  ticketId: string | null;
 }
 
 export interface SidebarThreadSummary {
@@ -135,6 +138,8 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  isOrchestrationThread: boolean;
+  parentThreadId: string | null;
 }
 
 export interface ThreadSession {

@@ -730,6 +730,9 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     worktreePath: null,
     turnDiffSummaries: [],
     activities: [],
+    isOrchestrationThread: false,
+    parentThreadId: null,
+    ticketId: null,
     ...overrides,
   };
 }
