@@ -92,6 +92,9 @@ export function buildOrchestrationTimelineRows(input: {
     if (actKind === "orchestration.run.ticket.started") {
       const ticketId = ticketIdFromActivity(activity);
       if (!ticketId) continue;
+      if (emittedTicketIds.has(ticketId)) {
+        continue;
+      }
 
       // Emit the ticket-started separator
       rows.push({

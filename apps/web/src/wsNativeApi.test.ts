@@ -138,6 +138,8 @@ const rpcClientMock = {
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     replayEvents: vi.fn(),
+    createRun: vi.fn(),
+    startRun: vi.fn(),
     onDomainEvent: vi.fn((listener: (event: OrchestrationEvent) => void) =>
       registerListener(orchestrationEventListeners, listener),
     ),
@@ -356,6 +358,38 @@ describe("wsNativeApi", () => {
       threadId: "thread-1",
       toTurnCount: 1,
     });
+  });
+
+  it("forwards orchestration run starts directly to the RPC client", async () => {
+    rpcClientMock.orchestration.startRun.mockResolvedValue({
+      id: "run-1",
+      projectId: ProjectId.makeUnsafe("project-1"),
+      status: "running",
+      currentPhase: "working",
+      currentTicketIndex: 0,
+      orchestrationThreadId: ThreadId.makeUnsafe("thread-1"),
+      ticketIdentifiers: ["TEST-2"],
+      workingThreadIds: [ThreadId.makeUnsafe("thread-2")],
+      modelSelection: {
+        provider: "codex",
+        model: "codex-mini",
+      },
+      runtimeMode: "full-access",
+      maxReviewIterations: 0,
+      createdAt: "2026-02-24T00:00:00.000Z",
+      updatedAt: "2026-02-24T00:00:00.000Z",
+      startedAt: "2026-02-24T00:00:01.000Z",
+      completedAt: null,
+      failedAt: null,
+      canceledAt: null,
+      lastError: null,
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.orchestration.startRun({ runId: "run-1" as never });
+
+    expect(rpcClientMock.orchestration.startRun).toHaveBeenCalledWith({ runId: "run-1" });
   });
 
   it("forwards provider refreshes directly to the RPC client", async () => {

@@ -126,6 +126,8 @@ import type {
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationRun,
+  OrchestrationStartRunInput,
 } from "./orchestration";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
@@ -330,5 +332,6 @@ export interface NativeApi {
     replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
     createRun: (input: OrchestrationCreateRunInput) => Promise<OrchestrationCreateRunResult>;
+    startRun: (input: OrchestrationStartRunInput) => Promise<OrchestrationRun>;
   };
 }

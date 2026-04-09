@@ -90,16 +90,17 @@ export function buildOrchestrationPlan(
   function walkTree(nodes: readonly TicketTreeNode[]) {
     for (const node of nodes) {
       ticketById.set(node.ticket.id, node.ticket);
+      const nodeDependencies = Array.isArray(node.dependencies) ? node.dependencies : [];
       depsById.set(
         node.ticket.id,
-        node.dependencies.map((d) => ({
+        nodeDependencies.map((d) => ({
           dependsOnTicketId: d.dependsOnTicketId,
           identifier: d.identifier,
           title: d.title,
           status: d.status,
         })),
       );
-      if ("children" in node && Array.isArray(node.children)) {
+      if (Array.isArray(node.children)) {
         walkTree(node.children as readonly TicketTreeNode[]);
       }
     }

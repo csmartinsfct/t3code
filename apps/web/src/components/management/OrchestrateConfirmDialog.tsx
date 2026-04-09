@@ -1,4 +1,10 @@
-import type { ModelSelection, TicketId, TicketSummary, TicketTreeNode } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type ModelSelection,
+  type TicketId,
+  type TicketSummary,
+  type TicketTreeNode,
+} from "@t3tools/contracts";
 import {
   AlertTriangleIcon,
   CircleAlertIcon,
@@ -38,7 +44,7 @@ interface OrchestrateConfirmDialogProps {
   selectedTickets: ReadonlyMap<TicketId, TicketSummary>;
   allTickets: readonly TicketSummary[];
   projectId: string;
-  onConfirm: (ticketIdentifiers: string[], modelSelection: ModelSelection) => void;
+  onConfirm: (ticketIdentifiers: string[], modelSelection: ModelSelection) => Promise<void> | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,8 +64,11 @@ function resolveModelSelection(): { modelSelection: ModelSelection; displayName:
   }
 
   // Fallback: construct a default codex selection.
-  const fallback: ModelSelection = { provider: "codex", model: "codex-mini" } as ModelSelection;
-  return { modelSelection: fallback, displayName: "codex / codex-mini" };
+  const fallback: ModelSelection = {
+    provider: "codex",
+    model: DEFAULT_MODEL_BY_PROVIDER.codex,
+  } as ModelSelection;
+  return { modelSelection: fallback, displayName: `codex / ${DEFAULT_MODEL_BY_PROVIDER.codex}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +86,14 @@ export function OrchestrateConfirmDialog({
   const [plan, setPlan] = useState<OrchestrationPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Fetch tree and compute plan when dialog opens.
   useEffect(() => {
     if (!open || selectedTickets.size === 0) {
       setPlan(null);
       setError(null);
+      setIsSubmitting(false);
       return;
     }
 
@@ -114,14 +125,22 @@ export function OrchestrateConfirmDialog({
 
   const { modelSelection, displayName: modelDisplayName } = resolveModelSelection();
 
-  const handleConfirm = useCallback(() => {
-    if (plan?.kind !== "valid") return;
+  const handleConfirm = useCallback(async () => {
+    if (plan?.kind !== "valid" || isSubmitting) return;
     const identifiers = plan.orderedTickets
       .filter((t) => t.annotation !== "skipped-done")
       .map((t) => t.ticket.identifier);
-    onConfirm(identifiers, modelSelection);
-    onOpenChange(false);
-  }, [plan, modelSelection, onConfirm, onOpenChange]);
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onConfirm(identifiers, modelSelection);
+      onOpenChange(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to start orchestration");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isSubmitting, plan, modelSelection, onConfirm, onOpenChange]);
 
   const runnableCount =
     plan?.kind === "valid"
@@ -170,16 +189,21 @@ export function OrchestrateConfirmDialog({
                     />
                   </div>
                 </div>
+                {error ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {error}
+                  </div>
+                ) : null}
               </div>
             </DialogPanel>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={handleConfirm}>
+              <Button onClick={() => void handleConfirm()} disabled={isSubmitting}>
                 <PlayIcon className="size-3.5" />
-                Start Orchestration
+                {isSubmitting ? "Starting..." : "Start Orchestration"}
               </Button>
             </DialogFooter>
           </>

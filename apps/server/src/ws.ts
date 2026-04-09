@@ -57,6 +57,7 @@ import {
 } from "./observability/RpcInstrumentation";
 import { ProviderRateLimitsCache } from "./provider/Services/ProviderRateLimitsCache";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import { ProviderService } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -94,6 +95,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const git = yield* GitCore;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const providerService = yield* ProviderService;
     const rateLimitsCache = yield* ProviderRateLimitsCache;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -118,6 +120,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const orchestrationRunRunner = yield* makeOrchestrationRunRunnerFromDeps({
       runService: orchestrationRuns,
       orchestrationEngine,
+      providerService,
       ticketing,
       startup,
     });

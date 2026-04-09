@@ -225,6 +225,7 @@ export interface WsRpcClient {
     readonly pauseRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.pauseRun>;
     readonly resumeRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.resumeRun>;
     readonly cancelRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.cancelRun>;
+    readonly startRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.startRun>;
     readonly onDomainEvent: (
       listener: (event: OrchestrationEvent) => void,
       options?: OrchestrationDomainEventSubscriptionOptions,
@@ -514,6 +515,18 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         logWebTimeline("orchestration.run.cancel.success", {
           runId: input.runId,
           status: result.status,
+        });
+        return result;
+      },
+      startRun: async (input) => {
+        logWebTimeline("orchestration.run.start.start", { runId: input.runId });
+        const result = await transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.startRun](input),
+        );
+        logWebTimeline("orchestration.run.start.success", {
+          runId: input.runId,
+          status: result.status,
+          currentTicketIndex: result.currentTicketIndex,
         });
         return result;
       },

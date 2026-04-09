@@ -1,10 +1,12 @@
 import {
+  EventId,
   type OrchestrationCommand,
-  type OrchestrationEvent,
   OrchestrationRunId,
   ProjectId,
+  type ProviderRuntimeEvent,
   ThreadId,
   TicketId,
+  TurnId,
   type Ticket,
   type OrchestrationRun,
   OrchestrationRunError,
@@ -13,6 +15,10 @@ import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import {
+  ProviderService,
+  type ProviderServiceShape,
+} from "../../provider/Services/ProviderService.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import {
   TicketingService,
@@ -59,6 +65,12 @@ const makeTicket = (overrides: { id: string; identifier: string; title: string }
 const ticket1 = makeTicket({ id: ticket1Id, identifier: "T3CO-1", title: "First ticket" });
 const ticket2 = makeTicket({ id: ticket2Id, identifier: "T3CO-2", title: "Second ticket" });
 
+const resolveTestTicket = (id: TicketId): Ticket => {
+  if (id === ticket1Id) return ticket1;
+  if (id === ticket2Id) return ticket2;
+  throw new Error(`Unknown ticket: ${id}`);
+};
+
 const makeRun = (overrides: Partial<OrchestrationRun> = {}): OrchestrationRun => ({
   id: runId,
   orchestrationThreadId,
@@ -77,20 +89,69 @@ const makeRun = (overrides: Partial<OrchestrationRun> = {}): OrchestrationRun =>
   ...overrides,
 });
 
+const makeTurnStartedRuntimeEvent = (input: {
+  threadId: ThreadId;
+  turnId?: string;
+}): ProviderRuntimeEvent => ({
+  eventId: EventId.makeUnsafe(crypto.randomUUID()),
+  provider: "codex",
+  threadId: input.threadId,
+  createdAt: "2026-04-09T10:00:00.000Z",
+  turnId: TurnId.makeUnsafe(input.turnId ?? "turn-1"),
+  type: "turn.started",
+  payload: {
+    model: "gpt-5.4",
+  },
+});
+
+const makeTurnCompletedRuntimeEvent = (input: {
+  threadId: ThreadId;
+  turnId?: string;
+  state?: "completed" | "failed" | "interrupted" | "cancelled";
+  errorMessage?: string;
+}): ProviderRuntimeEvent => ({
+  eventId: EventId.makeUnsafe(crypto.randomUUID()),
+  provider: "codex",
+  threadId: input.threadId,
+  createdAt: "2026-04-09T10:00:01.000Z",
+  turnId: TurnId.makeUnsafe(input.turnId ?? "turn-1"),
+  type: "turn.completed",
+  payload: {
+    state: input.state ?? "completed",
+    ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+  },
+});
+
+const makeTurnAbortedRuntimeEvent = (input: {
+  threadId: ThreadId;
+  turnId?: string;
+  reason?: string;
+}): ProviderRuntimeEvent => ({
+  eventId: EventId.makeUnsafe(crypto.randomUUID()),
+  provider: "codex",
+  threadId: input.threadId,
+  createdAt: "2026-04-09T10:00:01.000Z",
+  turnId: TurnId.makeUnsafe(input.turnId ?? "turn-1"),
+  type: "turn.aborted",
+  payload: {
+    reason: input.reason ?? "interrupted",
+  },
+});
+
 const makeTicketingService = (
   overrides: Partial<TicketingServiceShape> = {},
 ): TicketingServiceShape => ({
   resolveId: () => Effect.die(new Error("not mocked")),
   resolveIdentifiers: () => Effect.succeed(new Map()),
   list: () => Effect.succeed([]),
-  getById: ({ id }) => {
-    if (id === ticket1Id) return Effect.succeed(ticket1);
-    if (id === ticket2Id) return Effect.succeed(ticket2);
-    return Effect.die(new Error(`Unknown ticket: ${id}`));
-  },
+  getById: ({ id }) => Effect.succeed(resolveTestTicket(id)),
   getByIdentifier: () => Effect.die(new Error("not mocked")),
   create: () => Effect.die(new Error("not mocked")),
-  update: () => Effect.die(new Error("not mocked")),
+  update: ({ id, ...changes }) =>
+    Effect.succeed({
+      ...resolveTestTicket(id),
+      ...changes,
+    } as Ticket),
   delete: () => Effect.void,
   reorder: () => Effect.void,
   search: () => Effect.succeed([]),
@@ -135,16 +196,43 @@ const makeRunService = (
   ...overrides,
 });
 
+const makeProviderService = (
+  overrides: Partial<ProviderServiceShape> = {},
+): ProviderServiceShape => ({
+  startSession: () => Effect.die(new Error("not mocked")),
+  sendTurn: () => Effect.die(new Error("not mocked")),
+  interruptTurn: () => Effect.void,
+  respondToRequest: () => Effect.die(new Error("not mocked")),
+  respondToUserInput: () => Effect.die(new Error("not mocked")),
+  stopSession: () => Effect.void,
+  listSessions: () => Effect.succeed([]),
+  getCapabilities: () => Effect.die(new Error("not mocked")),
+  rollbackConversation: () => Effect.die(new Error("not mocked")),
+  streamEvents: Stream.empty,
+  probeAllRateLimits: () => Effect.succeed([]),
+  ...overrides,
+});
+
 const makeLayer = (opts: {
   runService?: Partial<OrchestrationRunServiceShape>;
   ticketing?: Partial<TicketingServiceShape>;
-  domainEvents?: Stream.Stream<OrchestrationEvent>;
+  providerService?: Partial<ProviderServiceShape>;
+  providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
 }) => {
   const dispatchedCommands = opts.dispatchedCommands ?? [];
   return OrchestrationRunRunnerLive.pipe(
     Layer.provide(Layer.succeed(OrchestrationRunService, makeRunService(opts.runService))),
     Layer.provide(Layer.succeed(TicketingService, makeTicketingService(opts.ticketing))),
+    Layer.provide(
+      Layer.succeed(
+        ProviderService,
+        makeProviderService({
+          ...opts.providerService,
+          streamEvents: opts.providerEvents ?? opts.providerService?.streamEvents ?? Stream.empty,
+        }),
+      ),
+    ),
     Layer.provide(
       Layer.succeed(ServerRuntimeStartup, {
         awaitCommandReady: Effect.void,
@@ -166,7 +254,7 @@ const makeLayer = (opts: {
           dispatchedCommands.push(command);
           return Effect.succeed({ sequence: dispatchedCommands.length });
         },
-        streamDomainEvents: opts.domainEvents ?? Stream.empty,
+        streamDomainEvents: Stream.empty,
       }),
     ),
   );
@@ -224,5 +312,262 @@ describe("OrchestrationRunRunner", () => {
     expect(expectedPrompt).toContain("Pull the ticket details");
     expect(expectedPrompt).toContain("update the ticket status to blocked");
     expect(expectedPrompt).toContain("acceptance criteria");
+  });
+
+  it("finalizes instead of pausing when the last ticket already completed", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const runningSingleTicketRun = makeRun({
+      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      currentTicketIndex: 0,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...runningSingleTicketRun,
+      status: "completed",
+    });
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(runningSingleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      ticketing: {
+        getById: ({ id }) => {
+          if (id === ticket1Id) {
+            return Effect.succeed({ ...ticket1, status: "done" satisfies Ticket["status"] });
+          }
+          return Effect.die(new Error(`Unknown ticket: ${id}`));
+        },
+      },
+    });
+
+    const result = await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.pauseRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.status).toBe("completed");
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.completed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.paused",
+    );
+  });
+
+  it("treats resume on a terminal run as a no-op", async () => {
+    const completedRun = makeRun({ status: "completed" });
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(completedRun),
+      },
+    });
+
+    const result = await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.status).toBe("completed");
+    expect(dispatchedCommands).toEqual([]);
+  });
+
+  it("resumes the in-flight ticket with a continue prompt instead of restarting it", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const pausedSingleTicketRun = makeRun({
+      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      currentTicketIndex: 0,
+      status: "paused",
+    });
+    const runningSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "completed",
+    });
+    let getCallCount = 0;
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          if (getCallCount === 1) {
+            return Effect.succeed(pausedSingleTicketRun);
+          }
+          return Effect.succeed(runningSingleTicketRun);
+        },
+        resume: () => Effect.succeed(runningSingleTicketRun),
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...pausedSingleTicketRun,
+              status: "running",
+              currentTicketIndex: 0,
+            }),
+          ),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === workingThread1,
+    );
+
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.message.text).toBe("Continue.");
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.resumed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.ticket.started",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.completed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.completed",
+    );
+  });
+
+  it("includes ticket metadata in parent orchestration activities", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+    });
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...singleTicketRun,
+              currentTicketIndex: 0,
+            }),
+          ),
+        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1 }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1 }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const ticketStarted = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.ticket.started",
+    );
+    const ticketCompleted = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.ticket.completed",
+    );
+
+    expect(ticketStarted?.activity.payload).toMatchObject({
+      ticketId: ticket1Id,
+      ticketIdentifier: ticket1.identifier,
+      workingThreadId: workingThread1,
+    });
+    expect(ticketCompleted?.activity.payload).toMatchObject({
+      ticketId: ticket1Id,
+      ticketIdentifier: ticket1.identifier,
+      workingThreadId: workingThread1,
+    });
+  });
+
+  it("treats an aborted provider turn as paused instead of completed", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+    });
+    const pausedSingleTicketRun = makeRun({
+      ...singleTicketRun,
+      status: "paused",
+      currentTicketIndex: 0,
+    });
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...singleTicketRun,
+              currentTicketIndex: 0,
+            }),
+          ),
+        pause: () => Effect.succeed(pausedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-abort" }),
+        makeTurnAbortedRuntimeEvent({
+          threadId: workingThread1,
+          turnId: "turn-abort",
+          reason: "user interrupt",
+        }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.paused",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.ticket.completed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.completed",
+    );
   });
 });

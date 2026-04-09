@@ -107,6 +107,7 @@ import {
   TicketSearchInput,
   TicketSummary,
   TicketTreeInput,
+  TicketTreeNodeWire,
   UpdateCriterionStatusInput,
   Artifact,
   Comment,
@@ -757,7 +758,7 @@ export const WsTicketingSearchRpc = Rpc.make(WS_METHODS.ticketingSearch, {
 
 export const WsTicketingGetTreeRpc = Rpc.make(WS_METHODS.ticketingGetTree, {
   payload: TicketTreeInput,
-  success: Schema.Array(Schema.Struct({ ticket: TicketSummary })),
+  success: Schema.Array(TicketTreeNodeWire),
   error: TicketingError,
 });
 

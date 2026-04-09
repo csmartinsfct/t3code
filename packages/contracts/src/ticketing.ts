@@ -211,11 +211,13 @@ export interface TicketTreeNode {
  * Actual encode/decode works because Effect RPC uses JSON serialization which
  * handles the recursive children natively.
  */
-export const TicketTreeNode = Schema.Struct({
+export const TicketTreeNodeWire = Schema.Struct({
   ticket: TicketSummary,
-  children: Schema.Array(Schema.Struct({ ticket: TicketSummary })),
+  children: Schema.Array(Schema.Unknown),
   dependencies: Schema.Array(TicketDependency),
-}) as unknown as Schema.Schema<TicketTreeNode>;
+});
+
+export const TicketTreeNode = TicketTreeNodeWire as unknown as Schema.Schema<TicketTreeNode>;
 
 // ---------------------------------------------------------------------------
 // RPC input schemas

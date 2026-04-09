@@ -55,6 +55,7 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import {
   ProviderRateLimitsCache,
   type ProviderRateLimitsCacheShape,
@@ -196,12 +197,27 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRegistry,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            refresh: () => Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRegistry,
+          }),
+          Layer.mock(ProviderService)({
+            startSession: () => Effect.die(new Error("not mocked")),
+            sendTurn: () => Effect.die(new Error("not mocked")),
+            interruptTurn: () => Effect.void,
+            respondToRequest: () => Effect.die(new Error("not mocked")),
+            respondToUserInput: () => Effect.die(new Error("not mocked")),
+            stopSession: () => Effect.void,
+            listSessions: () => Effect.succeed([]),
+            getCapabilities: () => Effect.die(new Error("not mocked")),
+            rollbackConversation: () => Effect.die(new Error("not mocked")),
+            streamEvents: Stream.empty,
+            probeAllRateLimits: () => Effect.succeed([]),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProviderRateLimitsCache)({

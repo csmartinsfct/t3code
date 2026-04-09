@@ -43,7 +43,7 @@ const SCOPE = "server.orchestration-runs";
 const VALID_TRANSITIONS: Record<OrchestrationRunStatus, Set<OrchestrationRunStatus>> = {
   pending: new Set(["running", "canceled"]),
   running: new Set(["paused", "completed", "canceled", "failed"]),
-  paused: new Set(["running", "canceled"]),
+  paused: new Set(["running", "completed", "canceled"]),
   completed: new Set(),
   canceled: new Set(),
   failed: new Set(),

@@ -50,6 +50,14 @@ export function useOrchestrationTimeline(
     useCallback((s) => (thread ? s.threadsById[thread.id] : undefined), [thread?.id]),
   );
 
+  useEffect(() => {
+    fetchIdRef.current += 1;
+    setRun(null);
+    setChildThreadIds([]);
+    setError(null);
+    setLoading(Boolean(thread?.id && projectId));
+  }, [thread?.id, projectId]);
+
   // ── Fetch run + child thread IDs ──────────────────────────────────
   const fetchData = useCallback(async () => {
     if (!thread || !projectId) return;

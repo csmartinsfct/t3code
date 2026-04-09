@@ -73,6 +73,33 @@ describe("buildOrchestrationPlan", () => {
     }
   });
 
+  it("does not crash when sibling tree nodes arrive without nested dependency data", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const child = makeTicket({
+      id: "child" as TicketId,
+      identifier: "T-CHILD",
+      parentId: "parent" as TicketId,
+    });
+    const target = makeTicket({ id: "target" as TicketId, identifier: "T-TARGET" });
+    const malformedTree = [
+      {
+        ticket: parent,
+        children: [{ ticket: child }],
+        dependencies: [],
+      } as unknown as TicketTreeNode,
+      {
+        ticket: target,
+      } as unknown as TicketTreeNode,
+    ];
+
+    const plan = buildOrchestrationPlan(new Set(["target" as TicketId]), malformedTree, [target]);
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
+      expect(plan.orderedTickets).toHaveLength(1);
+      expect(plan.orderedTickets[0]!.ticket.identifier).toBe("T-TARGET");
+    }
+  });
+
   it("orders tickets by dependency", () => {
     const t1 = makeTicket({ id: "1" as TicketId, identifier: "T-1", sortOrder: 2000 });
     const t2 = makeTicket({ id: "2" as TicketId, identifier: "T-2", sortOrder: 1000 });

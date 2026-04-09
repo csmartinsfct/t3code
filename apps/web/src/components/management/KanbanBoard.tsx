@@ -200,6 +200,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         ticketIdentifiers: ticketIdentifiers as never,
         modelSelection,
       });
+      await api.orchestration.startRun({ runId: result.runId });
       clearSelection();
       void navigate({
         to: "/$threadId",
