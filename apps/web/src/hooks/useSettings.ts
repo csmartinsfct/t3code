@@ -140,6 +140,14 @@ export function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<s
     patch.enableAssistantStreaming = legacySettings.enableAssistantStreaming;
   }
 
+  if (
+    typeof legacySettings.maxReviewIterations === "number" &&
+    Number.isInteger(legacySettings.maxReviewIterations) &&
+    legacySettings.maxReviewIterations >= 0
+  ) {
+    patch.maxReviewIterations = legacySettings.maxReviewIterations;
+  }
+
   if (Schema.is(ThreadEnvMode)(legacySettings.defaultThreadEnvMode)) {
     patch.defaultThreadEnvMode = legacySettings.defaultThreadEnvMode;
   }

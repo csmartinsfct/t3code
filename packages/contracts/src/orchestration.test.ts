@@ -12,6 +12,8 @@ import {
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
+  ReviewOutput,
+  ReviewResult,
   OrchestrationSession,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
@@ -37,6 +39,8 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeReviewOutput = Schema.decodeUnknownEffect(ReviewOutput);
+const decodeReviewResult = Schema.decodeUnknownEffect(ReviewResult);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -228,6 +232,53 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.modelSelection?.provider, "claudeAgent");
+  }),
+);
+
+it.effect("decodes ReviewOutput with nullable file and line fields", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeReviewOutput({
+      changesNeeded: true,
+      summary: "Needs another pass.",
+      comments: [
+        {
+          file: "apps/server/src/orchestration/review.ts",
+          line: 42,
+          severity: "critical",
+          body: "The review result is never persisted.",
+        },
+        {
+          file: null,
+          line: null,
+          severity: "nit",
+          body: "Tighten the wording in the summary.",
+        },
+      ],
+      suggestions: ["Persist the review output before advancing the run."],
+    });
+
+    assert.strictEqual(parsed.comments[0]?.file, "apps/server/src/orchestration/review.ts");
+    assert.strictEqual(parsed.comments[1]?.line, null);
+  }),
+);
+
+it.effect("decodes ReviewResult with ticket and review-thread context", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeReviewResult({
+      ticketIdentifier: "T3CO-22",
+      reviewThreadId: "thread-review-1",
+      iteration: 1,
+      output: {
+        changesNeeded: false,
+        summary: "Looks good.",
+        comments: [],
+        suggestions: [],
+      },
+    });
+
+    assert.strictEqual(parsed.ticketIdentifier, "T3CO-22");
+    assert.strictEqual(parsed.reviewThreadId, "thread-review-1");
+    assert.strictEqual(parsed.iteration, 1);
   }),
 );
 

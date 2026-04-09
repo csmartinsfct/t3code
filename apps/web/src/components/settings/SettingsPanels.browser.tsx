@@ -65,6 +65,10 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+    await expect.element(page.getByText("Automated review cycles")).toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText("Maximum automated review iterations"))
+      .toHaveValue("3");
   });
 
   it("opens the logs folder in the preferred editor", async () => {

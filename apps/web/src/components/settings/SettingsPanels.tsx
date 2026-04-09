@@ -15,13 +15,15 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   baseProviderKind,
   type BaseProviderKind,
-  PROVIDER_DISPLAY_NAMES,
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
   ThreadId,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  MAX_REVIEW_ITERATIONS_UI_MAX,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -473,6 +475,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.maxReviewIterations !== DEFAULT_UNIFIED_SETTINGS.maxReviewIterations
+        ? ["Automated review cycles"]
+        : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
@@ -496,6 +501,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.maxReviewIterations,
       settings.mcpDeliveryMode,
       settings.timestampFormat,
       theme,
@@ -1035,6 +1041,50 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Automated review cycles"
+          description="Set how many automated review-requested fix cycles orchestration can attempt. 0 disables automated review."
+          resetAction={
+            settings.maxReviewIterations !== DEFAULT_UNIFIED_SETTINGS.maxReviewIterations ? (
+              <SettingResetButton
+                label="automated review cycles"
+                onClick={() =>
+                  updateSettings({
+                    maxReviewIterations: DEFAULT_UNIFIED_SETTINGS.maxReviewIterations,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <label className="flex items-center gap-2">
+              <Input
+                aria-label="Maximum automated review iterations"
+                className="w-24"
+                min={0}
+                max={MAX_REVIEW_ITERATIONS_UI_MAX}
+                step={1}
+                type="number"
+                value={settings.maxReviewIterations}
+                onChange={(event) => {
+                  const rawValue = Number(event.target.value);
+                  if (!Number.isFinite(rawValue)) {
+                    return;
+                  }
+                  const nextValue = Math.max(
+                    0,
+                    Math.min(MAX_REVIEW_ITERATIONS_UI_MAX, Math.trunc(rawValue)),
+                  );
+                  updateSettings({ maxReviewIterations: nextValue });
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                0-{MAX_REVIEW_ITERATIONS_UI_MAX}
+              </span>
+            </label>
           }
         />
 

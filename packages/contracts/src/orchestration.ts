@@ -9,6 +9,7 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationRunId,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -1191,6 +1192,37 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
+
+// ---------------------------------------------------------------------------
+// Automated Review
+// ---------------------------------------------------------------------------
+
+export const ReviewCommentSeverity = Schema.Literals(["critical", "suggestion", "nit"]);
+export type ReviewCommentSeverity = typeof ReviewCommentSeverity.Type;
+
+export const ReviewComment = Schema.Struct({
+  file: Schema.NullOr(Schema.String),
+  line: Schema.NullOr(PositiveInt),
+  severity: ReviewCommentSeverity,
+  body: Schema.String,
+});
+export type ReviewComment = typeof ReviewComment.Type;
+
+export const ReviewOutput = Schema.Struct({
+  changesNeeded: Schema.Boolean,
+  summary: Schema.String,
+  comments: Schema.Array(ReviewComment),
+  suggestions: Schema.Array(Schema.String),
+});
+export type ReviewOutput = typeof ReviewOutput.Type;
+
+export const ReviewResult = Schema.Struct({
+  ticketIdentifier: TrimmedNonEmptyString,
+  reviewThreadId: ThreadId,
+  iteration: PositiveInt,
+  output: ReviewOutput,
+});
+export type ReviewResult = typeof ReviewResult.Type;
 
 // ---------------------------------------------------------------------------
 // Orchestration Runs
