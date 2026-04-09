@@ -10,6 +10,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationThread,
   type OrchestrationSessionStatus,
+  type OrchestrationRunStatus,
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -32,6 +33,7 @@ export interface AppState {
   sidebarThreadsById: Record<string, SidebarThreadSummary>;
   threadIdsByProjectId: Record<string, ThreadId[]>;
   bootstrapComplete: boolean;
+  orchestrationRunStatusByThreadId: Record<string, OrchestrationRunStatus>;
 }
 
 const initialState: AppState = {
@@ -41,6 +43,7 @@ const initialState: AppState = {
   sidebarThreadsById: {},
   threadIdsByProjectId: {},
   bootstrapComplete: false,
+  orchestrationRunStatusByThreadId: {},
 };
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
@@ -1227,6 +1230,11 @@ export const selectThreadIdsByProjectId =
   (projectId: ProjectId | null | undefined) =>
   (state: AppState): ThreadId[] =>
     projectId ? (state.threadIdsByProjectId[projectId] ?? EMPTY_THREAD_IDS) : EMPTY_THREAD_IDS;
+
+export const selectOrchestrationRunStatusByThreadId =
+  (threadId: ThreadId | null | undefined) =>
+  (state: AppState): OrchestrationRunStatus | null =>
+    threadId ? (state.orchestrationRunStatusByThreadId[threadId] ?? null) : null;
 
 export function setError(state: AppState, threadId: ThreadId, error: string | null): AppState {
   return updateThreadState(state, threadId, (t) => {

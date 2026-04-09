@@ -71,7 +71,7 @@ import {
   newProjectId,
   newThreadId,
 } from "../lib/utils";
-import { useStore } from "../store";
+import { selectOrchestrationRunStatusByThreadId, useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -147,6 +147,7 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
+import { useOrchestrationRunStatusSync } from "../hooks/useOrchestrationRunStatusSync";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -303,6 +304,11 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
     (state) =>
       selectThreadTerminalState(state.terminalStateByThreadId, props.threadId).runningTerminalIds,
   );
+  const orchestrationRunStatusSelector = useMemo(
+    () => selectOrchestrationRunStatusByThreadId(props.threadId),
+    [props.threadId],
+  );
+  const orchestrationRunStatus = useStore(orchestrationRunStatusSelector);
 
   if (!thread) {
     return null;
@@ -311,12 +317,17 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
   const isActive = props.routeThreadId === thread.id;
   const isSelected = props.selectedThreadIds.has(thread.id);
   const isHighlighted = isActive || isSelected;
+  const isOrchestrationRunActive =
+    thread.isOrchestrationThread &&
+    (orchestrationRunStatus === "running" || orchestrationRunStatus === "pending");
   const isThreadRunning =
-    thread.session?.status === "running" && thread.session.activeTurnId != null;
+    (thread.session?.status === "running" && thread.session.activeTurnId != null) ||
+    isOrchestrationRunActive;
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
       lastVisitedAt,
+      isOrchestrationRunActive,
     },
   });
   const prStatus = prStatusIndicator(props.pr);
@@ -682,10 +693,14 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  useOrchestrationRunStatusSync();
   const projects = useStore((store) => store.projects);
   const bootstrapComplete = useStore((store) => store.bootstrapComplete);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
   const threadIdsByProjectId = useStore((store) => store.threadIdsByProjectId);
+  const orchestrationRunStatusByThreadId = useStore(
+    (store) => store.orchestrationRunStatusByThreadId,
+  );
   const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
     useShallow((store) => ({
       projectExpandedById: store.projectExpandedById,
@@ -1639,13 +1654,18 @@ export default function Sidebar() {
   const renderedProjects = useMemo(
     () =>
       sortedProjects.map((project) => {
-        const resolveProjectThreadStatus = (thread: (typeof visibleThreads)[number]) =>
-          resolveThreadStatusPill({
+        const resolveProjectThreadStatus = (thread: (typeof visibleThreads)[number]) => {
+          const runStatus = orchestrationRunStatusByThreadId[thread.id] ?? null;
+          const isOrchestrationRunActive =
+            thread.isOrchestrationThread && (runStatus === "running" || runStatus === "pending");
+          return resolveThreadStatusPill({
             thread: {
               ...thread,
               lastVisitedAt: threadLastVisitedAtById[thread.id],
+              isOrchestrationRunActive,
             },
           });
+        };
         const projectThreads = sortThreadsForSidebar(
           listVisibleProjectThreads({
             projectId: project.id,
@@ -1698,6 +1718,7 @@ export default function Sidebar() {
     [
       appSettings.sidebarThreadSortOrder,
       expandedThreadListsByProject,
+      orchestrationRunStatusByThreadId,
       routeThreadId,
       sortedProjects,
       sidebarThreadsById,
@@ -2316,7 +2337,7 @@ export default function Sidebar() {
             <SidebarGroup className="px-2 py-2">
               <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                  Projects
+                  My Projects
                 </span>
                 <div className="flex items-center gap-1">
                   <Tooltip>

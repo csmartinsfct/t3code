@@ -52,6 +52,7 @@ type ThreadStatusInput = Pick<
   | "session"
 > & {
   lastVisitedAt?: string | undefined;
+  isOrchestrationRunActive?: boolean;
 };
 
 export interface ThreadJumpHintVisibilityController {
@@ -355,7 +356,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.session?.status === "running" || thread.isOrchestrationRunActive) {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
