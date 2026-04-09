@@ -69,8 +69,10 @@ import { TextGeneration } from "./git/Services/TextGeneration";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
-import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns";
-import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner";
+import { OrchestrationRunRepository } from "./persistence/Services/OrchestrationRuns";
+import { ProjectionThreadRepository } from "./persistence/Services/ProjectionThreads";
+import { makeOrchestrationRunServiceFromDeps } from "./orchestrationRuns/Layers/OrchestrationRuns";
+import { makeOrchestrationRunRunnerFromDeps } from "./orchestrationRuns/Layers/OrchestrationRunRunner";
 import {
   resolveClaudeMcpServerNames,
   resolveCodexMcpServerNames,
@@ -104,8 +106,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const textGeneration = yield* TextGeneration;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
-    const orchestrationRuns = yield* OrchestrationRunService;
-    const orchestrationRunRunner = yield* OrchestrationRunRunner;
+    const orchestrationRunRepo = yield* OrchestrationRunRepository;
+    const projectionThreadRepo = yield* ProjectionThreadRepository;
+    const orchestrationRuns = yield* makeOrchestrationRunServiceFromDeps({
+      repo: orchestrationRunRepo,
+      orchestrationEngine,
+      projectionThreadRepo,
+      ticketing,
+      startup,
+    });
+    const orchestrationRunRunner = yield* makeOrchestrationRunRunnerFromDeps({
+      runService: orchestrationRuns,
+      orchestrationEngine,
+      ticketing,
+      startup,
+    });
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;

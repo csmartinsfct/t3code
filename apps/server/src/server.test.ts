@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Path, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
@@ -49,6 +49,8 @@ import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.t
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
 import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner.ts";
+import { OrchestrationRunRepository } from "./persistence/Services/OrchestrationRuns.ts";
+import { ProjectionThreadRepository } from "./persistence/Services/ProjectionThreads.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -359,7 +361,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.merge(
+        Layer.mergeAll(
           Layer.succeed(OrchestrationRunService, {
             create: () => Effect.die(new Error("not mocked")),
             get: () => Effect.die(new Error("not mocked")),
@@ -379,6 +381,21 @@ const buildAppUnderTest = (options?: {
             pauseRun: () => Effect.die(new Error("not mocked")),
             resumeRun: () => Effect.die(new Error("not mocked")),
             cancelRun: () => Effect.die(new Error("not mocked")),
+          }),
+          Layer.succeed(OrchestrationRunRepository, {
+            create: () => Effect.void,
+            update: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            getByOrchestrationThreadId: () => Effect.succeed(Option.none()),
+            listByProject: () => Effect.succeed([]),
+            deleteById: () => Effect.void,
+          }),
+          Layer.succeed(ProjectionThreadRepository, {
+            upsert: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            listByProjectId: () => Effect.succeed([]),
+            listByParentThreadId: () => Effect.succeed([]),
+            deleteById: () => Effect.void,
           }),
         ),
       ),

@@ -56,8 +56,6 @@ import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingMcpRouteLayer } from "./ticketing/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
-import { OrchestrationRunServiceLive } from "./orchestrationRuns/Layers/OrchestrationRuns";
-import { OrchestrationRunRunnerLive } from "./orchestrationRuns/Layers/OrchestrationRunRunner";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -107,6 +105,8 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
@@ -128,11 +128,16 @@ const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationProjectionSnapshotQueryLive,
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationProjectionPipelineLayerLive,
+).pipe(Layer.provide(PersistenceLayerLive));
+
+const OrchestrationEngineLayerLive = OrchestrationEngineLive.pipe(
+  Layer.provide(OrchestrationInfrastructureLayerLive),
+  Layer.provide(PersistenceLayerLive),
 );
 
 const OrchestrationLayerLive = Layer.mergeAll(
   OrchestrationInfrastructureLayerLive,
-  OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
+  OrchestrationEngineLayerLive,
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
@@ -178,8 +183,6 @@ const ProviderLayerLive = Layer.unwrap(
     ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
   }),
 );
-
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(
@@ -244,59 +247,8 @@ const RuntimeServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
-  // OrchestrationRunServiceLive's remaining requirements (ServerRuntimeStartup, TicketingService)
-  // are satisfied by earlier layers in the provideMerge chain at runtime.
-  Layer.provideMerge(
-    OrchestrationRunServiceLive.pipe(
-      Layer.provide(OrchestrationRunRepositoryLive),
-      Layer.provide(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
-      Layer.provide(
-        TicketingServiceLive.pipe(
-          Layer.provide(TicketingRepositoryLive),
-          Layer.provide(PersistenceLayerLive),
-        ),
-      ),
-      Layer.provide(
-        OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
-      ),
-      Layer.provide(PersistenceLayerLive),
-    ) as Layer.Layer<
-      import("./orchestrationRuns/Services/OrchestrationRuns").OrchestrationRunService
-    >,
-  ),
-  // OrchestrationRunRunnerLive's requirements (OrchestrationRunService, OrchestrationEngineService,
-  // TicketingService, ServerRuntimeStartup) are satisfied by earlier layers in the chain.
-  Layer.provideMerge(
-    OrchestrationRunRunnerLive.pipe(
-      Layer.provide(
-        OrchestrationRunServiceLive.pipe(
-          Layer.provide(OrchestrationRunRepositoryLive),
-          Layer.provide(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
-          Layer.provide(
-            TicketingServiceLive.pipe(
-              Layer.provide(TicketingRepositoryLive),
-              Layer.provide(PersistenceLayerLive),
-            ),
-          ),
-          Layer.provide(
-            OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
-          ),
-          Layer.provide(PersistenceLayerLive),
-        ),
-      ),
-      Layer.provide(
-        OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
-      ),
-      Layer.provide(
-        TicketingServiceLive.pipe(
-          Layer.provide(TicketingRepositoryLive),
-          Layer.provide(PersistenceLayerLive),
-        ),
-      ),
-    ) as Layer.Layer<
-      import("./orchestrationRuns/Services/OrchestrationRunRunner").OrchestrationRunRunner
-    >,
-  ),
+  Layer.provideMerge(OrchestrationRunRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
+  Layer.provideMerge(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
   Layer.provideMerge(
     Layer.empty.pipe(
       Layer.provideMerge(KeybindingsLive),
