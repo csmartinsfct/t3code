@@ -59,6 +59,20 @@ function annotateTicket(ticket: TicketSummary): TicketAnnotation {
   return "will-run";
 }
 
+function sortTicketIdsByBoardOrder(
+  ticketIds: readonly TicketId[],
+  ticketById: ReadonlyMap<TicketId, TicketSummary>,
+): TicketId[] {
+  return [...ticketIds].toSorted((leftId, rightId) => {
+    const left = ticketById.get(leftId);
+    const right = ticketById.get(rightId);
+    if (!left || !right) return String(leftId).localeCompare(String(rightId));
+    return (
+      boardOrderKey(left) - boardOrderKey(right) || left.identifier.localeCompare(right.identifier)
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -86,6 +100,16 @@ export function buildOrchestrationPlan(
     TicketId,
     { dependsOnTicketId: TicketId; identifier: string; title: string; status: TicketStatus }[]
   >();
+  const childIdsByParentId = new Map<TicketId, TicketId[]>();
+
+  const addChildId = (parentId: TicketId, childId: TicketId) => {
+    const existing = childIdsByParentId.get(parentId);
+    if (existing) {
+      if (!existing.includes(childId)) existing.push(childId);
+      return;
+    }
+    childIdsByParentId.set(parentId, [childId]);
+  };
 
   function walkTree(nodes: readonly TicketTreeNode[]) {
     for (const node of nodes) {
@@ -101,6 +125,11 @@ export function buildOrchestrationPlan(
         })),
       );
       if (Array.isArray(node.children)) {
+        for (const child of node.children) {
+          if (child?.ticket?.id) {
+            addChildId(node.ticket.id, child.ticket.id);
+          }
+        }
         walkTree(node.children as readonly TicketTreeNode[]);
       }
     }
@@ -111,11 +140,29 @@ export function buildOrchestrationPlan(
   // might only appear as children).
   for (const t of allTickets) {
     if (!ticketById.has(t.id)) ticketById.set(t.id, t);
+    if (t.parentId) addChildId(t.parentId, t.id);
+  }
+
+  for (const [parentId, childIds] of childIdsByParentId) {
+    childIdsByParentId.set(parentId, sortTicketIdsByBoardOrder(childIds, ticketById));
+  }
+
+  const collectLeafExecutionIds = (ticketId: TicketId): TicketId[] => {
+    const childIds = childIdsByParentId.get(ticketId) ?? [];
+    if (childIds.length === 0) return [ticketId];
+    return childIds.flatMap((childId) => collectLeafExecutionIds(childId));
+  };
+
+  const executionIds = new Set<TicketId>();
+  for (const selectedId of selectedIds) {
+    for (const executionId of collectLeafExecutionIds(selectedId)) {
+      executionIds.add(executionId);
+    }
   }
 
   // Resolve selected tickets.
   const selectedTickets: TicketSummary[] = [];
-  for (const id of selectedIds) {
+  for (const id of executionIds) {
     const t = ticketById.get(id);
     if (t) selectedTickets.push(t);
   }
@@ -130,7 +177,7 @@ export function buildOrchestrationPlan(
   for (const ticket of selectedTickets) {
     const deps = depsById.get(ticket.id) ?? [];
     for (const dep of deps) {
-      if (selectedIds.has(dep.dependsOnTicketId)) continue; // internal
+      if (executionIds.has(dep.dependsOnTicketId)) continue; // internal
       if (TERMINAL_STATUSES.has(dep.status)) continue; // already done
       externalDeps.push({
         ticket,
@@ -158,7 +205,7 @@ export function buildOrchestrationPlan(
   for (const ticket of runnableTickets) {
     const deps = depsById.get(ticket.id) ?? [];
     for (const dep of deps) {
-      if (!selectedIds.has(dep.dependsOnTicketId)) continue;
+      if (!executionIds.has(dep.dependsOnTicketId)) continue;
       if (TERMINAL_STATUSES.has(dep.status)) continue; // skip done deps
       const depTicket = ticketById.get(dep.dependsOnTicketId);
       if (depTicket) {

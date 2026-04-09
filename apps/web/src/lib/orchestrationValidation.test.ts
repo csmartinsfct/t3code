@@ -73,6 +73,55 @@ describe("buildOrchestrationPlan", () => {
     }
   });
 
+  it("expands a selected parent ticket into its leaf subtickets", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const childA = makeTicket({
+      id: "child-a" as TicketId,
+      identifier: "T-CHILD-A",
+      parentId: "parent" as TicketId,
+      sortOrder: 2000,
+    });
+    const childB = makeTicket({
+      id: "child-b" as TicketId,
+      identifier: "T-CHILD-B",
+      parentId: "parent" as TicketId,
+      sortOrder: 1000,
+    });
+    const tree = [makeTreeNode(parent, [], [makeTreeNode(childA), makeTreeNode(childB)])];
+
+    const plan = buildOrchestrationPlan(new Set(["parent" as TicketId]), tree, [
+      parent,
+      childA,
+      childB,
+    ]);
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
+      expect(plan.orderedTickets.map((entry) => entry.ticket.identifier)).toEqual([
+        "T-CHILD-B",
+        "T-CHILD-A",
+      ]);
+    }
+  });
+
+  it("dedupes parent expansion when a subtask is also selected directly", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const child = makeTicket({
+      id: "child" as TicketId,
+      identifier: "T-CHILD",
+      parentId: "parent" as TicketId,
+    });
+    const tree = [makeTreeNode(parent, [], [makeTreeNode(child)])];
+
+    const plan = buildOrchestrationPlan(new Set(["parent", "child"] as TicketId[]), tree, [
+      parent,
+      child,
+    ]);
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
+      expect(plan.orderedTickets.map((entry) => entry.ticket.identifier)).toEqual(["T-CHILD"]);
+    }
+  });
+
   it("does not crash when sibling tree nodes arrive without nested dependency data", () => {
     const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
     const child = makeTicket({
