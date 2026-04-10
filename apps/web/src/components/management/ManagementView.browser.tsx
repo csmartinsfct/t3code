@@ -140,6 +140,7 @@ vi.mock("../ChatView", () => ({
 
 const { ManagementView } = await import("./ManagementView");
 
+// Referenced from the hoisted useTicketing vi.mock factory above.
 const applyLocalReorderMock = vi.fn();
 const ticketingUpdateMock = vi.fn(async () => null);
 const ticketingReorderMock = vi.fn(async () => null);

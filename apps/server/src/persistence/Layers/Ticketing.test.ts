@@ -155,6 +155,7 @@ layer("TicketingRepository", (it) => {
         })),
         [
           { id: thirdChildId, sortOrder: 0 },
+          // same sortOrder - tiebroken by createdAt ASC
           { id: firstChildId, sortOrder: 1000 },
           { id: secondChildId, sortOrder: 1000 },
         ],
