@@ -223,7 +223,7 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
   );
 }
 
-function SettingsSection({
+export function SettingsSection({
   title,
   icon,
   headerAction,
@@ -250,7 +250,7 @@ function SettingsSection({
   );
 }
 
-function SettingsRow({
+export function SettingsRow({
   title,
   description,
   status,
@@ -289,7 +289,7 @@ function SettingsRow({
   );
 }
 
-function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -313,7 +313,7 @@ function SettingResetButton({ label, onClick }: { label: string; onClick: () => 
   );
 }
 
-function SettingsPageContainer({ children }: { children: ReactNode }) {
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">{children}</div>

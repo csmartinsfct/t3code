@@ -14,6 +14,7 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
 import { Route as SettingsRunsRouteImport } from './routes/settings.runs'
+import { Route as SettingsPromptsRouteImport } from './routes/settings.prompts'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
@@ -42,6 +43,11 @@ const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
 const SettingsRunsRoute = SettingsRunsRouteImport.update({
   id: '/runs',
   path: '/runs',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsPromptsRoute = SettingsPromptsRouteImport.update({
+  id: '/prompts',
+  path: '/prompts',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
@@ -88,6 +95,7 @@ export interface FileRoutesByTo {
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
   '/': typeof ChatIndexRoute
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
   '/_chat/': typeof ChatIndexRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/prompts'
     | '/settings/runs'
     | '/settings/scheduled-tasks'
     | '/settings/scheduled-tasks/$taskId'
@@ -124,6 +134,7 @@ export interface FileRouteTypes {
     | '/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/prompts'
     | '/settings/runs'
     | '/'
     | '/settings/scheduled-tasks/$taskId'
@@ -135,6 +146,7 @@ export interface FileRouteTypes {
     | '/_chat/$threadId'
     | '/settings/archived'
     | '/settings/general'
+    | '/settings/prompts'
     | '/settings/runs'
     | '/settings/scheduled-tasks'
     | '/_chat/'
@@ -182,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/runs'
       fullPath: '/settings/runs'
       preLoaderRoute: typeof SettingsRunsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/prompts': {
+      id: '/settings/prompts'
+      path: '/prompts'
+      fullPath: '/settings/prompts'
+      preLoaderRoute: typeof SettingsPromptsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/general': {
@@ -253,6 +272,7 @@ const SettingsScheduledTasksRouteWithChildren =
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsPromptsRoute: typeof SettingsPromptsRoute
   SettingsRunsRoute: typeof SettingsRunsRoute
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRouteWithChildren
 }
@@ -260,6 +280,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsPromptsRoute: SettingsPromptsRoute,
   SettingsRunsRoute: SettingsRunsRoute,
   SettingsScheduledTasksRoute: SettingsScheduledTasksRouteWithChildren,
 }
