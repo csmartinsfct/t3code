@@ -1,4 +1,4 @@
-import type { TicketSummary } from "@t3tools/contracts";
+import type { TicketSummary, ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,15 @@ const mockEnsureNativeApi = vi.fn(() => ({
   },
 }));
 const mockLogWebTimeline = vi.fn();
+const detailMockState: {
+  lastProps: {
+    ticketId: TicketSummary["id"];
+    onBack: () => void;
+    onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+  } | null;
+} = {
+  lastProps: null,
+};
 
 const selectionStoreState = {
   selectedTicketIds: new Set<string>(),
@@ -29,7 +38,15 @@ const selectionStoreState = {
 };
 
 const uiStateStoreState = {
-  boardContextByThreadId: {} as Record<string, never>,
+  boardContextByThreadId: {} as Record<
+    string,
+    {
+      projectId: TicketSummary["projectId"];
+      ticketStack: TicketSummary["id"][];
+      boardScrollLeft: number;
+      updatedAt: string;
+    }
+  >,
   setThreadBoardRoot: vi.fn(),
   pushThreadBoardTicket: vi.fn(),
   popThreadBoardTicket: vi.fn(),
@@ -108,7 +125,14 @@ vi.mock("./KanbanSelectionBar", () => ({
 }));
 
 vi.mock("./KanbanTicketDetail", () => ({
-  KanbanTicketDetail: () => null,
+  KanbanTicketDetail: (props: {
+    ticketId: TicketSummary["id"];
+    onBack: () => void;
+    onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+  }) => {
+    detailMockState.lastProps = props;
+    return <div>Detail:{props.ticketId}</div>;
+  },
 }));
 
 vi.mock("./OrchestrateConfirmDialog", () => ({
@@ -139,17 +163,22 @@ function makeTicket(overrides: Partial<TicketSummary> = {}): TicketSummary {
 
 async function renderBoard({
   electron = false,
+  threadId = null,
   tickets = [],
+  boardContextByThreadId = {},
 }: {
   electron?: boolean;
+  threadId?: ThreadId | null;
   tickets?: ReadonlyArray<TicketSummary>;
+  boardContextByThreadId?: typeof uiStateStoreState.boardContextByThreadId;
 } = {}) {
   vi.resetModules();
   vi.clearAllMocks();
 
   selectionStoreState.selectedTicketIds = new Set();
   selectionStoreState.selectedTickets = new Map();
-  uiStateStoreState.boardContextByThreadId = {};
+  uiStateStoreState.boardContextByThreadId = boardContextByThreadId;
+  detailMockState.lastProps = null;
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -173,7 +202,7 @@ async function renderBoard({
 
   const { KanbanBoard } = await import("./KanbanBoard");
 
-  return renderToStaticMarkup(<KanbanBoard threadId={null} projectId="project-1" />);
+  return renderToStaticMarkup(<KanbanBoard threadId={threadId} projectId="project-1" />);
 }
 
 describe("KanbanBoard", () => {
@@ -261,5 +290,86 @@ describe("KanbanBoard", () => {
     expect(markup).toContain("drag-region");
     expect(markup).toContain("px-3 sm:px-5");
     expect(markup).not.toContain("New ticket");
+  });
+
+  it("steps back through nested ticket detail state one level at a time before returning to the board", async () => {
+    const threadId = "thread-1" as ThreadId;
+    const updatedAt = "2026-04-10T11:00:00.000Z";
+
+    const boardMarkup = await renderBoard({
+      threadId,
+      tickets: [makeTicket()],
+      boardContextByThreadId: {
+        [threadId]: {
+          projectId: "project-1" as TicketSummary["projectId"],
+          ticketStack: [],
+          boardScrollLeft: 0,
+          updatedAt,
+        },
+      },
+    });
+
+    expect(boardMarkup).toContain(">Board<");
+    expect(boardMarkup).not.toContain("Detail:");
+
+    const nestedDetailMarkup = await renderBoard({
+      threadId,
+      tickets: [makeTicket()],
+      boardContextByThreadId: {
+        [threadId]: {
+          projectId: "project-1" as TicketSummary["projectId"],
+          ticketStack: [
+            "parent-ticket" as TicketSummary["id"],
+            "child-ticket" as TicketSummary["id"],
+          ],
+          boardScrollLeft: 0,
+          updatedAt,
+        },
+      },
+    });
+
+    expect(nestedDetailMarkup).toContain("Back");
+    expect(nestedDetailMarkup).toContain("Detail:child-ticket");
+    expect(detailMockState.lastProps?.ticketId).toBe("child-ticket");
+
+    detailMockState.lastProps?.onBack();
+    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledWith(threadId);
+
+    const parentDetailMarkup = await renderBoard({
+      threadId,
+      tickets: [makeTicket()],
+      boardContextByThreadId: {
+        [threadId]: {
+          projectId: "project-1" as TicketSummary["projectId"],
+          ticketStack: ["parent-ticket" as TicketSummary["id"]],
+          boardScrollLeft: 0,
+          updatedAt,
+        },
+      },
+    });
+
+    expect(parentDetailMarkup).toContain("Back");
+    expect(parentDetailMarkup).toContain("Detail:parent-ticket");
+    expect(detailMockState.lastProps?.ticketId).toBe("parent-ticket");
+
+    detailMockState.lastProps?.onBack();
+    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledOnce();
+    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledWith(threadId);
+
+    const restoredBoardMarkup = await renderBoard({
+      threadId,
+      tickets: [makeTicket()],
+      boardContextByThreadId: {
+        [threadId]: {
+          projectId: "project-1" as TicketSummary["projectId"],
+          ticketStack: [],
+          boardScrollLeft: 0,
+          updatedAt,
+        },
+      },
+    });
+
+    expect(restoredBoardMarkup).toContain(">Board<");
+    expect(restoredBoardMarkup).not.toContain("Detail:parent-ticket");
   });
 });
