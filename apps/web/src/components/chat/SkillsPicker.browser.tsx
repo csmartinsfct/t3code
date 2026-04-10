@@ -91,52 +91,44 @@ describe("SkillsPicker", () => {
   });
 
   it("attaches unattached skills and keeps attached rows disabled", async () => {
-    const mounted = await mountPicker({
+    await using mounted = await mountPicker({
       attachedSkillIds: new Set(["skill-top-level"]),
     });
 
-    try {
-      await page.getByLabelText("Skills").click();
+    await page.getByLabelText("Skills").click();
 
-      const attachedRow = await vi.waitFor(() => {
-        const row = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-          (element) => element.textContent?.includes("Top Level Skill"),
-        );
-        expect(row).toBeTruthy();
-        return row!;
-      });
-      expect(attachedRow.getAttribute("data-disabled")).toBe("");
+    const attachedRow = await vi.waitFor(() => {
+      const row = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+        (element) => element.textContent?.includes("Top Level Skill"),
+      );
+      expect(row).toBeTruthy();
+      return row!;
+    });
+    expect(attachedRow.getAttribute("data-disabled")).toBe("");
 
-      await page.getByRole("menuitem", { name: "Alpha Skill" }).click();
+    await page.getByRole("menuitem", { name: "Alpha Skill" }).click();
 
-      expect(mounted.onAttachSkill).toHaveBeenCalledTimes(1);
-      expect(mounted.onAttachSkill).toHaveBeenCalledWith(TEST_SKILLS[2]);
-    } finally {
-      await mounted.cleanup();
-    }
+    expect(mounted.onAttachSkill).toHaveBeenCalledTimes(1);
+    expect(mounted.onAttachSkill).toHaveBeenCalledWith(TEST_SKILLS[2]);
   });
 
   it("reveals a skill without attaching it", async () => {
-    const mounted = await mountPicker();
+    await using mounted = await mountPicker();
 
-    try {
-      await page.getByLabelText("Skills").click();
+    await page.getByLabelText("Skills").click();
 
-      const revealButton = await vi.waitFor(() => {
-        const button = document.querySelector<HTMLButtonElement>(
-          'button[aria-label="Reveal Alpha Skill in file explorer"]',
-        );
-        expect(button).toBeTruthy();
-        return button!;
-      });
+    const revealButton = await vi.waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Reveal Alpha Skill in file explorer"]',
+      );
+      expect(button).toBeTruthy();
+      return button!;
+    });
 
-      revealButton.click();
+    revealButton.click();
 
-      expect(mounted.onRevealSkill).toHaveBeenCalledTimes(1);
-      expect(mounted.onRevealSkill).toHaveBeenCalledWith(TEST_SKILLS[2]);
-      expect(mounted.onAttachSkill).not.toHaveBeenCalled();
-    } finally {
-      await mounted.cleanup();
-    }
+    expect(mounted.onRevealSkill).toHaveBeenCalledTimes(1);
+    expect(mounted.onRevealSkill).toHaveBeenCalledWith(TEST_SKILLS[2]);
+    expect(mounted.onAttachSkill).not.toHaveBeenCalled();
   });
 });
