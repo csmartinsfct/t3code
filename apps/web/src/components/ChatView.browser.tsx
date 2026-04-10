@@ -9,6 +9,7 @@ import {
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
+  type ServerProvider,
   type ServerLifecycleWelcomePayload,
   type TicketId,
   type ThreadId,
@@ -170,6 +171,31 @@ function createBaseServerConfig(): ServerConfig {
       ...DEFAULT_SERVER_SETTINGS,
       ...DEFAULT_CLIENT_SETTINGS,
     },
+  };
+}
+
+function createProvider(input: {
+  provider: string;
+  displayName?: string;
+  models?: ServerProvider["models"];
+}): ServerProvider {
+  return {
+    provider: input.provider as never,
+    ...(input.displayName ? { displayName: input.displayName } : {}),
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: NOW_ISO,
+    models: input.models ?? [
+      {
+        slug: input.provider === "codex" ? "gpt-5" : "claude-opus-4-6",
+        name: input.provider === "codex" ? "GPT-5" : "Claude Opus 4.6",
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
   };
 }
 
@@ -2694,6 +2720,157 @@ describe("ChatView timeline estimator parity (full app)", () => {
           },
         },
         activeProvider: "claudeAgent",
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("creates new drafts from sticky profiled Claude selections and keeps the trigger label", async () => {
+    // Audit traceability: e1077b5, 7d6be28.
+    useComposerDraftStore.setState({
+      stickyModelSelectionByProvider: {
+        "claudeAgent:metric": {
+          provider: "claudeAgent",
+          profileId: "metric",
+          model: "claude-opus-4-6",
+          options: {
+            effort: "max",
+          },
+        },
+      },
+      stickyActiveProvider: "claudeAgent:metric",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sticky-profiled-claude-test" as MessageId,
+        targetText: "sticky profiled claude test",
+      }),
+      configureFixture: (fixture) => {
+        fixture.serverConfig = {
+          ...fixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({ provider: "claudeAgent", displayName: "Claude" }),
+            createProvider({
+              provider: "claudeAgent:metric",
+              displayName: "Claude (metric)",
+            }),
+          ],
+        };
+      },
+    });
+
+    try {
+      await page.getByTestId("new-thread-button").click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new profiled claude draft thread UUID.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      expect(useComposerDraftStore.getState().draftsByThreadId[newThreadId]).toMatchObject({
+        modelSelectionByProvider: {
+          "claudeAgent:metric": {
+            provider: "claudeAgent",
+            profileId: "metric",
+            model: "claude-opus-4-6",
+            options: {
+              effort: "max",
+            },
+          },
+        },
+        activeProvider: "claudeAgent:metric",
+      });
+
+      await vi.waitFor(() => {
+        expect(findComposerProviderModelPicker()?.textContent).toContain("metric");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("rehydrates an existing profiled Claude draft selection into the picker label", async () => {
+    const profiledDraftThreadId = "2ac8e396-e55f-4f16-9a4a-9deae2dc8b3a" as ThreadId;
+    useComposerDraftStore.setState({
+      draftsByThreadId: {
+        [profiledDraftThreadId]: {
+          prompt: "",
+          images: [],
+          nonPersistedImageIds: [],
+          persistedAttachments: [],
+          terminalContexts: [],
+          codeSnippets: [],
+          skills: [],
+          modelSelectionByProvider: {
+            "claudeAgent:metric": {
+              provider: "claudeAgent",
+              profileId: "metric",
+              model: "claude-opus-4-6",
+            },
+          },
+          activeProvider: "claudeAgent:metric",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          ticketAttachments: [],
+        },
+      },
+      draftThreadsByThreadId: {
+        [profiledDraftThreadId]: {
+          projectId: PROJECT_ID,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      projectDraftThreadIdByProjectId: {
+        [PROJECT_ID]: profiledDraftThreadId,
+      },
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-profiled-draft-rehydration-test" as MessageId,
+        targetText: "profiled draft rehydration test",
+      }),
+      configureFixture: (fixture) => {
+        fixture.serverConfig = {
+          ...fixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({ provider: "claudeAgent", displayName: "Claude" }),
+            createProvider({
+              provider: "claudeAgent:metric",
+              displayName: "Claude (metric)",
+            }),
+          ],
+        };
+      },
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: profiledDraftThreadId },
+      });
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${profiledDraftThreadId}`,
+        "Route should bootstrap into the profiled claude draft thread.",
+      );
+      await vi.waitFor(() => {
+        expect(findComposerProviderModelPicker()?.textContent).toContain("metric");
       });
     } finally {
       await mounted.cleanup();

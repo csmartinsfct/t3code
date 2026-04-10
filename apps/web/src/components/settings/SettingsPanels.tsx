@@ -556,7 +556,7 @@ export function GeneralSettingsPanel() {
     ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
-    Record<ProviderKind, string>
+    Partial<Record<ProviderKind, string>>
   >({
     codex: "",
     claudeAgent: "",
@@ -720,14 +720,14 @@ export function GeneralSettingsPanel() {
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
 
   const addCustomModel = useCallback(
-    (provider: BaseProviderKind) => {
-      const customModelInput = customModelInputByProvider[provider];
+    (provider: BaseProviderKind, stateKey: ProviderKind = provider) => {
+      const customModelInput = customModelInputByProvider[stateKey] ?? "";
       const customModels = settings.providers[provider].customModels;
       const normalized = normalizeModelSlug(customModelInput, provider);
       if (!normalized) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "Enter a model slug.",
+          [stateKey]: "Enter a model slug.",
         }));
         return;
       }
@@ -738,21 +738,21 @@ export function GeneralSettingsPanel() {
       ) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "That model is already built in.",
+          [stateKey]: "That model is already built in.",
         }));
         return;
       }
       if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
+          [stateKey]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
         }));
         return;
       }
       if (customModels.includes(normalized)) {
         setCustomModelErrorByProvider((existing) => ({
           ...existing,
-          [provider]: "That custom model is already saved.",
+          [stateKey]: "That custom model is already saved.",
         }));
         return;
       }
@@ -768,14 +768,14 @@ export function GeneralSettingsPanel() {
       });
       setCustomModelInputByProvider((existing) => ({
         ...existing,
-        [provider]: "",
+        [stateKey]: "",
       }));
       setCustomModelErrorByProvider((existing) => ({
         ...existing,
-        [provider]: null,
+        [stateKey]: null,
       }));
 
-      const el = modelListRefs.current[provider];
+      const el = modelListRefs.current[stateKey];
       if (!el) return;
       const scrollToEnd = () => el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       requestAnimationFrame(scrollToEnd);
@@ -790,7 +790,7 @@ export function GeneralSettingsPanel() {
   );
 
   const removeCustomModel = useCallback(
-    (provider: BaseProviderKind, slug: string) => {
+    (provider: BaseProviderKind, slug: string, stateKey: ProviderKind = provider) => {
       updateSettings({
         providers: {
           ...settings.providers,
@@ -804,7 +804,7 @@ export function GeneralSettingsPanel() {
       });
       setCustomModelErrorByProvider((existing) => ({
         ...existing,
-        [provider]: null,
+        [stateKey]: null,
       }));
     },
     [settings, updateSettings],
@@ -1502,12 +1502,15 @@ export function GeneralSettingsPanel() {
         }
       >
         {providerCards.map((providerCard) => {
-          const customModelInput = customModelInputByProvider[providerCard.provider];
-          const customModelError = customModelErrorByProvider[providerCard.provider] ?? null;
+          const customModelInput = customModelInputByProvider[providerCard.providerKind] ?? "";
+          const customModelError = customModelErrorByProvider[providerCard.providerKind] ?? null;
           const providerDisplayName = providerCard.title;
 
           return (
-            <div key={providerCard.provider} className="border-t border-border first:border-t-0">
+            <div
+              key={providerCard.providerKind}
+              className="border-t border-border first:border-t-0"
+            >
               <div className="px-4 py-4 sm:px-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 flex-1 space-y-1">
@@ -1535,7 +1538,7 @@ export function GeneralSettingsPanel() {
                               });
                               setCustomModelErrorByProvider((existing) => ({
                                 ...existing,
-                                [providerCard.provider]: null,
+                                [providerCard.providerKind]: null,
                               }));
                             }}
                           />
@@ -1608,14 +1611,14 @@ export function GeneralSettingsPanel() {
                   <div className="space-y-0">
                     <div className="border-t border-border/60 px-4 py-3 sm:px-5">
                       <label
-                        htmlFor={`provider-install-${providerCard.provider}-binary-path`}
+                        htmlFor={`provider-install-${providerCard.providerKind}-binary-path`}
                         className="block"
                       >
                         <span className="text-xs font-medium text-foreground">
                           {providerDisplayName} binary path
                         </span>
                         <Input
-                          id={`provider-install-${providerCard.provider}-binary-path`}
+                          id={`provider-install-${providerCard.providerKind}-binary-path`}
                           className="mt-1.5"
                           value={providerCard.binaryPathValue}
                           onChange={(event) =>
@@ -1682,7 +1685,7 @@ export function GeneralSettingsPanel() {
                       </div>
                       <div
                         ref={(el) => {
-                          modelListRefs.current[providerCard.provider] = el;
+                          modelListRefs.current[providerCard.providerKind] = el;
                         }}
                         className="mt-2 max-h-40 overflow-y-auto pb-1"
                       >
@@ -1749,7 +1752,11 @@ export function GeneralSettingsPanel() {
                                     className="text-muted-foreground transition-colors hover:text-foreground"
                                     aria-label={`Remove ${model.slug}`}
                                     onClick={() =>
-                                      removeCustomModel(providerCard.provider, model.slug)
+                                      removeCustomModel(
+                                        providerCard.provider,
+                                        model.slug,
+                                        providerCard.providerKind,
+                                      )
                                     }
                                   >
                                     <XIcon className="size-3" />
@@ -1763,25 +1770,25 @@ export function GeneralSettingsPanel() {
 
                       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                         <Input
-                          id={`custom-model-${providerCard.provider}`}
+                          id={`custom-model-${providerCard.providerKind}`}
                           value={customModelInput}
                           onChange={(event) => {
                             const value = event.target.value;
                             setCustomModelInputByProvider((existing) => ({
                               ...existing,
-                              [providerCard.provider]: value,
+                              [providerCard.providerKind]: value,
                             }));
                             if (customModelError) {
                               setCustomModelErrorByProvider((existing) => ({
                                 ...existing,
-                                [providerCard.provider]: null,
+                                [providerCard.providerKind]: null,
                               }));
                             }
                           }}
                           onKeyDown={(event) => {
                             if (event.key !== "Enter") return;
                             event.preventDefault();
-                            addCustomModel(providerCard.provider);
+                            addCustomModel(providerCard.provider, providerCard.providerKind);
                           }}
                           placeholder={
                             providerCard.provider === "codex"
@@ -1793,7 +1800,9 @@ export function GeneralSettingsPanel() {
                         <Button
                           className="shrink-0"
                           variant="outline"
-                          onClick={() => addCustomModel(providerCard.provider)}
+                          onClick={() =>
+                            addCustomModel(providerCard.provider, providerCard.providerKind)
+                          }
                         >
                           <PlusIcon className="size-3.5" />
                           Add

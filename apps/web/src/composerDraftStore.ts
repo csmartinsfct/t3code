@@ -9,6 +9,8 @@ import {
   modelSelectionProviderKind,
   ProjectId,
   ProviderInteractionMode,
+  providerProfileId,
+  isValidProviderKind,
   ProviderKind,
   ProviderModelOptions,
   RuntimeMode,
@@ -498,8 +500,23 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   );
 }
 
-function normalizeProviderKind(value: unknown): BaseProviderKind | null {
-  return value === "codex" || value === "claudeAgent" ? value : null;
+function normalizeProviderKind(value: unknown): ProviderKind | null {
+  return typeof value === "string" && isValidProviderKind(value) ? value : null;
+}
+
+function makeProviderScopedModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ModelSelection["options"],
+): ModelSelection {
+  const base = baseProviderKind(provider);
+  const profileId = providerProfileId(provider);
+  return {
+    provider: base,
+    model,
+    ...(profileId ? { profileId } : {}),
+    ...(options ? { options } : {}),
+  } as ModelSelection;
 }
 
 function normalizeProviderModelOptions(
@@ -603,10 +620,11 @@ function normalizeModelSelection(
   },
 ): ModelSelection | null {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  const provider = normalizeProviderKind(candidate?.provider ?? legacy?.provider);
-  if (provider === null) {
+  const providerKind = normalizeProviderKind(candidate?.provider ?? legacy?.provider);
+  if (providerKind === null) {
     return null;
   }
+  const provider = baseProviderKind(providerKind);
   const rawModel = candidate?.model ?? legacy?.model;
   if (typeof rawModel !== "string") {
     return null;
@@ -990,8 +1008,8 @@ function normalizePersistedDraftsByThreadId(
     );
     // If the draft already has the v3 shape, use it directly
     const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState;
-    let modelSelectionByProvider: Partial<Record<BaseProviderKind, ModelSelection>> = {};
-    let activeProvider: BaseProviderKind | null = null;
+    let modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>> = {};
+    let activeProvider: ProviderKind | null = null;
 
     if (
       draftCandidate.modelSelectionByProvider &&
@@ -999,7 +1017,7 @@ function normalizePersistedDraftsByThreadId(
     ) {
       // v3 format
       modelSelectionByProvider = draftCandidate.modelSelectionByProvider as Partial<
-        Record<BaseProviderKind, ModelSelection>
+        Record<ProviderKind, ModelSelection>
       >;
       activeProvider = normalizeProviderKind(draftCandidate.activeProvider);
     } else {
@@ -1050,14 +1068,20 @@ function normalizePersistedDraftsByThreadId(
     }
     nextDraftsByThreadId[threadId as ThreadId] = {
       prompt,
-      attachments,
-      ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
-      ...(codeSnippets.length > 0 ? { codeSnippets } : {}),
-      ...(skills.length > 0 ? { skills } : {}),
-      ...(hasModelData ? { modelSelectionByProvider, activeProvider } : {}),
+      attachments: [...attachments],
+      ...(terminalContexts.length > 0 ? { terminalContexts: [...terminalContexts] } : {}),
+      ...(codeSnippets.length > 0 ? { codeSnippets: [...codeSnippets] } : {}),
+      ...(skills.length > 0 ? { skills: [...skills] } : {}),
+      ...(hasModelData
+        ? {
+            modelSelectionByProvider:
+              modelSelectionByProvider as PersistedComposerThreadDraftState["modelSelectionByProvider"],
+            activeProvider: activeProvider as PersistedComposerThreadDraftState["activeProvider"],
+          }
+        : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
-    };
+    } as DeepMutable<PersistedComposerThreadDraftState>;
   }
 
   return nextDraftsByThreadId;
@@ -1103,8 +1127,9 @@ function migratePersistedComposerDraftStoreState(
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
     stickyModelSelectionByProvider,
-    stickyActiveProvider,
-  };
+    stickyActiveProvider:
+      stickyActiveProvider as PersistedComposerDraftStoreState["stickyActiveProvider"],
+  } as PersistedComposerDraftStoreState;
 }
 
 function partializeComposerDraftStoreState(
@@ -1205,15 +1230,15 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     );
 
   // Handle both v3 (modelSelectionByProvider) and v2/legacy formats
-  let stickyModelSelectionByProvider: Partial<Record<BaseProviderKind, ModelSelection>> = {};
-  let stickyActiveProvider: BaseProviderKind | null = null;
+  let stickyModelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>> = {};
+  let stickyActiveProvider: ProviderKind | null = null;
   if (
     normalizedPersistedState.stickyModelSelectionByProvider &&
     typeof normalizedPersistedState.stickyModelSelectionByProvider === "object"
   ) {
     stickyModelSelectionByProvider =
       normalizedPersistedState.stickyModelSelectionByProvider as Partial<
-        Record<BaseProviderKind, ModelSelection>
+        Record<ProviderKind, ModelSelection>
       >;
     stickyActiveProvider = normalizeProviderKind(normalizedPersistedState.stickyActiveProvider);
   } else {
@@ -1248,8 +1273,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
     stickyModelSelectionByProvider,
-    stickyActiveProvider,
-  };
+    stickyActiveProvider:
+      stickyActiveProvider as PersistedComposerDraftStoreState["stickyActiveProvider"],
+  } as PersistedComposerDraftStoreState;
 }
 
 function readPersistedAttachmentIdsFromStorage(threadId: ThreadId): string[] {
@@ -1886,7 +1912,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           { [normalizedProvider]: nextProviderOptions },
           normalizedProvider,
         );
-        const providerOpts = normalizedOpts?.[normalizedProvider];
+        const normalizedBaseProvider = baseProviderKind(normalizedProvider);
+        const providerOpts = normalizedOpts?.[normalizedBaseProvider];
 
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
@@ -1896,11 +1923,11 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const nextMap = { ...base.modelSelectionByProvider };
           const currentForProvider = nextMap[normalizedProvider];
           if (providerOpts) {
-            nextMap[normalizedProvider] = {
-              provider: normalizedProvider,
-              model: currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
-              options: providerOpts,
-            };
+            nextMap[normalizedProvider] = makeProviderScopedModelSelection(
+              normalizedProvider,
+              currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedBaseProvider],
+              providerOpts,
+            );
           } else if (currentForProvider?.options) {
             const { options: _, ...rest } = currentForProvider;
             nextMap[normalizedProvider] = rest as ModelSelection;
@@ -1914,14 +1941,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             const stickyBase =
               nextStickyMap[normalizedProvider] ??
               base.modelSelectionByProvider[normalizedProvider] ??
-              ({
-                provider: normalizedProvider,
-                model: DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
-              } as ModelSelection);
+              makeProviderScopedModelSelection(
+                normalizedProvider,
+                DEFAULT_MODEL_BY_PROVIDER[normalizedBaseProvider],
+              );
             if (providerOpts) {
               nextStickyMap[normalizedProvider] = {
                 ...stickyBase,
-                provider: normalizedProvider,
                 options: providerOpts,
               };
             } else if (stickyBase.options) {

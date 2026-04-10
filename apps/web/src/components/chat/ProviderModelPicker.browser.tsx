@@ -113,6 +113,36 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
       },
     ],
   },
+  {
+    provider: "claudeAgent:metric" as never,
+    displayName: "Claude (metric)",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: new Date().toISOString(),
+    models: [
+      {
+        slug: "claude-opus-4-6",
+        name: "Claude Opus 4.6",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            effort("low"),
+            effort("medium", true),
+            effort("high"),
+            effort("max"),
+          ],
+          supportsFastMode: false,
+          supportsThinkingToggle: true,
+          supportsPlan: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
 ];
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
@@ -186,6 +216,7 @@ describe("ProviderModelPicker", () => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Codex");
         expect(text).toContain("Claude");
+        expect(text).toContain("Claude (metric)");
         expect(text).not.toContain("Claude Sonnet 4.6");
       });
     } finally {
@@ -363,6 +394,33 @@ describe("ProviderModelPicker", () => {
       expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
         "claudeAgent",
         "claude-sonnet-4-6",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps discovered Claude profiles as distinct provider selections", async () => {
+    // Audit traceability: e1077b5, 7d6be28.
+    const mounted = await mountPicker({
+      provider: "claudeAgent:metric",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(page.getByRole("button").element().textContent).toContain("Claude Opus 4.6");
+        expect(page.getByRole("button").element().textContent).toContain("metric");
+      });
+
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Claude (metric)" }).hover();
+      await page.getByRole("menuitemradio", { name: "Claude Opus 4.6" }).click();
+
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
+        "claudeAgent:metric",
+        "claude-opus-4-6",
       );
     } finally {
       await mounted.cleanup();

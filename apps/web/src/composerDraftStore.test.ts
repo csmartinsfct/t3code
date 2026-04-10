@@ -82,12 +82,19 @@ function resetComposerDraftStore() {
 function modelSelection(
   provider: "codex" | "claudeAgent",
   model: string,
+  profileIdOrOptions?: string | ModelSelection["options"],
   options?: ModelSelection["options"],
 ): ModelSelection {
+  const profileId =
+    provider === "claudeAgent" && typeof profileIdOrOptions === "string"
+      ? profileIdOrOptions
+      : undefined;
+  const resolvedOptions = typeof profileIdOrOptions === "string" ? options : profileIdOrOptions;
   return {
     provider,
     model,
-    ...(options ? { options } : {}),
+    ...(profileId ? { profileId } : {}),
+    ...(resolvedOptions ? { options: resolvedOptions } : {}),
   } as ModelSelection;
 }
 
@@ -551,6 +558,65 @@ describe("composerDraftStore terminal contexts", () => {
     expect(mergedState.draftsByThreadId[threadId]).toBeUndefined();
     expect(mergedState.draftThreadsByThreadId).toEqual({});
     expect(mergedState.projectDraftThreadIdByProjectId).toEqual({});
+  });
+
+  it("rehydrates profiled Claude drafts and sticky state from persisted storage", () => {
+    // Audit traceability: e1077b5, 7d6be28.
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const profiledThreadId = ThreadId.makeUnsafe("thread-profiled-rehydrated");
+
+    const mergedState = persistApi.getOptions().merge(
+      {
+        draftsByThreadId: {
+          [profiledThreadId]: {
+            prompt: "",
+            attachments: [],
+            modelSelectionByProvider: {
+              "claudeAgent:metric": {
+                provider: "claudeAgent",
+                profileId: "metric",
+                model: "claude-opus-4-6",
+                options: {
+                  effort: "max",
+                },
+              },
+            },
+            activeProvider: "claudeAgent:metric",
+          },
+        },
+        draftThreadsByThreadId: {},
+        projectDraftThreadIdByProjectId: {},
+        stickyModelSelectionByProvider: {
+          "claudeAgent:metric": {
+            provider: "claudeAgent",
+            profileId: "metric",
+            model: "claude-opus-4-6",
+          },
+        },
+        stickyActiveProvider: "claudeAgent:metric",
+      },
+      useComposerDraftStore.getInitialState(),
+    );
+
+    expect(mergedState.draftsByThreadId[profiledThreadId]).toMatchObject({
+      modelSelectionByProvider: {
+        "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+          effort: "max",
+        }),
+      },
+      activeProvider: "claudeAgent:metric",
+    });
+    expect(mergedState.stickyModelSelectionByProvider).toMatchObject({
+      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric"),
+    });
+    expect(mergedState.stickyActiveProvider).toBe("claudeAgent:metric");
   });
 });
 
@@ -1068,6 +1134,23 @@ describe("composerDraftStore sticky composer settings", () => {
       }),
     );
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex");
+  });
+
+  it("stores profiled Claude sticky selections with the full provider kind", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setStickyModelSelection(
+      modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+        effort: "max",
+      }),
+    );
+
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toMatchObject({
+      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+        effort: "max",
+      }),
+    });
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("claudeAgent:metric");
   });
 
   it("normalizes empty sticky model options by dropping selection options", () => {
