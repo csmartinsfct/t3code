@@ -2,7 +2,9 @@ import { ProjectId, ThreadId, TicketId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  cloneThreadBoardContext,
   clearThreadUi,
+  initializeThreadBoardContextFromSource,
   markThreadUnread,
   popThreadBoardTicket,
   pushThreadBoardTicket,
@@ -330,6 +332,92 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.boardContextByThreadId[thread1]).toMatchObject({
       projectId: project2,
+      ticketStack: [],
+      boardScrollLeft: 0,
+    });
+  });
+
+  it("cloneThreadBoardContext copies stack and scroll for same-project contexts", () => {
+    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
+    const targetThreadId = ThreadId.makeUnsafe("thread-target");
+    const project1 = ProjectId.makeUnsafe("project-1");
+    const ticket1 = TicketId.makeUnsafe("ticket-1");
+    const ticket2 = TicketId.makeUnsafe("ticket-2");
+    const initialState = makeUiState({
+      boardContextByThreadId: {
+        [sourceThreadId]: {
+          projectId: project1,
+          ticketStack: [ticket1, ticket2],
+          boardScrollLeft: 96,
+          updatedAt: "2026-02-25T12:35:00.000Z",
+        },
+      },
+    });
+
+    const next = cloneThreadBoardContext(initialState, sourceThreadId, targetThreadId, project1);
+
+    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
+      projectId: project1,
+      ticketStack: [ticket1, ticket2],
+      boardScrollLeft: 96,
+    });
+    expect(next.boardContextByThreadId[targetThreadId]?.ticketStack).not.toBe(
+      initialState.boardContextByThreadId[sourceThreadId]?.ticketStack,
+    );
+  });
+
+  it("cloneThreadBoardContext falls back to board root when source has no context", () => {
+    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
+    const targetThreadId = ThreadId.makeUnsafe("thread-target");
+    const project1 = ProjectId.makeUnsafe("project-1");
+
+    const next = cloneThreadBoardContext(makeUiState(), sourceThreadId, targetThreadId, project1);
+
+    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
+      projectId: project1,
+      ticketStack: [],
+      boardScrollLeft: 0,
+    });
+  });
+
+  it("cloneThreadBoardContext falls back to board root when source project mismatches", () => {
+    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
+    const targetThreadId = ThreadId.makeUnsafe("thread-target");
+    const project1 = ProjectId.makeUnsafe("project-1");
+    const project2 = ProjectId.makeUnsafe("project-2");
+    const ticket1 = TicketId.makeUnsafe("ticket-1");
+    const initialState = makeUiState({
+      boardContextByThreadId: {
+        [sourceThreadId]: {
+          projectId: project1,
+          ticketStack: [ticket1],
+          boardScrollLeft: 80,
+          updatedAt: "2026-02-25T12:35:00.000Z",
+        },
+      },
+    });
+
+    const next = cloneThreadBoardContext(initialState, sourceThreadId, targetThreadId, project2);
+
+    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
+      projectId: project2,
+      ticketStack: [],
+      boardScrollLeft: 0,
+    });
+  });
+
+  it("initializeThreadBoardContextFromSource falls back to root when source is null", () => {
+    const targetThreadId = ThreadId.makeUnsafe("thread-target");
+    const project1 = ProjectId.makeUnsafe("project-1");
+
+    const next = initializeThreadBoardContextFromSource(makeUiState(), {
+      sourceThreadId: null,
+      targetThreadId,
+      projectId: project1,
+    });
+
+    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
+      projectId: project1,
       ticketStack: [],
       boardScrollLeft: 0,
     });

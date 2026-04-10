@@ -620,6 +620,43 @@ export function clearThreadBoardContext(state: UiState, threadId: ThreadId): UiS
   return setBoardContextForThread(state, threadId, null);
 }
 
+export function cloneThreadBoardContext(
+  state: UiState,
+  sourceThreadId: ThreadId,
+  targetThreadId: ThreadId,
+  projectId: ProjectId,
+): UiState {
+  const sourceContext = state.boardContextByThreadId[sourceThreadId];
+  if (!sourceContext || sourceContext.projectId !== projectId) {
+    return setThreadBoardRoot(state, targetThreadId, projectId);
+  }
+
+  return setBoardContextForThread(
+    state,
+    targetThreadId,
+    buildBoardContext(projectId, {
+      ticketStack: [...sourceContext.ticketStack],
+      boardScrollLeft: sourceContext.boardScrollLeft,
+    }),
+  );
+}
+
+export function initializeThreadBoardContextFromSource(
+  state: UiState,
+  input: {
+    sourceThreadId: ThreadId | null;
+    targetThreadId: ThreadId;
+    projectId: ProjectId;
+  },
+): UiState {
+  const { sourceThreadId, targetThreadId, projectId } = input;
+  if (!sourceThreadId) {
+    return setThreadBoardRoot(state, targetThreadId, projectId);
+  }
+
+  return cloneThreadBoardContext(state, sourceThreadId, targetThreadId, projectId);
+}
+
 export function sanitizeThreadBoardContext(
   state: UiState,
   threadId: ThreadId,
@@ -727,6 +764,16 @@ interface UiStateStore extends UiState {
   ) => void;
   setThreadBoardScrollLeft: (threadId: ThreadId, scrollLeft: number) => void;
   clearThreadBoardContext: (threadId: ThreadId) => void;
+  cloneThreadBoardContext: (
+    sourceThreadId: ThreadId,
+    targetThreadId: ThreadId,
+    projectId: ProjectId,
+  ) => void;
+  initializeThreadBoardContextFromSource: (input: {
+    sourceThreadId: ThreadId | null;
+    targetThreadId: ThreadId;
+    projectId: ProjectId;
+  }) => void;
   sanitizeThreadBoardContext: (
     threadId: ThreadId,
     projectId: ProjectId,
@@ -758,6 +805,10 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setThreadBoardScrollLeft: (threadId, scrollLeft) =>
     set((state) => setThreadBoardScrollLeft(state, threadId, scrollLeft)),
   clearThreadBoardContext: (threadId) => set((state) => clearThreadBoardContext(state, threadId)),
+  cloneThreadBoardContext: (sourceThreadId, targetThreadId, projectId) =>
+    set((state) => cloneThreadBoardContext(state, sourceThreadId, targetThreadId, projectId)),
+  initializeThreadBoardContextFromSource: (input) =>
+    set((state) => initializeThreadBoardContextFromSource(state, input)),
   sanitizeThreadBoardContext: (threadId, projectId, validTicketIds) =>
     set((state) => sanitizeThreadBoardContext(state, threadId, projectId, validTicketIds)),
   setManagementLastProjectId: (projectId) =>

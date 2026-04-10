@@ -10,6 +10,7 @@ import {
   type ProjectId,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
+  type TicketId,
   type ThreadId,
   type TurnId,
   WS_METHODS,
@@ -24,6 +25,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useUiStateStore } from "../uiStateStore";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
@@ -1157,6 +1159,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       threads: [],
       bootstrapComplete: false,
     });
+    useUiStateStore.setState({
+      projectExpandedById: {},
+      projectOrder: [],
+      threadLastVisitedAtById: {},
+      boardContextByThreadId: {},
+      managementLastProjectId: null,
+      viewMode: "chat",
+    });
   });
 
   afterEach(() => {
@@ -2237,6 +2247,120 @@ describe("ChatView timeline estimator parity (full app)", () => {
         .element(page.getByText("Send a message to start the conversation."))
         .toBeInTheDocument();
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("inherits the active thread board context into a brand-new same-project draft thread", async () => {
+    const ticketId = "ticket-current-context" as TicketId;
+    useUiStateStore.setState({
+      boardContextByThreadId: {
+        [THREAD_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [ticketId],
+          boardScrollLeft: 144,
+          updatedAt: NOW_ISO,
+        },
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-board-context-inherit-test" as MessageId,
+        targetText: "board context inherit test",
+      }),
+    });
+
+    try {
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+
+      await newThreadButton.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread UUID.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      expect(useUiStateStore.getState().boardContextByThreadId[newThreadId]).toMatchObject({
+        projectId: PROJECT_ID,
+        ticketStack: [ticketId],
+        boardScrollLeft: 144,
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves existing project draft board context when reusing a draft thread", async () => {
+    const existingDraftThreadId = "11111111-1111-4111-8111-111111111111" as ThreadId;
+    const currentTicketId = "ticket-current-context" as TicketId;
+    const draftTicketId = "ticket-existing-draft-context" as TicketId;
+
+    useComposerDraftStore.setState({
+      draftThreadsByThreadId: {
+        [existingDraftThreadId]: {
+          projectId: PROJECT_ID,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      projectDraftThreadIdByProjectId: {
+        [PROJECT_ID]: existingDraftThreadId,
+      },
+    });
+    useUiStateStore.setState({
+      boardContextByThreadId: {
+        [THREAD_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [currentTicketId],
+          boardScrollLeft: 48,
+          updatedAt: NOW_ISO,
+        },
+        [existingDraftThreadId]: {
+          projectId: PROJECT_ID,
+          ticketStack: [draftTicketId],
+          boardScrollLeft: 220,
+          updatedAt: NOW_ISO,
+        },
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-draft-board-context-preserve-test" as MessageId,
+        targetText: "draft board context preserve test",
+      }),
+    });
+
+    try {
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+
+      await newThreadButton.click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${existingDraftThreadId}`,
+        "New-thread should reuse the existing project draft thread.",
+      );
+
+      expect(
+        useUiStateStore.getState().boardContextByThreadId[existingDraftThreadId],
+      ).toMatchObject({
+        projectId: PROJECT_ID,
+        ticketStack: [draftTicketId],
+        boardScrollLeft: 220,
+      });
     } finally {
       await mounted.cleanup();
     }

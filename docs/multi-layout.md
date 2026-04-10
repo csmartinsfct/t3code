@@ -51,8 +51,11 @@ Board mode still lives inside the chat routes, so the active thread remains the 
 - In `/_chat/`, Board mode uses standalone project context and always shows a project board root, never a thread-specific ticket detail.
 - Board context is stored **per thread**, not per project.
 - Switching threads restores the target thread's saved board context if it is still valid for that thread's project.
+- Creating a **brand-new** thread in the same project copies the current thread's board context into the new thread one time at creation.
+- Reusing an existing draft thread in the same project does **not** overwrite that draft's saved board context.
 - If a thread has no saved board context, the board opens at that thread's project root.
 - Cross-project thread switches never preserve the previous thread's ticket detail.
+- Cross-project new-thread creation never inherits board context.
 
 This means the board and the right-hand chat panel are intentionally coupled:
 
@@ -69,6 +72,12 @@ Board mode persists a small thread-scoped context in `uiStateStore`:
 - `boardScrollLeft` — horizontal scroll position for the root board columns view
 - `updatedAt` — timestamp for the most recent board-context write
 
+Thread creation rule:
+
+- when a **brand-new** thread is created in the same project as the active thread, the new thread's initial board context is copied from the active thread
+- the copy is one-time only; the two threads diverge normally after creation
+- when an existing draft thread is reused, its current board context is preserved as-is
+
 Sanitization rules:
 
 - if the saved `projectId` does not match the active thread's project, the saved context is discarded and replaced with that project's board root
@@ -81,6 +90,7 @@ Sanitization rules:
 - **Route** owns the active thread identity.
 - **Route** derives the active board project from that thread.
 - **`uiStateStore`** owns persisted per-thread board context plus the last standalone Board project.
+- **Thread-creation helpers** seed a new thread's initial board context from the active thread when the project matches.
 - **`useTicketing`** owns ticket fetches, project-scoped ticket lists, and live ticket stream updates.
 - **`KanbanBoard`** renders from route context, project ticket data, and the saved board context.
 - **`KanbanTicketDetail`** is only valid when the top-of-stack ticket still belongs to the active project.
@@ -189,7 +199,9 @@ interface ComposerTicketAttachment {
 
 ## Switching Examples
 
-- **Thread A, project X, ticket detail `X-12` → Thread B, project X:** the board restores B's saved context for project X. It does not inherit A's ticket detail.
+- **Thread A, project X, ticket detail `X-12` → create brand-new Thread B in project X:** Thread B opens on `X-12` because same-project new threads inherit the active thread's board context once at creation.
+- **Thread A, project X, ticket detail `X-12` → reuse an existing draft Thread B in project X:** Thread B keeps its own previously saved board context. It does not get overwritten by A's current ticket detail.
+- **Thread A, project X, ticket detail `X-12` → existing Thread B, project X:** switching to B restores B's own saved context for project X. Existing threads do not inherit A's current context just because they share a project.
 - **Thread A, project X, ticket detail `X-12` → Thread C, project Y:** the board restores C's saved context for project Y if valid; otherwise it opens project Y's board root.
 - **Target thread has no saved context:** the board opens that thread's project root.
 - **No active thread (`/_chat/`):** Board mode uses the last standalone Board project if available, otherwise the first ordered project, and always renders the board root only.

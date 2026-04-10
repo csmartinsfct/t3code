@@ -1227,6 +1227,11 @@ export default function Sidebar() {
 
         const forkThreadId = newThreadId();
         try {
+          useUiStateStore.getState().initializeThreadBoardContextFromSource({
+            sourceThreadId: routeThreadId,
+            targetThreadId: forkThreadId,
+            projectId: thread.projectId,
+          });
           await api.orchestration.dispatchCommand({
             type: "thread.fork",
             commandId: newCommandId(),
@@ -1351,6 +1356,7 @@ export default function Sidebar() {
       navigate,
       projectCwdById,
       projects,
+      routeThreadId,
       serverProviders,
       sidebarThreadsById,
     ],

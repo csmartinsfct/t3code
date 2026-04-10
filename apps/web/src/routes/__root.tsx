@@ -318,17 +318,18 @@ function EventRouter() {
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
       const projects = useStore.getState().projects;
-      syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
-      syncThreads(
-        threads.map((thread) => ({
-          id: thread.id,
-          seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-        })),
-      );
-      clearPromotedDraftThreads(threads.map((thread) => thread.id));
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
+      syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
+      syncThreads([
+        ...threads.map((thread) => ({
+          id: thread.id,
+          seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+        })),
+        ...draftThreadIds.map((threadId) => ({ id: threadId })),
+      ]);
+      clearPromotedDraftThreads(threads.map((thread) => thread.id));
       const activeThreadIds = collectActiveTerminalThreadIds({
         snapshotThreads: threads.map((thread) => ({
           id: thread.id,
@@ -394,12 +395,16 @@ function EventRouter() {
       );
       if (needsThreadUiSync) {
         const threads = useStore.getState().threads;
-        syncThreads(
-          threads.map((thread) => ({
+        const draftThreadIds = Object.keys(
+          useComposerDraftStore.getState().draftThreadsByThreadId,
+        ) as ThreadId[];
+        syncThreads([
+          ...threads.map((thread) => ({
             id: thread.id,
             seedVisitedAt: thread.updatedAt ?? thread.createdAt,
           })),
-        );
+          ...draftThreadIds.map((threadId) => ({ id: threadId })),
+        ]);
       }
       const draftStore = useComposerDraftStore.getState();
       for (const threadId of batchEffects.clearPromotedDraftThreadIds) {

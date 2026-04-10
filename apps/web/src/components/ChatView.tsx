@@ -1036,6 +1036,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, existingOpenTerminalThreadIds, terminalState.terminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
+  const initializeBoardContextForNewThread = useCallback(
+    (targetThreadId: ThreadId, targetProjectId: ProjectId) => {
+      useUiStateStore.getState().initializeThreadBoardContextFromSource({
+        sourceThreadId: activeThread?.projectId === targetProjectId ? threadId : null,
+        targetThreadId,
+        projectId: targetProjectId,
+      });
+    },
+    [activeThread?.projectId, threadId],
+  );
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -1082,6 +1092,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       clearProjectDraftThreadId(activeProject.id);
       const nextThreadId = newThreadId();
+      initializeBoardContextForNewThread(nextThreadId, activeProject.id);
       setProjectDraftThreadId(activeProject.id, nextThreadId, {
         createdAt: new Date().toISOString(),
         runtimeMode: DEFAULT_RUNTIME_MODE,
@@ -1099,6 +1110,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       clearProjectDraftThreadId,
       getDraftThread,
       getDraftThreadByProjectId,
+      initializeBoardContextForNewThread,
       isServerThread,
       navigate,
       setDraftThreadContext,
@@ -2104,6 +2116,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const { handleRunEvent } = useManagedRunCompletionToasts({
     projectId: activeProject?.id,
     scripts: activeProject?.scripts,
+    sourceThreadId: activeThread?.projectId === activeProject?.id ? threadId : null,
   });
 
   useEffect(() => {
@@ -4340,6 +4353,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const createdAt = new Date().toISOString();
     const nextThreadId = newThreadId();
+    initializeBoardContextForNewThread(nextThreadId, activeProject.id);
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
     const outgoingImplementationPrompt = formatOutgoingPrompt({
@@ -4424,6 +4438,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeProject,
     activeProposedPlan,
     activeThread,
+    initializeBoardContextForNewThread,
     beginLocalDispatch,
     isConnecting,
     isSendBusy,

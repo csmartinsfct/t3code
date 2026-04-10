@@ -98,6 +98,16 @@ export function useHandleNewThread() {
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
+        useUiStateStore.getState().initializeThreadBoardContextFromSource({
+          sourceThreadId:
+            routeThreadId &&
+            (activeThread?.projectId === projectId ||
+              latestActiveDraftThread?.projectId === projectId)
+              ? routeThreadId
+              : null,
+          targetThreadId: threadId,
+          projectId,
+        });
         setProjectDraftThreadId(projectId, threadId, {
           createdAt,
           branch: options?.branch ?? null,
@@ -113,7 +123,7 @@ export function useHandleNewThread() {
         });
       })();
     },
-    [navigate, routeThreadId],
+    [activeThread?.projectId, navigate, routeThreadId],
   );
 
   return {

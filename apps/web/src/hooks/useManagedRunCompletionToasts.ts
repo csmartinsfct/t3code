@@ -5,6 +5,7 @@ import {
   type ManagedRunSummary,
   type ProjectId,
   type ProjectScript,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef } from "react";
@@ -13,6 +14,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { toastManager } from "~/components/ui/toast";
+import { useUiStateStore } from "~/uiStateStore";
 
 const TERMINAL_STATUSES: ReadonlySet<ManagedRunStatus> = new Set([
   "completed",
@@ -70,10 +72,11 @@ function buildAskAiPrompt(params: {
 export function useManagedRunCompletionToasts(options: {
   projectId: ProjectId | undefined;
   scripts: ReadonlyArray<ProjectScript> | undefined;
+  sourceThreadId: ThreadId | null;
 }): {
   handleRunEvent: (event: ManagedRunStreamEvent) => void;
 } {
-  const { projectId, scripts } = options;
+  const { projectId, scripts, sourceThreadId } = options;
   const notifiedRunIdsRef = useRef(new Set<string>());
   const navigate = useNavigate();
 
@@ -187,6 +190,11 @@ export function useManagedRunCompletionToasts(options: {
     const { setProjectDraftThreadId, applyStickyState, setPrompt } =
       useComposerDraftStore.getState();
     const threadId = newThreadId();
+    useUiStateStore.getState().initializeThreadBoardContextFromSource({
+      sourceThreadId,
+      targetThreadId: threadId,
+      projectId: currentProjectId,
+    });
 
     setProjectDraftThreadId(currentProjectId, threadId, {
       createdAt: new Date().toISOString(),

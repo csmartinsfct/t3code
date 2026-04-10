@@ -7,6 +7,7 @@ import type {
   TicketingStreamEvent,
   TicketThreadLinks,
   ModelSelection,
+  ThreadId,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
 import {
@@ -21,12 +22,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { baseProviderKind, DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
+import { useUiStateStore } from "../../uiStateStore";
 import { TicketMarkdown } from "./TicketMarkdown";
 import {
   AlertDialog,
@@ -363,6 +365,10 @@ export function KanbanTicketDetail({
   }, [ticketId, onBack]);
 
   const navigate = useNavigate();
+  const routeThreadId = useParams({
+    strict: false,
+    select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
+  });
 
   const handleDecompose = useCallback(() => {
     if (!ticket) return;
@@ -380,6 +386,11 @@ export function KanbanTicketDetail({
     clearProjectDraftThreadId(typedProjectId);
 
     const threadId = newThreadId();
+    useUiStateStore.getState().initializeThreadBoardContextFromSource({
+      sourceThreadId: routeThreadId,
+      targetThreadId: threadId,
+      projectId: typedProjectId,
+    });
     setProjectDraftThreadId(typedProjectId, threadId, {
       createdAt: new Date().toISOString(),
       envMode: "local",
@@ -395,7 +406,7 @@ export function KanbanTicketDetail({
     setPrompt(threadId, DECOMPOSE_PROMPT);
 
     void navigate({ to: "/$threadId", params: { threadId } });
-  }, [ticket, navigate]);
+  }, [navigate, routeThreadId, ticket]);
 
   if (loading) {
     return (
