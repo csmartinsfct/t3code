@@ -53,6 +53,13 @@ export interface KanbanBoardHandle {
   handleDragCancel: () => void;
 }
 
+export function hasBoardOrchestrationProjectMismatch(
+  tickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>,
+  projectId: ProjectId,
+): boolean {
+  return [...tickets.values()].some((ticket) => ticket.projectId !== projectId);
+}
+
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(
   { threadId, projectId, onDropOnChat },
   ref,
@@ -323,8 +330,9 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
     ) => {
-      const hasProjectMismatch = [...orchestrateTickets.values()].some(
-        (ticket) => ticket.projectId !== typedProjectId,
+      const hasProjectMismatch = hasBoardOrchestrationProjectMismatch(
+        orchestrateTickets,
+        typedProjectId,
       );
       if (hasProjectMismatch) {
         toastManager.add({

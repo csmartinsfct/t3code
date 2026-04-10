@@ -119,6 +119,26 @@ export function resolveNullableInlineTextSave(input: {
   return { action: "save", nextValue };
 }
 
+export function buildTicketDetailLookupInput(
+  ticketId: TicketId,
+  projectId: string,
+): {
+  id: TicketId;
+  projectId: ProjectId;
+} {
+  return {
+    id: ticketId,
+    projectId: projectId as ProjectId,
+  };
+}
+
+export function shouldAutoBackFromTicketProjectMismatch(input: {
+  ticket: Pick<Ticket, "projectId"> | null;
+  projectId: string;
+}): boolean {
+  return !!input.ticket && input.ticket.projectId !== (input.projectId as ProjectId);
+}
+
 interface TicketDetailDecomposeComposerDraftStore {
   clearProjectDraftThreadId: (projectId: ProjectId) => void;
   setProjectDraftThreadId: (
@@ -516,10 +536,7 @@ export function KanbanTicketDetail({
     try {
       const api = ensureNativeApi();
       const [data, nextThreadLinks] = await Promise.all([
-        api.ticketing.getById({
-          id: ticketId,
-          projectId: projectId as ProjectId,
-        }),
+        api.ticketing.getById(buildTicketDetailLookupInput(ticketId, projectId)),
         api.ticketing.getThreadLinks({ ticketId }),
       ]);
       ticketRef.current = data;
@@ -554,7 +571,7 @@ export function KanbanTicketDetail({
   }, [ticketId, onBack, fetchTicket]);
 
   useEffect(() => {
-    if (ticket && ticket.projectId !== (projectId as ProjectId)) {
+    if (shouldAutoBackFromTicketProjectMismatch({ ticket, projectId })) {
       onBack();
     }
   }, [onBack, projectId, ticket]);
@@ -1158,7 +1175,7 @@ export function SubTicketsList({
       const existing = inflightRef.current.get(key);
       if (existing) return existing;
       const promise = ensureNativeApi()
-        .ticketing.getById({ id, projectId: projectId as ProjectId })
+        .ticketing.getById(buildTicketDetailLookupInput(id, projectId))
         .then((t) => {
           cacheRef.current.set(key, t);
           return t;

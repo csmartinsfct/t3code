@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildTicketDetailLookupInput,
   buildTicketDetailActionItems,
   DECOMPOSE_PROMPT,
   DependencyTicketRow,
@@ -18,6 +19,7 @@ import {
   resolveInlineEditBlurAction,
   resolveNullableInlineTextSave,
   resolveRequiredInlineTextSave,
+  shouldAutoBackFromTicketProjectMismatch,
   startTicketDetailDecomposeFlow,
   SubTicketRowButton,
   resolveTicketDetailStreamEventAction,
@@ -368,6 +370,44 @@ describe("KanbanTicketDetail", () => {
     element.props.onClick();
 
     expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("scopes ticket detail lookups by project id so stale cross-project detail state cannot hydrate", () => {
+    expect(
+      buildTicketDetailLookupInput("ticket-55" as Ticket["id"], "project-55" as ProjectId),
+    ).toEqual({
+      id: "ticket-55",
+      projectId: "project-55",
+    });
+  });
+
+  it("auto-backs when the fetched ticket belongs to a different project than the active board", () => {
+    expect(
+      shouldAutoBackFromTicketProjectMismatch({
+        ticket: makeTicket({
+          id: "ticket-55" as Ticket["id"],
+          projectId: "project-55" as ProjectId,
+        }),
+        projectId: "project-55",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoBackFromTicketProjectMismatch({
+        ticket: makeTicket({
+          id: "ticket-89" as Ticket["id"],
+          projectId: "project-89" as ProjectId,
+        }),
+        projectId: "project-55",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAutoBackFromTicketProjectMismatch({
+        ticket: null,
+        projectId: "project-55",
+      }),
+    ).toBe(false);
   });
 
   it("refetches for related ticket_upserted events that add or remove sub-ticket and dependency relationships", () => {

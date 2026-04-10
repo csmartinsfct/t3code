@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { STATUS_CONFIG } from "../settings/ticketUtils";
+import { hasBoardOrchestrationProjectMismatch } from "./KanbanBoard";
 
 // Audit traceability: 4973c83, b0b9d97, 9c5b9e2, 105f574, c709853.
 
@@ -10,20 +11,61 @@ const mockNavigate = vi.fn();
 const mockUseNavigate = vi.fn(() => mockNavigate);
 const mockUseProjectById = vi.fn();
 const mockUseTicketing = vi.fn();
+const mockCreateRun = vi.fn();
+const mockStartRun = vi.fn();
 const mockEnsureNativeApi = vi.fn(() => ({
   contextMenu: { show: vi.fn() },
-  orchestration: { createRun: vi.fn(), startRun: vi.fn() },
+  orchestration: { createRun: mockCreateRun, startRun: mockStartRun },
   ticketing: {
     reorder: vi.fn(),
     update: vi.fn(),
   },
 }));
 const mockLogWebTimeline = vi.fn();
+const mockToastAdd = vi.fn();
 const detailMockState: {
   lastProps: {
     ticketId: TicketSummary["id"];
     onBack: () => void;
     onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+    onOrchestrate?: (ticket: {
+      id: TicketSummary["id"];
+      projectId: TicketSummary["projectId"];
+      parentId: TicketSummary["parentId"];
+      ticketNumber: TicketSummary["ticketNumber"];
+      identifier: TicketSummary["identifier"];
+      title: TicketSummary["title"];
+      status: TicketSummary["status"];
+      priority: TicketSummary["priority"];
+      sortOrder: TicketSummary["sortOrder"];
+      isArchived: TicketSummary["isArchived"];
+      worktree: TicketSummary["worktree"];
+      labels: TicketSummary["labels"];
+      subTickets: [];
+      dependencies: [];
+      createdAt: TicketSummary["createdAt"];
+      updatedAt: TicketSummary["updatedAt"];
+    }) => void;
+  } | null;
+} = {
+  lastProps: null,
+};
+const selectionBarMockState: {
+  lastProps: {
+    selectedCount: number;
+    onOrchestrate: () => void;
+    onClear: () => void;
+  } | null;
+} = {
+  lastProps: null,
+};
+const orchestrateDialogMockState: {
+  lastProps: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    selectedTickets: ReadonlyMap<string, TicketSummary>;
+    projectId: string;
+    onConfirm: (...args: unknown[]) => Promise<void> | void;
   } | null;
 } = {
   lastProps: null,
@@ -112,6 +154,12 @@ vi.mock("../../timelineLogger", () => ({
   logWebTimeline: (...args: unknown[]) => mockLogWebTimeline(...args),
 }));
 
+vi.mock("../ui/toast", () => ({
+  toastManager: {
+    add: (...args: unknown[]) => mockToastAdd(...args),
+  },
+}));
+
 vi.mock("../ui/sidebar", () => ({
   CollapsedSidebarTrigger: ({ className }: { className?: string }) => (
     <button type="button" className={className}>
@@ -121,7 +169,14 @@ vi.mock("../ui/sidebar", () => ({
 }));
 
 vi.mock("./KanbanSelectionBar", () => ({
-  KanbanSelectionBar: () => null,
+  KanbanSelectionBar: (props: {
+    selectedCount: number;
+    onOrchestrate: () => void;
+    onClear: () => void;
+  }) => {
+    selectionBarMockState.lastProps = props;
+    return null;
+  },
 }));
 
 vi.mock("./KanbanTicketDetail", () => ({
@@ -129,6 +184,24 @@ vi.mock("./KanbanTicketDetail", () => ({
     ticketId: TicketSummary["id"];
     onBack: () => void;
     onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+    onOrchestrate?: (ticket: {
+      id: TicketSummary["id"];
+      projectId: TicketSummary["projectId"];
+      parentId: TicketSummary["parentId"];
+      ticketNumber: TicketSummary["ticketNumber"];
+      identifier: TicketSummary["identifier"];
+      title: TicketSummary["title"];
+      status: TicketSummary["status"];
+      priority: TicketSummary["priority"];
+      sortOrder: TicketSummary["sortOrder"];
+      isArchived: TicketSummary["isArchived"];
+      worktree: TicketSummary["worktree"];
+      labels: TicketSummary["labels"];
+      subTickets: [];
+      dependencies: [];
+      createdAt: TicketSummary["createdAt"];
+      updatedAt: TicketSummary["updatedAt"];
+    }) => void;
   }) => {
     detailMockState.lastProps = props;
     return <div>Detail:{props.ticketId}</div>;
@@ -136,7 +209,16 @@ vi.mock("./KanbanTicketDetail", () => ({
 }));
 
 vi.mock("./OrchestrateConfirmDialog", () => ({
-  OrchestrateConfirmDialog: () => null,
+  OrchestrateConfirmDialog: (props: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    selectedTickets: ReadonlyMap<string, TicketSummary>;
+    projectId: string;
+    onConfirm: (...args: unknown[]) => Promise<void> | void;
+  }) => {
+    orchestrateDialogMockState.lastProps = props;
+    return null;
+  },
 }));
 
 function makeTicket(overrides: Partial<TicketSummary> = {}): TicketSummary {
@@ -179,6 +261,11 @@ async function renderBoard({
   selectionStoreState.selectedTickets = new Map();
   uiStateStoreState.boardContextByThreadId = boardContextByThreadId;
   detailMockState.lastProps = null;
+  selectionBarMockState.lastProps = null;
+  orchestrateDialogMockState.lastProps = null;
+  mockToastAdd.mockReset();
+  mockCreateRun.mockReset();
+  mockStartRun.mockReset();
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -372,5 +459,56 @@ describe("KanbanBoard", () => {
 
     expect(restoredBoardMarkup).toContain(">Board<");
     expect(restoredBoardMarkup).not.toContain("Detail:parent-ticket");
+  });
+
+  it("clears stale cross-project detail state instead of rendering the wrong ticket detail", async () => {
+    const threadId = "thread-stale-project" as ThreadId;
+
+    const markup = await renderBoard({
+      threadId,
+      tickets: [makeTicket()],
+      boardContextByThreadId: {
+        [threadId]: {
+          projectId: "project-2" as TicketSummary["projectId"],
+          ticketStack: ["stale-ticket" as TicketSummary["id"]],
+          boardScrollLeft: 0,
+          updatedAt: "2026-04-10T11:30:00.000Z",
+        },
+      },
+    });
+
+    expect(markup).toContain(">Board<");
+    expect(markup).not.toContain("Detail:stale-ticket");
+  });
+
+  it("detects stale cross-project orchestration selections before the board starts a run", () => {
+    const sameProjectTicket = makeTicket({
+      id: "ticket-1" as TicketSummary["id"],
+      identifier: "T3CO-1",
+      title: "Active project ticket",
+    });
+    const staleProjectTicket = makeTicket({
+      id: "ticket-99" as TicketSummary["id"],
+      projectId: "project-2" as TicketSummary["projectId"],
+      identifier: "T3CO-99",
+      title: "Stale project ticket",
+    });
+
+    expect(
+      hasBoardOrchestrationProjectMismatch(
+        new Map([
+          [sameProjectTicket.id, sameProjectTicket],
+          [staleProjectTicket.id, staleProjectTicket],
+        ]),
+        "project-1" as TicketSummary["projectId"],
+      ),
+    ).toBe(true);
+
+    expect(
+      hasBoardOrchestrationProjectMismatch(
+        new Map([[sameProjectTicket.id, sameProjectTicket]]),
+        "project-1" as TicketSummary["projectId"],
+      ),
+    ).toBe(false);
   });
 });

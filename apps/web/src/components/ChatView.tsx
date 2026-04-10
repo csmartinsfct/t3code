@@ -101,6 +101,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { LRUCache } from "../lib/lruCache";
+import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { logWebTimeline } from "../timelineLogger";
 
 import { basenameOfPath } from "../vscode-icons";
@@ -1126,7 +1127,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const initializeBoardContextForNewThread = useCallback(
     (targetThreadId: ThreadId, targetProjectId: ProjectId) => {
       useUiStateStore.getState().initializeThreadBoardContextFromSource({
-        sourceThreadId: activeThread?.projectId === targetProjectId ? threadId : null,
+        sourceThreadId: resolveThreadBoardContextSourceThreadId({
+          routeThreadId: threadId,
+          targetProjectId,
+          activeThreadProjectId: activeThread?.projectId ?? null,
+        }),
         targetThreadId,
         projectId: targetProjectId,
       });

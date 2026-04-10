@@ -69,6 +69,54 @@ function buildAskAiPrompt(params: {
   return lines.join("\n");
 }
 
+interface ManagedRunAskAiComposerDraftStore {
+  setProjectDraftThreadId: (
+    projectId: ProjectId,
+    threadId: ThreadId,
+    state: {
+      createdAt: string;
+      runtimeMode: typeof DEFAULT_RUNTIME_MODE;
+    },
+  ) => void;
+  applyStickyState: (threadId: ThreadId) => void;
+  setPrompt: (threadId: ThreadId, prompt: string) => void;
+}
+
+interface ManagedRunAskAiUiStateStore {
+  initializeThreadBoardContextFromSource: (input: {
+    sourceThreadId: ThreadId | null;
+    targetThreadId: ThreadId;
+    projectId: ProjectId;
+  }) => void;
+}
+
+export function startManagedRunAskAiThread(input: {
+  projectId: ProjectId;
+  sourceThreadId: ThreadId | null;
+  prompt: string;
+  composerDraftStore: ManagedRunAskAiComposerDraftStore;
+  uiStateStore: ManagedRunAskAiUiStateStore;
+  createThreadId?: () => ThreadId;
+  now?: () => string;
+  navigateToThread: (threadId: ThreadId) => Promise<void> | void;
+}): Promise<ThreadId> {
+  const threadId = (input.createThreadId ?? newThreadId)();
+  const createdAt = (input.now ?? (() => new Date().toISOString()))();
+
+  input.uiStateStore.initializeThreadBoardContextFromSource({
+    sourceThreadId: input.sourceThreadId,
+    targetThreadId: threadId,
+    projectId: input.projectId,
+  });
+  input.composerDraftStore.setProjectDraftThreadId(input.projectId, threadId, {
+    createdAt,
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+  });
+  input.composerDraftStore.applyStickyState(threadId);
+  input.composerDraftStore.setPrompt(threadId, input.prompt);
+  return Promise.resolve(input.navigateToThread(threadId)).then(() => threadId);
+}
+
 export function useManagedRunCompletionToasts(options: {
   projectId: ProjectId | undefined;
   scripts: ReadonlyArray<ProjectScript> | undefined;
@@ -187,23 +235,14 @@ export function useManagedRunCompletionToasts(options: {
       logLines,
     });
 
-    const { setProjectDraftThreadId, applyStickyState, setPrompt } =
-      useComposerDraftStore.getState();
-    const threadId = newThreadId();
-    useUiStateStore.getState().initializeThreadBoardContextFromSource({
-      sourceThreadId,
-      targetThreadId: threadId,
+    await startManagedRunAskAiThread({
       projectId: currentProjectId,
+      sourceThreadId,
+      prompt,
+      composerDraftStore: useComposerDraftStore.getState(),
+      uiStateStore: useUiStateStore.getState(),
+      navigateToThread: (threadId) => navigate({ to: "/$threadId", params: { threadId } }),
     });
-
-    setProjectDraftThreadId(currentProjectId, threadId, {
-      createdAt: new Date().toISOString(),
-      runtimeMode: DEFAULT_RUNTIME_MODE,
-    });
-    applyStickyState(threadId);
-    setPrompt(threadId, prompt);
-
-    await navigate({ to: "/$threadId", params: { threadId } });
 
     toastManager.close(toastId);
   }

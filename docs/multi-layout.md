@@ -77,6 +77,7 @@ Thread creation rule:
 - when a **brand-new** thread is created in the same project as the active thread, the new thread's initial board context is copied from the active thread
 - the copy is one-time only; the two threads diverge normally after creation
 - when an existing draft thread is reused, its current board context is preserved as-is
+- alternate thread-creation paths that seed board context (`Fork with model`, ticket decompose flows, and managed-run `Ask AI`) follow the same same-project rule and must drop cross-project board context instead of cloning it
 
 Sanitization rules:
 

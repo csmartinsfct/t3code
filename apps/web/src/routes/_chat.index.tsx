@@ -7,8 +7,9 @@ import { ManagementView } from "../components/management/ManagementView";
 import { CollapsedSidebarTrigger } from "../components/ui/sidebar";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
+import { resolveInitialManagementProjectId } from "./chatIndex";
 
-function ChatIndexRouteView() {
+export function ChatIndexRouteView() {
   const viewMode = useUiStateStore((store) => store.viewMode);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const managementLastProjectId = useUiStateStore((store) => store.managementLastProjectId);
@@ -22,10 +23,10 @@ function ChatIndexRouteView() {
       }),
     [projectOrder, projects],
   );
-  const initialProjectId =
-    orderedProjects.find((project) => project.id === managementLastProjectId)?.id ??
-    orderedProjects[0]?.id ??
-    null;
+  const initialProjectId = resolveInitialManagementProjectId({
+    orderedProjectIds: orderedProjects.map((project) => project.id),
+    managementLastProjectId,
+  });
 
   if (viewMode === "management" && initialProjectId) {
     return <ManagementView threadId={null} projectId={initialProjectId} />;

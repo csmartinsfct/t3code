@@ -32,6 +32,7 @@ import {
   type TerminalContextDraft,
   removeInlineTerminalContextPlaceholder,
 } from "../lib/terminalContext";
+import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
@@ -100,6 +101,26 @@ const ATTACHMENT_VIEWPORT_MATRIX = [
   { name: "mobile", width: 430, height: 932, textTolerancePx: 56, attachmentTolerancePx: 56 },
   { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
+
+describe("ChatView thread board-context helpers", () => {
+  it("only inherits board context for same-project thread creation helpers", () => {
+    expect(
+      resolveThreadBoardContextSourceThreadId({
+        routeThreadId: THREAD_ID,
+        targetProjectId: PROJECT_ID,
+        activeThreadProjectId: PROJECT_ID,
+      }),
+    ).toBe(THREAD_ID);
+
+    expect(
+      resolveThreadBoardContextSourceThreadId({
+        routeThreadId: THREAD_ID,
+        targetProjectId: "project-2" as ProjectId,
+        activeThreadProjectId: PROJECT_ID,
+      }),
+    ).toBeNull();
+  });
+});
 
 interface UserRowMeasurement {
   measuredRowHeightPx: number;
