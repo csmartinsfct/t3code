@@ -51,7 +51,6 @@ import {
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketOriginThreadSection } from "./TicketOriginThreadSection";
-import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketHistory } from "../settings/TicketHistory";
@@ -114,9 +113,6 @@ export function KanbanTicketDetail({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [moveToBoardDialogOpen, setMoveToBoardDialogOpen] = useState(false);
-  const [moveToBoardTickets, setMoveToBoardTickets] = useState<readonly TicketSummary[]>([]);
-  const [movingToBoard, setMovingToBoard] = useState(false);
   const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
   const ticketRef = useRef<Ticket | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
@@ -128,7 +124,6 @@ export function KanbanTicketDetail({
   const descriptionRef = useRef<HTMLDivElement>(null);
   /** Set to true when Escape is pressed so the blur handler skips saving. */
   const cancelEditRef = useRef(false);
-  const removeFromSelection = useTicketSelectionStore((s) => s.removeFromSelection);
   const settings = useSettings();
   const serverProviders = useServerProviders();
 
@@ -161,27 +156,6 @@ export function KanbanTicketDetail({
           disabledText: "Enable in the settings",
         }
       : {};
-
-  const toTicketSummary = useCallback((value: Ticket): TicketSummary => {
-    return {
-      id: value.id,
-      projectId: value.projectId,
-      parentId: value.parentId,
-      ticketNumber: value.ticketNumber,
-      identifier: value.identifier,
-      title: value.title,
-      status: value.status,
-      priority: value.priority,
-      sortOrder: value.sortOrder,
-      isArchived: value.isArchived,
-      worktree: value.worktree,
-      labels: value.labels,
-      subTicketCount: value.subTickets.length,
-      dependencyCount: value.dependencies.length,
-      createdAt: value.createdAt,
-      updatedAt: value.updatedAt,
-    } as TicketSummary;
-  }, []);
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -414,41 +388,6 @@ export function KanbanTicketDetail({
     }
   }, [ticketId, onBack]);
 
-  const handleMoveToBoardRequest = useCallback((tickets: readonly TicketSummary[]) => {
-    if (tickets.length === 0) return;
-    setMoveToBoardTickets(tickets);
-    setMoveToBoardDialogOpen(true);
-  }, []);
-
-  const handleMoveCurrentTicketToBoard = useCallback(() => {
-    if (!ticket || ticket.parentId === null) return;
-    handleMoveToBoardRequest([toTicketSummary(ticket)]);
-  }, [handleMoveToBoardRequest, ticket, toTicketSummary]);
-
-  const handleConfirmMoveToBoard = useCallback(async () => {
-    if (moveToBoardTickets.length === 0) return;
-    setMovingToBoard(true);
-    try {
-      const api = ensureNativeApi();
-      await Promise.all(
-        moveToBoardTickets.map((ticket) =>
-          api.ticketing.update({
-            id: ticket.id,
-            parentId: null,
-          }),
-        ),
-      );
-      removeFromSelection(moveToBoardTickets.map((ticket) => ticket.id));
-      setMoveToBoardDialogOpen(false);
-      setMoveToBoardTickets([]);
-      await fetchTicket();
-    } catch (error) {
-      console.error("Failed to move ticket(s) to board:", error);
-    } finally {
-      setMovingToBoard(false);
-    }
-  }, [fetchTicket, moveToBoardTickets, removeFromSelection]);
-
   const navigate = useNavigate();
   const routeThreadId = useParams({
     strict: false,
@@ -573,9 +512,6 @@ export function KanbanTicketDetail({
                   <ListTreeIcon className="size-3.5" />
                   Decompose
                 </MenuItem>
-                {ticket.parentId !== null && (
-                  <MenuItem onClick={handleMoveCurrentTicketToBoard}>Move to board</MenuItem>
-                )}
                 <MenuSeparator />
                 <MenuItem variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
                   <TrashIcon className="size-3.5" />
@@ -827,7 +763,6 @@ export function KanbanTicketDetail({
             projectId={projectId}
             subTickets={ticket.subTickets}
             onNavigateToTicket={onNavigateToTicket}
-            onMoveToBoardRequest={handleMoveToBoardRequest}
           />
         )}
 
@@ -841,20 +776,6 @@ export function KanbanTicketDetail({
         {/* History */}
         <TicketHistory ticketId={ticketId} />
       </div>
-
-      <MoveTicketToBoardDialog
-        open={moveToBoardDialogOpen}
-        onOpenChange={(open) => {
-          setMoveToBoardDialogOpen(open);
-          if (!open && !movingToBoard) {
-            setMoveToBoardTickets([]);
-          }
-        }}
-        tickets={moveToBoardTickets}
-        pending={movingToBoard}
-        onConfirm={() => void handleConfirmMoveToBoard()}
-      />
-
       {/* Delete confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogPopup>
@@ -889,23 +810,15 @@ function SubTicketsList({
   projectId,
   subTickets,
   onNavigateToTicket,
-  onMoveToBoardRequest,
 }: {
   projectId: string;
   subTickets: readonly TicketSummary[];
   onNavigateToTicket: (ticketId: TicketId) => void;
-  onMoveToBoardRequest: (tickets: readonly TicketSummary[]) => void;
 }) {
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
-  const selectedTickets = useTicketSelectionStore((s) => s.selectedTickets);
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
-  const subTicketIds = useMemo(() => new Set(subTickets.map((ticket) => ticket.id)), [subTickets]);
-  const selectedSubTickets = useMemo(
-    () => [...selectedTickets.values()].filter((ticket) => subTicketIds.has(ticket.id)),
-    [selectedTickets, subTicketIds],
-  );
 
   const handleSubTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, sub: TicketSummary) => {
@@ -980,9 +893,6 @@ function SubTicketsList({
               onNavigateToTicket(sub.id);
             }}
             onMultiSelectClick={handleSubTicketMultiSelectClick}
-            onMoveToBoardRequest={onMoveToBoardRequest}
-            selectedTicketIds={selectedTicketIds}
-            selectedTickets={selectedSubTickets}
             fetchPreview={fetchPreview}
             getCached={getCached}
           />
@@ -997,9 +907,6 @@ function DraggableSubTicket({
   isSelected,
   onNavigate,
   onMultiSelectClick,
-  onMoveToBoardRequest,
-  selectedTicketIds,
-  selectedTickets,
   fetchPreview,
   getCached,
 }: {
@@ -1007,9 +914,6 @@ function DraggableSubTicket({
   isSelected: boolean;
   onNavigate: () => void;
   onMultiSelectClick: (e: React.MouseEvent, sub: TicketSummary) => void;
-  onMoveToBoardRequest: (tickets: readonly TicketSummary[]) => void;
-  selectedTicketIds: ReadonlySet<TicketId>;
-  selectedTickets: readonly TicketSummary[];
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
   getCached: (id: TicketId) => Ticket | undefined;
 }) {
@@ -1018,30 +922,6 @@ function DraggableSubTicket({
     data: { ticket: sub, status: sub.status },
   });
   const subStatusCfg = STATUS_CONFIG[sub.status];
-  const handleContextMenu = useCallback(
-    async (e: React.MouseEvent<HTMLButtonElement>) => {
-      e.preventDefault();
-      const api = ensureNativeApi();
-      const selection =
-        selectedTicketIds.has(sub.id) && selectedTickets.length > 0 ? selectedTickets : [sub];
-      const clicked = await api.contextMenu.show(
-        [
-          {
-            id: "move-to-board",
-            label: selection.length > 1 ? "Move all tickets to the board" : "Move to board",
-          },
-        ],
-        {
-          x: e.clientX,
-          y: e.clientY,
-        },
-      );
-      if (clicked === "move-to-board") {
-        onMoveToBoardRequest(selection);
-      }
-    },
-    [onMoveToBoardRequest, selectedTicketIds, selectedTickets, sub],
-  );
 
   return (
     <Popover>
@@ -1064,7 +944,6 @@ function DraggableSubTicket({
               }
               onNavigate();
             }}
-            onContextMenu={handleContextMenu}
             {...attributes}
             {...listeners}
           />
