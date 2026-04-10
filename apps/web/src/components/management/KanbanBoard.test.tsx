@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { STATUS_CONFIG } from "../settings/ticketUtils";
 
-// Audit traceability: b0b9d97, 9c5b9e2, 105f574, c709853.
+// Audit traceability: 4973c83, b0b9d97, 9c5b9e2, 105f574, c709853.
 
 const mockNavigate = vi.fn();
 const mockUseNavigate = vi.fn(() => mockNavigate);

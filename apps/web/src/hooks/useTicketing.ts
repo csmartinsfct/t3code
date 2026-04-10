@@ -1,4 +1,4 @@
-import type { TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
+import type { NativeApi, TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
@@ -49,6 +49,85 @@ export interface UseTicketingReturn {
   ) => void;
 }
 
+export interface TicketingProjectSnapshot {
+  id: string;
+  title: string;
+  workspaceRoot: string;
+}
+
+export interface TicketingProjectResyncState {
+  shouldResync: boolean;
+  nextProjectId: string | null;
+}
+
+export interface TicketingFetchState {
+  projects: ReadonlyArray<TicketingProjectSnapshot>;
+  resolvedProjectId: string | null;
+  tickets: ReadonlyArray<TicketSummary>;
+  shouldSelectResolvedProject: boolean;
+  snapshotError: unknown;
+}
+
+export function resolveTicketingProjectResyncState(input: {
+  requestedProjectId?: string | undefined;
+  selectedProjectId: string | null;
+}): TicketingProjectResyncState {
+  const nextProjectId = input.requestedProjectId ?? null;
+  return {
+    shouldResync:
+      input.requestedProjectId !== undefined && nextProjectId !== input.selectedProjectId,
+    nextProjectId,
+  };
+}
+
+export async function fetchTicketingState(input: {
+  api: Pick<NativeApi, "orchestration" | "ticketing">;
+  requestedProjectId?: string | undefined;
+  selectedProjectId: string | null;
+  currentFetchId: number;
+  isCurrentFetch: (fetchId: number) => boolean;
+}): Promise<TicketingFetchState | null> {
+  let projects: ReadonlyArray<TicketingProjectSnapshot> = [];
+  let resolvedProjectId = input.selectedProjectId ?? input.requestedProjectId ?? null;
+  let snapshotError: unknown = null;
+
+  try {
+    const snapshot = await input.api.orchestration.getSnapshot();
+    if (!input.isCurrentFetch(input.currentFetchId)) return null;
+
+    projects = snapshot.projects.map((project) => ({
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+    }));
+    resolvedProjectId ??= projects[0]?.id ?? null;
+  } catch (error) {
+    if (!input.isCurrentFetch(input.currentFetchId)) return null;
+    snapshotError = error;
+  }
+
+  if (!resolvedProjectId) {
+    return {
+      projects,
+      resolvedProjectId,
+      tickets: [],
+      shouldSelectResolvedProject: false,
+      snapshotError,
+    };
+  }
+
+  const tickets = await input.api.ticketing.list({ projectId: resolvedProjectId as never });
+  if (!input.isCurrentFetch(input.currentFetchId)) return null;
+
+  return {
+    projects,
+    resolvedProjectId,
+    tickets,
+    shouldSelectResolvedProject: input.selectedProjectId === null,
+    snapshotError,
+  };
+}
+
 export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn {
   const [tickets, setTickets] = useState<ReadonlyArray<TicketSummary>>([]);
   const [projects, setProjects] = useState<
@@ -63,10 +142,14 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   // Handles TanStack Router keeping components mounted across param-only
   // navigations (thread switches in management view).
   useEffect(() => {
-    if (options?.projectId !== undefined && options.projectId !== selectedProjectId) {
+    const resync = resolveTicketingProjectResyncState({
+      requestedProjectId: options?.projectId,
+      selectedProjectId,
+    });
+    if (resync.shouldResync) {
       setLoading(true);
       setTickets([]);
-      setSelectedProjectId(options.projectId);
+      setSelectedProjectId(resync.nextProjectId);
     }
     // Only react to prop changes, not internal state changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,63 +161,64 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
     const currentFetchId = ++fetchIdRef.current;
     try {
       const api = ensureNativeApi();
-      let projectList: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }> = [];
-      let resolvedProjectId = selectedProjectId ?? options?.projectId ?? null;
+      const requestedProjectId = options?.projectId ?? undefined;
 
       logWebTimeline("ticketing.fetch.start", {
         fetchId: currentFetchId,
         selectedProjectId,
-        requestedProjectId: options?.projectId ?? null,
-        resolvedProjectId,
+        requestedProjectId: requestedProjectId ?? null,
+        resolvedProjectId: selectedProjectId ?? requestedProjectId ?? null,
       });
 
-      try {
-        const snapshot = await api.orchestration.getSnapshot();
-        if (fetchIdRef.current !== currentFetchId) return;
-        projectList = snapshot.projects.map((p) => ({
-          id: p.id,
-          title: p.title,
-          workspaceRoot: p.workspaceRoot,
-        }));
-        setProjects(projectList);
-        resolvedProjectId ??= projectList[0]?.id ?? null;
-        logWebTimeline("ticketing.snapshot.success", {
-          fetchId: currentFetchId,
-          projectCount: projectList.length,
-          resolvedProjectId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+      const result = await fetchTicketingState({
+        api,
+        requestedProjectId,
+        selectedProjectId,
+        currentFetchId,
+        isCurrentFetch: (fetchId) => fetchIdRef.current === fetchId,
+      });
+      if (!result) return;
+
+      setProjects(result.projects);
+
+      if (result.snapshotError !== null) {
+        const message =
+          result.snapshotError instanceof Error
+            ? result.snapshotError.message
+            : String(result.snapshotError);
         warnWebTimeline("ticketing.snapshot.failed", {
           fetchId: currentFetchId,
           error: message,
         });
-        console.warn("Failed to fetch ticketing project snapshot:", error);
+        console.warn("Failed to fetch ticketing project snapshot:", result.snapshotError);
+      } else {
+        logWebTimeline("ticketing.snapshot.success", {
+          fetchId: currentFetchId,
+          projectCount: result.projects.length,
+          resolvedProjectId: result.resolvedProjectId,
+        });
       }
 
       // If no project selected yet and there are projects, select the first one.
-      if (resolvedProjectId && !selectedProjectId) {
-        setSelectedProjectId(resolvedProjectId);
+      if (result.shouldSelectResolvedProject && result.resolvedProjectId) {
+        setSelectedProjectId(result.resolvedProjectId);
       }
 
-      if (!resolvedProjectId) {
-        if (fetchIdRef.current !== currentFetchId) return;
+      if (!result.resolvedProjectId) {
         setTickets([]);
         logWebTimeline("ticketing.fetch.empty", {
           fetchId: currentFetchId,
-          projectCount: projectList.length,
+          projectCount: result.projects.length,
         });
         return;
       }
 
-      const ticketList = await api.ticketing.list({ projectId: resolvedProjectId as never });
-      if (fetchIdRef.current !== currentFetchId) return;
-      setTickets(ticketList);
+      setTickets(result.tickets);
       logWebTimeline("ticketing.fetch.success", {
         fetchId: currentFetchId,
-        projectId: resolvedProjectId,
-        ticketCount: ticketList.length,
-        ...summarizeTicketSet(ticketList),
+        projectId: result.resolvedProjectId,
+        ticketCount: result.tickets.length,
+        ...summarizeTicketSet(result.tickets),
       });
     } catch (error) {
       if (fetchIdRef.current !== currentFetchId) return;
