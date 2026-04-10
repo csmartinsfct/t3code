@@ -102,4 +102,45 @@ describe("buildOrchestrationSwitcherItems", () => {
       threadId: "thread-review-1",
     });
   });
+
+  it("omits the review item when the run has no reviewThreadId", () => {
+    const ticket = {
+      id: "ticket-1" as TicketId,
+      identifier: "T3CO-24",
+      title: "Review UI",
+    } as TicketSummary;
+
+    const items = buildOrchestrationSwitcherItems({
+      run: {
+        ...makeRun(),
+        currentPhase: "working",
+        reviewIteration: 0,
+        maxReviewIterations: 0,
+        ticketOrder: [
+          {
+            ticketId: "ticket-1" as TicketId,
+            workingThreadId: "thread-1" as ThreadId,
+          },
+        ],
+      },
+      parentThreadId: "parent-thread",
+      parentTitle: "Orchestration",
+      isParent: false,
+      childThreads: [
+        makeThread({
+          id: "thread-1",
+          ticketId: "ticket-1",
+          title: "Review UI",
+          messages: [],
+        }),
+      ],
+      ticketById: new Map([[ticket.id, ticket]]),
+      activeThreadId: "thread-1",
+    });
+
+    expect(items.map((item) => ({ kind: item.kind, label: item.label }))).toEqual([
+      { kind: "timeline", label: "Timeline" },
+      { kind: "working-thread", label: "T3CO-24" },
+    ]);
+  });
 });

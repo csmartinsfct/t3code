@@ -192,16 +192,6 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           tickets.push(yield* resolveTicketForProject(input.projectId, identifier));
         }
 
-        const runtimeMode = input.runtimeMode ?? "full-access";
-        const runId = crypto.randomUUID() as import("@t3tools/contracts").OrchestrationRunId;
-        const orchestrationThreadId = crypto.randomUUID() as ThreadId;
-        const workingThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
-        const reviewThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
-        const ticketOrder: OrchestrationTicketEntry[] = tickets.map((ticket, index) => ({
-          ticketId: ticket.id,
-          workingThreadId: workingThreadIds[index]!,
-          reviewThreadId: reviewThreadIds[index]!,
-        }));
         const settings = yield* serverSettings.getSettings.pipe(
           Effect.mapError(
             (cause) =>
@@ -211,6 +201,21 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
               }),
           ),
         );
+        const effectiveMaxReviewIterations =
+          input.maxReviewIterations ?? settings.maxReviewIterations;
+        const reviewEnabled = effectiveMaxReviewIterations > 0;
+        const runtimeMode = input.runtimeMode ?? "full-access";
+        const runId = crypto.randomUUID() as import("@t3tools/contracts").OrchestrationRunId;
+        const orchestrationThreadId = crypto.randomUUID() as ThreadId;
+        const workingThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
+        const reviewThreadIds = reviewEnabled
+          ? tickets.map(() => crypto.randomUUID() as ThreadId)
+          : tickets.map(() => undefined);
+        const ticketOrder: OrchestrationTicketEntry[] = tickets.map((ticket, index) => ({
+          ticketId: ticket.id,
+          workingThreadId: workingThreadIds[index]!,
+          ...(reviewThreadIds[index] ? { reviewThreadId: reviewThreadIds[index]! } : {}),
+        }));
         const persisted: PersistedOrchestrationRun = {
           id: runId,
           orchestrationThreadId,
@@ -220,7 +225,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           currentTicketIndex: -1 as const,
           currentPhase: "working",
           reviewIteration: 0 as const,
-          maxReviewIterations: input.maxReviewIterations ?? settings.maxReviewIterations,
+          maxReviewIterations: effectiveMaxReviewIterations,
           createdAt: now,
           updatedAt: now,
         };
@@ -259,7 +264,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
 
           for (const [index, ticket] of tickets.entries()) {
             const workingThreadId = workingThreadIds[index]!;
-            const reviewThreadId = reviewThreadIds[index]!;
+            const reviewThreadId = reviewThreadIds[index];
             yield* dispatchQueuedCommand(
               {
                 type: "thread.create",
@@ -279,6 +284,10 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
               `Failed to create working thread for ticket ${ticket.identifier}`,
             );
             createdThreadIds.push(workingThreadId);
+
+            if (!reviewThreadId) {
+              continue;
+            }
 
             yield* dispatchQueuedCommand(
               {

@@ -240,7 +240,7 @@ const serviceEffect = <A, E>(
   );
 
 describe("OrchestrationRunService", () => {
-  it("creates paired working and review threads and defaults maxReviewIterations from server settings", async () => {
+  it("creates paired working and review threads when automated review is enabled", async () => {
     const ticket = makeTicket({ id: "ticket-1", identifier: "T3CO-1", title: "First ticket" });
     const dispatchedCommands: OrchestrationCommand[] = [];
     const createdRuns: PersistedOrchestrationRun[] = [];
@@ -287,6 +287,59 @@ describe("OrchestrationRunService", () => {
     expect(threadCreates[2]?.title).toBe(`${ticket.title} Review`);
     expect(threadCreates[1]?.ticketId).toBe(ticket.id);
     expect(threadCreates[2]?.ticketId).toBe(ticket.id);
+    expect(result.workingThreadIds).toHaveLength(1);
+  });
+
+  it("skips review thread creation when maxReviewIterations is 0", async () => {
+    const ticket = makeTicket({ id: "ticket-1", identifier: "T3CO-1", title: "First ticket" });
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const createdRuns: PersistedOrchestrationRun[] = [];
+    const layer = makeServiceLayer({
+      repository: makeRunRepository({
+        create: (input) =>
+          Effect.sync(() => {
+            createdRuns.push(input);
+          }),
+      }),
+      ticketing: makeTicketingService({
+        getByIdentifier: ({ identifier }) =>
+          identifier === ticket.identifier
+            ? Effect.succeed(ticket)
+            : Effect.die(new Error("unexpected ticket lookup")),
+      }),
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatchedCommands.push(command);
+          return { sequence: dispatchedCommands.length };
+        }),
+    });
+
+    const result = await Effect.runPromise(
+      serviceEffect(layer, (service) =>
+        service.create({
+          projectId,
+          ticketIdentifiers: [ticket.identifier],
+          implementerModelSelection: baseModelSelection,
+          reviewerModelSelection: baseModelSelection,
+          maxReviewIterations: 0,
+        }),
+      ),
+    );
+
+    expect(createdRuns[0]?.maxReviewIterations).toBe(0);
+    expect(JSON.parse(createdRuns[0]?.ticketOrderJson ?? "[]")).toEqual([
+      {
+        ticketId: ticket.id,
+        workingThreadId: expect.any(String),
+      },
+    ]);
+
+    const threadCreates = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.create" }> =>
+        command.type === "thread.create",
+    );
+    expect(threadCreates).toHaveLength(2);
+    expect(threadCreates[1]?.title).toBe(ticket.title);
     expect(result.workingThreadIds).toHaveLength(1);
   });
 

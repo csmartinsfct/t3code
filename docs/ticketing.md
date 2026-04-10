@@ -148,14 +148,14 @@ When an orchestration run is created with `maxReviewIterations > 0`, the server 
 - a working thread for implementation turns
 - a review thread for automated review turns
 
-Each ticket entry in the orchestration run plan stores both `workingThreadId` and `reviewThreadId`, so consumers can identify the dedicated review thread explicitly. After a successful work turn, the runner moves the ticket to `in_review`, executes the review thread with the ticket context and working-thread diff, and then:
+When `maxReviewIterations === 0`, the server creates only the working thread for each ticket and does not create a review thread at all. Each ticket entry in the orchestration run plan always stores `workingThreadId` and stores `reviewThreadId` only when automated review is enabled. After a successful work turn, the runner either completes the ticket immediately when review is disabled, or moves the ticket to `in_review`, executes the review thread with the ticket context and working-thread diff, and then:
 
 - marks the ticket `done` when the review returns `changesNeeded: false`
 - moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
 - pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `review`, or `reviewFeedback` cannot be validated or rendered
 
-The chat UI uses that explicit `reviewThreadId` identity to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
+The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
 ### Orchestration Prompt Templates
 
