@@ -1,14 +1,17 @@
 import type { OrchestrationRun, OrchestrationRunStatus } from "@t3tools/contracts";
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
   Loader2Icon,
   PauseIcon,
   PlayIcon,
   XCircleIcon,
   XIcon,
 } from "lucide-react";
+import { Group, GroupSeparator } from "../ui/group";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +24,7 @@ interface OrchestrationProgressHeaderProps {
   currentTicketLabel: string | null;
   onPause: () => void;
   onResume: () => void;
+  onResumeWithFreshAgent: () => void;
   onCancel: () => void;
 }
 
@@ -107,6 +111,7 @@ export function OrchestrationProgressHeader({
   currentTicketLabel,
   onPause,
   onResume,
+  onResumeWithFreshAgent,
   onCancel,
 }: OrchestrationProgressHeaderProps) {
   if (!run) return null;
@@ -170,10 +175,33 @@ export function OrchestrationProgressHeader({
         )}
         {run.status === "paused" && (
           <div className="flex items-center gap-1.5">
-            <Button type="button" size="xs" variant="outline" onClick={onResume}>
-              <PlayIcon className="size-3" />
-              Resume
-            </Button>
+            <Group aria-label="Orchestration resume actions">
+              <Button type="button" size="xs" variant="outline" onClick={onResume}>
+                <PlayIcon className="size-3" />
+                Resume
+              </Button>
+              <GroupSeparator />
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      aria-label="Resume options"
+                      size="icon-xs"
+                      type="button"
+                      variant="outline"
+                    />
+                  }
+                >
+                  <ChevronDownIcon aria-hidden="true" className="size-4" />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuItem onClick={onResumeWithFreshAgent}>
+                    <PlayIcon className="size-3.5" />
+                    Resume with fresh agent
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            </Group>
             <Button type="button" size="xs" variant="outline" onClick={onCancel}>
               <XIcon className="size-3" />
               Cancel

@@ -860,6 +860,60 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         `Failed to stop session on thread ${threadId}`,
       ).pipe(Effect.catch(() => Effect.void));
 
+    const resolveFreshAgentResumeTarget = (input: {
+      readonly run: OrchestrationRun;
+      readonly resolvedStartIndex: number;
+    }) =>
+      Effect.gen(function* () {
+        const ticketEntry = input.run.ticketOrder[input.resolvedStartIndex];
+        if (!ticketEntry) {
+          return yield* new OrchestrationRunError({
+            message: `No ticket entry exists at index ${input.resolvedStartIndex} for run ${input.run.id}`,
+          });
+        }
+
+        const ticket = yield* ticketing.getById({ id: ticketEntry.ticketId }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: `Failed to resolve ticket ${ticketEntry.ticketId} for fresh-agent resume`,
+                cause,
+              }),
+          ),
+        );
+
+        const shouldResumeCurrentTicket =
+          input.run.currentTicketIndex >= 0 &&
+          input.resolvedStartIndex === input.run.currentTicketIndex;
+        const shouldResumeReviewPhase =
+          shouldResumeCurrentTicket && input.run.currentPhase === "reviewing";
+
+        if (shouldResumeReviewPhase && ticketEntry.reviewThreadId) {
+          return {
+            ticket,
+            threadId: ticketEntry.reviewThreadId as ThreadId,
+            phase: "reviewing" as const,
+          };
+        }
+
+        if (shouldResumeReviewPhase && !ticketEntry.reviewThreadId) {
+          yield* Effect.logWarning(
+            formatTimelineLog(SCOPE, "runner.resume.fresh-agent.review-thread-missing", {
+              runId: input.run.id,
+              ticketId: ticket.id,
+              ticketIdentifier: ticket.identifier,
+              resolvedStartIndex: input.resolvedStartIndex,
+            }),
+          );
+        }
+
+        return {
+          ticket,
+          threadId: ticketEntry.workingThreadId as ThreadId,
+          phase: "working" as const,
+        };
+      });
+
     const runChildTurn = (input: {
       readonly threadId: ThreadId;
       readonly dispatch: Effect.Effect<unknown, OrchestrationRunError | PromptRenderFailure>;
@@ -1648,7 +1702,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
     const resumeRun: OrchestrationRunRunnerShape["resumeRun"] = (input) =>
       Effect.gen(function* () {
-        yield* Effect.logInfo(formatTimelineLog(SCOPE, "runner.resume", { runId: input.runId }));
+        const resumeMode = input.mode ?? "default";
+        yield* Effect.logInfo(
+          formatTimelineLog(SCOPE, "runner.resume", { runId: input.runId, resumeMode }),
+        );
 
         // Load run to check current state
         const currentRun = yield* withRunService((runService) => runService.get(input));
@@ -1691,6 +1748,29 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           );
         }
 
+        const freshAgentTarget =
+          resumeMode === "fresh-agent"
+            ? yield* resolveFreshAgentResumeTarget({
+                run: currentRun,
+                resolvedStartIndex,
+              })
+            : null;
+
+        if (freshAgentTarget) {
+          yield* Effect.logInfo(
+            formatTimelineLog(SCOPE, "runner.resume.fresh-agent.restart", {
+              runId: input.runId,
+              resolvedStartIndex,
+              ticketId: freshAgentTarget.ticket.id,
+              ticketIdentifier: freshAgentTarget.ticket.identifier,
+              phase: freshAgentTarget.phase,
+              threadId: freshAgentTarget.threadId,
+            }),
+          );
+          yield* interruptWorkingThread(freshAgentTarget.threadId);
+          yield* stopWorkingThread(freshAgentTarget.threadId);
+        }
+
         // Transition paused → running
         const run = yield* withRunService((runService) => runService.resume(input));
         const orchestrationThreadId = run.orchestrationThreadId as ThreadId;
@@ -1699,7 +1779,20 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         yield* postActivity({
           threadId: orchestrationThreadId,
           kind: "orchestration.run.resumed",
-          summary: "Orchestration resumed",
+          summary: freshAgentTarget
+            ? `Resumed ${freshAgentTarget.ticket.identifier} with fresh agent`
+            : "Orchestration resumed",
+          ...(freshAgentTarget
+            ? {
+                payload: {
+                  resumeMode,
+                  ticketId: freshAgentTarget.ticket.id,
+                  ticketIdentifier: freshAgentTarget.ticket.identifier,
+                  phase: freshAgentTarget.phase,
+                  restartedThreadId: freshAgentTarget.threadId,
+                },
+              }
+            : {}),
         }).pipe(Effect.catch(() => Effect.void));
 
         yield* Effect.logInfo(

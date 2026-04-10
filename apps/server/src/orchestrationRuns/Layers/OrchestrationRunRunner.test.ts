@@ -722,6 +722,262 @@ describe("OrchestrationRunRunner", () => {
     );
   });
 
+  it("restarts the working thread session when resuming with a fresh agent", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const pausedSingleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      currentTicketIndex: 0,
+      currentPhase: "working",
+      status: "paused",
+    });
+    const runningSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "completed",
+    });
+    let getCallCount = 0;
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          return Effect.succeed(
+            getCallCount === 1 ? pausedSingleTicketRun : runningSingleTicketRun,
+          );
+        },
+        resume: () => Effect.succeed(runningSingleTicketRun),
+        updateRunProgress: () => Effect.succeed(runningSingleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume-fresh" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume-fresh" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId, mode: "fresh-agent" }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const interruptCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.interrupt" }> =>
+        command.type === "thread.turn.interrupt",
+    );
+    const stopCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.session.stop" }> =>
+        command.type === "thread.session.stop",
+    );
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const resumeActivity = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.resumed",
+    );
+
+    expect(interruptCommands.map((command) => command.threadId)).toContain(workingThread1);
+    expect(stopCommands.map((command) => command.threadId)).toContain(workingThread1);
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.threadId).toBe(workingThread1);
+    expect(resumeActivity?.activity.summary).toBe("Resumed T3CO-1 with fresh agent");
+    expect(resumeActivity?.activity.payload).toMatchObject({
+      resumeMode: "fresh-agent",
+      ticketId: ticket1Id,
+      ticketIdentifier: "T3CO-1",
+      phase: "working",
+      restartedThreadId: workingThread1,
+    });
+  });
+
+  it("restarts the review thread session when resuming a review with a fresh agent", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const pausedSingleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      currentTicketIndex: 0,
+      currentPhase: "reviewing",
+      reviewIteration: 0,
+      maxReviewIterations: 1,
+      status: "paused",
+    });
+    const runningSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "completed",
+    });
+    let getCallCount = 0;
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      readModelThreads: makeCompletedWorkAndReviewThreads(
+        JSON.stringify({
+          changesNeeded: false,
+          summary: "Looks good.",
+          comments: [],
+          suggestions: [],
+        }),
+      ),
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          return Effect.succeed(
+            getCallCount === 1 ? pausedSingleTicketRun : runningSingleTicketRun,
+          );
+        },
+        resume: () => Effect.succeed(runningSingleTicketRun),
+        updateRunProgress: () => Effect.succeed(runningSingleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-fresh" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-fresh" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId, mode: "fresh-agent" }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const interruptCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.interrupt" }> =>
+        command.type === "thread.turn.interrupt",
+    );
+    const stopCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.session.stop" }> =>
+        command.type === "thread.session.stop",
+    );
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start",
+    );
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const resumeActivity = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.resumed",
+    );
+
+    expect(interruptCommands.map((command) => command.threadId)).toContain(reviewThread1);
+    expect(stopCommands.map((command) => command.threadId)).toContain(reviewThread1);
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.threadId).toBe(reviewThread1);
+    expect(resumeActivity?.activity.summary).toBe("Resumed T3CO-1 with fresh agent");
+    expect(resumeActivity?.activity.payload).toMatchObject({
+      resumeMode: "fresh-agent",
+      ticketId: ticket1Id,
+      ticketIdentifier: "T3CO-1",
+      phase: "reviewing",
+      restartedThreadId: reviewThread1,
+    });
+  });
+
+  it("targets the next actionable ticket when fresh-agent resume skips completed work", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const pausedRun = makeRun({
+      currentTicketIndex: 0,
+      currentPhase: "working",
+      status: "paused",
+    });
+    const runningRun = makeRun({
+      ...pausedRun,
+      status: "running",
+    });
+    const completedRun = makeRun({
+      ...pausedRun,
+      status: "completed",
+      currentTicketIndex: 1,
+    });
+    let getCallCount = 0;
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          return Effect.succeed(getCallCount === 1 ? pausedRun : runningRun);
+        },
+        resume: () => Effect.succeed(runningRun),
+        updateRunProgress: ({ currentTicketIndex, currentPhase, reviewIteration }) =>
+          Effect.succeed(
+            makeRun({
+              ...runningRun,
+              currentTicketIndex,
+              currentPhase: currentPhase ?? runningRun.currentPhase,
+              reviewIteration: reviewIteration ?? runningRun.reviewIteration,
+            }),
+          ),
+        complete: () => Effect.succeed(completedRun),
+      },
+      ticketing: {
+        getById: ({ id }) => {
+          if (id === ticket1Id) {
+            return Effect.succeed({ ...ticket1, status: "done" satisfies Ticket["status"] });
+          }
+          return Effect.succeed(ticket2);
+        },
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread2, turnId: "turn-ticket-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread2, turnId: "turn-ticket-2" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId, mode: "fresh-agent" }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const interruptCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.interrupt" }> =>
+        command.type === "thread.turn.interrupt",
+    );
+    const stopCommands = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.session.stop" }> =>
+        command.type === "thread.session.stop",
+    );
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const resumeActivity = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.resumed",
+    );
+
+    expect(interruptCommands.map((command) => command.threadId)).toContain(workingThread2);
+    expect(stopCommands.map((command) => command.threadId)).toContain(workingThread2);
+    expect(resumeActivity?.activity.summary).toBe("Resumed T3CO-2 with fresh agent");
+    expect(resumeActivity?.activity.payload).toMatchObject({
+      resumeMode: "fresh-agent",
+      ticketId: ticket2Id,
+      ticketIdentifier: "T3CO-2",
+      phase: "working",
+      restartedThreadId: workingThread2,
+    });
+  });
+
   it("uses customized global orchestration prompt templates from server settings", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const singleTicketRun = makeRun({

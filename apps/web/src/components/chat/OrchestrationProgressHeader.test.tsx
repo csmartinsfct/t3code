@@ -35,6 +35,7 @@ describe("OrchestrationProgressHeader", () => {
         currentTicketLabel="ORCH-1 — Fix sidebar"
         onPause={() => {}}
         onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
         onCancel={() => {}}
       />,
     );
@@ -51,6 +52,7 @@ describe("OrchestrationProgressHeader", () => {
         currentTicketLabel={null}
         onPause={() => {}}
         onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
         onCancel={() => {}}
       />,
     );
@@ -76,11 +78,28 @@ describe("OrchestrationProgressHeader", () => {
         currentTicketLabel="ORCH-1 — Fix sidebar"
         onPause={() => {}}
         onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
         onCancel={() => {}}
       />,
     );
 
     expect(markup).toContain("Automated review disabled. Enable it in settings.");
     expect(markup).toContain('href="/settings/general#automated-review-cycles"');
+  });
+
+  it("renders resume split controls when paused", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun({ status: "paused", currentPhase: "working" })}
+        currentTicketLabel="ORCH-1 — Fix sidebar"
+        onPause={() => {}}
+        onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Resume");
+    expect(markup).toContain("Resume options");
   });
 });

@@ -157,6 +157,13 @@ When `maxReviewIterations === 0`, the server creates only the working thread for
 
 The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
+When a run is paused, the orchestration header exposes two resume paths:
+
+- `Resume` continues with the current child session as-is
+- `Resume with fresh agent` keeps the same working/review child thread identity for the current ticket, but interrupts and discards the current provider session before resuming so the next turn starts on a fresh agent session
+
+Fresh-agent resume is intentionally session-scoped rather than thread-scoped. The orchestration timeline and thread switcher continue to show the original child thread for the ticket instead of creating a replacement "rerun" thread.
+
 ### Orchestration Prompt Templates
 
 The orchestration runner now has a shared prompt-template domain model for its four logical prompt ids:

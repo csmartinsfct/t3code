@@ -533,7 +533,10 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         return result;
       },
       resumeRun: async (input) => {
-        logWebTimeline("orchestration.run.resume.start", { runId: input.runId });
+        logWebTimeline("orchestration.run.resume.start", {
+          runId: input.runId,
+          resumeMode: input.mode ?? "default",
+        });
         const result = await transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.resumeRun](input),
         );
@@ -541,6 +544,7 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           runId: input.runId,
           status: result.status,
           currentTicketIndex: result.currentTicketIndex,
+          resumeMode: input.mode ?? "default",
         });
         return result;
       },

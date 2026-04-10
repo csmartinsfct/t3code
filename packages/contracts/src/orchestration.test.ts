@@ -12,6 +12,7 @@ import {
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
+  OrchestrationResumeRunInput,
   ReviewOutput,
   ReviewResult,
   OrchestrationSession,
@@ -24,6 +25,7 @@ import {
 } from "./orchestration";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
+const decodeResumeRunInput = Schema.decodeUnknownEffect(OrchestrationResumeRunInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
@@ -61,6 +63,39 @@ it.effect("rejects turn diff input when fromTurnCount > toTurnCount", () =>
         threadId: "thread-1",
         fromTurnCount: 3,
         toTurnCount: 2,
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("decodes orchestration resume input without an explicit mode", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeResumeRunInput({
+      runId: "run-1",
+    });
+    assert.strictEqual(parsed.runId, "run-1");
+    assert.strictEqual(parsed.mode, undefined);
+  }),
+);
+
+it.effect("decodes orchestration resume input with fresh-agent mode", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeResumeRunInput({
+      runId: "run-1",
+      mode: "fresh-agent",
+    });
+    assert.strictEqual(parsed.runId, "run-1");
+    assert.strictEqual(parsed.mode, "fresh-agent");
+  }),
+);
+
+it.effect("rejects orchestration resume input with an unknown mode", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeResumeRunInput({
+        runId: "run-1",
+        mode: "fresh",
       }),
     );
     assert.strictEqual(result._tag, "Failure");

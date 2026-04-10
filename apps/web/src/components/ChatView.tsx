@@ -962,8 +962,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
     logWebTimeline("orchestration.ui.resume", {
       runId: orchestrationTimeline.run.id,
       currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      resumeMode: "default",
     });
     void getWsRpcClient().orchestration.resumeRun({ runId: orchestrationTimeline.run.id });
+  }, [orchestrationTimeline.run]);
+  const onOrchestrationResumeWithFreshAgent = useCallback(() => {
+    if (!orchestrationTimeline.run) return;
+    logWebTimeline("orchestration.ui.resume", {
+      runId: orchestrationTimeline.run.id,
+      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      resumeMode: "fresh-agent",
+    });
+    void getWsRpcClient().orchestration.resumeRun({
+      runId: orchestrationTimeline.run.id,
+      mode: "fresh-agent",
+    });
   }, [orchestrationTimeline.run]);
   const onOrchestrationCancel = useCallback(() => {
     if (!orchestrationTimeline.run) return;
@@ -4936,6 +4949,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 })()}
                 onPause={onOrchestrationPause}
                 onResume={onOrchestrationResume}
+                onResumeWithFreshAgent={onOrchestrationResumeWithFreshAgent}
                 onCancel={onOrchestrationCancel}
               />
               <div className="relative flex min-h-0 flex-1 flex-col">

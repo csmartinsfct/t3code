@@ -1349,8 +1349,13 @@ export const OrchestrationPauseRunInput = Schema.Struct({
 });
 export type OrchestrationPauseRunInput = typeof OrchestrationPauseRunInput.Type;
 
+export const ORCHESTRATION_RESUME_RUN_MODES = ["default", "fresh-agent"] as const;
+export const OrchestrationResumeRunMode = Schema.Literals(ORCHESTRATION_RESUME_RUN_MODES);
+export type OrchestrationResumeRunMode = typeof OrchestrationResumeRunMode.Type;
+
 export const OrchestrationResumeRunInput = Schema.Struct({
   runId: OrchestrationRunId,
+  mode: Schema.optional(OrchestrationResumeRunMode),
 });
 export type OrchestrationResumeRunInput = typeof OrchestrationResumeRunInput.Type;
 
