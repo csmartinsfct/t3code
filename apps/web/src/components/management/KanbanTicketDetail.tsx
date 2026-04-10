@@ -1,5 +1,6 @@
 import type {
   Ticket,
+  TicketDependency,
   TicketId,
   TicketPriority,
   TicketStatus,
@@ -79,6 +80,10 @@ Instructions:
 
 Goal: Break this ticket into well-scoped units of work so that an AI agent can pick up and complete each one independently, within a single session.`;
 
+type TicketRowButtonProps = React.ComponentPropsWithoutRef<"button"> & {
+  "data-ticket-selectable"?: boolean;
+};
+
 interface KanbanTicketDetailProps {
   ticketId: TicketId;
   projectId: string;
@@ -100,6 +105,86 @@ export function KanbanTicketDetailDescription({
     <div ref={descriptionRef} className="mt-0.5 cursor-text text-foreground" onClick={onClick}>
       <TicketMarkdown>{description}</TicketMarkdown>
     </div>
+  );
+}
+
+function TicketRelationRowButton({
+  identifier,
+  title,
+  status,
+  className,
+  buttonProps,
+  buttonRef,
+}: {
+  identifier: string;
+  title: string;
+  status: TicketStatus;
+  className: string;
+  buttonProps?: TicketRowButtonProps;
+  buttonRef?: React.Ref<HTMLButtonElement>;
+}) {
+  const statusCfg = STATUS_CONFIG[status];
+
+  return (
+    <button ref={buttonRef} type="button" className={className} {...buttonProps}>
+      <Badge size="sm" variant={statusCfg.badgeVariant}>
+        {statusCfg.label}
+      </Badge>
+      <span className="shrink-0 text-muted-foreground">{identifier}</span>
+      <span className="truncate text-foreground">{title}</span>
+    </button>
+  );
+}
+
+export function DependencyTicketRow({
+  dependency,
+  onNavigateToTicket,
+}: {
+  dependency: TicketDependency;
+  onNavigateToTicket: (ticketId: TicketId) => void;
+}) {
+  return (
+    <TicketRelationRowButton
+      identifier={dependency.identifier}
+      title={dependency.title}
+      status={dependency.status}
+      className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
+      buttonProps={{
+        onClick: () => onNavigateToTicket(dependency.dependsOnTicketId),
+      }}
+    />
+  );
+}
+
+export function SubTicketRowButton({
+  subTicket,
+  isSelected,
+  isDragging,
+  onClick,
+  buttonRef,
+  buttonProps,
+}: {
+  subTicket: TicketSummary;
+  isSelected: boolean;
+  isDragging: boolean;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
+  buttonRef?: React.Ref<HTMLButtonElement>;
+  buttonProps?: TicketRowButtonProps;
+}) {
+  return (
+    <TicketRelationRowButton
+      identifier={subTicket.identifier}
+      title={subTicket.title}
+      status={subTicket.status}
+      {...(buttonRef ? { buttonRef } : {})}
+      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+        isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+      } ${isDragging ? "opacity-40" : ""}`}
+      buttonProps={{
+        ...buttonProps,
+        onClick,
+      }}
+    />
   );
 }
 
@@ -668,20 +753,12 @@ export function KanbanTicketDetail({
             </h3>
             <div className="flex flex-col gap-1">
               {ticket.dependencies.map((dep) => {
-                const depStatusCfg = STATUS_CONFIG[dep.status];
                 return (
-                  <button
+                  <DependencyTicketRow
                     key={dep.dependsOnTicketId}
-                    type="button"
-                    className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
-                    onClick={() => onNavigateToTicket(dep.dependsOnTicketId)}
-                  >
-                    <Badge size="sm" variant={depStatusCfg.badgeVariant}>
-                      {depStatusCfg.label}
-                    </Badge>
-                    <span className="shrink-0 text-muted-foreground">{dep.identifier}</span>
-                    <span className="truncate text-foreground">{dep.title}</span>
-                  </button>
+                    dependency={dep}
+                    onNavigateToTicket={onNavigateToTicket}
+                  />
                 );
               })}
             </div>
@@ -921,7 +998,6 @@ function DraggableSubTicket({
     id: sub.id,
     data: { ticket: sub, status: sub.status },
   });
-  const subStatusCfg = STATUS_CONFIG[sub.status];
 
   return (
     <Popover>
@@ -930,13 +1006,11 @@ function DraggableSubTicket({
         delay={300}
         closeDelay={150}
         render={
-          <button
-            ref={setNodeRef}
-            type="button"
-            data-ticket-selectable
-            className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
-            } ${isDragging ? "opacity-40" : ""}`}
+          <SubTicketRowButton
+            subTicket={sub}
+            isSelected={isSelected}
+            isDragging={isDragging}
+            buttonRef={setNodeRef}
             onClick={(e) => {
               if (e.altKey || e.metaKey || e.shiftKey) {
                 onMultiSelectClick(e, sub);
@@ -944,17 +1018,14 @@ function DraggableSubTicket({
               }
               onNavigate();
             }}
-            {...attributes}
-            {...listeners}
+            buttonProps={{
+              "data-ticket-selectable": true,
+              ...attributes,
+              ...listeners,
+            }}
           />
         }
-      >
-        <Badge size="sm" variant={subStatusCfg.badgeVariant}>
-          {subStatusCfg.label}
-        </Badge>
-        <span className="shrink-0 text-muted-foreground">{sub.identifier}</span>
-        <span className="truncate text-foreground">{sub.title}</span>
-      </PopoverTrigger>
+      />
       <PopoverPopup
         side="bottom"
         align="end"
