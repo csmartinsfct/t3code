@@ -196,6 +196,7 @@ const makeTicketingService = Effect.gen(function* () {
       isOrchestrationThread: firstRow.isOrchestrationThread,
       parentThreadId: firstRow.parentThreadId,
       linkTypes,
+      // Keep this visibility rule in sync with the detail-view refresh signature on the web side.
       isVisible: firstRow.threadArchivedAt === null && firstRow.parentThreadId === null,
       linkedAt: linkedRow.createdAt,
     };

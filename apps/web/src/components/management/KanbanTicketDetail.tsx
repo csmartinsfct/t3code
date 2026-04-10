@@ -230,6 +230,20 @@ export function resolveTicketDetailStreamEventAction(
   return "ignore";
 }
 
+function linkedThreadSignature(thread: TicketLinkedThread | null): string {
+  return thread
+    ? [
+        thread.threadId,
+        thread.title,
+        thread.linkedAt,
+        thread.archivedAt ?? "",
+        thread.isOrchestrationThread ? "review" : "normal",
+        thread.isVisible ? "visible" : "hidden",
+        thread.linkTypes.join(","),
+      ].join("|")
+    : "null";
+}
+
 function shouldRefetchThreadLinks(
   previousLinks: TicketThreadLinks | null,
   nextLinks: TicketThreadLinks,
@@ -237,23 +251,11 @@ function shouldRefetchThreadLinks(
   if (previousLinks === null) {
     return true;
   }
-  const toSignature = (thread: TicketLinkedThread | null) =>
-    thread
-      ? [
-          thread.threadId,
-          thread.linkedAt,
-          thread.archivedAt ?? "",
-          thread.isOrchestrationThread ? "review" : "normal",
-          thread.isVisible ? "visible" : "hidden",
-          thread.linkTypes.join(","),
-        ].join("|")
-      : "null";
-
-  const previousRelated = previousLinks.relatedThreads.map(toSignature).join("||");
-  const nextRelated = nextLinks.relatedThreads.map(toSignature).join("||");
+  const previousRelated = previousLinks.relatedThreads.map(linkedThreadSignature).join("||");
+  const nextRelated = nextLinks.relatedThreads.map(linkedThreadSignature).join("||");
   return (
-    toSignature(previousLinks.originThread) !== toSignature(nextLinks.originThread) ||
-    previousRelated !== nextRelated
+    linkedThreadSignature(previousLinks.originThread) !==
+      linkedThreadSignature(nextLinks.originThread) || previousRelated !== nextRelated
   );
 }
 

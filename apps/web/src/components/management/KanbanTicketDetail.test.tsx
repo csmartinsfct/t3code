@@ -203,13 +203,22 @@ describe("KanbanTicketDetail", () => {
         projectId: currentTicket.projectId,
         ticket: makeSubTicket({ id: "ticket-2" as TicketSummary["id"], parentId: null }),
       },
+      {
+        type: "ticket_upserted",
+        projectId: currentTicket.projectId,
+        ticket: makeSubTicket({
+          id: "ticket-99" as TicketSummary["id"],
+          parentId: null,
+          identifier: "T3CO-99",
+        }),
+      },
     ];
 
     expect(
       cases.map((event) =>
         resolveTicketDetailStreamEventAction(currentTicket.id, currentTicket, event),
       ),
-    ).toEqual(["refetch", "refetch", "refetch"]);
+    ).toEqual(["refetch", "refetch", "refetch", "ignore"]);
   });
 
   it("refetches for related delete events that remove dependency or sub-ticket rows", () => {
