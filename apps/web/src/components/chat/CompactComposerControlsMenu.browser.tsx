@@ -9,7 +9,12 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { TraitsMenuContent } from "./TraitsPicker";
 import { useComposerDraftStore } from "../../composerDraftStore";
 
-async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: string }) {
+async function mountMenu(props?: {
+  interactionMode?: "default" | "plan" | "plan-accept";
+  modelSelection?: ModelSelection;
+  prompt?: string;
+  supportsPlan?: boolean;
+}) {
   const threadId = ThreadId.makeUnsafe("thread-compact-menu");
   const provider = props?.modelSelection?.provider ?? "claudeAgent";
   const draftsByThreadId = {} as ReturnType<
@@ -45,6 +50,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   const host = document.createElement("div");
   document.body.append(host);
   const onPromptChange = vi.fn();
+  const onInteractionModeChange = vi.fn();
   const providerOptions = props?.modelSelection?.options;
   const models =
     provider === "claudeAgent"
@@ -120,8 +126,8 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
         ];
   const screen = await render(
     <CompactComposerControlsMenu
-      interactionMode="default"
-      supportsPlan
+      interactionMode={props?.interactionMode ?? "default"}
+      supportsPlan={props?.supportsPlan ?? true}
       traitsMenuContent={
         <TraitsMenuContent
           provider={provider}
@@ -133,7 +139,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onInteractionModeChange={vi.fn()}
+      onInteractionModeChange={onInteractionModeChange}
     />,
     { container: host },
   );
@@ -146,7 +152,23 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   return {
     [Symbol.asyncDispose]: cleanup,
     cleanup,
+    onInteractionModeChange,
   };
+}
+
+async function waitForMenuRadioItem(label: string): Promise<HTMLElement> {
+  let item: HTMLElement | null = null;
+  await vi.waitFor(() => {
+    item =
+      Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')).find(
+        (element) => element.textContent?.trim() === label,
+      ) ?? null;
+    expect(item).toBeTruthy();
+  });
+  if (!item) {
+    throw new Error(`Unable to find menu item "${label}".`);
+  }
+  return item;
 }
 
 describe("CompactComposerControlsMenu", () => {
@@ -259,6 +281,62 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).toContain(
         'Your prompt contains "ultrathink" in the text. Remove it to change effort.',
       );
+    });
+  });
+
+  it("cycles between Chat, Plan, and Plan + Accept modes from the menu", async () => {
+    // Audit traceability: 623a434, 3dd6391, 03999e7.
+    const defaultMounted = await mountMenu({
+      interactionMode: "default",
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+    });
+
+    try {
+      await page.getByLabelText("More composer controls").click();
+      (await waitForMenuRadioItem("Plan")).click();
+
+      expect(defaultMounted.onInteractionModeChange).toHaveBeenCalledWith("plan");
+
+      await page.getByLabelText("More composer controls").click();
+      (await waitForMenuRadioItem("Plan + Accept")).click();
+
+      expect(defaultMounted.onInteractionModeChange).toHaveBeenCalledWith("plan-accept");
+    } finally {
+      await defaultMounted.cleanup();
+    }
+
+    const acceptMounted = await mountMenu({
+      interactionMode: "plan-accept",
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+    });
+
+    try {
+      await page.getByLabelText("More composer controls").click();
+      (await waitForMenuRadioItem("Chat")).click();
+
+      expect(acceptMounted.onInteractionModeChange).toHaveBeenCalledWith("default");
+    } finally {
+      await acceptMounted.cleanup();
+    }
+  });
+
+  it("hides plan-only controls when the selected model does not support planning", async () => {
+    const mounted = await mountMenu({
+      interactionMode: "default",
+      modelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+      supportsPlan: false,
+    });
+
+    await using _ = mounted;
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Chat");
+      expect(text).not.toContain("Plan + Accept");
+      expect(text).not.toContain("Runtime access");
+      expect(text).not.toContain("Full access");
     });
   });
 });

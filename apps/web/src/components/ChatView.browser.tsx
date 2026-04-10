@@ -5,6 +5,7 @@ import {
   EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
+  type NativeApi,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
@@ -37,16 +38,21 @@ import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardConte
 import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
+import { applyServerConfigEvent } from "../rpc/serverState";
 import { useStore } from "../store";
 import type { SidebarThreadSummary, Thread } from "../types";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { createReadyServerProvider } from "../test/providerTestUtils";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { createWsNativeApi } from "../wsNativeApi";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const UUID_ROUTE_RE = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROJECT_ID = "project-1" as ProjectId;
+const ORCHESTRATION_PARENT_THREAD_ID = "thread-orchestration-parent" as ThreadId;
+const ORCHESTRATION_RUN_ID = "run-orchestration-browser-test";
+const ORCHESTRATION_TICKET_ID = "ticket-orchestration-browser-test" as TicketId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
@@ -61,6 +67,7 @@ let fixture: TestFixture;
 const rpcHarness = new BrowserWsRpcHarness();
 const wsRequests = rpcHarness.requests;
 let customWsRpcResolver: ((body: NormalizedWsRpcRequestBody) => unknown | undefined) | null = null;
+let resolvedMcpServerNames: readonly string[] = [];
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 interface ViewportSpec {
@@ -517,6 +524,24 @@ function materializeThreadInStore(threadId: ThreadId): void {
   }));
 }
 
+function installTestNativeApi(input?: {
+  resolveMcpServers?: () => Promise<{ serverNames: readonly string[] }>;
+  resolveSkills?: () => Promise<{ skills: readonly [] }>;
+}): NativeApi {
+  const base = createWsNativeApi();
+  const api: NativeApi = {
+    ...base,
+    server: {
+      ...base.server,
+      resolveMcpServers:
+        input?.resolveMcpServers ?? (async () => ({ serverNames: resolvedMcpServerNames })),
+      resolveSkills: input?.resolveSkills ?? (async () => ({ skills: [] })),
+    },
+  };
+  window.nativeApi = api;
+  return api;
+}
+
 async function waitForWsClient(): Promise<void> {
   await vi.waitFor(
     () => {
@@ -762,6 +787,82 @@ function createSnapshotWithPlanFollowUpPrompt(): OrchestrationReadModel {
   };
 }
 
+function createOrchestrationRun(status: "pending" | "running") {
+  return {
+    id: ORCHESTRATION_RUN_ID,
+    orchestrationThreadId: ORCHESTRATION_PARENT_THREAD_ID,
+    projectId: PROJECT_ID,
+    status,
+    ticketOrder: [
+      {
+        ticketId: ORCHESTRATION_TICKET_ID,
+        workingThreadId: THREAD_ID,
+      },
+    ],
+    currentTicketIndex: status === "pending" ? -1 : 0,
+    currentPhase: "working" as const,
+    reviewIteration: 0,
+    maxReviewIterations: 1,
+    createdAt: isoAt(2_000),
+    updatedAt: isoAt(status === "pending" ? 2_001 : 2_010),
+  };
+}
+
+function createOrchestrationWaitingSnapshot(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-orchestration-wait-target" as MessageId,
+    targetText: "orchestration wait target",
+  });
+
+  const activeThread = snapshot.threads[0];
+  if (!activeThread) {
+    throw new Error("Expected a base thread in the orchestration waiting snapshot.");
+  }
+
+  return {
+    ...snapshot,
+    threads: [
+      {
+        id: ORCHESTRATION_PARENT_THREAD_ID,
+        projectId: PROJECT_ID,
+        title: "Orchestration timeline",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5",
+        },
+        interactionMode: "default",
+        runtimeMode: "full-access",
+        branch: "main",
+        worktreePath: null,
+        parentThreadId: null,
+        isOrchestrationThread: true,
+        ticketId: null,
+        latestTurn: null,
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        archivedAt: null,
+        deletedAt: null,
+        messages: [],
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        session: null,
+      },
+      {
+        ...activeThread,
+        title: "Waiting child thread",
+        parentThreadId: ORCHESTRATION_PARENT_THREAD_ID,
+        isOrchestrationThread: false,
+        ticketId: ORCHESTRATION_TICKET_ID,
+        messages: [],
+        activities: [],
+        latestTurn: null,
+        session: null,
+      },
+    ],
+  };
+}
+
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -773,6 +874,12 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
+  }
+  if (tag === WS_METHODS.serverResolveMcpServers || tag.includes("McpServers")) {
+    return { serverNames: resolvedMcpServerNames };
+  }
+  if (tag === WS_METHODS.serverResolveSkills || tag.includes("Skills")) {
+    return { skills: [] };
   }
   if (tag === WS_METHODS.gitListBranches) {
     return {
@@ -980,6 +1087,21 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
     "Unable to find send button.",
+  );
+}
+
+async function waitForWaitingSendButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () =>
+      document.querySelector<HTMLButtonElement>('button[aria-label="Waiting for agent to start"]'),
+    'Unable to find disabled "Waiting for agent to start" send button.',
+  );
+}
+
+async function waitForMcpServersButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="MCP servers"]'),
+    "Unable to find MCP servers button.",
   );
 }
 
@@ -1313,11 +1435,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
     __resetNativeApiForTests();
+    delete window.nativeApi;
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";
     wsRequests.length = 0;
     customWsRpcResolver = null;
+    resolvedMcpServerNames = [];
     useComposerDraftStore.setState({
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
@@ -1342,6 +1466,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
   afterEach(() => {
     customWsRpcResolver = null;
+    delete window.nativeApi;
     document.body.innerHTML = "";
   });
 
@@ -2097,6 +2222,264 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps orchestration child threads locked until the agent starts", async () => {
+    // Audit traceability: 623a434, 3dd6391, 03999e7.
+    installTestNativeApi();
+    useComposerDraftStore.setState({
+      draftsByThreadId: {
+        [THREAD_ID]: {
+          prompt: "Send this once the worker starts",
+          images: [],
+          nonPersistedImageIds: [],
+          persistedAttachments: [],
+          terminalContexts: [],
+          codeSnippets: [],
+          ticketAttachments: [],
+          skills: [],
+          modelSelectionByProvider: {
+            codex: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+          },
+          activeProvider: "codex",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        },
+      },
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+
+    let run = createOrchestrationRun("pending");
+    const orchestrationTicket = {
+      id: ORCHESTRATION_TICKET_ID,
+      projectId: PROJECT_ID,
+      parentId: null,
+      ticketNumber: 168,
+      identifier: "T3CO-168",
+      title: "Composer wait coverage",
+      status: "in_progress" as const,
+      priority: "high" as const,
+      sortOrder: 0,
+      isArchived: false,
+      worktree: null,
+      labels: [],
+      subTicketCount: 0,
+      dependencyCount: 0,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createOrchestrationWaitingSnapshot(),
+      resolveRpc: (body) => {
+        const tag = String(body._tag);
+        if (tag === ORCHESTRATION_WS_METHODS.listRuns || tag.endsWith("listRuns")) {
+          return [
+            {
+              id: run.id,
+              orchestrationThreadId: run.orchestrationThreadId,
+              projectId: run.projectId,
+              status: run.status,
+              currentTicketIndex: run.currentTicketIndex,
+              ticketCount: run.ticketOrder.length,
+              currentPhase: run.currentPhase,
+              createdAt: run.createdAt,
+              updatedAt: run.updatedAt,
+            },
+          ];
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getRun || tag.endsWith("getRun")) {
+          return run;
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getChildThreads || tag.endsWith("getChildThreads")) {
+          return fixture.snapshot.threads.filter(
+            (thread) => thread.parentThreadId === ORCHESTRATION_PARENT_THREAD_ID,
+          );
+        }
+        if (tag === WS_METHODS.ticketingList || tag.endsWith("ticketing.list")) {
+          return [orchestrationTicket];
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const waitingLabel = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("span")).find(
+            (element) => element.textContent?.trim() === "Waiting for agent to start",
+          ) as HTMLSpanElement | null,
+        'Unable to find "Waiting for agent to start" status copy.',
+      );
+      const waitingGroup = waitingLabel.parentElement;
+      const centeredWrapper = waitingGroup?.parentElement;
+      const messagesPane = centeredWrapper?.parentElement;
+
+      if (
+        !(waitingGroup instanceof HTMLDivElement) ||
+        !(centeredWrapper instanceof HTMLDivElement) ||
+        !(messagesPane instanceof HTMLDivElement)
+      ) {
+        throw new Error("Expected the orchestration waiting state container to be rendered.");
+      }
+
+      await vi.waitFor(() => {
+        const wrapperRect = centeredWrapper.getBoundingClientRect();
+        const paneRect = messagesPane.getBoundingClientRect();
+        const wrapperCenterX = wrapperRect.left + wrapperRect.width / 2;
+        const paneCenterX = paneRect.left + paneRect.width / 2;
+        const wrapperCenterY = wrapperRect.top + wrapperRect.height / 2;
+        const paneCenterY = paneRect.top + paneRect.height / 2;
+
+        expect(waitingGroup.querySelector("svg")).toBeTruthy();
+        expect(Math.abs(wrapperCenterX - paneCenterX)).toBeLessThanOrEqual(8);
+        expect(Math.abs(wrapperCenterY - paneCenterY)).toBeLessThanOrEqual(8);
+      });
+
+      expect(findComposerProviderModelPicker()).toBeTruthy();
+      expect(findComposerProviderModelPicker()?.disabled).toBe(true);
+
+      const waitingSendButton = await waitForWaitingSendButton();
+      expect(waitingSendButton.disabled).toBe(true);
+
+      waitingSendButton.click();
+      await waitForLayout();
+
+      expect(
+        wsRequests.some(
+          (candidate) =>
+            candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            candidate.type === "thread.turn.start",
+        ),
+      ).toBe(false);
+
+      useStore.setState((state) => {
+        const activeThread = state.threadsById[THREAD_ID];
+        const sidebarThread = state.sidebarThreadsById[THREAD_ID];
+        if (!activeThread || !sidebarThread) {
+          return state;
+        }
+
+        const session = {
+          provider: "codex" as const,
+          status: "ready" as const,
+          createdAt: NOW_ISO,
+          updatedAt: NOW_ISO,
+          orchestrationStatus: "ready" as const,
+        };
+
+        return {
+          ...state,
+          threadsById: {
+            ...state.threadsById,
+            [THREAD_ID]: {
+              ...activeThread,
+              session,
+            },
+          },
+          sidebarThreadsById: {
+            ...state.sidebarThreadsById,
+            [THREAD_ID]: {
+              ...sidebarThread,
+              session,
+            },
+          },
+        };
+      });
+
+      const sendButton = await waitForSendButton();
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").not.toContain("Waiting for agent to start");
+        expect(findComposerProviderModelPicker()?.disabled).toBe(false);
+        expect(sendButton.disabled).toBe(false);
+      });
+
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (candidate) =>
+                candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                candidate.type === "thread.turn.start",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders resolved MCP server names and refreshes them after config changes", async () => {
+    // Audit traceability: 623a434, 3dd6391, 03999e7.
+    resolvedMcpServerNames = ["Filesystem", "Project Tickets"];
+    const resolveMcpServers = vi.fn(async () => ({ serverNames: resolvedMcpServerNames }));
+    installTestNativeApi({
+      resolveMcpServers,
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mcp-disclosure-target" as MessageId,
+        targetText: "mcp disclosure target",
+      }),
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const mcpButton = await waitForMcpServersButton();
+      await vi.waitFor(
+        () => {
+          expect(resolveMcpServers).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      mcpButton.click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("MCP Servers");
+        expect(text).toContain("Filesystem");
+        expect(text).toContain("Project Tickets");
+        expect(text).not.toContain("Runtime access");
+        expect(text).not.toContain("Full access");
+      });
+
+      const resolveRequestCount = resolveMcpServers.mock.calls.length;
+
+      mcpButton.click();
+
+      resolvedMcpServerNames = ["Prompt Registry"];
+      applyServerConfigEvent({
+        version: 1,
+        type: "mcpConfigChanged",
+      });
+
+      await vi.waitFor(() => {
+        expect(resolveMcpServers.mock.calls.length).toBeGreaterThan(resolveRequestCount);
+      });
+
+      mcpButton.click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Prompt Registry");
+        expect(text).not.toContain("Project Tickets");
+      });
     } finally {
       await mounted.cleanup();
     }
