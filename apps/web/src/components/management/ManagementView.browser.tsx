@@ -16,7 +16,7 @@ import { useTicketSelectionStore } from "~/ticketSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { SidebarProvider } from "../ui/sidebar";
 
-// Audit traceability: aa1e7da, 1f727cb.
+// Audit traceability: aa1e7da, 1f727cb, 9a22a14.
 
 const mockNavigate = vi.fn();
 let currentTicketsByProject: Record<string, TicketSummary[]> = {};
@@ -120,18 +120,12 @@ vi.mock("../../hooks/useTicketing", async () => {
         applyLocalReorder: (
           updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>,
         ) => {
-          setTickets((current) => {
-            const updateMap = new Map(updates.map((update) => [update.id, update]));
-            return current.map((ticket) => {
-              const update = updateMap.get(ticket.id);
-              if (!update) return ticket;
-              return {
-                ...ticket,
-                sortOrder: update.sortOrder,
-                ...(update.status ? { status: update.status as TicketSummary["status"] } : {}),
-              };
-            });
-          });
+          currentTicketsByProject[resolvedProjectId] = applyTicketUpdates(
+            currentTicketsByProject[resolvedProjectId] ?? [],
+            updates,
+          );
+          applyLocalReorderMock(updates);
+          setTickets((current) => applyTicketUpdates(current, updates));
         },
       };
     },
@@ -146,6 +140,7 @@ vi.mock("../ChatView", () => ({
 
 const { ManagementView } = await import("./ManagementView");
 
+const applyLocalReorderMock = vi.fn();
 const ticketingUpdateMock = vi.fn(async () => null);
 const ticketingReorderMock = vi.fn(async () => null);
 
@@ -178,6 +173,7 @@ function makeTicket(input: {
 }
 
 function installNativeApiStub() {
+  applyLocalReorderMock.mockReset();
   ticketingUpdateMock.mockReset();
   ticketingReorderMock.mockReset();
 
@@ -201,6 +197,22 @@ function installNativeApiStub() {
   };
 
   window.nativeApi = api as NativeApi;
+}
+
+function applyTicketUpdates(
+  tickets: ReadonlyArray<TicketSummary>,
+  updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>,
+): TicketSummary[] {
+  const updateMap = new Map(updates.map((update) => [update.id, update]));
+  return tickets.map((ticket) => {
+    const update = updateMap.get(ticket.id);
+    if (!update) return ticket;
+    return {
+      ...ticket,
+      sortOrder: update.sortOrder,
+      ...(update.status ? { status: update.status as TicketSummary["status"] } : {}),
+    };
+  });
 }
 
 function seedStores() {
@@ -483,6 +495,93 @@ describe("ManagementView", () => {
           { id: alpha.id, sortOrder: 1000 },
         ],
       });
+    });
+  });
+
+  it("does not persist a cross-column hover when the drag is canceled", async () => {
+    await using mounted = await mountManagementView({ threadId: null });
+
+    await vi.waitFor(() => {
+      expect(latestDndHandlers?.onDragOver).toBeTypeOf("function");
+      expect(latestDndHandlers?.onDragCancel).toBeTypeOf("function");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const active = makeActiveEvent(alpha);
+
+    latestDndHandlers?.onDragStart?.(active);
+    latestDndHandlers?.onDragOver?.({
+      ...active,
+      over: makeOverEvent({ id: "column:blocked", status: "blocked" }),
+    } as DragOverEvent);
+    await mounted.rerender(
+      <SidebarProvider defaultOpen>
+        <ManagementView threadId={null} projectId="project-1" />
+      </SidebarProvider>,
+    );
+
+    latestDndHandlers?.onDragCancel?.();
+
+    await vi.waitFor(() => {
+      expect(ticketingUpdateMock).not.toHaveBeenCalled();
+      expect(ticketingReorderMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reverts optimistic cross-column hover state when the ticket is dropped onto chat", async () => {
+    const threadId = "thread-cross-column-chat-drop" as ThreadId;
+    await using mounted = await mountManagementView({ threadId });
+
+    await vi.waitFor(() => {
+      expect(latestDndHandlers?.onDragOver).toBeTypeOf("function");
+      expect(latestDndHandlers?.onDragEnd).toBeTypeOf("function");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const beta = currentTicketsByProject["project-1"]![1]!;
+
+    useTicketSelectionStore.setState({
+      selectedTicketIds: new Set([alpha.id, beta.id]),
+      selectedTickets: new Map([
+        [alpha.id, alpha],
+        [beta.id, beta],
+      ]),
+      anchorTicketId: alpha.id,
+    });
+
+    const active = makeActiveEvent(alpha);
+    latestDndHandlers?.onDragStart?.(active);
+    latestDndHandlers?.onDragOver?.({
+      ...active,
+      over: makeOverEvent({ id: "column:blocked", status: "blocked" }),
+    } as DragOverEvent);
+    await mounted.rerender(
+      <SidebarProvider defaultOpen>
+        <ManagementView threadId={threadId} projectId="project-1" />
+      </SidebarProvider>,
+    );
+
+    latestDndHandlers?.onDragEnd?.({
+      ...active,
+      over: makeOverEvent({ id: "chat-composer" }),
+    } as DragEndEvent);
+
+    await vi.waitFor(() => {
+      expect(ticketingUpdateMock).not.toHaveBeenCalled();
+      expect(ticketingReorderMock).not.toHaveBeenCalled();
+      const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
+      expect(draft?.ticketAttachments).toEqual([
+        {
+          id: alpha.id,
+          identifier: alpha.identifier,
+          title: alpha.title,
+        },
+        {
+          id: beta.id,
+          identifier: beta.identifier,
+          title: beta.title,
+        },
+      ]);
     });
   });
 
