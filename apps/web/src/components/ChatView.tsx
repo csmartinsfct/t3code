@@ -938,7 +938,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeOrchestrationItem = orchestrationSwitcher.visible
     ? (orchestrationSwitcher.items.find((item) => item.isActive) ?? null)
     : null;
+  const activeOrchestrationRun = orchestrationSwitcher.run ?? orchestrationTimeline.run;
   const isReviewOrchestrationChild = activeOrchestrationItem?.kind === "review-thread";
+  const currentOrchestrationTicketLabel = useMemo(() => {
+    if (!isOrchestrationThread || !orchestrationSwitcher.visible || !activeOrchestrationRun) {
+      return null;
+    }
+
+    const workingItems = orchestrationSwitcher.items.filter(
+      (item) => item.kind === "working-thread",
+    );
+    const currentItem = workingItems.at(activeOrchestrationRun.currentTicketIndex);
+    if (!currentItem) {
+      return null;
+    }
+
+    return currentItem.sublabel
+      ? `${currentItem.label} — ${currentItem.sublabel}`
+      : currentItem.label;
+  }, [
+    activeOrchestrationRun,
+    isOrchestrationThread,
+    orchestrationSwitcher.items,
+    orchestrationSwitcher.visible,
+  ]);
   const onSwitchThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/$threadId", params: { threadId } });
@@ -950,42 +973,42 @@ export default function ChatView({ threadId }: ChatViewProps) {
     orchestrationSwitcher.visible &&
     orchestrationSwitcher.items.find((i) => i.isActive)?.isStarted === false;
   const onOrchestrationPause = useCallback(() => {
-    if (!orchestrationTimeline.run) return;
+    if (!activeOrchestrationRun) return;
     logWebTimeline("orchestration.ui.pause", {
-      runId: orchestrationTimeline.run.id,
-      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      runId: activeOrchestrationRun.id,
+      currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
     });
-    void getWsRpcClient().orchestration.pauseRun({ runId: orchestrationTimeline.run.id });
-  }, [orchestrationTimeline.run]);
+    void getWsRpcClient().orchestration.pauseRun({ runId: activeOrchestrationRun.id });
+  }, [activeOrchestrationRun]);
   const onOrchestrationResume = useCallback(() => {
-    if (!orchestrationTimeline.run) return;
+    if (!activeOrchestrationRun) return;
     logWebTimeline("orchestration.ui.resume", {
-      runId: orchestrationTimeline.run.id,
-      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      runId: activeOrchestrationRun.id,
+      currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
       resumeMode: "default",
     });
-    void getWsRpcClient().orchestration.resumeRun({ runId: orchestrationTimeline.run.id });
-  }, [orchestrationTimeline.run]);
+    void getWsRpcClient().orchestration.resumeRun({ runId: activeOrchestrationRun.id });
+  }, [activeOrchestrationRun]);
   const onOrchestrationResumeWithFreshAgent = useCallback(() => {
-    if (!orchestrationTimeline.run) return;
+    if (!activeOrchestrationRun) return;
     logWebTimeline("orchestration.ui.resume", {
-      runId: orchestrationTimeline.run.id,
-      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      runId: activeOrchestrationRun.id,
+      currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
       resumeMode: "fresh-agent",
     });
     void getWsRpcClient().orchestration.resumeRun({
-      runId: orchestrationTimeline.run.id,
+      runId: activeOrchestrationRun.id,
       mode: "fresh-agent",
     });
-  }, [orchestrationTimeline.run]);
+  }, [activeOrchestrationRun]);
   const onOrchestrationCancel = useCallback(() => {
-    if (!orchestrationTimeline.run) return;
+    if (!activeOrchestrationRun) return;
     logWebTimeline("orchestration.ui.cancel", {
-      runId: orchestrationTimeline.run.id,
-      currentTicketIndex: orchestrationTimeline.run.currentTicketIndex,
+      runId: activeOrchestrationRun.id,
+      currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
     });
-    void getWsRpcClient().orchestration.cancelRun({ runId: orchestrationTimeline.run.id });
-  }, [orchestrationTimeline.run]);
+    void getWsRpcClient().orchestration.cancelRun({ runId: activeOrchestrationRun.id });
+  }, [activeOrchestrationRun]);
   const onNavigateToChildThread = useCallback(
     (childThreadId: string) => {
       void navigate({ to: "/$threadId", params: { threadId: childThreadId } });
@@ -4936,22 +4959,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {(isOrchestrationThread || isOrchestrationChild) && activeOrchestrationRun ? (
+            <OrchestrationProgressHeader
+              run={activeOrchestrationRun}
+              currentTicketLabel={isOrchestrationThread ? currentOrchestrationTicketLabel : null}
+              onPause={onOrchestrationPause}
+              onResume={onOrchestrationResume}
+              onResumeWithFreshAgent={onOrchestrationResumeWithFreshAgent}
+              onCancel={onOrchestrationCancel}
+            />
+          ) : null}
           {isOrchestrationThread ? (
             <>
-              <OrchestrationProgressHeader
-                run={orchestrationTimeline.run}
-                currentTicketLabel={(() => {
-                  if (!orchestrationSwitcher.visible || !orchestrationTimeline.run) return null;
-                  const item = orchestrationSwitcher.items
-                    .filter((i) => i.kind === "working-thread")
-                    .at(orchestrationTimeline.run.currentTicketIndex);
-                  return item ? `${item.label} — ${item.sublabel}` : null;
-                })()}
-                onPause={onOrchestrationPause}
-                onResume={onOrchestrationResume}
-                onResumeWithFreshAgent={onOrchestrationResumeWithFreshAgent}
-                onCancel={onOrchestrationCancel}
-              />
               <div className="relative flex min-h-0 flex-1 flex-col">
                 <div
                   ref={setMessagesScrollContainerRef}

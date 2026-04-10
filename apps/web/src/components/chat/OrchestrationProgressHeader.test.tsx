@@ -61,7 +61,7 @@ describe("OrchestrationProgressHeader", () => {
     expect(markup).toContain("1/1");
   });
 
-  it("shows a settings link when automated review is disabled", () => {
+  it("omits the ticket label when none is provided", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationProgressHeader
         run={makeRun({
@@ -75,7 +75,7 @@ describe("OrchestrationProgressHeader", () => {
             },
           ],
         })}
-        currentTicketLabel="ORCH-1 — Fix sidebar"
+        currentTicketLabel={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -83,8 +83,8 @@ describe("OrchestrationProgressHeader", () => {
       />,
     );
 
-    expect(markup).toContain("Automated review disabled. Enable it in settings.");
-    expect(markup).toContain('href="/settings/general#automated-review-cycles"');
+    expect(markup).not.toContain("ORCH-1");
+    expect(markup).not.toContain("Automated review disabled");
   });
 
   it("renders resume split controls when paused", () => {

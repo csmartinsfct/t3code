@@ -121,7 +121,6 @@ export function OrchestrationProgressHeader({
   const currentIndex = run.currentTicketIndex;
   const isTerminal =
     run.status === "completed" || run.status === "failed" || run.status === "canceled";
-  const reviewDisabled = run.maxReviewIterations === 0;
 
   const completedCount = isTerminal
     ? run.status === "completed"
@@ -131,83 +130,75 @@ export function OrchestrationProgressHeader({
 
   return (
     <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 backdrop-blur-sm sm:px-5 py-2">
-      <div className="mx-auto flex max-w-3xl items-center gap-2.5">
-        {/* Status badge */}
-        <Badge variant={badge.variant} size="sm">
-          {badge.icon}
-          {badge.label}
-        </Badge>
+      <div className="mx-auto grid max-w-3xl grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+        <div className="min-w-0">
+          <Badge variant={badge.variant} size="sm">
+            {badge.icon}
+            {badge.label}
+          </Badge>
+        </div>
 
-        {/* Current ticket — truncates or hides when space is tight */}
-        {currentTicketLabel && !isTerminal && (
-          <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block">
-            {currentTicketLabel}
+        <div className="min-w-0 px-2">
+          {currentTicketLabel && !isTerminal ? (
+            <span className="block truncate text-center text-xs text-muted-foreground">
+              {currentTicketLabel}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="ml-auto flex min-w-0 items-center justify-end gap-2.5">
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {completedCount}/{ticketCount}
           </span>
-        )}
-        {reviewDisabled && !isTerminal && (
-          <a
-            className="hidden shrink-0 text-xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground sm:block"
-            href="/settings/general#automated-review-cycles"
-          >
-            Automated review disabled. Enable it in settings.
-          </a>
-        )}
 
-        <span className="flex-1" />
-
-        {/* Ticket progress counter */}
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {completedCount}/{ticketCount}
-        </span>
-
-        {/* Action buttons */}
-        {run.status === "running" && (
-          <div className="flex items-center gap-1.5">
-            <Button type="button" size="xs" variant="outline" onClick={onPause}>
-              <PauseIcon className="size-3" />
-              Pause
-            </Button>
-            <Button type="button" size="xs" variant="outline" onClick={onCancel}>
-              <XIcon className="size-3" />
-              Cancel
-            </Button>
-          </div>
-        )}
-        {run.status === "paused" && (
-          <div className="flex items-center gap-1.5">
-            <Group aria-label="Orchestration resume actions">
-              <Button type="button" size="xs" variant="outline" onClick={onResume}>
-                <PlayIcon className="size-3" />
-                Resume
+          {run.status === "running" && (
+            <div className="flex items-center gap-1.5">
+              <Button type="button" size="xs" variant="outline" onClick={onPause}>
+                <PauseIcon className="size-3" />
+                Pause
               </Button>
-              <GroupSeparator />
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      aria-label="Resume options"
-                      size="icon-xs"
-                      type="button"
-                      variant="outline"
-                    />
-                  }
-                >
-                  <ChevronDownIcon aria-hidden="true" className="size-4" />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem onClick={onResumeWithFreshAgent}>
-                    <PlayIcon className="size-3.5" />
-                    Resume with fresh agent
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            </Group>
-            <Button type="button" size="xs" variant="outline" onClick={onCancel}>
-              <XIcon className="size-3" />
-              Cancel
-            </Button>
-          </div>
-        )}
+              <Button type="button" size="xs" variant="outline" onClick={onCancel}>
+                <XIcon className="size-3" />
+                Cancel
+              </Button>
+            </div>
+          )}
+          {run.status === "paused" && (
+            <div className="flex items-center gap-1.5">
+              <Group aria-label="Orchestration resume actions">
+                <Button type="button" size="xs" variant="outline" onClick={onResume}>
+                  <PlayIcon className="size-3" />
+                  Resume
+                </Button>
+                <GroupSeparator />
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <Button
+                        aria-label="Resume options"
+                        size="icon-xs"
+                        type="button"
+                        variant="outline"
+                      />
+                    }
+                  >
+                    <ChevronDownIcon aria-hidden="true" className="size-4" />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    <MenuItem onClick={onResumeWithFreshAgent}>
+                      <PlayIcon className="size-3.5" />
+                      Resume with fresh agent
+                    </MenuItem>
+                  </MenuPopup>
+                </Menu>
+              </Group>
+              <Button type="button" size="xs" variant="outline" onClick={onCancel}>
+                <XIcon className="size-3" />
+                Cancel
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Segmented progress bar */}

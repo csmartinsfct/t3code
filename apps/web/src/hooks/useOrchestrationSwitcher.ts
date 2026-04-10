@@ -30,6 +30,7 @@ export interface OrchestrationSwitcherItem {
 
 export interface UseOrchestrationSwitcherReturn {
   visible: boolean;
+  run: OrchestrationRun | null;
   items: OrchestrationSwitcherItem[];
   currentLabel: string;
   loading: boolean;
@@ -37,6 +38,7 @@ export interface UseOrchestrationSwitcherReturn {
 
 const EMPTY: UseOrchestrationSwitcherReturn = {
   visible: false,
+  run: null,
   items: [],
   currentLabel: "",
   loading: false,
@@ -208,6 +210,7 @@ export function useOrchestrationSwitcher(
 
   return {
     visible: true,
+    run,
     items,
     currentLabel,
     loading,
