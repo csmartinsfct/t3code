@@ -4,6 +4,7 @@ import type { Ticket, TicketId, TicketSummary } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import { dispatchModifiedClick, findButtonByText } from "~/test-utils/browser";
 
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
@@ -192,33 +193,6 @@ async function mountPreviewHarness(input: {
   };
 }
 
-function dispatchModifiedClick(
-  element: HTMLButtonElement,
-  modifiers: { altKey?: boolean; shiftKey?: boolean },
-) {
-  const eventInit: MouseEventInit = {
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    ...modifiers,
-  };
-  element.dispatchEvent(new PointerEvent("pointerdown", eventInit));
-  element.dispatchEvent(new MouseEvent("mousedown", eventInit));
-  element.dispatchEvent(new PointerEvent("pointerup", eventInit));
-  element.dispatchEvent(new MouseEvent("mouseup", eventInit));
-  element.dispatchEvent(new MouseEvent("click", eventInit));
-}
-
-function findButtonByText(host: HTMLElement, text: string): HTMLButtonElement {
-  const button = [...host.querySelectorAll("button")].find((candidate) =>
-    candidate.textContent?.includes(text),
-  );
-  if (!(button instanceof HTMLButtonElement)) {
-    throw new Error(`Unable to find button containing "${text}"`);
-  }
-  return button;
-}
-
 describe("KanbanTicketDetail sub-ticket preview", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -339,10 +313,6 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
     await using interaction = {
       host: interactionHost,
-      cleanup: async () => {
-        await interactionScreen.unmount();
-        interactionHost.remove();
-      },
       [Symbol.asyncDispose]: async () => {
         await interactionScreen.unmount();
         interactionHost.remove();
@@ -376,10 +346,6 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
     );
 
     await using _dragSurface = {
-      cleanup: async () => {
-        await dragScreen.unmount();
-        dragHost.remove();
-      },
       [Symbol.asyncDispose]: async () => {
         await dragScreen.unmount();
         dragHost.remove();

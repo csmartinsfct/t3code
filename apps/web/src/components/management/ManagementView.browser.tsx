@@ -11,6 +11,7 @@ import { render } from "vitest-browser-react";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { __resetNativeApiForTests } from "~/nativeApi";
 import { useStore } from "~/store";
+import { findButtonByText } from "~/test-utils/browser";
 import { useTicketSelectionStore } from "~/ticketSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { SidebarProvider } from "../ui/sidebar";
@@ -298,16 +299,6 @@ async function mountManagementView(input: { threadId: ThreadId | null; projectId
     rerender: screen.rerender,
     [Symbol.asyncDispose]: cleanup,
   };
-}
-
-function findButtonByText(host: HTMLElement, text: string): HTMLButtonElement {
-  const button = [...host.querySelectorAll("button")].find((candidate) =>
-    candidate.textContent?.includes(text),
-  );
-  if (!(button instanceof HTMLButtonElement)) {
-    throw new Error(`Unable to find button containing "${text}"`);
-  }
-  return button;
 }
 
 function makeActiveEvent(ticket: TicketSummary): DragStartEvent {
