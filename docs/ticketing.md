@@ -113,6 +113,8 @@ Ticket {
 }
 ```
 
+Promoting a sub-ticket back to a top-level board ticket is modeled as a normal ticket update with `parentId: null`. That promotion preserves the ticket's existing status and sort order unless a separate update changes them.
+
 ---
 
 ## Business Logic

@@ -150,6 +150,15 @@ Board state itself is **not** owned by `useTicketing`. `KanbanBoard` reads ticke
 - switching threads changes the restored board context even inside the same project
 - invalid stored context is sanitized against the current project's ticket list before detail renders
 
+### Sub-ticket Promotion
+
+The ticket detail view supports promoting sub-tickets to top-level board tickets without changing the current route or board context:
+
+- the hamburger menu shows `Move to board` when the currently opened ticket is a sub-ticket
+- sub-ticket rows inside a parent ticket support a right-click context menu for `Move to board`
+- when multiple sub-tickets are selected, right-clicking one of the selected rows offers `Move all tickets to the board`
+- promoting a sub-ticket removes its `parentId`, keeps its current status, refreshes the current detail view in place, and lets the normal ticket stream update the rest of the board
+
 ### Sort Order Strategy
 
 After `arrayMove`, sort orders are reassigned as `index * 1000` for each ticket in the affected column. This gives clean integer ordering with room for future insertions.
