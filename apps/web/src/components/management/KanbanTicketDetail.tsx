@@ -45,9 +45,21 @@ import {
 } from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { useSettings } from "../../hooks/useSettings";
@@ -104,7 +116,9 @@ export function KanbanTicketDetail({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
+  const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(
+    null
+  );
   const ticketRef = useRef<Ticket | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
@@ -123,22 +137,24 @@ export function KanbanTicketDetail({
       resolveAppModelSelectionState(
         {
           ...settings,
-          textGenerationModelSelection: settings.orchestrationImplementerModelSelection,
+          textGenerationModelSelection:
+            settings.orchestrationImplementerModelSelection,
         },
-        serverProviders,
+        serverProviders
       ),
-    [settings, serverProviders],
+    [settings, serverProviders]
   );
   const resolvedGlobalReviewer = useMemo(
     () =>
       resolveAppModelSelectionState(
         {
           ...settings,
-          textGenerationModelSelection: settings.orchestrationReviewerModelSelection,
+          textGenerationModelSelection:
+            settings.orchestrationReviewerModelSelection,
         },
-        serverProviders,
+        serverProviders
       ),
-    [settings, serverProviders],
+    [settings, serverProviders]
   );
   const reviewerSettingsLinkProps =
     settings.maxReviewIterations === 0
@@ -152,7 +168,10 @@ export function KanbanTicketDetail({
     try {
       const api = ensureNativeApi();
       const [data, relatedThreads] = await Promise.all([
-        api.ticketing.getById({ id: ticketId, projectId: projectId as ProjectId }),
+        api.ticketing.getById({
+          id: ticketId,
+          projectId: projectId as ProjectId,
+        }),
         api.ticketing.getThreadLinks({ ticketId }),
       ]);
       ticketRef.current = data;
@@ -192,12 +211,17 @@ export function KanbanTicketDetail({
         } else {
           // A dependency ticket was updated
           const current = ticketRef.current;
-          if (current?.dependencies.some((d) => d.dependsOnTicketId === event.ticket.id)) {
+          if (
+            current?.dependencies.some(
+              (d) => d.dependsOnTicketId === event.ticket.id
+            )
+          ) {
             void fetchTicket();
           }
         }
       } else if (
-        (event.type === "comment_upserted" || event.type === "comment_deleted") &&
+        (event.type === "comment_upserted" ||
+          event.type === "comment_deleted") &&
         event.ticketId === ticketId
       ) {
         void fetchTicket();
@@ -223,7 +247,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update status:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handlePriorityChange = useCallback(
@@ -237,7 +261,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update priority:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleTitleSave = useCallback(async () => {
@@ -339,7 +363,7 @@ export function KanbanTicketDetail({
   const handleModelOverrideChange = useCallback(
     async (
       field: "implementerModelOverride" | "reviewerModelOverride",
-      value: ModelSelection | null,
+      value: ModelSelection | null
     ) => {
       const previous = ticketRef.current;
       if (previous) {
@@ -363,7 +387,7 @@ export function KanbanTicketDetail({
         }
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleDelete = useCallback(async () => {
@@ -379,7 +403,8 @@ export function KanbanTicketDetail({
   const navigate = useNavigate();
   const routeThreadId = useParams({
     strict: false,
-    select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
+    select: (params) =>
+      params.threadId ? (params.threadId as ThreadId) : null,
   });
 
   const handleDecompose = useCallback(() => {
@@ -501,7 +526,10 @@ export function KanbanTicketDetail({
                   Decompose
                 </MenuItem>
                 <MenuSeparator />
-                <MenuItem variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+                <MenuItem
+                  variant="destructive"
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
                   <TrashIcon className="size-3.5" />
                   Delete
                 </MenuItem>
@@ -541,17 +569,27 @@ export function KanbanTicketDetail({
 
             <Select
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
+              onValueChange={(v) =>
+                void handlePriorityChange(v as TicketPriority)
+              }
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <div className={`size-2 rounded-full ${priorityCfg.dotClass}`} />
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-1.5 px-1.5 py-1"
+              >
+                <div
+                  className={`size-2 rounded-full ${priorityCfg.dotClass}`}
+                />
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
                 {ALL_PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <div className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`} />
+                      <div
+                        className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`}
+                      />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -567,8 +605,10 @@ export function KanbanTicketDetail({
         </div>
 
         {/* Description */}
-        <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-          <p className="text-[11px] font-medium text-muted-foreground">Description</p>
+        <div className="rounded-md px-3 py-2">
+          <p className="text-[11px] font-medium text-muted-foreground">
+            Description
+          </p>
           {editingDescription ? (
             <textarea
               className="mt-0.5 w-full resize-y bg-transparent font-[inherit]! text-xs leading-relaxed text-foreground outline-none"
@@ -632,7 +672,9 @@ export function KanbanTicketDetail({
         {/* Labels */}
         {ticket.labels.length > 0 && (
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Labels
+            </h3>
             <div className="flex flex-wrap gap-1.5">
               {ticket.labels.map((label) => (
                 <span
@@ -669,8 +711,12 @@ export function KanbanTicketDetail({
                     <Badge size="sm" variant={depStatusCfg.badgeVariant}>
                       {depStatusCfg.label}
                     </Badge>
-                    <span className="shrink-0 text-muted-foreground">{dep.identifier}</span>
-                    <span className="truncate text-foreground">{dep.title}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {dep.identifier}
+                    </span>
+                    <span className="truncate text-foreground">
+                      {dep.title}
+                    </span>
                   </button>
                 );
               })}
@@ -680,7 +726,9 @@ export function KanbanTicketDetail({
 
         {/* Worktree */}
         <div className="flex flex-col gap-2">
-          <h3 className="text-xs font-medium text-muted-foreground">Worktree</h3>
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Worktree
+          </h3>
           <input
             type="text"
             className={`w-full cursor-text bg-transparent font-[inherit]! text-xs outline-none ${
@@ -688,7 +736,7 @@ export function KanbanTicketDetail({
                 ? "text-foreground"
                 : "italic text-muted-foreground/60"
             }`}
-            value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
+            value={editingWorktree ? worktreeDraft : ticket.worktree ?? ""}
             placeholder="No worktree specified"
             onFocus={() => {
               setWorktreeDraft(ticket.worktree ?? "");
@@ -716,14 +764,18 @@ export function KanbanTicketDetail({
           />
         </div>
 
-        {(threadLinks?.originThread || (threadLinks?.relatedThreads.length ?? 0) > 0) && (
+        {(threadLinks?.originThread ||
+          (threadLinks?.relatedThreads.length ?? 0) > 0) && (
           <div className="flex flex-col gap-4">
             {threadLinks?.originThread && (
               <ThreadLinkSection
                 title="Origin Thread"
                 threads={[threadLinks.originThread]}
                 onOpenThread={(nextThreadId) =>
-                  void navigate({ to: "/$threadId", params: { threadId: nextThreadId } })
+                  void navigate({
+                    to: "/$threadId",
+                    params: { threadId: nextThreadId },
+                  })
                 }
               />
             )}
@@ -732,7 +784,10 @@ export function KanbanTicketDetail({
                 title="Related Threads"
                 threads={threadLinks?.relatedThreads ?? []}
                 onOpenThread={(nextThreadId) =>
-                  void navigate({ to: "/$threadId", params: { threadId: nextThreadId } })
+                  void navigate({
+                    to: "/$threadId",
+                    params: { threadId: nextThreadId },
+                  })
                 }
               />
             )}
@@ -746,7 +801,9 @@ export function KanbanTicketDetail({
           globalDefault={resolvedGlobalImplementer}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) => void handleModelOverrideChange("implementerModelOverride", value)}
+          onChange={(value) =>
+            void handleModelOverrideChange("implementerModelOverride", value)
+          }
         />
         <ModelOverrideRow
           label="Reviewer"
@@ -755,7 +812,9 @@ export function KanbanTicketDetail({
           {...reviewerSettingsLinkProps}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) => void handleModelOverrideChange("reviewerModelOverride", value)}
+          onChange={(value) =>
+            void handleModelOverrideChange("reviewerModelOverride", value)
+          }
         />
 
         {/* Sub-tickets */}
@@ -784,8 +843,8 @@ export function KanbanTicketDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
+              This will permanently delete "{ticket.identifier}: {ticket.title}"
+              and all its data. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -794,7 +853,11 @@ export function KanbanTicketDetail({
                 Cancel
               </Button>
             </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+            >
               Delete
             </Button>
           </AlertDialogFooter>
@@ -869,7 +932,9 @@ function ThreadLinkSection({
   );
 }
 
-function formatThreadLinkSource(source: "origin" | "bound" | "mention"): string {
+function formatThreadLinkSource(
+  source: "origin" | "bound" | "mention"
+): string {
   switch (source) {
     case "origin":
       return "Origin";
@@ -911,7 +976,7 @@ function SubTicketsList({
         return;
       }
     },
-    [toggleTicket, rangeSelectTo, subTickets],
+    [toggleTicket, rangeSelectTo, subTickets]
   );
 
   // Hover-preview cache scoped to this list's lifetime
@@ -948,7 +1013,7 @@ function SubTicketsList({
       inflightRef.current.set(key, promise);
       return promise;
     },
-    [projectId],
+    [projectId]
   );
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
@@ -1013,7 +1078,9 @@ function DraggableSubTicket({
             type="button"
             data-ticket-selectable
             className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-              isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+              isSelected
+                ? "bg-primary/5 ring-1.5 ring-primary/40"
+                : "hover:bg-accent/30"
             } ${isDragging ? "opacity-40" : ""}`}
             onClick={(e) => {
               if (e.altKey || e.metaKey || e.shiftKey) {
@@ -1096,9 +1163,10 @@ function ModelOverrideRow({
     settings,
     serverProviders,
     effectiveProvider,
-    effective.model,
+    effective.model
   );
-  const models = serverProviders.find((p) => p.provider === effectiveProvider)?.models ?? [];
+  const models =
+    serverProviders.find((p) => p.provider === effectiveProvider)?.models ?? [];
 
   return (
     <div className="flex flex-col gap-2">
@@ -1123,7 +1191,9 @@ function ModelOverrideRow({
           providers={serverProviders}
           modelOptionsByProvider={optionsByProvider}
           triggerVariant="ghost"
-          triggerClassName={`h-6 text-[11px] px-1.5 ${hasOverride ? "text-foreground" : "text-muted-foreground"}`}
+          triggerClassName={`h-6 text-[11px] px-1.5 ${
+            hasOverride ? "text-foreground" : "text-muted-foreground"
+          }`}
           onProviderModelChange={(provider, model) => {
             onChange(makeAppModelSelection(provider, model));
           }}
@@ -1137,7 +1207,9 @@ function ModelOverrideRow({
           modelOptions={(effective as Record<string, unknown>).options as never}
           allowPromptInjectedEffort={false}
           triggerVariant="ghost"
-          triggerClassName={`h-6 text-[11px] px-1.5 ${hasOverride ? "text-foreground" : "text-muted-foreground"}`}
+          triggerClassName={`h-6 text-[11px] px-1.5 ${
+            hasOverride ? "text-foreground" : "text-muted-foreground"
+          }`}
           onModelOptionsChange={(nextOptions) => {
             onChange({
               ...effective,
