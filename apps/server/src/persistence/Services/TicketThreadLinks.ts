@@ -42,6 +42,7 @@ export type DeleteTicketThreadLinksByMessageIdInput =
 
 export const ListTicketThreadLinksByTicketInput = Schema.Struct({
   ticketId: TicketId,
+  linkTypes: Schema.optional(Schema.Array(TicketThreadLinkType)),
 });
 export type ListTicketThreadLinksByTicketInput = typeof ListTicketThreadLinksByTicketInput.Type;
 

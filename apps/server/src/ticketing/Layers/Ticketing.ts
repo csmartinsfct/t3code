@@ -18,7 +18,6 @@ import {
   type TicketLinkedThread,
   type TicketSummary,
   type TicketThreadLinks,
-  type TicketThreadLinkType,
   type TicketTreeNode,
   type TicketingError,
   type TicketingStreamEvent,
@@ -166,12 +165,6 @@ const makeTicketingService = Effect.gen(function* () {
       } satisfies Ticket;
     }).pipe(Effect.mapError(toOperationError("buildFullTicket")));
 
-  const TICKET_THREAD_LINK_SOURCE_ORDER: ReadonlyArray<TicketThreadLinkType> = [
-    "origin",
-    "bound",
-    "mention",
-  ];
-
   const toLinkedThread = (
     rows: ReadonlyArray<TicketThreadLinkLookupRow>,
   ): TicketLinkedThread | null => {
@@ -179,14 +172,12 @@ const makeTicketingService = Effect.gen(function* () {
     if (!firstRow || firstRow.threadDeletedAt !== null) {
       return null;
     }
-    const uniqueSources = new Set(rows.map((row) => row.linkType));
-    const sources = TICKET_THREAD_LINK_SOURCE_ORDER.filter((source) =>
-      uniqueSources.has(source),
-    ) as TicketThreadLinkType[];
-    const lastRelatedAt = rows.reduce(
-      (latest, row) => (row.updatedAt > latest ? row.updatedAt : latest),
-      firstRow.updatedAt,
-    );
+    const earliestOriginRow = rows
+      .filter((row) => row.linkType === "origin")
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+    if (!earliestOriginRow) {
+      return null;
+    }
 
     return {
       threadId: firstRow.threadId,
@@ -196,15 +187,9 @@ const makeTicketingService = Effect.gen(function* () {
       archivedAt: firstRow.threadArchivedAt,
       isOrchestrationThread: firstRow.isOrchestrationThread,
       parentThreadId: firstRow.parentThreadId,
-      sources,
-      lastRelatedAt,
+      linkedAt: earliestOriginRow.createdAt,
     };
   };
-
-  const compareLinkedThreads = (left: TicketLinkedThread, right: TicketLinkedThread): number =>
-    right.lastRelatedAt.localeCompare(left.lastRelatedAt) ||
-    right.updatedAt.localeCompare(left.updatedAt) ||
-    left.threadId.localeCompare(right.threadId);
 
   /** Re-publish a parent ticket's summary so clients see updated subTicketCount. */
   const notifyParent = (parentId: TicketId): Effect.Effect<void, TicketingError> =>
@@ -352,7 +337,7 @@ const makeTicketingService = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* resolveTicketOrFail(input.ticketId);
       const rows = yield* ticketThreadLinkRepository
-        .listByTicketId({ ticketId: input.ticketId })
+        .listByTicketId({ ticketId: input.ticketId, linkTypes: ["origin"] })
         .pipe(Effect.mapError(toOperationError("getThreadLinks")));
 
       const rowsByThreadId = new Map<string, TicketThreadLinkLookupRow[]>();
@@ -387,23 +372,10 @@ const makeTicketingService = Effect.gen(function* () {
       const originThread = selectedOriginThreadId
         ? toLinkedThread(rowsByThreadId.get(selectedOriginThreadId) ?? [])
         : null;
-      const relatedThreads: TicketLinkedThread[] = [];
-
-      for (const threadRows of rowsByThreadId.values()) {
-        const linkedThread = toLinkedThread(threadRows);
-        if (linkedThread === null) continue;
-        if (linkedThread.threadId === selectedOriginThreadId) {
-          continue;
-        }
-        relatedThreads.push(linkedThread);
-      }
 
       return {
         ticketId: input.ticketId,
         originThread,
-        relatedThreads: relatedThreads
-          .filter((thread) => thread.threadId !== originThread?.threadId)
-          .toSorted(compareLinkedThreads),
       } satisfies TicketThreadLinks;
     });
 

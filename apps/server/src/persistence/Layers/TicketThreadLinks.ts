@@ -65,7 +65,7 @@ const makeTicketThreadLinkRepository = Effect.gen(function* () {
   const listLinksByTicketIdRows = SqlSchema.findAll({
     Request: ListTicketThreadLinksByTicketInput,
     Result: TicketThreadLinkLookupRowDbSchema,
-    execute: ({ ticketId }) =>
+    execute: ({ ticketId, linkTypes }) =>
       sql`
         SELECT
           links.ticket_id AS "ticketId",
@@ -84,6 +84,11 @@ const makeTicketThreadLinkRepository = Effect.gen(function* () {
         FROM ticket_thread_links links
         INNER JOIN projection_threads threads ON threads.thread_id = links.thread_id
         WHERE links.ticket_id = ${ticketId}
+          ${
+            linkTypes && linkTypes.length > 0
+              ? sql`AND links.link_type IN ${sql.in(linkTypes)}`
+              : sql``
+          }
         ORDER BY links.updated_at DESC, links.created_at DESC, links.thread_id ASC
       `,
   });

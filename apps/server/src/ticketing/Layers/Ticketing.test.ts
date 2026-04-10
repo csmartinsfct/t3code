@@ -136,7 +136,7 @@ TicketingTestLayer("TicketingService", (it) => {
     }),
   );
 
-  it.effect("separates origin threads from related threads and hides deleted threads", () =>
+  it.effect("returns only the archived origin thread and ignores non-origin links", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.makeUnsafe("project-links");
       const originThreadId = ThreadId.makeUnsafe("thread-origin-links");
@@ -188,18 +188,36 @@ TicketingTestLayer("TicketingService", (it) => {
 
       assert.strictEqual(result.originThread?.threadId, originThreadId);
       assert.strictEqual(result.originThread?.archivedAt, "2026-04-09T10:30:00.000Z");
-      assert.deepStrictEqual(
-        result.relatedThreads.map((thread) => ({
-          threadId: thread.threadId,
-          sources: thread.sources,
-        })),
-        [
-          {
-            threadId: relatedThreadId,
-            sources: ["bound", "mention"],
-          },
-        ],
-      );
+      assert.strictEqual(result.originThread?.linkedAt, ticket.createdAt);
+      assert.ok(!("relatedThreads" in result));
+    }),
+  );
+
+  it.effect("omits deleted origin threads from thread links", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-deleted-origin");
+      const deletedOriginThreadId = ThreadId.makeUnsafe("thread-deleted-origin");
+      const ticketing = yield* TicketingService;
+
+      yield* seedProject(projectId, "Deleted origin project");
+      yield* seedThread({ threadId: deletedOriginThreadId, projectId });
+
+      const ticket = yield* ticketing.create({
+        projectId,
+        originThreadId: deletedOriginThreadId,
+        title: "Deleted origin ticket",
+      });
+
+      yield* seedThread({
+        threadId: deletedOriginThreadId,
+        projectId,
+        deletedAt: "2026-04-09T10:30:00.000Z",
+      });
+
+      const result = yield* ticketing.getThreadLinks({ ticketId: ticket.id });
+
+      assert.strictEqual(result.originThread, null);
+      assert.ok(!("relatedThreads" in result));
     }),
   );
 });

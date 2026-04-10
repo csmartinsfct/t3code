@@ -80,7 +80,7 @@ Tickets can be linked to threads in three ways:
 - `mention`
   A user or assistant message in the thread contains the canonical ticket identifier, case-insensitively.
 
-`mention` links are stored per message so the projection pipeline can reconcile them during streaming updates and remove them when messages are deleted. Ticket detail queries aggregate multiple rows back into a single linked-thread entry with source badges and a `lastRelatedAt` timestamp.
+`mention` links are stored per message so the projection pipeline can reconcile them during streaming updates and remove them when messages are deleted. Ticket detail queries currently read only the origin-thread link and show its origin-link timestamp inline.
 
 ---
 
@@ -284,7 +284,7 @@ All ticket operations are exposed as WebSocket RPC methods under the `ticketing.
 Relationship reads use a dedicated RPC:
 
 - `ticketing.getThreadLinks({ ticketId })`
-  Returns `{ ticketId, originThread, relatedThreads }` without inflating the core `Ticket` payload.
+  Returns `{ ticketId, originThread }` without inflating the core `Ticket` payload.
 
 ### Stream Events
 
@@ -319,24 +319,22 @@ Relationship reads use a dedicated RPC:
 | `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata              |
 | `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                |
 | `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                     |
-| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with origin/related thread sections    |
+| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with origin-thread section             |
+| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                |
 
 ### Ticket Detail Thread Sections
 
-The ticket detail panel shows two thread relationship sections when data exists:
+The ticket detail panel shows a single thread relationship section when data exists:
 
 - `Origin Thread`
   The single thread that created the ticket, if any.
-- `Related Threads`
-  Other threads connected through explicit binding or canonical identifier mentions.
 
 Behavior:
 
 - archived threads stay visible and show an `Archived` badge
 - deleted threads are filtered out at read time
-- repeated mentions from the same thread are deduped into one row
-- source badges render as `Origin`, `Ticket thread`, and `Mentioned`
-  | `ticketUtils` | `ticketUtils.ts` | Status/priority color maps, date formatters |
+- the row can also show a `Review` badge when the origin thread is an orchestration/review thread
+- the inline timestamp reflects the origin-link time, not the thread's own update time
 
 ### Data Hook
 

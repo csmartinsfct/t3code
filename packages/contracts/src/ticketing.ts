@@ -227,15 +227,13 @@ export const TicketLinkedThread = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime),
   isOrchestrationThread: Schema.Boolean,
   parentThreadId: Schema.NullOr(ThreadId),
-  sources: Schema.Array(TicketThreadLinkType),
-  lastRelatedAt: IsoDateTime,
+  linkedAt: IsoDateTime,
 });
 export type TicketLinkedThread = typeof TicketLinkedThread.Type;
 
 export const TicketThreadLinks = Schema.Struct({
   ticketId: TicketId,
   originThread: Schema.NullOr(TicketLinkedThread),
-  relatedThreads: Schema.Array(TicketLinkedThread),
 });
 export type TicketThreadLinks = typeof TicketThreadLinks.Type;
 

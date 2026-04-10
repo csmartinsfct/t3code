@@ -120,7 +120,7 @@ const seedTicket = (input: {
   });
 
 layer("TicketThreadLinkRepository", (it) => {
-  it.effect("stores structured and mention links and can list them by ticket", () =>
+  it.effect("stores thread links and can filter ticket reads by link type", () =>
     Effect.gen(function* () {
       const repository = yield* TicketThreadLinkRepository;
       const projectId = ProjectId.makeUnsafe("project-ticket-thread-links");
@@ -137,6 +137,12 @@ layer("TicketThreadLinkRepository", (it) => {
         title: "Alpha link target",
       });
 
+      yield* repository.upsertStructuredLink({
+        ticketId,
+        threadId,
+        linkType: "origin",
+        occurredAt: "2026-04-09T10:40:00.000Z",
+      });
       yield* repository.upsertStructuredLink({
         ticketId,
         threadId,
@@ -171,6 +177,31 @@ layer("TicketThreadLinkRepository", (it) => {
             linkType: "bound",
             sourceMessageId: "",
             archivedAt: "2026-04-09T10:30:00.000Z",
+          },
+          {
+            threadId,
+            linkType: "origin",
+            sourceMessageId: "",
+            archivedAt: "2026-04-09T10:30:00.000Z",
+          },
+        ],
+      );
+
+      const originRows = yield* repository.listByTicketId({
+        ticketId,
+        linkTypes: ["origin"],
+      });
+      assert.deepStrictEqual(
+        originRows.map((row) => ({
+          threadId: row.threadId,
+          linkType: row.linkType,
+          sourceMessageId: row.sourceMessageId,
+        })),
+        [
+          {
+            threadId,
+            linkType: "origin",
+            sourceMessageId: "",
           },
         ],
       );
