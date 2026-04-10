@@ -8,6 +8,7 @@ export type OrchestrationPromptGroupId = typeof OrchestrationPromptGroupId.Type;
 export const ORCHESTRATION_PROMPT_IDS = [
   "implement",
   "resume",
+  "resumeFreshAgent",
   "review",
   "reviewFeedback",
 ] as const;
@@ -17,6 +18,7 @@ export const OrchestrationPromptId = Schema.Literals(ORCHESTRATION_PROMPT_IDS);
 export const OrchestrationPromptOverrides = Schema.Struct({
   implement: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   resume: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+  resumeFreshAgent: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   review: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   reviewFeedback: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
 }).pipe(Schema.withDecodingDefault(() => ({})));
@@ -25,6 +27,7 @@ export type OrchestrationPromptOverrides = typeof OrchestrationPromptOverrides.T
 export const OrchestrationPromptOverridesPatch = Schema.Struct({
   implement: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   resume: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+  resumeFreshAgent: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   review: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   reviewFeedback: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
 }).pipe(Schema.withDecodingDefault(() => ({})));
@@ -131,6 +134,23 @@ export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
       {
         when: null,
         text: "Continue.",
+      },
+    ],
+  },
+  resumeFreshAgent: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "Work on ticket ${ticketTitle} - ${ticketId}. You are taking over this ticket with a fresh agent session, and prior work may already exist in the workspace or thread history.",
+      },
+      {
+        when: { type: "exists", variable: "worktree" },
+        text: " Worktree: ${worktree}.",
+      },
+      {
+        when: null,
+        text: " First inspect the current workspace state and determine what remains. Do not overwrite unrelated changes or assume the earlier agent finished correctly. Pull the ticket details and any other context you need yourself. If you get blocked, update the ticket status to blocked and stop. Try to complete the acceptance criteria mentioned in the ticket, if defined. Otherwise try to comply with the specifications in the ticket.",
       },
     ],
   },

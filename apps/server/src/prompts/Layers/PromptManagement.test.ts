@@ -83,6 +83,26 @@ function makePromptManagementLayer(options?: {
 }
 
 describe("PromptManagementLive", () => {
+  it("lists resumeFreshAgent as an orchestration prompt definition", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const promptManagement = yield* PromptManagementService;
+        return yield* promptManagement.listPromptDefinitions({
+          scope: "global",
+        });
+      }).pipe(Effect.provide(makePromptManagementLayer())),
+    );
+
+    expect(
+      result.definitions.find((definition) => definition.promptId === "resumeFreshAgent"),
+    ).toMatchObject({
+      groupId: "orchestration",
+      promptId: "resumeFreshAgent",
+      label: "Resume Fresh Agent",
+      description: expect.stringContaining("fresh agent session"),
+    });
+  });
+
   it("returns effective project override state with global fallback metadata", async () => {
     const globalDocument = {
       version: 1,

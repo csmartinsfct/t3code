@@ -287,6 +287,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           DEFAULT_SERVER_SETTINGS.prompts.orchestration.resume,
         );
         assert.deepEqual(
+          next.prompts.orchestration.resumeFreshAgent,
+          DEFAULT_SERVER_SETTINGS.prompts.orchestration.resumeFreshAgent,
+        );
+        assert.deepEqual(
           next.promptDefaults.orchestration,
           DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration,
         );

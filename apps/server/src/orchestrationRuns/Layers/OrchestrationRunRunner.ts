@@ -6,6 +6,7 @@ import type {
   OrchestrationProject,
   OrchestrationRun,
   OrchestrationRunId,
+  OrchestrationResumeRunMode,
   OrchestrationThread,
   ProviderRuntimeEvent,
   PromptTemplateDocument,
@@ -610,7 +611,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             cause,
           });
 
-    type DispatchWorkTurnMode = "start" | "resume" | "feedback";
+    type DispatchWorkTurnMode = "start" | "resume" | "resumeFreshAgent" | "feedback";
 
     /**
      * Dispatch the next work turn for a ticket on its working thread.
@@ -628,6 +629,24 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             return renderValidatedPromptDocument({
               promptId: "resume",
               promptDocument: prompts.resume,
+              context: {
+                ticket: input.ticket,
+                project,
+              },
+            }).pipe(
+              Effect.flatMap((text) =>
+                dispatchThreadTurn({
+                  threadId: input.workingThreadId,
+                  text,
+                }),
+              ),
+            );
+          }
+
+          if (input.mode === "resumeFreshAgent") {
+            return renderValidatedPromptDocument({
+              promptId: "resumeFreshAgent",
+              promptDocument: prompts.resumeFreshAgent,
               context: {
                 ticket: input.ticket,
                 project,
@@ -1017,11 +1036,13 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       options?: {
         readonly isResume?: boolean;
         readonly resumeCurrentTicketIndex?: number | null;
+        readonly resumeMode?: OrchestrationResumeRunMode;
       },
     ) =>
       Effect.gen(function* () {
         const isResume = options?.isResume ?? false;
         const resumeCurrentTicketIndex = options?.resumeCurrentTicketIndex ?? null;
+        const resumeMode = options?.resumeMode ?? "default";
         // 1. Load run and parse ticket order
         const run = yield* withRunService((runService) => runService.get({ runId }));
         const ticketOrder = run.ticketOrder;
@@ -1125,11 +1146,15 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             let reviewIteration = shouldResumeExistingTicket ? currentRun.reviewIteration : 0;
             let nextWorkMode: DispatchWorkTurnMode =
               shouldResumeExistingTicket && currentRun.currentPhase === "working"
-                ? "resume"
+                ? resumeMode === "fresh-agent"
+                  ? "resumeFreshAgent"
+                  : "resume"
                 : "start";
             let pendingReviewFeedback: ReviewOutput | undefined;
             let resumeReviewTurn =
               shouldResumeExistingTicket && currentRun.currentPhase === "reviewing";
+            const shouldRestartReviewWithFreshAgent =
+              resumeReviewTurn && resumeMode === "fresh-agent";
 
             // 4c. Post ticket-started activity for fresh ticket dispatches only.
             if (!shouldResumeExistingTicket) {
@@ -1341,46 +1366,48 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
               const reviewOutcome = yield* runChildTurn({
                 threadId: reviewThreadId,
-                dispatch: resumeReviewTurn
-                  ? getResolvedProjectPromptContext(run.projectId).pipe(
-                      Effect.flatMap(({ project, prompts }) =>
-                        renderValidatedPromptDocument({
-                          promptId: "resume",
-                          promptDocument: prompts.resume,
-                          context: {
-                            ticket,
-                            project,
-                          },
-                        }).pipe(
-                          Effect.flatMap((text) =>
-                            dispatchThreadTurn({
-                              threadId: reviewThreadId,
-                              text,
-                              modelSelection: reviewModelSelection,
-                            }),
+                dispatch:
+                  resumeReviewTurn && !shouldRestartReviewWithFreshAgent
+                    ? getResolvedProjectPromptContext(run.projectId).pipe(
+                        Effect.flatMap(({ project, prompts }) =>
+                          renderValidatedPromptDocument({
+                            promptId: "resume",
+                            promptDocument: prompts.resume,
+                            context: {
+                              ticket,
+                              project,
+                            },
+                          }).pipe(
+                            Effect.flatMap((text) =>
+                              dispatchThreadTurn({
+                                threadId: reviewThreadId,
+                                text,
+                                modelSelection: reviewModelSelection,
+                              }),
+                            ),
                           ),
                         ),
-                      ),
-                      Effect.mapError((cause) =>
-                        wrapDispatchError(
-                          `Failed to resume review turn for ticket ${ticket.identifier}`,
-                          cause,
+                        Effect.mapError((cause) =>
+                          wrapDispatchError(
+                            `Failed to resume review turn for ticket ${ticket.identifier}`,
+                            cause,
+                          ),
                         ),
-                      ),
-                    )
-                  : dispatchReviewTurn({
-                      projectId: run.projectId,
-                      reviewThreadId,
-                      ticket,
-                      workingThreadId,
-                      reviewIteration,
-                      modelSelection: reviewModelSelection,
-                    }),
+                      )
+                    : dispatchReviewTurn({
+                        projectId: run.projectId,
+                        reviewThreadId,
+                        ticket,
+                        workingThreadId,
+                        reviewIteration,
+                        modelSelection: reviewModelSelection,
+                      }),
                 runId,
                 ticketId: entry.ticketId,
                 ticketIdentifier: ticket.identifier,
                 phase: "reviewing",
-                dispatchMode: resumeReviewTurn ? "resume" : "review",
+                dispatchMode:
+                  resumeReviewTurn && !shouldRestartReviewWithFreshAgent ? "resume" : "review",
               });
 
               resumeReviewTurn = false;
@@ -1570,6 +1597,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       options?: {
         readonly isResume?: boolean;
         readonly resumeCurrentTicketIndex?: number | null;
+        readonly resumeMode?: OrchestrationResumeRunMode;
       },
     ) =>
       Effect.gen(function* () {
@@ -1811,6 +1839,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         yield* forkExecutionLoop(input.runId, orchestrationThreadId, resolvedStartIndex, {
           isResume: true,
           resumeCurrentTicketIndex: shouldResumeCurrentTicket ? resolvedStartIndex : null,
+          resumeMode,
         });
 
         return run;

@@ -10,6 +10,13 @@ import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
 import { PromptManagementService, type PromptManagementShape } from "./Services/PromptManagement";
 
 const MCP_ROUTE = "/mcp/prompts";
+const ORCHESTRATION_PROMPT_ID_VALUES = [
+  "implement",
+  "resume",
+  "resumeFreshAgent",
+  "review",
+  "reviewFeedback",
+] as const;
 
 const DEV_BYPASS_TOKEN = process.env.NODE_ENV === "production" ? null : "t3-dev-bypass";
 
@@ -205,9 +212,7 @@ function createPromptsMcpServer(
           .string()
           .optional()
           .describe("Required when scope is 'project'. Omit for global scope."),
-        promptId: z
-          .enum(["implement", "resume", "review", "reviewFeedback"])
-          .describe("Prompt id."),
+        promptId: z.enum(ORCHESTRATION_PROMPT_ID_VALUES).describe("Prompt id."),
       },
     },
     async ({ scope, projectId, promptId }) => {
@@ -238,9 +243,7 @@ function createPromptsMcpServer(
           .string()
           .optional()
           .describe("Required when scope is 'project'. Omit for global scope."),
-        promptId: z
-          .enum(["implement", "resume", "review", "reviewFeedback"])
-          .describe("Prompt id."),
+        promptId: z.enum(ORCHESTRATION_PROMPT_ID_VALUES).describe("Prompt id."),
         document: z.any().describe("Prompt document candidate to validate."),
       },
     },
@@ -273,9 +276,7 @@ function createPromptsMcpServer(
           .string()
           .optional()
           .describe("Required when scope is 'project'. Omit for global scope."),
-        promptId: z
-          .enum(["implement", "resume", "review", "reviewFeedback"])
-          .describe("Prompt id."),
+        promptId: z.enum(ORCHESTRATION_PROMPT_ID_VALUES).describe("Prompt id."),
         document: z
           .any()
           .optional()
@@ -311,9 +312,7 @@ function createPromptsMcpServer(
           .string()
           .optional()
           .describe("Required when scope is 'project'. Omit for global scope."),
-        promptId: z
-          .enum(["implement", "resume", "review", "reviewFeedback"])
-          .describe("Prompt id."),
+        promptId: z.enum(ORCHESTRATION_PROMPT_ID_VALUES).describe("Prompt id."),
         document: z
           .any()
           .nullable()

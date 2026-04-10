@@ -61,6 +61,22 @@ describe("prompt template variable registry", () => {
     expect(listPromptTemplateVariables("resume").map((definition) => definition.key)).not.toContain(
       "commitDiff",
     );
+    expect(
+      listPromptTemplateVariables("resumeFreshAgent").map((definition) => definition.key),
+    ).toEqual(
+      expect.arrayContaining([
+        "ticketId",
+        "ticketTitle",
+        "ticketDescription",
+        "acceptanceCriteria",
+        "worktree",
+        "projectTitle",
+        "projectPath",
+      ]),
+    );
+    expect(
+      listPromptTemplateVariables("resumeFreshAgent").map((definition) => definition.key),
+    ).not.toContain("commitDiff");
   });
 
   it("normalizes aliases to canonical keys", () => {
@@ -193,6 +209,35 @@ describe("validatePromptTemplateDocument", () => {
           {
             when: null,
             text: "Resume ${ticketId} in ${projectTitle} @ ${projectPath}",
+          },
+        ],
+      },
+      referencedVariables: ["ticketId", "projectTitle", "projectPath"],
+    });
+  });
+
+  it("accepts shared ticket and project variables for resumeFreshAgent prompts", () => {
+    const result = validatePromptTemplateDocument({
+      promptId: "resumeFreshAgent",
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: null,
+            text: "Take over ${ticketIdentifier} in ${projectTitle} @ ${projectPath}",
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: null,
+            text: "Take over ${ticketId} in ${projectTitle} @ ${projectPath}",
           },
         ],
       },

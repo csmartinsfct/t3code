@@ -58,6 +58,10 @@ const ORCHESTRATION_PROMPT_METADATA = {
     label: "Resume",
     description: "Used when orchestration resumes an in-flight working thread.",
   },
+  resumeFreshAgent: {
+    label: "Resume Fresh Agent",
+    description: "Used when orchestration resumes a working ticket with a fresh agent session.",
+  },
   review: {
     label: "Review",
     description: "Used when orchestration requests structured automated review output.",

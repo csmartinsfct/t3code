@@ -153,7 +153,7 @@ When `maxReviewIterations === 0`, the server creates only the working thread for
 - marks the ticket `done` when the review returns `changesNeeded: false`
 - moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
-- pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `review`, or `reviewFeedback` cannot be validated or rendered
+- pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, or `reviewFeedback` cannot be validated or rendered
 
 The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
@@ -164,12 +164,19 @@ When a run is paused, the orchestration header exposes two resume paths:
 
 Fresh-agent resume is intentionally session-scoped rather than thread-scoped. The orchestration timeline and thread switcher continue to show the original child thread for the ticket instead of creating a replacement "rerun" thread.
 
+Fresh-agent prompt behavior is phase-aware:
+
+- fresh-agent resume of a working turn renders `resumeFreshAgent`
+- fresh-agent resume of a review turn renders the full `review` prompt again
+- normal `Resume` keeps using the lightweight `resume` prompt
+
 ### Orchestration Prompt Templates
 
-The orchestration runner now has a shared prompt-template domain model for its four logical prompt ids:
+The orchestration runner now has a shared prompt-template domain model for its five logical prompt ids:
 
 - `orchestration/implement`
 - `orchestration/resume`
+- `orchestration/resumeFreshAgent`
 - `orchestration/review`
 - `orchestration/reviewFeedback`
 
@@ -205,7 +212,7 @@ The canonical v1 variable registry lives in `packages/shared/src/promptTemplates
 
 Global prompt storage is now server-authoritative through `settings.json`:
 
-- `settings.prompts.orchestration.<promptId>` stores the current effective global prompt document for `implement`, `resume`, `review`, and `reviewFeedback`
+- `settings.prompts.orchestration.<promptId>` stores the current effective global prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, and `reviewFeedback`
 - `settings.promptDefaults.orchestration.<promptId>` exposes the immutable shipped default document for the same ids
 - persisted settings stay sparse by stripping prompt ids that match the shipped default exactly
 - `server.updateSettings` accepts `null` for a prompt id in `settings.prompts.orchestration` to reset that prompt back to its shipped default
@@ -213,7 +220,7 @@ Global prompt storage is now server-authoritative through `settings.json`:
 Projects can now also store sparse orchestration prompt overrides in the orchestration read model:
 
 - `project.promptOverrides.orchestration.<promptId>` stores only the prompt ids explicitly overridden for that project
-- supported project override ids are the same four orchestration prompt ids: `implement`, `resume`, `review`, and `reviewFeedback`
+- supported project override ids are the same five orchestration prompt ids: `implement`, `resume`, `resumeFreshAgent`, `review`, and `reviewFeedback`
 - clearing a project override removes that prompt id from project storage instead of copying any global/default value into the project row
 - project payloads continue to expose `promptOverrides` separately from server settings so consumers can distinguish stored project overrides from the currently effective prompt document
 

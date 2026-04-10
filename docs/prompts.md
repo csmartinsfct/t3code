@@ -4,10 +4,11 @@ T3 Code exposes orchestration prompt management through one backend-owned servic
 
 ## Overview
 
-The prompt-management surface covers the four orchestration prompt ids:
+The prompt-management surface covers the five orchestration prompt ids:
 
 - `implement`
 - `resume`
+- `resumeFreshAgent`
 - `review`
 - `reviewFeedback`
 
