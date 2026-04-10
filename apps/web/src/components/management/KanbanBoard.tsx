@@ -57,7 +57,12 @@ export function hasBoardOrchestrationProjectMismatch(
   tickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>,
   projectId: ProjectId,
 ): boolean {
-  return [...tickets.values()].some((ticket) => ticket.projectId !== projectId);
+  for (const ticket of tickets.values()) {
+    if (ticket.projectId !== projectId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(

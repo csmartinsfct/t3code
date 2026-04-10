@@ -90,7 +90,7 @@ interface ManagedRunAskAiUiStateStore {
   }) => void;
 }
 
-export function startManagedRunAskAiThread(input: {
+export async function startManagedRunAskAiThread(input: {
   projectId: ProjectId;
   sourceThreadId: ThreadId | null;
   prompt: string;
@@ -114,7 +114,8 @@ export function startManagedRunAskAiThread(input: {
   });
   input.composerDraftStore.applyStickyState(threadId);
   input.composerDraftStore.setPrompt(threadId, input.prompt);
-  return Promise.resolve(input.navigateToThread(threadId)).then(() => threadId);
+  await input.navigateToThread(threadId);
+  return threadId;
 }
 
 export function useManagedRunCompletionToasts(options: {
