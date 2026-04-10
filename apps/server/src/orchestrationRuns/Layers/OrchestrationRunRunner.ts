@@ -426,38 +426,51 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         `Timed out waiting for completed checkpoint state on thread ${threadId}`,
       );
 
-    const getCompletedAssistantMessageForTurn = (input: {
+    const getCompletedAssistantMessagesForTurn = (input: {
       readonly threadId: ThreadId;
       readonly turnId: TurnId | null;
     }) =>
-      waitForThread(
-        input.threadId,
-        (thread) => {
+      getThread(input.threadId).pipe(
+        Effect.map((thread) => {
+          if (input.turnId === null || !thread) {
+            return null;
+          }
+
           const latestTurn = thread.latestTurn;
           if (
-            input.turnId === null ||
             !latestTurn ||
             latestTurn.turnId !== input.turnId ||
-            latestTurn.state !== "completed" ||
-            latestTurn.completedAt === null ||
-            latestTurn.assistantMessageId === null
+            latestTurn.state !== "completed"
           ) {
             return null;
           }
 
-          const assistantMessage = thread.messages.find(
-            (message) => message.id === latestTurn.assistantMessageId,
+          const assistantMessages = thread.messages.filter(
+            (message) =>
+              message.turnId === input.turnId &&
+              message.role === "assistant" &&
+              message.streaming === false &&
+              message.text.length > 0,
           );
-          return assistantMessage &&
-            assistantMessage.turnId === input.turnId &&
-            assistantMessage.role === "assistant" &&
-            assistantMessage.streaming === false &&
-            assistantMessage.updatedAt >= latestTurn.completedAt &&
-            assistantMessage.text.length > 0
-            ? assistantMessage
-            : null;
-        },
-        `Timed out waiting for finalized assistant output on thread ${input.threadId} for turn ${String(input.turnId)}`,
+          if (assistantMessages.length === 0) {
+            return null;
+          }
+
+          return assistantMessages.toSorted((left, right) => {
+            const leftPriority =
+              latestTurn.assistantMessageId !== null && left.id === latestTurn.assistantMessageId
+                ? 1
+                : 0;
+            const rightPriority =
+              latestTurn.assistantMessageId !== null && right.id === latestTurn.assistantMessageId
+                ? 1
+                : 0;
+            if (leftPriority !== rightPriority) {
+              return rightPriority - leftPriority;
+            }
+            return right.updatedAt.localeCompare(left.updatedAt);
+          });
+        }),
       );
 
     const parseReviewOutput = (input: {
@@ -465,31 +478,59 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly turnId: TurnId | null;
     }) =>
       Effect.gen(function* () {
-        const assistantMessage = yield* getCompletedAssistantMessageForTurn(input);
-        const rawText = assistantMessage.text;
-        const parsedCandidates = yield* Effect.try({
-          try: () => parseReviewOutputJsonCandidates(rawText),
-          catch: (cause) =>
-            new OrchestrationRunError({
-              message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} was not valid JSON`,
-              cause,
-            }),
-        });
+        let lastParseError: OrchestrationRunError | null = null;
 
-        let lastDecodeCause: unknown = null;
-        for (const parsedCandidate of parsedCandidates) {
-          const decodedExit = yield* Effect.exit(
-            decodeReviewOutput(normalizeReviewOutputCandidate(parsedCandidate)),
-          );
-          if (decodedExit._tag === "Success") {
-            return decodedExit.value;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const assistantMessages = yield* getCompletedAssistantMessagesForTurn(input);
+          if (assistantMessages !== null) {
+            for (const assistantMessage of assistantMessages) {
+              const parsedCandidatesExit = yield* Effect.exit(
+                Effect.try({
+                  try: () => parseReviewOutputJsonCandidates(assistantMessage.text),
+                  catch: (cause) =>
+                    new OrchestrationRunError({
+                      message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} was not valid JSON`,
+                      cause,
+                    }),
+                }),
+              );
+              if (parsedCandidatesExit._tag === "Failure") {
+                lastParseError = new OrchestrationRunError({
+                  message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} was not valid JSON`,
+                  cause: parsedCandidatesExit.cause,
+                });
+                continue;
+              }
+
+              let lastDecodeCause: unknown = null;
+              for (const parsedCandidate of parsedCandidatesExit.value) {
+                const decodedExit = yield* Effect.exit(
+                  decodeReviewOutput(normalizeReviewOutputCandidate(parsedCandidate)),
+                );
+                if (decodedExit._tag === "Success") {
+                  return decodedExit.value;
+                }
+                lastDecodeCause = decodedExit.cause;
+              }
+
+              lastParseError = new OrchestrationRunError({
+                message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} did not match ReviewOutput`,
+                cause: lastDecodeCause,
+              });
+            }
           }
-          lastDecodeCause = decodedExit.cause;
+
+          if (attempt < 19) {
+            yield* Effect.sleep(Duration.millis(100));
+          }
+        }
+
+        if (lastParseError !== null) {
+          return yield* lastParseError;
         }
 
         return yield* new OrchestrationRunError({
-          message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} did not match ReviewOutput`,
-          cause: lastDecodeCause,
+          message: `Timed out waiting for finalized assistant output on thread ${input.threadId} for turn ${String(input.turnId)}`,
         });
       });
 
