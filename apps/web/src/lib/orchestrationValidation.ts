@@ -49,6 +49,15 @@ function boardOrderKey(t: TicketSummary): number {
   return STATUS_ORDER[t.status] * 1_000_000 + t.sortOrder;
 }
 
+function compareTicketsByBoardOrder(left: TicketSummary, right: TicketSummary): number {
+  return (
+    boardOrderKey(left) - boardOrderKey(right) ||
+    new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||
+    left.ticketNumber - right.ticketNumber ||
+    left.identifier.localeCompare(right.identifier)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -67,9 +76,7 @@ function sortTicketIdsByBoardOrder(
     const left = ticketById.get(leftId);
     const right = ticketById.get(rightId);
     if (!left || !right) return String(leftId).localeCompare(String(rightId));
-    return (
-      boardOrderKey(left) - boardOrderKey(right) || left.identifier.localeCompare(right.identifier)
-    );
+    return compareTicketsByBoardOrder(left, right);
   });
 }
 
@@ -199,7 +206,7 @@ export function buildOrchestrationPlan(
   const skippedTickets = selectedTickets.filter((t) => TERMINAL_STATUSES.has(t.status));
 
   // Sort runnable tickets by board order so toposort uses it as tiebreaker.
-  runnableTickets.sort((a, b) => boardOrderKey(a) - boardOrderKey(b));
+  runnableTickets.sort(compareTicketsByBoardOrder);
 
   const internalEdges: { from: TicketSummary; to: TicketSummary }[] = [];
   for (const ticket of runnableTickets) {
