@@ -13,6 +13,7 @@ import { runProcess } from "../processRunner.ts";
 
 const CODEX_TIMEOUT_MS = 180_000;
 const CLAUDE_TIMEOUT_MS = 180_000;
+const CODEX_AUTH_FILE_NAME = "auth.json";
 
 export class StructuredOutputRunnerError extends Error {
   override readonly cause?: unknown;
@@ -39,6 +40,28 @@ async function removeTempFile(filePath: string): Promise<void> {
   await fs.rm(nodePath.dirname(filePath), { recursive: true, force: true });
 }
 
+function resolveCodexHomePath(homePath?: string): string {
+  return homePath || process.env.CODEX_HOME || nodePath.join(nodeOs.homedir(), ".codex");
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createIsolatedCodexHome(homePath?: string): Promise<string> {
+  const isolatedHomePath = await fs.mkdtemp(nodePath.join(nodeOs.tmpdir(), "t3code-codex-home-"));
+  const authPath = nodePath.join(resolveCodexHomePath(homePath), CODEX_AUTH_FILE_NAME);
+  if (await pathExists(authPath)) {
+    await fs.copyFile(authPath, nodePath.join(isolatedHomePath, CODEX_AUTH_FILE_NAME));
+  }
+  return isolatedHomePath;
+}
+
 export function runCodexStructuredOutput<S extends Schema.Top>(input: {
   operation: string;
   cwd: string;
@@ -58,6 +81,7 @@ export function runCodexStructuredOutput<S extends Schema.Top>(input: {
         JSON.stringify(toJsonSchemaObject(input.outputSchema)),
       );
       const outputPath = await writeTempFile("codex-output", "");
+      const codexHomePath = await createIsolatedCodexHome(input.homePath);
 
       try {
         const result = await runProcess(
@@ -86,7 +110,7 @@ export function runCodexStructuredOutput<S extends Schema.Top>(input: {
             stdin: input.prompt,
             env: {
               ...process.env,
-              ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+              CODEX_HOME: codexHomePath,
             },
             allowNonZeroExit: true,
             outputMode: "truncate",
@@ -116,7 +140,11 @@ export function runCodexStructuredOutput<S extends Schema.Top>(input: {
           );
         }
       } finally {
-        await Promise.all([removeTempFile(schemaPath), removeTempFile(outputPath)]);
+        await Promise.all([
+          removeTempFile(schemaPath),
+          removeTempFile(outputPath),
+          fs.rm(codexHomePath, { recursive: true, force: true }),
+        ]);
       }
     },
     catch: (cause) =>

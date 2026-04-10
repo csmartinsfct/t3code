@@ -37,6 +37,7 @@ function makeFakeCodexBinary(
     forbidReasoningEffort?: boolean;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
+    requireIsolatedHomeAuthFrom?: string;
   },
 ) {
   return Effect.gen(function* () {
@@ -147,6 +148,30 @@ function makeFakeCodexBinary(
               "fi",
             ]
           : []),
+        ...(input.requireIsolatedHomeAuthFrom !== undefined
+          ? [
+              'if [ -z "$CODEX_HOME" ]; then',
+              '  printf "%s\\n" "missing CODEX_HOME override" >&2',
+              "  exit 9",
+              "fi",
+              `if [ "$CODEX_HOME" = ${JSON.stringify(input.requireIsolatedHomeAuthFrom)} ]; then`,
+              '  printf "%s\\n" "CODEX_HOME should be isolated" >&2',
+              "  exit 10",
+              "fi",
+              'if [ ! -f "$CODEX_HOME/auth.json" ]; then',
+              '  printf "%s\\n" "missing copied auth.json" >&2',
+              "  exit 11",
+              "fi",
+              `if ! cmp -s "$CODEX_HOME/auth.json" ${JSON.stringify(`${input.requireIsolatedHomeAuthFrom}/auth.json`)}; then`,
+              '  printf "%s\\n" "copied auth.json did not match source" >&2',
+              "  exit 12",
+              "fi",
+              'if [ -f "$CODEX_HOME/config.toml" ]; then',
+              '  printf "%s\\n" "isolated CODEX_HOME should not copy config.toml" >&2',
+              "  exit 13",
+              "fi",
+            ]
+          : []),
         ...(input.stderr !== undefined
           ? [`printf "%s\\n" ${JSON.stringify(input.stderr)} >&2`]
           : []),
@@ -176,32 +201,65 @@ function withFakeCodexEnv<A, E, R>(
     forbidReasoningEffort?: boolean;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
+    requireIsolatedHomeAuthCopy?: boolean;
+    codexHomeFixture?: {
+      readonly authJson: string;
+      readonly configToml?: string;
+    };
   },
   effect: Effect.Effect<A, E, R>,
 ) {
   return Effect.acquireUseRelease(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
-      const codexPath = yield* makeFakeCodexBinary(tempDir, input);
+      const codexHomeDir =
+        input.codexHomeFixture !== undefined
+          ? yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-home-source-" })
+          : undefined;
+      if (codexHomeDir && input.codexHomeFixture) {
+        yield* fs.writeFileString(
+          path.join(codexHomeDir, "auth.json"),
+          input.codexHomeFixture.authJson,
+        );
+        if (input.codexHomeFixture.configToml !== undefined) {
+          yield* fs.writeFileString(
+            path.join(codexHomeDir, "config.toml"),
+            input.codexHomeFixture.configToml,
+          );
+        }
+      }
+      const codexPath = yield* makeFakeCodexBinary(tempDir, {
+        ...input,
+        ...(input.requireIsolatedHomeAuthCopy && codexHomeDir
+          ? { requireIsolatedHomeAuthFrom: codexHomeDir }
+          : {}),
+      });
       const serverSettings = yield* ServerSettingsService;
       const previousSettings = yield* serverSettings.getSettings;
       yield* serverSettings.updateSettings({
         providers: {
           codex: {
             binaryPath: codexPath,
+            ...(codexHomeDir ? { homePath: codexHomeDir } : {}),
           },
         },
       });
-      return { serverSettings, previousBinaryPath: previousSettings.providers.codex.binaryPath };
+      return {
+        serverSettings,
+        previousBinaryPath: previousSettings.providers.codex.binaryPath,
+        previousHomePath: previousSettings.providers.codex.homePath,
+      };
     }),
     () => effect,
-    ({ serverSettings, previousBinaryPath }) =>
+    ({ serverSettings, previousBinaryPath, previousHomePath }) =>
       serverSettings
         .updateSettings({
           providers: {
             codex: {
               binaryPath: previousBinaryPath,
+              homePath: previousHomePath,
             },
           },
         })
@@ -293,6 +351,34 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           stagedPatch: "diff --git a/README.md b/README.md",
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
+      }),
+    ),
+  );
+
+  it.effect("runs codex exec with an isolated CODEX_HOME that only copies auth", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          subject: "Add important change",
+          body: "",
+        }),
+        requireIsolatedHomeAuthCopy: true,
+        codexHomeFixture: {
+          authJson: '{"auth_mode":"chatgpt"}',
+          configToml: '[mcp_servers.broken]\nurl = "http://127.0.0.1:3845/mcp"\n',
+        },
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+        const generated = yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+
+        expect(generated.subject).toBe("Add important change");
       }),
     ),
   );
