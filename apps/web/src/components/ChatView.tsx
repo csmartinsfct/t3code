@@ -266,7 +266,7 @@ function formatTicketAttachmentsForModel(
   tickets: import("../composerDraftStore").ComposerTicketAttachment[],
 ): string {
   if (tickets.length === 0) return "";
-  return `Referenced tickets:\n${tickets.map((t) => `${t.title} - ${t.identifier}`).join("\n")}`;
+  return `Ticket ids: ${tickets.map((ticket) => ticket.identifier).join(", ")}`;
 }
 
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];

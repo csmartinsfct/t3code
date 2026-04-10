@@ -341,6 +341,18 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
   return Math.max(options.minWidth, Math.min(width, options.maxWidth));
 }
 
+export function runSidebarRevalidationWhenIdle(input: {
+  isResizeInteractionActive: boolean;
+  revalidate: () => void;
+}): boolean {
+  if (input.isResizeInteractionActive) {
+    return false;
+  }
+
+  input.revalidate();
+  return true;
+}
+
 function SidebarRail({
   className,
   onClick,
@@ -698,12 +710,16 @@ function SidebarRail({
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
-            if (resizeStateRef.current) return;
-            revalidateSidebarWidth();
+            runSidebarRevalidationWhenIdle({
+              isResizeInteractionActive: resizeStateRef.current !== null,
+              revalidate: revalidateSidebarWidth,
+            });
           });
     const handleWindowResize = () => {
-      if (resizeStateRef.current) return;
-      revalidateSidebarWidth();
+      runSidebarRevalidationWhenIdle({
+        isResizeInteractionActive: resizeStateRef.current !== null,
+        revalidate: revalidateSidebarWidth,
+      });
     };
 
     resizeObserver?.observe(elements.wrapper);

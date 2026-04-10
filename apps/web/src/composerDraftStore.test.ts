@@ -211,6 +211,59 @@ describe("composerDraftStore clearComposerContent", () => {
   });
 });
 
+describe("composerDraftStore ticket attachments", () => {
+  const threadId = ThreadId.makeUnsafe("thread-ticket-attachments");
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("deduplicates ticket attachments by ticket id and removes the draft when the last chip is removed", () => {
+    // Audit traceability: aa1e7da.
+    const store = useComposerDraftStore.getState();
+
+    store.addTicketAttachment(threadId, {
+      id: "ticket-1",
+      identifier: "T3CO-1",
+      title: "Board drag regression",
+    });
+    store.addTicketAttachment(threadId, {
+      id: "ticket-1",
+      identifier: "T3CO-1",
+      title: "Board drag regression",
+    });
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.ticketAttachments).toEqual([
+      {
+        id: "ticket-1",
+        identifier: "T3CO-1",
+        title: "Board drag regression",
+      },
+    ]);
+
+    store.removeTicketAttachment(threadId, "ticket-1");
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.ticketAttachments).toEqual(
+      [],
+    );
+  });
+
+  it("clears ticket attachments alongside the rest of the composer draft content", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setPrompt(threadId, "follow up");
+    store.addTicketAttachment(threadId, {
+      id: "ticket-2",
+      identifier: "T3CO-2",
+      title: "Composer continuity regression",
+    });
+
+    store.clearComposerContent(threadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.makeUnsafe("thread-sync-persisted");
 

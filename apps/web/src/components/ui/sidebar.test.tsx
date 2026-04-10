@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getSidebarReferenceWidth } from "~/lib/persistedPanelWidth";
 
@@ -8,6 +8,7 @@ import {
   SidebarMenuButton,
   SidebarMenuSubButton,
   SidebarProvider,
+  runSidebarRevalidationWhenIdle,
 } from "./sidebar";
 
 function measuredElement(width: number, parentElement: any = null) {
@@ -76,5 +77,32 @@ describe("sidebar reference width", () => {
     const sidebarContainer = measuredElement(320);
 
     expect(getSidebarReferenceWidth({ sidebarContainer, wrapper })).toBe(900);
+  });
+});
+
+describe("sidebar resize guard", () => {
+  it("skips revalidation while a drag resize interaction is active", () => {
+    // Audit traceability: aa1e7da.
+    const revalidate = vi.fn();
+
+    expect(
+      runSidebarRevalidationWhenIdle({
+        isResizeInteractionActive: true,
+        revalidate,
+      }),
+    ).toBe(false);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it("runs revalidation once the drag resize interaction is idle", () => {
+    const revalidate = vi.fn();
+
+    expect(
+      runSidebarRevalidationWhenIdle({
+        isResizeInteractionActive: false,
+        revalidate,
+      }),
+    ).toBe(true);
+    expect(revalidate).toHaveBeenCalledTimes(1);
   });
 });

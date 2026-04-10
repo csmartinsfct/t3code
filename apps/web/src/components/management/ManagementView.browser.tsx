@@ -1,32 +1,171 @@
 import "../../index.css";
 
-import type { NativeApi, TicketSummary } from "@t3tools/contracts";
+import type { NativeApi, TicketStatus, TicketSummary, ThreadId } from "@t3tools/contracts";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import type { PropsWithChildren } from "react";
 import { useState } from "react";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { useComposerDraftStore } from "~/composerDraftStore";
 import { __resetNativeApiForTests } from "~/nativeApi";
 import { useStore } from "~/store";
 import { useTicketSelectionStore } from "~/ticketSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { SidebarProvider } from "../ui/sidebar";
-import { ManagementView } from "./ManagementView";
 
-// Audit traceability: 4973c83.
+// Audit traceability: aa1e7da.
 
-function makeTicket(projectId: string): TicketSummary {
-  const isSecondProject = projectId === "project-2";
+const mockNavigate = vi.fn();
+let currentTicketsByProject: Record<string, TicketSummary[]> = {};
+
+let latestDndHandlers: {
+  onDragStart?: ((event: DragStartEvent) => void) | undefined;
+  onDragOver?: ((event: DragOverEvent) => void) | undefined;
+  onDragEnd?: ((event: DragEndEvent) => void) | undefined;
+  onDragCancel?: (() => void) | undefined;
+} | null = null;
+
+vi.mock("@tanstack/react-router", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
+
   return {
-    id: (isSecondProject ? "ticket-2" : "ticket-1") as TicketSummary["id"],
-    projectId: projectId as TicketSummary["projectId"],
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+vi.mock("@dnd-kit/core", async () => {
+  const actual = await vi.importActual<typeof import("@dnd-kit/core")>("@dnd-kit/core");
+
+  return {
+    ...actual,
+    DndContext: ({
+      children,
+      onDragStart,
+      onDragOver,
+      onDragEnd,
+      onDragCancel,
+    }: PropsWithChildren<{
+      onDragStart?: (event: DragStartEvent) => void;
+      onDragOver?: (event: DragOverEvent) => void;
+      onDragEnd?: (event: DragEndEvent) => void;
+      onDragCancel?: () => void;
+    }>) => {
+      latestDndHandlers = { onDragStart, onDragOver, onDragEnd, onDragCancel };
+      return <div data-testid="management-dnd-context">{children}</div>;
+    },
+    DragOverlay: ({ children }: PropsWithChildren) => (
+      <div data-testid="management-drag-overlay">{children}</div>
+    ),
+    PointerSensor: class MockPointerSensor {},
+    pointerWithin: vi.fn(),
+    useDroppable: () => ({
+      setNodeRef: () => {},
+      isOver: false,
+    }),
+    useSensor: vi.fn(() => ({})),
+    useSensors: vi.fn((...sensors: unknown[]) => sensors),
+  };
+});
+
+vi.mock("@dnd-kit/sortable", async () => {
+  const actual = await vi.importActual<typeof import("@dnd-kit/sortable")>("@dnd-kit/sortable");
+
+  return {
+    ...actual,
+    SortableContext: ({ children }: React.PropsWithChildren) => children,
+    useSortable: () => ({
+      attributes: {},
+      listeners: {},
+      setNodeRef: () => {},
+      transform: null,
+      transition: undefined,
+      isDragging: false,
+    }),
+  };
+});
+
+vi.mock("../../storeSelectors", () => ({
+  useProjectById: () => ({
+    id: "project-1",
+    name: "Project One",
+  }),
+}));
+
+vi.mock("../../hooks/useTicketing", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    useTicketing: ({ projectId }: { projectId?: string }) => {
+      const resolvedProjectId = projectId ?? "project-1";
+      const [tickets, setTickets] = React.useState<ReadonlyArray<TicketSummary>>(
+        currentTicketsByProject[resolvedProjectId] ?? [],
+      );
+
+      React.useEffect(() => {
+        setTickets(currentTicketsByProject[resolvedProjectId] ?? []);
+      }, [resolvedProjectId]);
+
+      return {
+        tickets,
+        projects: [],
+        loading: false,
+        selectedProjectId: resolvedProjectId,
+        setSelectedProjectId: vi.fn(),
+        refetch: vi.fn(async () => {}),
+        applyLocalReorder: (
+          updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>,
+        ) => {
+          setTickets((current) => {
+            const updateMap = new Map(updates.map((update) => [update.id, update]));
+            return current.map((ticket) => {
+              const update = updateMap.get(ticket.id);
+              if (!update) return ticket;
+              return {
+                ...ticket,
+                sortOrder: update.sortOrder,
+                ...(update.status ? { status: update.status as TicketSummary["status"] } : {}),
+              };
+            });
+          });
+        },
+      };
+    },
+  };
+});
+
+vi.mock("../ChatView", () => ({
+  default: ({ threadId }: { threadId: ThreadId }) => (
+    <div data-testid="management-chat-view">Chat shell {threadId}</div>
+  ),
+}));
+
+const { ManagementView } = await import("./ManagementView");
+
+const ticketingUpdateMock = vi.fn(async () => null);
+const ticketingReorderMock = vi.fn(async () => null);
+
+function makeTicket(input: {
+  id: string;
+  identifier: string;
+  title: string;
+  projectId?: string;
+  status?: TicketStatus;
+  sortOrder?: number;
+}): TicketSummary {
+  return {
+    id: input.id as TicketSummary["id"],
+    projectId: (input.projectId ?? "project-1") as TicketSummary["projectId"],
     parentId: null,
-    ticketNumber: isSecondProject ? 2 : 1,
-    identifier: isSecondProject ? "T3CO-2" : "T3CO-1",
-    title: isSecondProject ? "Beta ticket" : "Alpha ticket",
-    status: "todo",
+    ticketNumber: Number(input.identifier.replace(/\D/g, "")) || 1,
+    identifier: input.identifier,
+    title: input.title,
+    status: input.status ?? "todo",
     priority: "medium",
-    sortOrder: 0,
+    sortOrder: input.sortOrder ?? 0,
     isArchived: false,
     worktree: null,
     labels: [],
@@ -38,6 +177,9 @@ function makeTicket(projectId: string): TicketSummary {
 }
 
 function installNativeApiStub() {
+  ticketingUpdateMock.mockReset();
+  ticketingReorderMock.mockReset();
+
   const api: Partial<NativeApi> = {
     orchestration: {
       getSnapshot: vi.fn(async () => ({
@@ -48,8 +190,12 @@ function installNativeApiStub() {
       })),
     } as unknown as NativeApi["orchestration"],
     ticketing: {
-      list: vi.fn(async ({ projectId }: { projectId: string }) => [makeTicket(projectId)]),
+      list: vi.fn(
+        async ({ projectId }: { projectId: string }) => currentTicketsByProject[projectId] ?? [],
+      ),
       onEvent: vi.fn(() => () => {}),
+      reorder: ticketingReorderMock,
+      update: ticketingUpdateMock,
     } as unknown as NativeApi["ticketing"],
   };
 
@@ -97,6 +243,14 @@ function seedStores() {
     selectedTickets: new Map(),
     anchorTicketId: null,
   });
+
+  useComposerDraftStore.setState({
+    draftsByThreadId: {},
+    draftThreadsByThreadId: {},
+    projectDraftThreadIdByProjectId: {},
+    stickyModelSelectionByProvider: {},
+    stickyActiveProvider: null,
+  });
 }
 
 function Harness() {
@@ -123,14 +277,90 @@ function Harness() {
   );
 }
 
+async function mountManagementView(input: { threadId: ThreadId | null; projectId?: string }) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const screen = await render(
+    <SidebarProvider defaultOpen>
+      <ManagementView threadId={input.threadId} projectId={input.projectId ?? "project-1"} />
+    </SidebarProvider>,
+    { container: host },
+  );
+
+  const cleanup = async () => {
+    await screen.unmount();
+    host.remove();
+  };
+
+  return {
+    cleanup,
+    rerender: screen.rerender,
+    [Symbol.asyncDispose]: cleanup,
+  };
+}
+
+function makeActiveEvent(ticket: TicketSummary): DragStartEvent {
+  return {
+    activatorEvent: new MouseEvent("pointerdown"),
+    active: {
+      id: ticket.id,
+      data: {
+        current: {
+          ticket,
+          status: ticket.status,
+        },
+      },
+    },
+  } as unknown as DragStartEvent;
+}
+
+function makeOverEvent(input: {
+  id: string;
+  status?: TicketStatus;
+  ticket?: TicketSummary;
+}): DragOverEvent["over"] {
+  return {
+    id: input.id,
+    data: {
+      current: {
+        ...(input.ticket ? { ticket: input.ticket } : {}),
+        ...(input.status ? { status: input.status } : {}),
+      },
+    },
+  } as DragOverEvent["over"];
+}
+
 describe("ManagementView", () => {
   beforeEach(() => {
+    latestDndHandlers = null;
+    currentTicketsByProject = {
+      "project-1": [
+        makeTicket({ id: "ticket-1", identifier: "T3CO-1", title: "Alpha ticket", sortOrder: 0 }),
+        makeTicket({ id: "ticket-2", identifier: "T3CO-2", title: "Beta ticket", sortOrder: 1000 }),
+        makeTicket({
+          id: "ticket-3",
+          identifier: "T3CO-3",
+          title: "Blocked ticket",
+          status: "blocked",
+          sortOrder: 0,
+        }),
+      ],
+      "project-2": [
+        makeTicket({
+          id: "ticket-4",
+          identifier: "T3CO-4",
+          title: "Project two ticket",
+          projectId: "project-2",
+        }),
+      ],
+    };
     __resetNativeApiForTests();
     installNativeApiStub();
     seedStores();
   });
 
   afterEach(() => {
+    latestDndHandlers = null;
     __resetNativeApiForTests();
     delete window.nativeApi;
     document.body.innerHTML = "";
@@ -163,7 +393,9 @@ describe("ManagementView", () => {
     try {
       useTicketSelectionStore.setState({
         selectedTicketIds: new Set(["ticket-1" as TicketSummary["id"]]),
-        selectedTickets: new Map([["ticket-1" as TicketSummary["id"], makeTicket("project-1")]]),
+        selectedTickets: new Map([
+          ["ticket-1" as TicketSummary["id"], currentTicketsByProject["project-1"]![0]!],
+        ]),
         anchorTicketId: "ticket-1" as TicketSummary["id"],
       });
 
@@ -172,8 +404,7 @@ describe("ManagementView", () => {
 
       await page.getByRole("button", { name: "Project 2" }).click();
 
-      await expect.element(page.getByText("Project Two")).toBeInTheDocument();
-      await expect.element(page.getByText("Beta ticket")).toBeInTheDocument();
+      await expect.element(page.getByText("Project two ticket")).toBeInTheDocument();
       await vi.waitFor(() => {
         expect(useTicketSelectionStore.getState().selectedTicketIds.size).toBe(0);
       });
@@ -181,5 +412,120 @@ describe("ManagementView", () => {
       await screen.unmount();
       host.remove();
     }
+  });
+
+  it("persists same-column reorder through the board drag handlers", async () => {
+    await using _ = await mountManagementView({ threadId: null });
+
+    await vi.waitFor(() => {
+      expect(latestDndHandlers?.onDragStart).toBeTypeOf("function");
+      expect(document.body.textContent ?? "").toContain("Alpha ticket");
+      expect(document.body.textContent ?? "").toContain("Beta ticket");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const beta = currentTicketsByProject["project-1"]![1]!;
+    const active = makeActiveEvent(alpha);
+
+    latestDndHandlers?.onDragStart?.(active);
+    latestDndHandlers?.onDragEnd?.({
+      ...active,
+      over: makeOverEvent({ id: beta.id, status: beta.status, ticket: beta }),
+    } as DragEndEvent);
+
+    await vi.waitFor(() => {
+      expect(ticketingReorderMock).toHaveBeenCalledWith({
+        items: [
+          { id: beta.id, sortOrder: 0 },
+          { id: alpha.id, sortOrder: 1000 },
+        ],
+      });
+    });
+    expect(ticketingUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("persists cross-column moves through drag-over and drag-end", async () => {
+    await using mounted = await mountManagementView({ threadId: null });
+
+    await vi.waitFor(() => {
+      expect(latestDndHandlers?.onDragOver).toBeTypeOf("function");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const active = makeActiveEvent(alpha);
+
+    latestDndHandlers?.onDragStart?.(active);
+    latestDndHandlers?.onDragOver?.({
+      ...active,
+      over: makeOverEvent({ id: "column:blocked", status: "blocked" }),
+    } as DragOverEvent);
+    await mounted.rerender(
+      <SidebarProvider defaultOpen>
+        <ManagementView threadId={null} projectId="project-1" />
+      </SidebarProvider>,
+    );
+
+    latestDndHandlers?.onDragEnd?.({
+      ...active,
+      over: makeOverEvent({ id: "column:blocked", status: "blocked" }),
+    } as DragEndEvent);
+
+    await vi.waitFor(() => {
+      expect(ticketingUpdateMock).toHaveBeenCalledWith({
+        id: alpha.id,
+        status: "blocked",
+      });
+      expect(ticketingReorderMock).toHaveBeenCalledWith({
+        items: [
+          { id: "ticket-3", sortOrder: 0 },
+          { id: alpha.id, sortOrder: 1000 },
+        ],
+      });
+    });
+  });
+
+  it("drops selected tickets onto chat and keeps composer ticket attachments in sync", async () => {
+    const threadId = "thread-drop-target" as ThreadId;
+    await using _ = await mountManagementView({ threadId });
+
+    await vi.waitFor(() => {
+      expect(latestDndHandlers?.onDragEnd).toBeTypeOf("function");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const beta = currentTicketsByProject["project-1"]![1]!;
+
+    useTicketSelectionStore.setState({
+      selectedTicketIds: new Set([alpha.id, beta.id]),
+      selectedTickets: new Map([
+        [alpha.id, alpha],
+        [beta.id, beta],
+      ]),
+      anchorTicketId: alpha.id,
+    });
+
+    const active = makeActiveEvent(alpha);
+    latestDndHandlers?.onDragStart?.(active);
+    latestDndHandlers?.onDragEnd?.({
+      ...active,
+      over: makeOverEvent({ id: "chat-composer" }),
+    } as DragEndEvent);
+
+    await vi.waitFor(() => {
+      const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
+      expect(draft?.ticketAttachments).toEqual([
+        {
+          id: alpha.id,
+          identifier: alpha.identifier,
+          title: alpha.title,
+        },
+        {
+          id: beta.id,
+          identifier: beta.identifier,
+          title: beta.title,
+        },
+      ]);
+      expect(useTicketSelectionStore.getState().selectedTicketIds.size).toBe(0);
+    });
   });
 });

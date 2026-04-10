@@ -25,6 +25,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { clearPromotedDraftThread } from "../composerDraftStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
@@ -398,6 +399,101 @@ function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
   rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
 }
 
+function materializeThreadInStore(threadId: ThreadId): void {
+  const thread = fixture.snapshot.threads.find((candidate) => candidate.id === threadId);
+  if (!thread) {
+    throw new Error(`Unable to materialize thread ${threadId} from the test snapshot.`);
+  }
+
+  useStore.setState((state) => ({
+    ...state,
+    threads: state.threads.some((candidate) => candidate.id === threadId)
+      ? state.threads
+      : [
+          ...state.threads,
+          {
+            id: thread.id,
+            codexThreadId: null,
+            projectId: thread.projectId,
+            title: thread.title,
+            modelSelection: thread.modelSelection,
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            session: null,
+            messages: [],
+            proposedPlans: [],
+            error: null,
+            createdAt: thread.createdAt,
+            archivedAt: null,
+            updatedAt: thread.updatedAt,
+            latestTurn: null,
+            branch: thread.branch,
+            worktreePath: thread.worktreePath,
+            turnDiffSummaries: [],
+            activities: [],
+            isOrchestrationThread: thread.isOrchestrationThread,
+            parentThreadId: thread.parentThreadId,
+            ticketId: thread.ticketId,
+          } as any,
+        ],
+    threadsById: {
+      ...state.threadsById,
+      [threadId]: {
+        id: thread.id,
+        codexThreadId: null,
+        projectId: thread.projectId,
+        title: thread.title,
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        session: null,
+        messages: [],
+        proposedPlans: [],
+        error: null,
+        createdAt: thread.createdAt,
+        archivedAt: null,
+        updatedAt: thread.updatedAt,
+        latestTurn: null,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        turnDiffSummaries: [],
+        activities: [],
+        isOrchestrationThread: thread.isOrchestrationThread,
+        parentThreadId: thread.parentThreadId,
+        ticketId: thread.ticketId,
+      } as any,
+    },
+    sidebarThreadsById: {
+      ...state.sidebarThreadsById,
+      [threadId]: {
+        id: thread.id,
+        projectId: thread.projectId,
+        title: thread.title,
+        interactionMode: thread.interactionMode,
+        session: null,
+        createdAt: thread.createdAt,
+        archivedAt: null,
+        updatedAt: thread.updatedAt,
+        latestTurn: null,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        latestUserMessageAt: null,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasActionableProposedPlan: false,
+        isOrchestrationThread: thread.isOrchestrationThread,
+        parentThreadId: thread.parentThreadId,
+      } as any,
+    },
+    threadIdsByProjectId: {
+      ...state.threadIdsByProjectId,
+      [thread.projectId]: Array.from(
+        new Set([...(state.threadIdsByProjectId[thread.projectId] ?? []), threadId]),
+      ),
+    },
+  }));
+}
+
 async function waitForWsClient(): Promise<void> {
   await vi.waitFor(
     () => {
@@ -417,9 +513,20 @@ async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<voi
   sendOrchestrationDomainEvent(
     createThreadCreatedEvent(threadId, fixture.snapshot.snapshotSequence),
   );
+  materializeThreadInStore(threadId);
+  await vi.waitFor(
+    () => {
+      expect(useStore.getState().threadsById[threadId]).toBeDefined();
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  clearPromotedDraftThread(threadId);
   await vi.waitFor(
     () => {
       expect(useComposerDraftStore.getState().draftThreadsByThreadId[threadId]).toBeUndefined();
+      expect(useComposerDraftStore.getState().projectDraftThreadIdByProjectId[PROJECT_ID]).not.toBe(
+        threadId,
+      );
     },
     { timeout: 8_000, interval: 16 },
   );
@@ -687,6 +794,47 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   if (tag === WS_METHODS.shellOpenInEditor) {
     return null;
   }
+  if (tag === WS_METHODS.managedRunsLaunchProjectScript) {
+    return {
+      run: {
+        runId: "run-project-script",
+        projectId: body.projectId,
+        scriptId: body.scriptId,
+        createdByThreadId: body.threadId,
+        lastTouchedByThreadId: body.threadId,
+        cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
+        launchMode: "script",
+        status: "running",
+        detectedUrl: null,
+        detectedPort: null,
+        terminalThreadId: body.threadId,
+        terminalId: "default",
+        terminalPid: 123,
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        startedAt: NOW_ISO,
+        completedAt: null,
+        lastExitCode: null,
+        lastExitSignal: null,
+        declaredServices: [],
+        runtimeServices: [],
+        inferenceStatus: "idle",
+        inferenceUpdatedAt: null,
+        inferenceError: null,
+      },
+      terminal: {
+        threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
+        terminalId: "default",
+        cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
+        status: "running",
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: NOW_ISO,
+      },
+    };
+  }
   if (tag === WS_METHODS.terminalOpen) {
     return {
       threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
@@ -869,13 +1017,13 @@ async function expectComposerActionsContained(): Promise<void> {
 }
 
 async function waitForInteractionModeButton(
-  expectedLabel: "Chat" | "Plan",
+  expectedLabel: "Chat" | "Plan" | "Plan + Accept",
 ): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
-      Array.from(document.querySelectorAll("button")).find(
-        (button) => button.textContent?.trim() === expectedLabel,
-      ) as HTMLButtonElement | null,
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[data-chat-composer-footer="true"] button'),
+      ).find((button) => button.textContent?.trim() === expectedLabel) as HTMLButtonElement | null,
     `Unable to find ${expectedLabel} interaction mode button.`,
   );
 }
@@ -1636,29 +1784,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
+            (request) => request._tag === WS_METHODS.managedRunsLaunchProjectScript,
           );
           expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
+            _tag: WS_METHODS.managedRunsLaunchProjectScript,
+            projectId: PROJECT_ID,
+            scriptId: "lint",
             threadId: THREAD_ID,
             cwd: "/repo/project",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-            },
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await vi.waitFor(
-        () => {
-          const writeRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalWrite,
-          );
-          expect(writeRequest).toMatchObject({
-            _tag: WS_METHODS.terminalWrite,
-            threadId: THREAD_ID,
-            data: "bun run lint\r",
           });
         },
         { timeout: 8_000, interval: 16 },
@@ -1712,16 +1845,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
+            (request) => request._tag === WS_METHODS.managedRunsLaunchProjectScript,
           );
           expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
+            _tag: WS_METHODS.managedRunsLaunchProjectScript,
+            projectId: PROJECT_ID,
+            scriptId: "test",
             threadId: THREAD_ID,
             cwd: "/repo/worktrees/feature-draft",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-              T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
-            },
+            worktreePath: "/repo/worktrees/feature-draft",
           });
         },
         { timeout: 8_000, interval: 16 },
@@ -1845,31 +1977,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => {
           const openRequest = wsRequests.find(
             (request) =>
-              request._tag === WS_METHODS.terminalOpen && request.cwd === "/repo/worktrees/pr-1359",
+              request._tag === WS_METHODS.managedRunsLaunchProjectScript &&
+              request.cwd === "/repo/worktrees/pr-1359",
           );
           expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
+            _tag: WS_METHODS.managedRunsLaunchProjectScript,
+            projectId: PROJECT_ID,
+            scriptId: "setup",
             threadId: expect.any(String),
             cwd: "/repo/worktrees/pr-1359",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-              T3CODE_WORKTREE_PATH: "/repo/worktrees/pr-1359",
-            },
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await vi.waitFor(
-        () => {
-          const writeRequest = wsRequests.find(
-            (request) =>
-              request._tag === WS_METHODS.terminalWrite && request.data === "bun install\r",
-          );
-          expect(writeRequest).toMatchObject({
-            _tag: WS_METHODS.terminalWrite,
-            threadId: expect.any(String),
-            data: "bun install\r",
+            worktreePath: "/repo/worktrees/pr-1359",
           });
         },
         { timeout: 8_000, interval: 16 },
@@ -1918,6 +2035,24 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Plan")).title).toContain(
+            "enter plan + accept mode",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        async () => {
+          expect((await waitForInteractionModeButton("Plan + Accept")).title).toContain(
             "return to normal chat mode",
           );
         },
@@ -2092,6 +2227,94 @@ describe("ChatView timeline estimator parity (full app)", () => {
           );
           expect(document.body.textContent).not.toContain(expiredLabel);
           expect(document.body.textContent).toContain("yoowaddup");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps removable ticket chips in sync with draft state and prefixes sends with Ticket ids", async () => {
+    // Audit traceability: aa1e7da.
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Please pick this up next.");
+    useComposerDraftStore.getState().addTicketAttachment(THREAD_ID, {
+      id: "ticket-123",
+      identifier: "T3CO-123",
+      title: "Board drag regression",
+    });
+    useComposerDraftStore.getState().addTicketAttachment(THREAD_ID, {
+      id: "ticket-456",
+      identifier: "T3CO-456",
+      title: "Composer continuity regression",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-ticket-attachments-send" as MessageId,
+        targetText: "ticket attachment send target",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const text = document.body.textContent ?? "";
+          expect(text).toContain("T3CO-123");
+          expect(text).toContain("Board drag regression");
+          expect(text).toContain("T3CO-456");
+          expect(text).toContain("Composer continuity regression");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await page.getByRole("button", { name: "Remove T3CO-456" }).click();
+
+      await vi.waitFor(
+        () => {
+          const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+          expect(draft?.ticketAttachments).toEqual([
+            {
+              id: "ticket-123",
+              identifier: "T3CO-123",
+              title: "Board drag regression",
+            },
+          ]);
+          expect(document.body.textContent ?? "").not.toContain("Composer continuity regression");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const request = wsRequests.find(
+            (candidate) =>
+              candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              candidate.type === "thread.turn.start",
+          );
+          expect(request).toBeTruthy();
+          const turnStartRequest = request as unknown as { message: { text: string } };
+          expect(turnStartRequest.message.text).toContain(
+            "Ticket ids: T3CO-123",
+          );
+          expect(turnStartRequest.message.text).toContain(
+            "Please pick this up next.",
+          );
+          expect(turnStartRequest.message.text).not.toContain("T3CO-456");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toMatchObject({
+            prompt: "Please pick this up next.",
+            ticketAttachments: [],
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
