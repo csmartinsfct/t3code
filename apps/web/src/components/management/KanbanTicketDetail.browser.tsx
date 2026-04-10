@@ -9,6 +9,8 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 
 // Audit traceability: 5f27fa2, 5dba42d.
+// This file covers the browser-only hover preview flow that KanbanTicketDetail wires around
+// SubTicketPreviewContent, without mounting the full ticket detail surface.
 
 vi.mock("./TicketMarkdown", () => ({
   TicketMarkdown: ({ children }: { children: string }) => <div>{children}</div>,

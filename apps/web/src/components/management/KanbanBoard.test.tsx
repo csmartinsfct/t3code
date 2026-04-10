@@ -352,6 +352,7 @@ describe("KanbanBoard", () => {
     expect(parentDetailMarkup).toContain("Detail:parent-ticket");
     expect(detailMockState.lastProps?.ticketId).toBe("parent-ticket");
 
+    // renderBoard() clears mocks between renders, so this assertion is scoped to the second back step.
     detailMockState.lastProps?.onBack();
     expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledOnce();
     expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledWith(threadId);
