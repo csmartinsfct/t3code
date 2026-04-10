@@ -416,11 +416,13 @@ const makeTicketingRepository = Effect.gen(function* () {
         }
 
         const where = conditions.join(" AND ");
-        const limit = input.limit ?? 100;
-        const offset = input.offset ?? 0;
+        const paginationClause =
+          input.limit !== undefined || input.offset !== undefined
+            ? ` LIMIT ${input.limit ?? -1} OFFSET ${input.offset ?? 0}`
+            : "";
 
         const rawRows =
-          yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets ${sql.literal(joinClause)} WHERE ${sql.literal(where)} ORDER BY sort_order ASC, created_at ASC LIMIT ${limit} OFFSET ${offset}`;
+          yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets ${sql.literal(joinClause)} WHERE ${sql.literal(where)} ORDER BY sort_order ASC, created_at ASC${sql.literal(paginationClause)}`;
         const rows = rawRows as unknown as ReadonlyArray<typeof TicketRow.Type>;
         return rows.map(toPersistedTicket);
       }).pipe(Effect.mapError(toPersistenceSqlError("TicketingRepository.listByProject:query"))),
