@@ -875,10 +875,10 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
-  if (tag === WS_METHODS.serverResolveMcpServers || tag.includes("McpServers")) {
+  if (tag === WS_METHODS.serverResolveMcpServers) {
     return { serverNames: resolvedMcpServerNames };
   }
-  if (tag === WS_METHODS.serverResolveSkills || tag.includes("Skills")) {
+  if (tag === WS_METHODS.serverResolveSkills) {
     return { skills: [] };
   }
   if (tag === WS_METHODS.gitListBranches) {
@@ -2342,6 +2342,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         const paneCenterY = paneRect.top + paneRect.height / 2;
 
         expect(waitingGroup.querySelector("svg")).toBeTruthy();
+        // Allow a few pixels for sub-pixel layout rounding and container chrome.
         expect(Math.abs(wrapperCenterX - paneCenterX)).toBeLessThanOrEqual(8);
         expect(Math.abs(wrapperCenterY - paneCenterY)).toBeLessThanOrEqual(8);
       });
