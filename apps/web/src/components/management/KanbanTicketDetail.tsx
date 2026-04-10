@@ -146,7 +146,7 @@ export function startTicketDetailDecomposeFlow(input: {
   return threadId;
 }
 
-export function TicketDetailActionsMenu({
+function TicketDetailActionsMenu({
   ticket,
   onOrchestrate,
   onDecompose,

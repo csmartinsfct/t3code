@@ -173,19 +173,13 @@ describe("KanbanTicketDetail", () => {
       "delete",
     ]);
 
-    const decomposeAction = actions.find(
-      (action) => action.kind === "item" && action.key === "decompose",
-    );
+    const decomposeAction = actions[1] as Extract<(typeof actions)[number], { kind: "item" }>;
 
     expect(decomposeAction).toMatchObject({
       kind: "item",
       key: "decompose",
       label: "Decompose",
     });
-
-    if (!decomposeAction || decomposeAction.kind !== "item") {
-      throw new Error("Decompose action missing from ticket detail menu");
-    }
 
     decomposeAction.onSelect();
 
