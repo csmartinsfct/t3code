@@ -32,6 +32,7 @@ function makeActivity(input: {
   workingThreadId?: string;
   reviewThreadId?: string;
   reviewIteration?: number;
+  sequence?: number;
 }): OrchestrationThreadActivity {
   return {
     id: input.id as OrchestrationThreadActivity["id"],
@@ -39,6 +40,7 @@ function makeActivity(input: {
     tone: input.tone ?? "info",
     summary: input.summary,
     createdAt: input.createdAt,
+    sequence: input.sequence,
     payload: {
       ...(input.ticketId ? { ticketId: input.ticketId as TicketId } : {}),
       ...(input.ticketIdentifier ? { ticketIdentifier: input.ticketIdentifier } : {}),
@@ -54,7 +56,6 @@ function makeChildThread(input: {
   id: string;
   ticketId?: string;
   messages?: ChatMessage[];
-  activities?: OrchestrationThreadActivity[];
 }): Thread {
   return {
     id: input.id as ThreadId,
@@ -75,7 +76,7 @@ function makeChildThread(input: {
     branch: null,
     worktreePath: null,
     turnDiffSummaries: [],
-    activities: input.activities ?? [],
+    activities: [],
     isOrchestrationThread: false,
     parentThreadId: "parent-thread" as ThreadId,
     ticketId: (input.ticketId ?? null) as Thread["ticketId"],
@@ -91,8 +92,8 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
     ticketOrder: [
       {
         ticketId: "ticket-1" as TicketId,
-        workingThreadId: "thread-1" as ThreadId,
-        reviewThreadId: "thread-review-1" as ThreadId,
+        workingThreadId: "thread-impl" as ThreadId,
+        reviewThreadId: "thread-review" as ThreadId,
       },
     ],
     currentTicketIndex: 0,
@@ -106,8 +107,8 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
 }
 
 describe("buildOrchestrationTimelineRows", () => {
-  it("interleaves implementation and review rows chronologically", () => {
-    const reviewOutput: ReviewOutput = {
+  it("interleaves implementation and review blocks chronologically", () => {
+    const finalReview: ReviewOutput = {
       changesNeeded: false,
       summary: "Looks good now.",
       comments: [],
@@ -122,7 +123,7 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
+          workingThreadId: "thread-impl",
         }),
         makeActivity({
           id: "review-started-1",
@@ -131,8 +132,7 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:02.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
         }),
         makeActivity({
@@ -142,8 +142,7 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:03.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
         }),
         makeActivity({
@@ -153,8 +152,7 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:05.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 2,
         }),
         makeActivity({
@@ -164,8 +162,7 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:06.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 2,
         }),
         makeActivity({
@@ -175,13 +172,11 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:07.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
-          reviewThreadId: "thread-review-1",
         }),
       ],
       childThreads: [
         makeChildThread({
-          id: "thread-1",
+          id: "thread-impl",
           ticketId: "ticket-1",
           messages: [
             makeMessage("impl-1", {
@@ -197,7 +192,7 @@ describe("buildOrchestrationTimelineRows", () => {
           ],
         }),
         makeChildThread({
-          id: "thread-review-1",
+          id: "thread-review",
           ticketId: "ticket-1",
           messages: [
             makeMessage("review-1", {
@@ -211,29 +206,22 @@ describe("buildOrchestrationTimelineRows", () => {
             }),
             makeMessage("review-2", {
               role: "assistant",
-              text: JSON.stringify(reviewOutput),
+              text: JSON.stringify(finalReview),
               createdAt: "2026-04-09T10:00:05.500Z",
             }),
           ],
         }),
       ],
-      run: makeRun({ currentPhase: "reviewing", reviewIteration: 1 }),
+      run: makeRun({ currentPhase: "reviewing", reviewIteration: 2 }),
     });
 
     expect(
       rows.map((row) => {
-        switch (row.kind) {
-          case "milestone":
-            return row.summary;
-          case "message":
-            return row.message.text;
-          case "waiting":
-            return row.text;
-          case "loading":
-            return row.id;
-          case "empty":
-            return row.id;
+        if (row.kind === "separator") return row.summary;
+        if (row.kind === "thread-block") {
+          return row.messages[0]?.text ?? row.emptyStateText ?? row.id;
         }
+        return row.id;
       }),
     ).toEqual([
       "Starting work on ticket T3CO-24",
@@ -247,23 +235,22 @@ describe("buildOrchestrationTimelineRows", () => {
       "Changes requested",
       "Addressed review feedback",
       "Reviewing ticket T3CO-24 again",
-      JSON.stringify(reviewOutput),
+      JSON.stringify(finalReview),
       "Approved",
       "Completed ticket T3CO-24",
     ]);
   });
 
-  it("keeps review milestones visible and labels review passes", () => {
+  it("splits repeated review blocks by review iteration and outcome", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [
         makeActivity({
-          id: "review-started",
+          id: "review-started-1",
           kind: "orchestration.run.ticket.review.started",
           summary: "Review started",
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
-          ticketIdentifier: "T3CO-24",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
         }),
         makeActivity({
@@ -272,8 +259,7 @@ describe("buildOrchestrationTimelineRows", () => {
           summary: "Changes requested",
           createdAt: "2026-04-09T10:00:01.000Z",
           ticketId: "ticket-1",
-          ticketIdentifier: "T3CO-24",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
         }),
         makeActivity({
@@ -282,8 +268,7 @@ describe("buildOrchestrationTimelineRows", () => {
           summary: "Review started again",
           createdAt: "2026-04-09T10:00:02.000Z",
           ticketId: "ticket-1",
-          ticketIdentifier: "T3CO-24",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 2,
         }),
         makeActivity({
@@ -292,14 +277,13 @@ describe("buildOrchestrationTimelineRows", () => {
           summary: "Approved",
           createdAt: "2026-04-09T10:00:03.000Z",
           ticketId: "ticket-1",
-          ticketIdentifier: "T3CO-24",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 2,
         }),
       ],
       childThreads: [
         makeChildThread({
-          id: "thread-review-1",
+          id: "thread-review",
           ticketId: "ticket-1",
           messages: [
             makeMessage("review-1", {
@@ -315,15 +299,23 @@ describe("buildOrchestrationTimelineRows", () => {
           ],
         }),
       ],
-      run: makeRun({ currentPhase: "reviewing", reviewIteration: 1 }),
+      run: makeRun({ currentPhase: "reviewing", reviewIteration: 2 }),
     });
 
-    expect(rows.filter((row) => row.kind === "milestone")).toHaveLength(4);
-    expect(
-      rows
-        .filter((row) => row.kind === "message")
-        .map((row) => (row.kind === "message" ? row.sourceLabel : "")),
-    ).toEqual(["Review 1", "Review 2"]);
+    const reviewBlocks = rows.filter((row) => row.kind === "thread-block");
+    expect(reviewBlocks).toHaveLength(2);
+    expect(reviewBlocks[0]).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "review",
+      reviewIteration: 1,
+      reviewOutcome: "requested-changes",
+    });
+    expect(reviewBlocks[1]).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "review",
+      reviewIteration: 2,
+      reviewOutcome: "approved",
+    });
   });
 
   it("dedupes duplicate ticket started milestones", () => {
@@ -351,12 +343,12 @@ describe("buildOrchestrationTimelineRows", () => {
     expect(
       rows.filter(
         (row) =>
-          row.kind === "milestone" && row.activityKind === "orchestration.run.ticket.started",
+          row.kind === "separator" && row.activityKind === "orchestration.run.ticket.started",
       ),
     ).toHaveLength(1);
   });
 
-  it("orders same-timestamp milestones before messages and messages before terminal milestones", () => {
+  it("orders same-timestamp milestones before blocks and blocks before terminal milestones", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [
         makeActivity({
@@ -365,8 +357,9 @@ describe("buildOrchestrationTimelineRows", () => {
           summary: "Review started",
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
+          sequence: 1,
         }),
         makeActivity({
           id: "review-approved",
@@ -374,13 +367,14 @@ describe("buildOrchestrationTimelineRows", () => {
           summary: "Approved",
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
-          reviewThreadId: "thread-review-1",
+          reviewThreadId: "thread-review",
           reviewIteration: 1,
+          sequence: 2,
         }),
       ],
       childThreads: [
         makeChildThread({
-          id: "thread-review-1",
+          id: "thread-review",
           ticketId: "ticket-1",
           messages: [
             makeMessage("review-message", {
@@ -394,18 +388,18 @@ describe("buildOrchestrationTimelineRows", () => {
       run: makeRun({ currentPhase: "reviewing" }),
     });
 
-    expect(rows.map((row) => row.kind)).toEqual(["milestone", "message", "milestone"]);
+    expect(rows.map((row) => row.kind)).toEqual(["separator", "thread-block", "separator"]);
   });
 
-  it("hides review user messages but keeps working user messages", () => {
+  it("keeps working user messages but hides review prompts", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [],
       childThreads: [
         makeChildThread({
-          id: "thread-1",
+          id: "thread-impl",
           ticketId: "ticket-1",
           messages: [
-            makeMessage("user-working", {
+            makeMessage("working-user", {
               role: "user",
               text: "Working follow-up",
               createdAt: "2026-04-09T10:00:00.000Z",
@@ -413,10 +407,10 @@ describe("buildOrchestrationTimelineRows", () => {
           ],
         }),
         makeChildThread({
-          id: "thread-review-1",
+          id: "thread-review",
           ticketId: "ticket-1",
           messages: [
-            makeMessage("user-review", {
+            makeMessage("review-user", {
               role: "user",
               text: "Internal review prompt",
               createdAt: "2026-04-09T10:00:01.000Z",
@@ -427,14 +421,16 @@ describe("buildOrchestrationTimelineRows", () => {
       run: makeRun(),
     });
 
-    expect(rows.filter((row) => row.kind === "message")).toHaveLength(1);
-    const messageRow = rows.find((row) => row.kind === "message");
-    expect(messageRow && messageRow.kind === "message" ? messageRow.message.text : null).toBe(
-      "Working follow-up",
-    );
+    const blocks = rows.filter((row) => row.kind === "thread-block");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "working",
+      messages: [expect.objectContaining({ text: "Working follow-up" })],
+    });
   });
 
-  it("renders a waiting row for an active phase with no visible messages", () => {
+  it("renders an old-style waiting implementation block when the active phase has no messages", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [
         makeActivity({
@@ -444,30 +440,32 @@ describe("buildOrchestrationTimelineRows", () => {
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
-          workingThreadId: "thread-1",
+          workingThreadId: "thread-impl",
         }),
       ],
-      childThreads: [makeChildThread({ id: "thread-1", ticketId: "ticket-1" })],
+      childThreads: [makeChildThread({ id: "thread-impl", ticketId: "ticket-1" })],
       run: makeRun({
         currentPhase: "working",
         updatedAt: "2026-04-09T10:00:05.000Z",
       }),
     });
 
-    const waitingRow = rows.find((row) => row.kind === "waiting");
-    expect(waitingRow).toMatchObject({
-      kind: "waiting",
-      sourceLabel: "Implementation",
-      text: "Waiting for agent response...",
+    const waitingBlock = rows.find((row) => row.kind === "thread-block");
+    expect(waitingBlock).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "working",
+      emptyStateText: "Waiting for agent response...",
+      messages: [],
+      isActive: true,
     });
   });
 
-  it("uses fallback review labeling when review association is malformed", () => {
+  it("falls back to review thread labeling when review association is malformed", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [],
       childThreads: [
         makeChildThread({
-          id: "thread-review-1",
+          id: "thread-review",
           ticketId: "ticket-1",
           messages: [
             makeMessage("review-message", {
@@ -481,10 +479,11 @@ describe("buildOrchestrationTimelineRows", () => {
       run: makeRun(),
     });
 
-    const messageRow = rows.find((row) => row.kind === "message");
-    expect(messageRow).toMatchObject({
-      kind: "message",
-      sourceLabel: "Review",
+    const reviewBlock = rows.find((row) => row.kind === "thread-block");
+    expect(reviewBlock).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "review",
+      reviewIteration: 1,
     });
   });
 });

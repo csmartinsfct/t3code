@@ -1,9 +1,9 @@
-import type { TicketId, ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { Thread } from "../../types";
 import type { OrchestrationTimelineRow } from "../../hooks/useOrchestrationTimeline.logic";
+import type { Thread } from "../../types";
 
 vi.mock("@tanstack/react-virtual", () => ({
   measureElement: () => undefined,
@@ -120,12 +120,12 @@ function makeThread(): Thread {
 }
 
 describe("OrchestrationTimeline", () => {
-  it("renders merged chronology and review cards", async () => {
+  it("renders chronological implementation and review blocks with the old section chrome", async () => {
     const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
     const rows: OrchestrationTimelineRow[] = [
       {
-        kind: "milestone",
-        id: "milestone:start",
+        kind: "separator",
+        id: "sep:start",
         activityKind: "orchestration.run.ticket.started",
         summary: "Starting work on T3CO-24",
         tone: "info",
@@ -133,26 +133,24 @@ describe("OrchestrationTimeline", () => {
         ticketIdentifier: "T3CO-24",
       },
       {
-        kind: "message",
-        id: "message:impl",
-        createdAt: "2026-04-09T10:00:01.000Z",
-        threadId: "thread-1",
-        ticketId: "ticket-1" as TicketId,
-        ticketIdentifier: "T3CO-24",
-        threadKind: "working",
-        sourceLabel: "Implementation",
-        isActiveSource: false,
-        message: {
-          id: "impl" as Thread["messages"][number]["id"],
-          role: "assistant",
-          text: "Addressed review feedback",
-          createdAt: "2026-04-09T10:00:01.000Z",
-          streaming: false,
-        },
+        kind: "thread-block",
+        id: "block:impl-1",
+        threadId: "thread-impl",
+        sectionKind: "working",
+        messages: [
+          {
+            id: "impl-1" as Thread["messages"][number]["id"],
+            role: "assistant",
+            text: "Initial implementation",
+            createdAt: "2026-04-09T10:00:01.000Z",
+            streaming: false,
+          },
+        ],
+        isActive: false,
       },
       {
-        kind: "milestone",
-        id: "milestone:changes",
+        kind: "separator",
+        id: "sep:changes",
         activityKind: "orchestration.run.ticket.review.requested-changes",
         summary: "Changes requested",
         tone: "info",
@@ -162,28 +160,38 @@ describe("OrchestrationTimeline", () => {
         reviewState: "requested-changes",
       },
       {
-        kind: "message",
-        id: "message:review",
-        createdAt: "2026-04-09T10:00:03.000Z",
-        threadId: "thread-review-1",
-        ticketId: "ticket-1" as TicketId,
-        ticketIdentifier: "T3CO-24",
-        threadKind: "review",
-        sourceLabel: "Review 2",
+        kind: "thread-block",
+        id: "block:impl-2",
+        threadId: "thread-impl",
+        sectionKind: "working",
+        messages: [
+          {
+            id: "impl-2" as Thread["messages"][number]["id"],
+            role: "assistant",
+            text: "Addressed review feedback",
+            createdAt: "2026-04-09T10:00:03.000Z",
+            streaming: false,
+          },
+        ],
+        isActive: false,
+      },
+      {
+        kind: "thread-block",
+        id: "block:review-2",
+        threadId: "thread-review",
+        sectionKind: "review",
+        messages: [
+          {
+            id: "review-2" as Thread["messages"][number]["id"],
+            role: "assistant",
+            text: '{"changesNeeded":false,"summary":"Looks good now.","comments":[]}',
+            createdAt: "2026-04-09T10:00:04.000Z",
+            streaming: false,
+          },
+        ],
+        isActive: false,
         reviewIteration: 2,
-        isActiveSource: true,
-        message: {
-          id: "review" as Thread["messages"][number]["id"],
-          role: "assistant",
-          text: '{"changesNeeded":false,"summary":"Looks good now.","comments":[]}',
-          createdAt: "2026-04-09T10:00:03.000Z",
-          streaming: false,
-        },
-        reviewOutput: {
-          changesNeeded: false,
-          summary: "Looks good now.",
-          comments: [],
-        },
+        reviewOutcome: "approved",
       },
     ];
     useOrchestrationTimeline.mockReturnValue({
@@ -208,16 +216,23 @@ describe("OrchestrationTimeline", () => {
       />,
     );
 
-    expect(markup.indexOf("Addressed review feedback")).toBeLessThan(
+    expect(markup).toContain("Implementation");
+    expect(markup).toContain("Review Passed");
+    expect(markup).toContain("Open thread");
+    expect(markup).not.toContain("Active");
+    expect(markup.indexOf("Initial implementation")).toBeLessThan(
       markup.indexOf("Changes requested"),
     );
-    expect(markup.indexOf("Changes requested")).toBeLessThan(markup.indexOf("Looks good now."));
-    expect(markup).toContain("Open thread");
-    expect(markup).toContain("Review 2");
-    expect(markup).toContain("Approved");
+    expect(markup.indexOf("Changes requested")).toBeLessThan(
+      markup.indexOf("Addressed review feedback"),
+    );
+    expect(markup.indexOf("Addressed review feedback")).toBeLessThan(
+      markup.indexOf("Looks good now."),
+    );
+    expect(markup).toContain("Automated review 2 Approved Looks good now.");
   });
 
-  it("passes ticket-link handlers through to markdown rows", async () => {
+  it("passes ticket-link handlers through to markdown inside a thread block", async () => {
     const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
     useOrchestrationTimeline.mockReturnValue({
       loading: false,
@@ -226,20 +241,20 @@ describe("OrchestrationTimeline", () => {
       childThreads: [],
       timelineRows: [
         {
-          kind: "message",
-          id: "message:impl",
-          createdAt: "2026-04-09T10:00:01.000Z",
+          kind: "thread-block",
+          id: "block:impl",
           threadId: "thread-1",
-          threadKind: "working",
-          sourceLabel: "Implementation",
-          isActiveSource: false,
-          message: {
-            id: "impl" as Thread["messages"][number]["id"],
-            role: "assistant",
-            text: "[T3CO-191](t3://ticket/T3CO-191)",
-            createdAt: "2026-04-09T10:00:01.000Z",
-            streaming: false,
-          },
+          sectionKind: "working",
+          isActive: false,
+          messages: [
+            {
+              id: "impl" as Thread["messages"][number]["id"],
+              role: "assistant",
+              text: "[T3CO-191](t3://ticket/T3CO-191)",
+              createdAt: "2026-04-09T10:00:01.000Z",
+              streaming: false,
+            },
+          ],
         },
       ],
       refresh: () => {},

@@ -1,12 +1,10 @@
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { measureElement as measureVirtualElement, useVirtualizer } from "@tanstack/react-virtual";
 import {
-  BotIcon,
   CheckCircle2Icon,
   CircleIcon,
   ExternalLinkIcon,
   FileCode2Icon,
-  HourglassIcon,
   Loader2Icon,
   PauseCircleIcon,
   PlayCircleIcon,
@@ -18,12 +16,9 @@ import { memo, useEffect } from "react";
 
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
 import { useOrchestrationTimeline } from "../../hooks/useOrchestrationTimeline";
-import type {
-  MessageRow,
-  MilestoneRow,
-  WaitingRow,
-} from "../../hooks/useOrchestrationTimeline.logic";
+import type { SeparatorRow, ThreadBlockRow } from "../../hooks/useOrchestrationTimeline.logic";
 import { estimateOrchestrationTimelineRowHeight } from "../../hooks/useOrchestrationTimeline.logic";
+import { parseReviewOutputText } from "../../lib/reviewOutput";
 import type { Thread } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
@@ -43,7 +38,7 @@ interface OrchestrationTimelineProps {
 
 type BadgeVariant = "info" | "success" | "warning" | "error" | "outline";
 
-function resolveMilestoneBadgeVariant(row: MilestoneRow): {
+function resolveSeparatorBadgeVariant(row: SeparatorRow): {
   variant: BadgeVariant;
   icon: React.ReactNode;
 } {
@@ -83,12 +78,12 @@ function resolveMilestoneBadgeVariant(row: MilestoneRow): {
   return { variant: "outline", icon: <CircleIcon /> };
 }
 
-const OrchestrationMilestone = memo(function OrchestrationMilestone({
+const OrchestrationSeparator = memo(function OrchestrationSeparator({
   row,
 }: {
-  row: MilestoneRow;
+  row: SeparatorRow;
 }) {
-  const { variant, icon } = resolveMilestoneBadgeVariant(row);
+  const { variant, icon } = resolveSeparatorBadgeVariant(row);
 
   return (
     <div className="my-3 flex items-center justify-center gap-1.5">
@@ -110,121 +105,120 @@ const OrchestrationMilestone = memo(function OrchestrationMilestone({
   );
 });
 
-const OrchestrationMessage = memo(function OrchestrationMessage({
+const TimelineSection = memo(function TimelineSection({
   row,
   markdownCwd,
   onNavigateToThread,
   onOpenTicketLink,
 }: {
-  row: MessageRow;
+  row: ThreadBlockRow;
   markdownCwd: string | undefined;
   onNavigateToThread: ((threadId: string) => void) | undefined;
   onOpenTicketLink?: (identifier: string) => void | Promise<void>;
 }) {
-  const sourceVariant =
-    row.threadKind === "working" ? "success" : row.threadKind === "review" ? "info" : "outline";
+  const isReview = row.sectionKind === "review";
+  const canNavigate = onNavigateToThread !== undefined;
+  let reviewCardCount = 0;
+
+  const sectionLabel = isReview
+    ? row.reviewOutcome === "approved"
+      ? "Review Passed"
+      : row.reviewOutcome === "requested-changes"
+        ? "Review Failed"
+        : row.reviewOutcome === "blocked"
+          ? "Review Blocked"
+          : "Review"
+    : "Implementation";
 
   return (
-    <div className="rounded-xl border border-border/50 bg-card/40 px-3 py-3">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Badge variant={sourceVariant} size="sm">
-          {row.threadKind === "working" ? (
-            <FileCode2Icon className="size-3" />
-          ) : row.threadKind === "review" ? (
-            <SearchCheckIcon className="size-3" />
+    <div>
+      {canNavigate ? (
+        <button
+          type="button"
+          className="group/section mb-3 flex w-full items-center gap-2.5 rounded-md px-1 py-1 transition-colors hover:bg-accent/50"
+          onClick={() => onNavigateToThread(row.threadId)}
+        >
+          {isReview ? (
+            <SearchCheckIcon className="size-3 shrink-0 text-info-foreground" />
           ) : (
-            <BotIcon className="size-3" />
+            <FileCode2Icon className="size-3 shrink-0 text-success-foreground" />
           )}
-          {row.sourceLabel}
-        </Badge>
-        {row.ticketIdentifier && (
-          <Badge variant="outline" size="sm">
-            {row.ticketIdentifier}
-          </Badge>
-        )}
-        {row.isActiveSource && (
-          <Badge variant="outline" size="sm">
-            Active
-          </Badge>
-        )}
-        <span className="flex-1" />
-        {onNavigateToThread ? (
-          <button
-            type="button"
-            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => onNavigateToThread(row.threadId)}
-          >
+          <span className="text-xs text-muted-foreground">{sectionLabel}</span>
+          <span className="flex-1" />
+          <span className="text-[11px] text-muted-foreground/0 transition-colors group-hover/section:text-muted-foreground/70">
             Open thread
             <ExternalLinkIcon className="mb-px ml-1 inline size-2.5" />
-          </button>
-        ) : null}
-      </div>
-
-      {row.message.role === "assistant" && row.reviewOutput ? (
-        <ReviewOutputCard
-          output={row.reviewOutput}
-          heading={
-            row.reviewIteration ? `Automated review ${row.reviewIteration}` : "Automated review"
-          }
-        />
-      ) : row.message.role === "assistant" ? (
-        <div className="min-w-0 px-1 py-0.5">
-          <ChatMarkdown
-            text={row.message.text || (row.message.streaming ? "" : "(empty response)")}
-            cwd={markdownCwd}
-            isStreaming={Boolean(row.message.streaming)}
-            {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
-          />
-        </div>
-      ) : row.message.role === "system" ? (
-        <div className="py-1 text-center">
-          <span className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/40">
-            {row.message.text}
           </span>
-        </div>
+        </button>
       ) : (
-        <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-            <div className="text-sm">{row.message.text}</div>
-          </div>
+        <div className="mb-3 flex items-center gap-2.5 px-1 py-1">
+          {isReview ? (
+            <SearchCheckIcon className="size-3 shrink-0 text-info-foreground" />
+          ) : (
+            <FileCode2Icon className="size-3 shrink-0 text-success-foreground" />
+          )}
+          <span className="text-xs text-muted-foreground">{sectionLabel}</span>
         </div>
       )}
-    </div>
-  );
-});
 
-const OrchestrationWaitingRow = memo(function OrchestrationWaitingRow({
-  row,
-  onNavigateToThread,
-}: {
-  row: WaitingRow;
-  onNavigateToThread: ((threadId: string) => void) | undefined;
-}) {
-  return (
-    <div className="rounded-xl border border-dashed border-border/60 bg-card/30 px-3 py-3 text-sm text-muted-foreground">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={row.threadKind === "working" ? "success" : "info"} size="sm">
-          <HourglassIcon className="size-3" />
-          {row.sourceLabel}
-        </Badge>
-        {row.ticketIdentifier && (
-          <Badge variant="outline" size="sm">
-            {row.ticketIdentifier}
-          </Badge>
-        )}
-        <span className="flex-1" />
-        {onNavigateToThread ? (
-          <button
-            type="button"
-            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => onNavigateToThread(row.threadId)}
-          >
-            Open thread
-            <ExternalLinkIcon className="mb-px ml-1 inline size-2.5" />
-          </button>
-        ) : null}
-      </div>
-      <p className="mt-2">{row.text}</p>
+      {row.messages.length === 0 ? (
+        <p className="py-3 text-center text-xs text-muted-foreground/40">
+          {row.emptyStateText ?? (isReview ? "No review messages yet" : "No messages yet")}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {row.messages.map((message) => {
+            if (isReview && message.role === "user") {
+              return null;
+            }
+
+            if (message.role === "assistant") {
+              const reviewOutput = isReview ? parseReviewOutputText(message.text) : null;
+
+              if (reviewOutput) {
+                reviewCardCount += 1;
+                const heading =
+                  row.reviewIteration !== undefined && reviewCardCount === 1
+                    ? `Automated review ${row.reviewIteration}`
+                    : `Automated review ${reviewCardCount}`;
+
+                return (
+                  <ReviewOutputCard key={message.id} output={reviewOutput} heading={heading} />
+                );
+              }
+
+              return (
+                <div key={message.id} className="min-w-0 px-1 py-0.5">
+                  <ChatMarkdown
+                    text={message.text || (message.streaming ? "" : "(empty response)")}
+                    cwd={markdownCwd}
+                    isStreaming={Boolean(message.streaming)}
+                    {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
+                  />
+                </div>
+              );
+            }
+
+            if (message.role === "system") {
+              return (
+                <div key={message.id} className="py-1 text-center">
+                  <span className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/40">
+                    {message.text}
+                  </span>
+                </div>
+              );
+            }
+
+            return (
+              <div key={message.id} className="flex justify-end">
+                <div className="max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                  <div className="text-sm">{message.text}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });
@@ -331,17 +325,14 @@ export function OrchestrationTimeline({
               className="absolute left-0 top-0 w-full pb-2"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
-              {row.kind === "milestone" && <OrchestrationMilestone row={row} />}
-              {row.kind === "message" && (
-                <OrchestrationMessage
+              {row.kind === "separator" && <OrchestrationSeparator row={row} />}
+              {row.kind === "thread-block" && (
+                <TimelineSection
                   row={row}
                   markdownCwd={markdownCwd}
                   onNavigateToThread={onNavigateToThread}
                   {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
                 />
-              )}
-              {row.kind === "waiting" && (
-                <OrchestrationWaitingRow row={row} onNavigateToThread={onNavigateToThread} />
               )}
               {row.kind === "loading" && <LoadingSkeleton />}
               {row.kind === "empty" && <EmptyState />}
