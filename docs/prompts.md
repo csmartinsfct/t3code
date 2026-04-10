@@ -4,12 +4,13 @@ T3 Code exposes orchestration prompt management through one backend-owned servic
 
 ## Overview
 
-The prompt-management surface covers the five orchestration prompt ids:
+The prompt-management surface covers the six orchestration prompt ids:
 
 - `implement`
 - `resume`
 - `resumeFreshAgent`
 - `review`
+- `reReview`
 - `reviewFeedback`
 
 Every prompt id belongs to the `orchestration` prompt group and is stored as a prompt-template document with:
@@ -25,6 +26,12 @@ Effective prompt resolution order is:
 3. shipped default
 
 Validation and preview rendering are always backend-owned. The server never trusts raw UI or MCP input without validating it first.
+
+Review-specific behavior:
+
+- `review` is used for review iteration `1`
+- `reReview` is used for review iteration `2+`
+- `reviewFeedback` is still the implementer-facing prompt that carries structured review findings back to the working thread
 
 ## Native API
 

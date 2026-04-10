@@ -15,6 +15,7 @@ const ORCHESTRATION_PROMPT_ID_VALUES = [
   "resume",
   "resumeFreshAgent",
   "review",
+  "reReview",
   "reviewFeedback",
 ] as const;
 

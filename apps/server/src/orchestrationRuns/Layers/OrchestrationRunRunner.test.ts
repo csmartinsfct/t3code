@@ -16,10 +16,13 @@ import {
   OrchestrationRunError,
 } from "@t3tools/contracts";
 import { Effect, Layer, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type DeepPartial } from "@t3tools/shared/Struct";
-import { CheckpointDiffQuery } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
+import {
+  CheckpointDiffQuery,
+  type CheckpointDiffQueryShape,
+} from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -149,6 +152,33 @@ const makeTurnAbortedRuntimeEvent = (input: {
   payload: {
     reason: input.reason ?? "interrupted",
   },
+});
+
+const makeOrchestrationParentThread = (
+  overrides: Partial<OrchestrationThread> = {},
+): OrchestrationThread => ({
+  id: orchestrationThreadId,
+  projectId,
+  title: "Orchestration",
+  modelSelection: { provider: "codex", model: "gpt-5-codex" },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  branch: null,
+  worktreePath: null,
+  parentThreadId: null,
+  isOrchestrationThread: true,
+  ticketId: null,
+  latestTurn: null,
+  createdAt: "2026-04-09T10:00:00.000Z",
+  updatedAt: "2026-04-09T10:00:00.000Z",
+  archivedAt: null,
+  deletedAt: null,
+  messages: [],
+  proposedPlans: [],
+  activities: [],
+  checkpoints: [],
+  session: null,
+  ...overrides,
 });
 
 const makeCompletedWorkAndReviewThreads = (
@@ -316,6 +346,7 @@ const makeLayer = (opts: {
   runService?: Partial<OrchestrationRunServiceShape>;
   ticketing?: Partial<TicketingServiceShape>;
   providerService?: Partial<ProviderServiceShape>;
+  checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
   providerEvents?: Stream.Stream<ProviderRuntimeEvent>;
   dispatchedCommands?: OrchestrationCommand[];
   onDispatch?: (command: OrchestrationCommand) => void;
@@ -343,6 +374,7 @@ const makeLayer = (opts: {
   const readModelThreads =
     opts.readModelThreads ??
     ([
+      makeOrchestrationParentThread(),
       {
         id: workingThread1,
         projectId,
@@ -491,7 +523,13 @@ const makeLayer = (opts: {
     ),
     Layer.provide(
       Layer.succeed(CheckpointDiffQuery, {
-        getTurnDiff: () => Effect.die(new Error("not mocked")),
+        getTurnDiff: () =>
+          Effect.succeed({
+            threadId: workingThread1,
+            fromTurnCount: 1,
+            toTurnCount: 2,
+            diff: "patch-delta",
+          }),
         getFullThreadDiff: () =>
           Effect.succeed({
             threadId: workingThread1,
@@ -499,6 +537,7 @@ const makeLayer = (opts: {
             toTurnCount: 1,
             diff: "patch",
           }),
+        ...opts.checkpointDiffQuery,
       }),
     ),
   );
@@ -1654,8 +1693,399 @@ describe("OrchestrationRunRunner", () => {
 
     expect(workTurnStarts).toHaveLength(2);
     expect(workTurnStarts[1]?.message.text).toBe(
-      "Feedback custom T3CO-1: Tighten the auth guard.\n- [critical] src/auth.ts:7 - Handle the missing token case.\n- Re-run the edge-case path.",
+      "Feedback custom T3CO-1: Tighten the auth guard.\n- [critical] src/auth.ts:7 - Handle the missing token case.\n- [suggestion] general - Re-run the edge-case path.",
     );
+  });
+
+  it("uses reReview with prior summary and delta diff on later review iterations", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 2,
+    });
+    const completedSingleTicketRun = makeRun({
+      ...singleTicketRun,
+      status: "completed",
+      currentTicketIndex: 0,
+    });
+    const [initialWorkingThread, initialReviewThread] = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({
+        changesNeeded: false,
+        summary: "placeholder",
+        comments: [],
+      }),
+    );
+    const orchestrationThreadState = makeOrchestrationParentThread();
+    const workingThreadState = {
+      ...initialWorkingThread,
+      latestTurn: null,
+      messages: [],
+      checkpoints: [],
+    } as OrchestrationThread;
+    const reviewThreadState = {
+      ...initialReviewThread,
+      latestTurn: null,
+      messages: [],
+      updatedAt: "2026-04-09T10:00:00.000Z",
+    } as OrchestrationThread;
+    const mutableWorkingThreadState = workingThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      checkpoints: OrchestrationThread["checkpoints"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+    const mutableReviewThreadState = reviewThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      messages: OrchestrationThread["messages"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+
+    let workDispatchCount = 0;
+    let reviewDispatchCount = 0;
+    const getFullThreadDiff = vi.fn(({ toTurnCount }: { toTurnCount: number }) =>
+      Effect.succeed({
+        threadId: workingThread1,
+        fromTurnCount: 0,
+        toTurnCount,
+        diff: `full-${toTurnCount}`,
+      }),
+    );
+    const getTurnDiff = vi.fn(
+      ({ fromTurnCount, toTurnCount }: { fromTurnCount: number; toTurnCount: number }) =>
+        Effect.succeed({
+          threadId: workingThread1,
+          fromTurnCount,
+          toTurnCount,
+          diff: `delta-${fromTurnCount}-${toTurnCount}`,
+        }),
+    );
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      checkpointDiffQuery: {
+        getFullThreadDiff,
+        getTurnDiff,
+      },
+      onDispatch: (command) => {
+        if (command.type === "thread.turn.start" && command.threadId === workingThread1) {
+          workDispatchCount += 1;
+          const turnId = TurnId.makeUnsafe(`turn-work-${workDispatchCount}`);
+          const assistantMessageId = MessageId.makeUnsafe(`assistant-work-${workDispatchCount}`);
+          mutableWorkingThreadState.latestTurn = {
+            turnId,
+            state: "completed",
+            requestedAt: `2026-04-09T10:00:0${workDispatchCount}.000Z`,
+            startedAt: `2026-04-09T10:00:0${workDispatchCount}.000Z`,
+            completedAt: `2026-04-09T10:00:0${workDispatchCount}.000Z`,
+            assistantMessageId,
+          };
+          mutableWorkingThreadState.checkpoints = [
+            {
+              turnId,
+              checkpointTurnCount: workDispatchCount,
+              checkpointRef: `checkpoint:work-${workDispatchCount}` as never,
+              status: "ready",
+              files: [],
+              assistantMessageId,
+              completedAt: `2026-04-09T10:00:0${workDispatchCount}.000Z`,
+            },
+          ];
+          mutableWorkingThreadState.updatedAt = `2026-04-09T10:00:0${workDispatchCount}.000Z`;
+          return;
+        }
+
+        if (command.type !== "thread.turn.start" || command.threadId !== reviewThread1) {
+          return;
+        }
+
+        reviewDispatchCount += 1;
+        const turnId = TurnId.makeUnsafe(`turn-review-${reviewDispatchCount}`);
+        const assistantMessageId = MessageId.makeUnsafe(`assistant-review-${reviewDispatchCount}`);
+        mutableReviewThreadState.latestTurn = {
+          turnId,
+          state: "completed",
+          requestedAt: `2026-04-09T10:00:1${reviewDispatchCount}.000Z`,
+          startedAt: `2026-04-09T10:00:1${reviewDispatchCount}.000Z`,
+          completedAt: `2026-04-09T10:00:1${reviewDispatchCount}.000Z`,
+          assistantMessageId,
+        };
+        mutableReviewThreadState.messages = [
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            text: JSON.stringify(
+              reviewDispatchCount === 1
+                ? {
+                    changesNeeded: true,
+                    summary: "Tighten the auth guard.",
+                    comments: [],
+                  }
+                : {
+                    changesNeeded: false,
+                    summary: "Looks good now.",
+                    comments: [],
+                  },
+            ),
+            turnId,
+            streaming: false,
+            createdAt: `2026-04-09T10:00:1${reviewDispatchCount}.000Z`,
+            updatedAt: `2026-04-09T10:00:1${reviewDispatchCount}.000Z`,
+          },
+        ];
+        mutableReviewThreadState.updatedAt = `2026-04-09T10:00:1${reviewDispatchCount}.000Z`;
+      },
+      readModelThreads: [orchestrationThreadState, workingThreadState, reviewThreadState],
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+      ]),
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            review: {
+              version: 1,
+              blocks: [{ when: null, text: "Review ${ticketId} ${commitDiff} ${reviewIteration}" }],
+            },
+            reReview: {
+              version: 1,
+              blocks: [
+                { when: null, text: "ReReview ${ticketId}" },
+                {
+                  when: { type: "exists", variable: "reviewSummary" },
+                  text: "\n${reviewSummary}",
+                },
+                { when: null, text: "\n${commitDiff}\n${reviewIteration}" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const reviewTurnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === reviewThread1,
+    );
+
+    expect(reviewTurnStarts).toHaveLength(2);
+    expect(reviewTurnStarts[0]?.message.text).toBe("Review T3CO-1 full-1 1");
+    expect(reviewTurnStarts[1]?.message.text).toBe(
+      "ReReview T3CO-1\nTighten the auth guard.\ndelta-1-2\n2",
+    );
+    expect(getFullThreadDiff).toHaveBeenCalledTimes(1);
+    expect(getTurnDiff).toHaveBeenCalledTimes(1);
+    expect(getTurnDiff).toHaveBeenCalledWith({
+      threadId: workingThread1,
+      fromTurnCount: 1,
+      toTurnCount: 2,
+    });
+  });
+
+  it("falls back to the full diff for reReview when no prior review boundary exists", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const pausedSingleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      currentTicketIndex: 0,
+      currentPhase: "working",
+      reviewIteration: 1,
+      maxReviewIterations: 2,
+      status: "paused",
+    });
+    const runningSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "completed",
+    });
+    const [initialWorkingThread, initialReviewThread] = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({
+        changesNeeded: false,
+        summary: "placeholder",
+        comments: [],
+      }),
+    );
+    const orchestrationThreadState = makeOrchestrationParentThread();
+    const workingThreadState = {
+      ...initialWorkingThread,
+      updatedAt: "2026-04-09T10:00:00.000Z",
+    } as OrchestrationThread;
+    const reviewThreadState = {
+      ...initialReviewThread,
+      latestTurn: null,
+      messages: [],
+      updatedAt: "2026-04-09T10:00:00.000Z",
+    } as OrchestrationThread;
+    const mutableWorkingThreadState = workingThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      checkpoints: OrchestrationThread["checkpoints"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+    const mutableReviewThreadState = reviewThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      messages: OrchestrationThread["messages"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+    let getCallCount = 0;
+
+    const getFullThreadDiff = vi.fn(({ toTurnCount }: { toTurnCount: number }) =>
+      Effect.succeed({
+        threadId: workingThread1,
+        fromTurnCount: 0,
+        toTurnCount,
+        diff: `full-${toTurnCount}`,
+      }),
+    );
+    const getTurnDiff = vi.fn(() => Effect.die(new Error("getTurnDiff should not be called")));
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      checkpointDiffQuery: {
+        getFullThreadDiff,
+        getTurnDiff,
+      },
+      onDispatch: (command) => {
+        if (command.type === "thread.turn.start" && command.threadId === workingThread1) {
+          const turnId = TurnId.makeUnsafe("turn-work-2");
+          const assistantMessageId = MessageId.makeUnsafe("assistant-work-2");
+          mutableWorkingThreadState.latestTurn = {
+            turnId,
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:02.000Z",
+            startedAt: "2026-04-09T10:00:02.000Z",
+            completedAt: "2026-04-09T10:00:02.000Z",
+            assistantMessageId,
+          };
+          mutableWorkingThreadState.checkpoints = [
+            {
+              turnId: TurnId.makeUnsafe("turn-work-1"),
+              checkpointTurnCount: 1,
+              checkpointRef: "checkpoint:work-1" as never,
+              status: "ready",
+              files: [],
+              assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+              completedAt: "2026-04-09T10:00:01.000Z",
+            },
+            {
+              turnId,
+              checkpointTurnCount: 2,
+              checkpointRef: "checkpoint:work-2" as never,
+              status: "ready",
+              files: [],
+              assistantMessageId,
+              completedAt: "2026-04-09T10:00:02.000Z",
+            },
+          ];
+          mutableWorkingThreadState.updatedAt = "2026-04-09T10:00:02.000Z";
+          return;
+        }
+
+        if (command.type !== "thread.turn.start" || command.threadId !== reviewThread1) {
+          return;
+        }
+
+        const turnId = TurnId.makeUnsafe("turn-review-2");
+        const assistantMessageId = MessageId.makeUnsafe("assistant-review-2");
+        mutableReviewThreadState.latestTurn = {
+          turnId,
+          state: "completed",
+          requestedAt: "2026-04-09T10:00:03.000Z",
+          startedAt: "2026-04-09T10:00:03.000Z",
+          completedAt: "2026-04-09T10:00:03.000Z",
+          assistantMessageId,
+        };
+        mutableReviewThreadState.messages = [
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            text: JSON.stringify({
+              changesNeeded: false,
+              summary: "Looks good now.",
+              comments: [],
+            }),
+            turnId,
+            streaming: false,
+            createdAt: "2026-04-09T10:00:03.000Z",
+            updatedAt: "2026-04-09T10:00:03.000Z",
+          },
+        ];
+        mutableReviewThreadState.updatedAt = "2026-04-09T10:00:03.000Z";
+      },
+      readModelThreads: [orchestrationThreadState, workingThreadState, reviewThreadState],
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          return Effect.succeed(
+            getCallCount === 1 ? pausedSingleTicketRun : runningSingleTicketRun,
+          );
+        },
+        resume: () => Effect.succeed(runningSingleTicketRun),
+        updateRunProgress: () => Effect.succeed(runningSingleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-2" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-2" }),
+      ]),
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            reReview: {
+              version: 1,
+              blocks: [
+                { when: null, text: "ReReview ${ticketId}" },
+                {
+                  when: { type: "exists", variable: "reviewSummary" },
+                  text: "\n${reviewSummary}",
+                },
+                { when: null, text: "\n${commitDiff}\n${reviewIteration}" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const reviewTurnStart = dispatchedCommands.find(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === reviewThread1,
+    );
+
+    expect(reviewTurnStart?.message.text).toBe("ReReview T3CO-1\nfull-2\n2");
+    expect(getFullThreadDiff).toHaveBeenCalledTimes(1);
+    expect(getTurnDiff).not.toHaveBeenCalled();
   });
 
   it("pauses with a prompt-specific activity when the effective prompt document is invalid", async () => {

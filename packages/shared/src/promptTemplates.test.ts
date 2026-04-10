@@ -47,6 +47,23 @@ describe("prompt template variable registry", () => {
     expect(listPromptTemplateVariables("review").map((definition) => definition.key)).not.toContain(
       "reviewSummary",
     );
+    expect(listPromptTemplateVariables("reReview").map((definition) => definition.key)).toEqual(
+      expect.arrayContaining([
+        "ticketId",
+        "ticketTitle",
+        "ticketDescription",
+        "acceptanceCriteria",
+        "worktree",
+        "projectTitle",
+        "projectPath",
+        "commitDiff",
+        "reviewIteration",
+        "reviewSummary",
+      ]),
+    );
+    expect(
+      listPromptTemplateVariables("reReview").map((definition) => definition.key),
+    ).not.toContain("reviewComments");
     expect(listPromptTemplateVariables("resume").map((definition) => definition.key)).toEqual(
       expect.arrayContaining([
         "ticketId",
@@ -245,6 +262,35 @@ describe("validatePromptTemplateDocument", () => {
     });
   });
 
+  it("accepts reReview-specific variables", () => {
+    const result = validatePromptTemplateDocument({
+      promptId: "reReview",
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: { type: "exists", variable: "reviewSummary" },
+            text: "Re-review ${ticketId}\n${reviewSummary}\n${commitDiff}\n${reviewIteration}",
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: { type: "exists", variable: "reviewSummary" },
+            text: "Re-review ${ticketId}\n${reviewSummary}\n${commitDiff}\n${reviewIteration}",
+          },
+        ],
+      },
+      referencedVariables: ["ticketId", "reviewSummary", "commitDiff", "reviewIteration"],
+    });
+  });
+
   it("rejects invalid versions", () => {
     const result = validatePromptTemplateDocument({
       promptId: "implement",
@@ -340,6 +386,32 @@ describe("validatePromptTemplateDocument", () => {
           code: "variable_not_allowed",
           blockIndex: 0,
           variable: "reviewSummary",
+        }),
+      ],
+    });
+  });
+
+  it("rejects reviewFeedback-only variables in reReview prompts", () => {
+    const result = validatePromptTemplateDocument({
+      promptId: "reReview",
+      document: {
+        version: 1,
+        blocks: [
+          {
+            when: null,
+            text: "Re-review using ${reviewComments}",
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        expect.objectContaining({
+          code: "variable_not_allowed",
+          blockIndex: 0,
+          variable: "reviewComments",
         }),
       ],
     });

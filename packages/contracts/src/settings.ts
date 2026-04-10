@@ -108,6 +108,9 @@ export const OrchestrationPromptSettings = Schema.Struct({
   review: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.review),
   ),
+  reReview: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.reReview),
+  ),
   reviewFeedback: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.reviewFeedback),
   ),
@@ -268,6 +271,7 @@ export const ServerSettingsPatch = Schema.Struct({
           resume: Schema.optionalKey(PromptDocumentPatch),
           resumeFreshAgent: Schema.optionalKey(PromptDocumentPatch),
           review: Schema.optionalKey(PromptDocumentPatch),
+          reReview: Schema.optionalKey(PromptDocumentPatch),
           reviewFeedback: Schema.optionalKey(PromptDocumentPatch),
         }),
       ),

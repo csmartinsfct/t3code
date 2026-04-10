@@ -10,6 +10,7 @@ export const ORCHESTRATION_PROMPT_IDS = [
   "resume",
   "resumeFreshAgent",
   "review",
+  "reReview",
   "reviewFeedback",
 ] as const;
 export type OrchestrationPromptId = (typeof ORCHESTRATION_PROMPT_IDS)[number];
@@ -20,6 +21,7 @@ export const OrchestrationPromptOverrides = Schema.Struct({
   resume: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   resumeFreshAgent: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   review: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
+  reReview: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
   reviewFeedback: Schema.optionalKey(Schema.suspend(() => PromptDocumentV1)),
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type OrchestrationPromptOverrides = typeof OrchestrationPromptOverrides.Type;
@@ -29,6 +31,7 @@ export const OrchestrationPromptOverridesPatch = Schema.Struct({
   resume: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   resumeFreshAgent: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   review: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
+  reReview: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
   reviewFeedback: Schema.optionalKey(Schema.NullOr(Schema.suspend(() => PromptDocumentV1))),
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type OrchestrationPromptOverridesPatch = typeof OrchestrationPromptOverridesPatch.Type;
@@ -175,6 +178,35 @@ export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
       {
         when: null,
         text: '\n\nDiff:\n${commitDiff}\n\nReview iteration: ${reviewIteration}\n\nReturn a JSON object matching this shape exactly:\n{\n  "changesNeeded": boolean,\n  "summary": string,\n  "comments": [\n    {\n      "file": string | null,\n      "line": number | null,\n      "severity": "critical" | "suggestion" | "nit",\n      "body": string\n    }\n  ]\n}\n\nIf the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.',
+      },
+    ],
+  },
+  reReview: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [
+      {
+        when: null,
+        text: "You are performing a follow-up review for a ticket in an automated orchestration workflow. Verify whether the latest implementation changes addressed the prior review findings. Return valid JSON only. Do not include markdown fences, commentary, or any text outside the JSON object.\n\nRe-review the latest changes for ticket ${ticketId}: ${ticketTitle}.",
+      },
+      {
+        when: { type: "exists", variable: "ticketDescription" },
+        text: "\n\nTicket description:\n${ticketDescription}",
+      },
+      {
+        when: { type: "exists", variable: "acceptanceCriteria" },
+        text: "\n\nAcceptance criteria:\n${acceptanceCriteria}",
+      },
+      {
+        when: { type: "exists", variable: "worktree" },
+        text: "\n\nWorktree:\n${worktree}",
+      },
+      {
+        when: { type: "exists", variable: "reviewSummary" },
+        text: "\n\nPrior review summary:\n${reviewSummary}",
+      },
+      {
+        when: null,
+        text: '\n\nLatest changes since the prior review:\n${commitDiff}\n\nReview iteration: ${reviewIteration}\n\nReturn a JSON object matching this shape exactly:\n{\n  "changesNeeded": boolean,\n  "summary": string,\n  "comments": [\n    {\n      "file": string | null,\n      "line": number | null,\n      "severity": "critical" | "suggestion" | "nit",\n      "body": string\n    }\n  ]\n}\n\nSet changesNeeded to true if the requested fixes are not fully addressed or the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.',
       },
     ],
   },

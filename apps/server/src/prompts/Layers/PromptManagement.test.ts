@@ -103,6 +103,26 @@ describe("PromptManagementLive", () => {
     });
   });
 
+  it("lists reReview as an orchestration prompt definition", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const promptManagement = yield* PromptManagementService;
+        return yield* promptManagement.listPromptDefinitions({
+          scope: "global",
+        });
+      }).pipe(Effect.provide(makePromptManagementLayer())),
+    );
+
+    expect(
+      result.definitions.find((definition) => definition.promptId === "reReview"),
+    ).toMatchObject({
+      groupId: "orchestration",
+      promptId: "reReview",
+      label: "Re-Review",
+      description: expect.stringContaining("follow-up review"),
+    });
+  });
+
   it("returns effective project override state with global fallback metadata", async () => {
     const globalDocument = {
       version: 1,

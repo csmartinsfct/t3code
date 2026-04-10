@@ -103,6 +103,12 @@ type PromptRenderContext = {
   readonly commitDiff?: string;
   readonly reviewIteration?: number;
   readonly review?: ReviewOutput;
+  readonly reviewSummary?: string;
+};
+
+type PriorRequestedChangesReview = {
+  readonly reviewSummary?: string;
+  readonly reviewedWorkingTurnCount?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -160,6 +166,9 @@ const formatReviewComments = (review: ReviewOutput): string =>
     })
     .join("\n");
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 const buildPromptVariableMap = (input: PromptRenderContext) => ({
   ticketId: input.ticket.identifier,
   ticketTitle: input.ticket.title,
@@ -170,7 +179,7 @@ const buildPromptVariableMap = (input: PromptRenderContext) => ({
   projectPath: input.project.workspaceRoot,
   commitDiff: input.commitDiff ?? "",
   reviewIteration: typeof input.reviewIteration === "number" ? String(input.reviewIteration) : "",
-  reviewSummary: input.review?.summary ?? "",
+  reviewSummary: input.reviewSummary ?? input.review?.summary ?? "",
   reviewComments: input.review ? formatReviewComments(input.review) : "",
 });
 
@@ -329,6 +338,48 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           }),
         };
       });
+
+    const getLatestRequestedChangesReview = (input: {
+      readonly orchestrationThreadId: ThreadId;
+      readonly ticketId: Ticket["id"];
+    }) =>
+      getThread(input.orchestrationThreadId).pipe(
+        Effect.map((thread) => {
+          if (!thread) {
+            return null;
+          }
+
+          for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
+            const activity = thread.activities[index]!;
+            if (activity.kind !== "orchestration.run.ticket.review.requested-changes") {
+              continue;
+            }
+
+            if (!isRecord(activity.payload) || activity.payload.ticketId !== input.ticketId) {
+              continue;
+            }
+
+            const reviewSummary =
+              typeof activity.payload.reviewSummary === "string" &&
+              activity.payload.reviewSummary.length > 0
+                ? activity.payload.reviewSummary
+                : undefined;
+            const reviewedWorkingTurnCount =
+              typeof activity.payload.reviewedWorkingTurnCount === "number" &&
+              Number.isInteger(activity.payload.reviewedWorkingTurnCount) &&
+              activity.payload.reviewedWorkingTurnCount >= 0
+                ? activity.payload.reviewedWorkingTurnCount
+                : undefined;
+
+            return {
+              ...(reviewSummary ? { reviewSummary } : {}),
+              ...(reviewedWorkingTurnCount !== undefined ? { reviewedWorkingTurnCount } : {}),
+            } satisfies PriorRequestedChangesReview;
+          }
+
+          return null;
+        }),
+      );
 
     const waitForThread = <A>(
       threadId: ThreadId,
@@ -706,41 +757,63 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       );
     };
 
-    const dispatchReviewTurn = (input: {
+    const resolveReviewTurnPrompt = (input: {
       readonly projectId: OrchestrationProject["id"];
-      readonly reviewThreadId: ThreadId;
+      readonly orchestrationThreadId: ThreadId;
       readonly ticket: Ticket;
       readonly workingThreadId: ThreadId;
       readonly reviewIteration: number;
-      readonly modelSelection: ModelSelection;
+      readonly priorRequestedChangesReview?: PriorRequestedChangesReview;
     }) =>
       Effect.gen(function* () {
         const turnCount = yield* getCompletedTurnCount(input.workingThreadId);
-        const fullDiff = yield* checkpointDiffQuery.getFullThreadDiff({
-          threadId: input.workingThreadId,
-          toTurnCount: turnCount,
-        });
+        const isReReview = input.reviewIteration >= 1;
+        const priorRequestedChangesReview =
+          input.priorRequestedChangesReview !== undefined
+            ? input.priorRequestedChangesReview
+            : ((yield* getLatestRequestedChangesReview({
+                orchestrationThreadId: input.orchestrationThreadId,
+                ticketId: input.ticket.id,
+              })) ?? null);
+        const priorReviewedWorkingTurnCount =
+          priorRequestedChangesReview?.reviewedWorkingTurnCount ?? null;
+        const diff =
+          isReReview &&
+          priorReviewedWorkingTurnCount !== null &&
+          priorReviewedWorkingTurnCount <= turnCount
+            ? yield* checkpointDiffQuery.getTurnDiff({
+                threadId: input.workingThreadId,
+                fromTurnCount: priorReviewedWorkingTurnCount,
+                toTurnCount: turnCount,
+              })
+            : yield* checkpointDiffQuery.getFullThreadDiff({
+                threadId: input.workingThreadId,
+                toTurnCount: turnCount,
+              });
         const { project, prompts } = yield* getResolvedProjectPromptContext(input.projectId);
+        const promptId = isReReview ? "reReview" : "review";
         const prompt = yield* renderValidatedPromptDocument({
-          promptId: "review",
-          promptDocument: prompts.review,
+          promptId,
+          promptDocument: prompts[promptId],
           context: {
             ticket: input.ticket,
             project,
-            commitDiff: fullDiff.diff,
+            commitDiff: diff.diff,
             reviewIteration: input.reviewIteration + 1,
+            ...(priorRequestedChangesReview?.reviewSummary
+              ? { reviewSummary: priorRequestedChangesReview.reviewSummary }
+              : {}),
           },
         });
 
-        yield* dispatchThreadTurn({
-          threadId: input.reviewThreadId,
-          text: prompt,
-          modelSelection: input.modelSelection,
-        });
+        return {
+          promptId,
+          prompt,
+        } as const;
       }).pipe(
         Effect.mapError((cause) =>
           wrapDispatchError(
-            `Failed to dispatch review turn for ticket ${input.ticket.identifier}`,
+            `Failed to render review turn for ticket ${input.ticket.identifier}`,
             cause,
           ),
         ),
@@ -1152,6 +1225,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   : "resume"
                 : "start";
             let pendingReviewFeedback: ReviewOutput | undefined;
+            let pendingReviewedWorkingTurnCount: number | undefined;
             let resumeReviewTurn =
               shouldResumeExistingTicket && currentRun.currentPhase === "reviewing";
             const shouldRestartReviewWithFreshAgent =
@@ -1364,6 +1438,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 reviewThreadId,
                 implementationModelSelection: workingThread.modelSelection,
               });
+              let dispatchedReviewPromptId: "review" | "reReview" | null = null;
 
               const reviewOutcome = yield* runChildTurn({
                 threadId: reviewThreadId,
@@ -1395,24 +1470,53 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                           ),
                         ),
                       )
-                    : dispatchReviewTurn({
+                    : resolveReviewTurnPrompt({
                         projectId: run.projectId,
-                        reviewThreadId,
+                        orchestrationThreadId,
                         ticket,
                         workingThreadId,
                         reviewIteration,
-                        modelSelection: reviewModelSelection,
-                      }),
+                        ...(pendingReviewFeedback || pendingReviewedWorkingTurnCount !== undefined
+                          ? {
+                              priorRequestedChangesReview: {
+                                ...(pendingReviewFeedback
+                                  ? { reviewSummary: pendingReviewFeedback.summary }
+                                  : {}),
+                                ...(pendingReviewedWorkingTurnCount !== undefined
+                                  ? {
+                                      reviewedWorkingTurnCount: pendingReviewedWorkingTurnCount,
+                                    }
+                                  : {}),
+                              } satisfies PriorRequestedChangesReview,
+                            }
+                          : {}),
+                      }).pipe(
+                        Effect.tap(({ promptId }) =>
+                          Effect.sync(() => {
+                            dispatchedReviewPromptId = promptId;
+                          }),
+                        ),
+                        Effect.flatMap(({ prompt }) =>
+                          dispatchThreadTurn({
+                            threadId: reviewThreadId,
+                            text: prompt,
+                            modelSelection: reviewModelSelection,
+                          }),
+                        ),
+                      ),
                 runId,
                 ticketId: entry.ticketId,
                 ticketIdentifier: ticket.identifier,
                 phase: "reviewing",
                 dispatchMode:
-                  resumeReviewTurn && !shouldRestartReviewWithFreshAgent ? "resume" : "review",
+                  resumeReviewTurn && !shouldRestartReviewWithFreshAgent
+                    ? "resume"
+                    : (dispatchedReviewPromptId ?? (reviewIteration >= 1 ? "reReview" : "review")),
               });
 
               resumeReviewTurn = false;
               pendingReviewFeedback = undefined;
+              pendingReviewedWorkingTurnCount = undefined;
 
               if (reviewOutcome.result === "failed") {
                 yield* ticketing
@@ -1464,6 +1568,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 return "blocked" as const;
               }
               const review = reviewExit.value;
+              const reviewedWorkingTurnCount = yield* getCompletedTurnCount(workingThreadId);
 
               if (!review.changesNeeded) {
                 yield* ticketing
@@ -1479,6 +1584,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     reviewThreadId,
                     workingThreadId,
                     reviewIteration: reviewIteration + 1,
+                    reviewSummary: review.summary,
+                    reviewedWorkingTurnCount,
                   },
                 });
                 yield* postActivity({
@@ -1499,6 +1606,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 reviewIteration += 1;
                 nextWorkMode = "feedback";
                 pendingReviewFeedback = review;
+                pendingReviewedWorkingTurnCount = reviewedWorkingTurnCount;
                 yield* ticketing
                   .update({ id: entry.ticketId, status: "in_progress" })
                   .pipe(Effect.catch(() => Effect.void));
@@ -1513,6 +1621,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     reviewThreadId,
                     reviewIteration,
                     reviewSummary: review.summary,
+                    reviewedWorkingTurnCount,
                   },
                 });
                 continue;
@@ -1532,6 +1641,8 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   workingThreadId,
                   reviewThreadId,
                   reviewIteration,
+                  reviewSummary: review.summary,
+                  reviewedWorkingTurnCount,
                 },
               });
               yield* pauseRunWithReason(

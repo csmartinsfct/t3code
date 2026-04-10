@@ -66,6 +66,11 @@ const ORCHESTRATION_PROMPT_METADATA = {
     label: "Review",
     description: "Used when orchestration requests structured automated review output.",
   },
+  reReview: {
+    label: "Re-Review",
+    description:
+      "Used when orchestration requests structured follow-up review output after earlier findings.",
+  },
   reviewFeedback: {
     label: "Review Feedback",
     description: "Used when orchestration asks an agent to address review findings.",

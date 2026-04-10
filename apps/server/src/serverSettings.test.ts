@@ -332,8 +332,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           DEFAULT_SERVER_SETTINGS.prompts.orchestration.reviewFeedback,
         );
         assert.deepEqual(
+          next.prompts.orchestration.reReview,
+          DEFAULT_SERVER_SETTINGS.prompts.orchestration.reReview,
+        );
+        assert.deepEqual(
           next.promptDefaults.orchestration.reviewFeedback,
           DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration.reviewFeedback,
+        );
+        assert.deepEqual(
+          next.promptDefaults.orchestration.reReview,
+          DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration.reReview,
         );
       }).pipe(Effect.provide(makeServerSettingsLayer())),
   );

@@ -153,7 +153,7 @@ When `maxReviewIterations === 0`, the server creates only the working thread for
 - marks the ticket `done` when the review returns `changesNeeded: false`
 - moves the ticket back to `in_progress` with structured feedback when changes are requested and review budget remains
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
-- pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, or `reviewFeedback` cannot be validated or rendered
+- pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, `reReview`, or `reviewFeedback` cannot be validated or rendered
 
 The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
 
@@ -170,14 +170,21 @@ Fresh-agent prompt behavior is phase-aware:
 - fresh-agent resume of a review turn renders the full `review` prompt again
 - normal `Resume` keeps using the lightweight `resume` prompt
 
+Fresh review prompt behavior is also phase-aware:
+
+- review iteration `1` renders `review` with the full working-thread diff
+- review iteration `2+` renders `reReview`
+- `reReview` receives the latest delta since the prior completed review pass and can also render the prior review summary when available
+
 ### Orchestration Prompt Templates
 
-The orchestration runner now has a shared prompt-template domain model for its five logical prompt ids:
+The orchestration runner now has a shared prompt-template domain model for its six logical prompt ids:
 
 - `orchestration/implement`
 - `orchestration/resume`
 - `orchestration/resumeFreshAgent`
 - `orchestration/review`
+- `orchestration/reReview`
 - `orchestration/reviewFeedback`
 
 Prompt documents use this exact persisted shape:
@@ -208,11 +215,11 @@ Rules:
 - aliases are normalized to canonical keys during validation/save
 - validation returns structured errors with block context so the UI can identify the failing block
 
-The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts`. Shared ticket/project variables such as `ticketId`, `ticketTitle`, `ticketDescription`, `acceptanceCriteria`, `worktree`, `projectTitle`, and `projectPath` are available across the orchestration prompt ids, while review-only and review-feedback-only variables remain scoped to the prompts that can safely render them. The review flow is modeled as one logical prompt id (`review`), and the shipped default now represents the full review instructions as a single configurable prompt document.
+The canonical v1 variable registry lives in `packages/shared/src/promptTemplates.ts`. Shared ticket/project variables such as `ticketId`, `ticketTitle`, `ticketDescription`, `acceptanceCriteria`, `worktree`, `projectTitle`, and `projectPath` are available across the orchestration prompt ids. `commitDiff` and `reviewIteration` are available to both `review` and `reReview`; `reviewSummary` is available to `reReview` and `reviewFeedback`; and `reviewComments` remains scoped to `reviewFeedback`.
 
 Global prompt storage is now server-authoritative through `settings.json`:
 
-- `settings.prompts.orchestration.<promptId>` stores the current effective global prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, and `reviewFeedback`
+- `settings.prompts.orchestration.<promptId>` stores the current effective global prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, `reReview`, and `reviewFeedback`
 - `settings.promptDefaults.orchestration.<promptId>` exposes the immutable shipped default document for the same ids
 - persisted settings stay sparse by stripping prompt ids that match the shipped default exactly
 - `server.updateSettings` accepts `null` for a prompt id in `settings.prompts.orchestration` to reset that prompt back to its shipped default
@@ -220,7 +227,7 @@ Global prompt storage is now server-authoritative through `settings.json`:
 Projects can now also store sparse orchestration prompt overrides in the orchestration read model:
 
 - `project.promptOverrides.orchestration.<promptId>` stores only the prompt ids explicitly overridden for that project
-- supported project override ids are the same five orchestration prompt ids: `implement`, `resume`, `resumeFreshAgent`, `review`, and `reviewFeedback`
+- supported project override ids are the same six orchestration prompt ids: `implement`, `resume`, `resumeFreshAgent`, `review`, `reReview`, and `reviewFeedback`
 - clearing a project override removes that prompt id from project storage instead of copying any global/default value into the project row
 - project payloads continue to expose `promptOverrides` separately from server settings so consumers can distinguish stored project overrides from the currently effective prompt document
 
@@ -230,11 +237,11 @@ Effective prompt resolution is:
 2. current global prompt from `settings.prompts`
 3. immutable shipped default from `settings.promptDefaults`
 
-The runner resolves, validates, and renders the effective prompt document at dispatch time for every new orchestration turn. That means resumed runs and later review-feedback turns always use the current effective document for that prompt id instead of reusing text captured when the run first started.
+The runner resolves, validates, and renders the effective prompt document at dispatch time for every new orchestration turn. That means resumed runs, later `reReview` turns, and later review-feedback turns always use the current effective document for that prompt id instead of reusing text captured when the run first started.
 
 If validation or rendering fails at dispatch time, the runner does not fall back to hardcoded user-facing prompt text. Instead, it appends an `orchestration.run.prompt.render.failed` activity with the affected prompt id and pauses the run so the prompt document can be fixed before execution continues.
 
-The `review` shipped default is one logical prompt document that includes both the fixed review instructions and the ticket-specific review body, so downstream consumers can fully customize or reset review behavior using one prompt id.
+The shipped defaults now distinguish first-pass review (`review`) from later verification passes (`reReview`). `review` remains the first-pass review prompt, while `reReview` is used for review iteration `2+` and is designed for checking the latest fixes against prior review findings.
 
 ### History Recording
 
