@@ -237,4 +237,46 @@ TicketingTestLayer("TicketingService", (it) => {
       assert.deepStrictEqual(result.relatedThreads, []);
     }),
   );
+
+  it.effect("persists worktree updates and clears across ticket reads", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-worktree");
+      const ticketing = yield* TicketingService;
+
+      yield* seedProject(projectId, "Worktree project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Worktree persistence ticket",
+      });
+
+      const updated = yield* ticketing.update({
+        id: created.id,
+        worktree: "feature/t3co-161-inline-edit",
+      });
+
+      assert.strictEqual(updated.worktree, "feature/t3co-161-inline-edit");
+
+      const byId = yield* ticketing.getById({ id: created.id });
+      const byIdentifier = yield* ticketing.getByIdentifier({ identifier: created.identifier });
+      const listed = yield* ticketing.list({ projectId });
+
+      assert.strictEqual(byId.worktree, "feature/t3co-161-inline-edit");
+      assert.strictEqual(byIdentifier.worktree, "feature/t3co-161-inline-edit");
+      assert.strictEqual(listed[0]?.worktree, "feature/t3co-161-inline-edit");
+
+      const cleared = yield* ticketing.update({
+        id: created.id,
+        worktree: null,
+      });
+
+      assert.strictEqual(cleared.worktree, null);
+
+      const afterClear = yield* ticketing.getById({ id: created.id });
+      const listedAfterClear = yield* ticketing.list({ projectId });
+
+      assert.strictEqual(afterClear.worktree, null);
+      assert.strictEqual(listedAfterClear[0]?.worktree, null);
+    }),
+  );
 });

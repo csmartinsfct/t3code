@@ -84,6 +84,40 @@ Instructions:
 
 Goal: Break this ticket into well-scoped units of work so that an AI agent can pick up and complete each one independently, within a single session.`;
 
+export type InlineEditBlurAction = "cancel" | "save" | "ignore";
+
+export function resolveInlineEditBlurAction(input: {
+  cancelRequested: boolean;
+  isEditing: boolean;
+}): InlineEditBlurAction {
+  if (input.cancelRequested) {
+    return "cancel";
+  }
+  return input.isEditing ? "save" : "ignore";
+}
+
+export function resolveRequiredInlineTextSave(input: { currentValue: string; draft: string }): {
+  action: "skip" | "save";
+  nextValue: string;
+} {
+  const nextValue = input.draft.trim();
+  if (!nextValue || nextValue === input.currentValue) {
+    return { action: "skip", nextValue: input.currentValue };
+  }
+  return { action: "save", nextValue };
+}
+
+export function resolveNullableInlineTextSave(input: {
+  currentValue: string | null;
+  draft: string;
+}): { action: "skip" | "save"; nextValue: string | null } {
+  const nextValue = input.draft.trim() || null;
+  if (nextValue === input.currentValue) {
+    return { action: "skip", nextValue: input.currentValue };
+  }
+  return { action: "save", nextValue };
+}
+
 interface TicketDetailDecomposeComposerDraftStore {
   clearProjectDraftThreadId: (projectId: ProjectId) => void;
   setProjectDraftThreadId: (
@@ -553,18 +587,18 @@ export function KanbanTicketDetail({
   );
 
   const handleTitleSave = useCallback(async () => {
-    const trimmed = titleDraft.trim();
-    if (!trimmed) {
-      setEditingTitle(false);
-      return;
-    }
-    if (trimmed === ticketRef.current?.title) {
+    const currentTitle = ticketRef.current?.title ?? "";
+    const result = resolveRequiredInlineTextSave({
+      currentValue: currentTitle,
+      draft: titleDraft,
+    });
+    if (result.action === "skip") {
       setEditingTitle(false);
       return;
     }
     const previous = ticketRef.current;
     if (previous) {
-      const optimistic = { ...previous, title: trimmed };
+      const optimistic = { ...previous, title: result.nextValue };
       ticketRef.current = optimistic;
       setTicket(optimistic);
     }
@@ -573,7 +607,7 @@ export function KanbanTicketDetail({
       const api = ensureNativeApi();
       const updated = await api.ticketing.update({
         id: ticketId,
-        title: trimmed as never,
+        title: result.nextValue as never,
       });
       ticketRef.current = updated;
       setTicket(updated);
@@ -587,15 +621,17 @@ export function KanbanTicketDetail({
   }, [ticketId, titleDraft]);
 
   const handleDescriptionSave = useCallback(async () => {
-    const newDesc = descriptionDraft.trim() || null;
-    const currentDesc = ticketRef.current?.description ?? null;
-    if (newDesc === currentDesc) {
+    const result = resolveNullableInlineTextSave({
+      currentValue: ticketRef.current?.description ?? null,
+      draft: descriptionDraft,
+    });
+    if (result.action === "skip") {
       setEditingDescription(false);
       return;
     }
     const previous = ticketRef.current;
     if (previous) {
-      const optimistic = { ...previous, description: newDesc };
+      const optimistic = { ...previous, description: result.nextValue };
       ticketRef.current = optimistic;
       setTicket(optimistic);
     }
@@ -604,7 +640,7 @@ export function KanbanTicketDetail({
       const api = ensureNativeApi();
       const updated = await api.ticketing.update({
         id: ticketId,
-        description: newDesc,
+        description: result.nextValue,
       });
       ticketRef.current = updated;
       setTicket(updated);
@@ -618,15 +654,17 @@ export function KanbanTicketDetail({
   }, [ticketId, descriptionDraft]);
 
   const handleWorktreeSave = useCallback(async () => {
-    const newWorktree = worktreeDraft.trim() || null;
-    const currentWorktree = ticketRef.current?.worktree ?? null;
-    if (newWorktree === currentWorktree) {
+    const result = resolveNullableInlineTextSave({
+      currentValue: ticketRef.current?.worktree ?? null,
+      draft: worktreeDraft,
+    });
+    if (result.action === "skip") {
       setEditingWorktree(false);
       return;
     }
     const previous = ticketRef.current;
     if (previous) {
-      const optimistic = { ...previous, worktree: newWorktree };
+      const optimistic = { ...previous, worktree: result.nextValue };
       ticketRef.current = optimistic;
       setTicket(optimistic);
     }
@@ -635,7 +673,7 @@ export function KanbanTicketDetail({
       const api = ensureNativeApi();
       const updated = await api.ticketing.update({
         id: ticketId,
-        worktree: newWorktree,
+        worktree: result.nextValue,
       });
       ticketRef.current = updated;
       setTicket(updated);
@@ -746,10 +784,14 @@ export function KanbanTicketDetail({
                 }}
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onBlur={() => {
-                  if (cancelEditRef.current) {
+                  const blurAction = resolveInlineEditBlurAction({
+                    cancelRequested: cancelEditRef.current,
+                    isEditing: editingTitle,
+                  });
+                  if (blurAction === "cancel") {
                     cancelEditRef.current = false;
                     setEditingTitle(false);
-                  } else if (editingTitle) {
+                  } else if (blurAction === "save") {
                     void handleTitleSave();
                   }
                 }}
@@ -839,10 +881,14 @@ export function KanbanTicketDetail({
               value={descriptionDraft}
               onChange={(e) => setDescriptionDraft(e.target.value)}
               onBlur={() => {
-                if (cancelEditRef.current) {
+                const blurAction = resolveInlineEditBlurAction({
+                  cancelRequested: cancelEditRef.current,
+                  isEditing: editingDescription,
+                });
+                if (blurAction === "cancel") {
                   cancelEditRef.current = false;
                   setEditingDescription(false);
-                } else {
+                } else if (blurAction === "save") {
                   void handleDescriptionSave();
                 }
               }}
@@ -950,10 +996,14 @@ export function KanbanTicketDetail({
             }}
             onChange={(e) => setWorktreeDraft(e.target.value)}
             onBlur={() => {
-              if (cancelEditRef.current) {
+              const blurAction = resolveInlineEditBlurAction({
+                cancelRequested: cancelEditRef.current,
+                isEditing: editingWorktree,
+              });
+              if (blurAction === "cancel") {
                 cancelEditRef.current = false;
                 setEditingWorktree(false);
-              } else if (editingWorktree) {
+              } else if (blurAction === "save") {
                 void handleWorktreeSave();
               }
             }}

@@ -15,6 +15,9 @@ import {
   DECOMPOSE_PROMPT,
   DependencyTicketRow,
   KanbanTicketDetailDescription,
+  resolveInlineEditBlurAction,
+  resolveNullableInlineTextSave,
+  resolveRequiredInlineTextSave,
   startTicketDetailDecomposeFlow,
   SubTicketRowButton,
   resolveTicketDetailStreamEventAction,
@@ -25,7 +28,7 @@ import {
   TicketThreadRowButton,
 } from "./TicketOriginThreadSection";
 
-// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c.
+// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c, b6dd6a5.
 const DETAIL_DESCRIPTION = `- Detail list item
 
 Visit [spec](https://example.com/spec) with \`inline detail code\`.
@@ -155,6 +158,95 @@ describe("KanbanTicketDetail", () => {
     expect(html).toContain("Blocked");
     expect(html).toContain("T3CO-3");
     expect(html).toContain("Child ticket title");
+  });
+
+  it("saves inline title edits only when the trimmed title changes", () => {
+    expect(
+      resolveRequiredInlineTextSave({
+        currentValue: "Parent ticket",
+        draft: "  Updated parent ticket  ",
+      }),
+    ).toEqual({
+      action: "save",
+      nextValue: "Updated parent ticket",
+    });
+
+    expect(
+      resolveRequiredInlineTextSave({
+        currentValue: "Parent ticket",
+        draft: "   ",
+      }),
+    ).toEqual({
+      action: "skip",
+      nextValue: "Parent ticket",
+    });
+  });
+
+  it("saves inline description edits and allows clearing the description", () => {
+    expect(
+      resolveNullableInlineTextSave({
+        currentValue: DETAIL_DESCRIPTION,
+        draft: "  Refined ticket description  ",
+      }),
+    ).toEqual({
+      action: "save",
+      nextValue: "Refined ticket description",
+    });
+
+    expect(
+      resolveNullableInlineTextSave({
+        currentValue: DETAIL_DESCRIPTION,
+        draft: "   ",
+      }),
+    ).toEqual({
+      action: "save",
+      nextValue: null,
+    });
+  });
+
+  it("saves inline worktree edits and allows clearing the worktree", () => {
+    expect(
+      resolveNullableInlineTextSave({
+        currentValue: "feature/t3co-161",
+        draft: "  feature/t3co-161-inline  ",
+      }),
+    ).toEqual({
+      action: "save",
+      nextValue: "feature/t3co-161-inline",
+    });
+
+    expect(
+      resolveNullableInlineTextSave({
+        currentValue: "feature/t3co-161",
+        draft: "   ",
+      }),
+    ).toEqual({
+      action: "save",
+      nextValue: null,
+    });
+  });
+
+  it("resolves blur actions so escape cancels and normal blur saves inline edits", () => {
+    expect(
+      resolveInlineEditBlurAction({
+        cancelRequested: true,
+        isEditing: true,
+      }),
+    ).toBe("cancel");
+
+    expect(
+      resolveInlineEditBlurAction({
+        cancelRequested: false,
+        isEditing: true,
+      }),
+    ).toBe("save");
+
+    expect(
+      resolveInlineEditBlurAction({
+        cancelRequested: false,
+        isEditing: false,
+      }),
+    ).toBe("ignore");
   });
 
   it("includes the decompose action in the ticket actions menu and wires it to the handler", () => {
