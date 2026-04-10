@@ -32,7 +32,7 @@ describe("OrchestrationProgressHeader", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationProgressHeader
         run={makeRun()}
-        currentTicketLabel="ORCH-1 — Fix sidebar"
+        centerLabel="Fix sidebar"
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -42,14 +42,14 @@ describe("OrchestrationProgressHeader", () => {
 
     expect(markup).toContain("Running");
     expect(markup).toContain("0/1");
-    expect(markup).toContain("ORCH-1");
+    expect(markup).toContain("Fix sidebar");
   });
 
   it("shows completed count when finished", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationProgressHeader
         run={makeRun({ status: "completed", currentTicketIndex: 0 })}
-        currentTicketLabel={null}
+        centerLabel="Timeline"
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -59,6 +59,7 @@ describe("OrchestrationProgressHeader", () => {
 
     expect(markup).toContain("Completed");
     expect(markup).toContain("1/1");
+    expect(markup).toContain("Timeline");
   });
 
   it("omits the ticket label when none is provided", () => {
@@ -75,7 +76,7 @@ describe("OrchestrationProgressHeader", () => {
             },
           ],
         })}
-        currentTicketLabel={null}
+        centerLabel={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -91,7 +92,7 @@ describe("OrchestrationProgressHeader", () => {
     const markup = renderToStaticMarkup(
       <OrchestrationProgressHeader
         run={makeRun({ status: "paused", currentPhase: "working" })}
-        currentTicketLabel="ORCH-1 — Fix sidebar"
+        centerLabel="Fix sidebar"
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -101,5 +102,22 @@ describe("OrchestrationProgressHeader", () => {
 
     expect(markup).toContain("Resume");
     expect(markup).toContain("Resume options");
+  });
+
+  it("renders the centered label as a button when clickable", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun()}
+        centerLabel="Fix sidebar"
+        onCenterLabelClick={() => {}}
+        onPause={() => {}}
+        onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("<button");
+    expect(markup).toContain('title="Fix sidebar"');
   });
 });

@@ -940,27 +940,54 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : null;
   const activeOrchestrationRun = orchestrationSwitcher.run ?? orchestrationTimeline.run;
   const isReviewOrchestrationChild = activeOrchestrationItem?.kind === "review-thread";
-  const currentOrchestrationTicketLabel = useMemo(() => {
-    if (!isOrchestrationThread || !orchestrationSwitcher.visible || !activeOrchestrationRun) {
+  const currentOrchestrationWorkingItem = useMemo(() => {
+    if (!orchestrationSwitcher.visible || !activeOrchestrationRun) {
       return null;
     }
 
-    const workingItems = orchestrationSwitcher.items.filter(
-      (item) => item.kind === "working-thread",
+    const currentTicketEntry = activeOrchestrationRun.ticketOrder.at(
+      activeOrchestrationRun.currentTicketIndex,
     );
-    const currentItem = workingItems.at(activeOrchestrationRun.currentTicketIndex);
-    if (!currentItem) {
-      return null;
+    if (!currentTicketEntry) return null;
+
+    return (
+      orchestrationSwitcher.items.find(
+        (item) =>
+          item.kind === "working-thread" && item.threadId === currentTicketEntry.workingThreadId,
+      ) ?? null
+    );
+  }, [activeOrchestrationRun, orchestrationSwitcher.items, orchestrationSwitcher.visible]);
+  const currentOrchestrationThreadId = useMemo(() => {
+    if (!activeOrchestrationRun) return null;
+
+    const currentTicketEntry = activeOrchestrationRun.ticketOrder.at(
+      activeOrchestrationRun.currentTicketIndex,
+    );
+    if (!currentTicketEntry) return null;
+
+    if (
+      activeOrchestrationRun.currentPhase === "reviewing" &&
+      currentTicketEntry.reviewThreadId !== undefined
+    ) {
+      return currentTicketEntry.reviewThreadId;
     }
 
-    return currentItem.sublabel
-      ? `${currentItem.label} — ${currentItem.sublabel}`
-      : currentItem.label;
+    return currentTicketEntry.workingThreadId;
+  }, [activeOrchestrationRun]);
+  const orchestrationCenterLabel = useMemo(() => {
+    if (!activeOrchestrationRun) return null;
+    if (isOrchestrationThread) {
+      return currentOrchestrationWorkingItem?.sublabel ?? null;
+    }
+    if (isOrchestrationChild) {
+      return "Timeline";
+    }
+    return null;
   }, [
     activeOrchestrationRun,
+    currentOrchestrationWorkingItem?.sublabel,
+    isOrchestrationChild,
     isOrchestrationThread,
-    orchestrationSwitcher.items,
-    orchestrationSwitcher.visible,
   ]);
   const onSwitchThread = useCallback(
     (threadId: string) => {
@@ -1015,6 +1042,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [navigate],
   );
+  const onOrchestrationCenterLabelClick = useCallback(() => {
+    if (!activeOrchestrationRun) return;
+
+    if (isOrchestrationThread) {
+      if (!currentOrchestrationThreadId) return;
+      void navigate({ to: "/$threadId", params: { threadId: currentOrchestrationThreadId } });
+      return;
+    }
+
+    if (isOrchestrationChild) {
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: activeOrchestrationRun.orchestrationThreadId },
+      });
+    }
+  }, [
+    activeOrchestrationRun,
+    currentOrchestrationThreadId,
+    isOrchestrationChild,
+    isOrchestrationThread,
+    navigate,
+  ]);
   const diffOpen = rawSearch.diff === "1";
   const fileExplorerOpen = rawSearch.fileExplorer === "1";
   const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
@@ -4962,7 +5011,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           {(isOrchestrationThread || isOrchestrationChild) && activeOrchestrationRun ? (
             <OrchestrationProgressHeader
               run={activeOrchestrationRun}
-              currentTicketLabel={isOrchestrationThread ? currentOrchestrationTicketLabel : null}
+              centerLabel={orchestrationCenterLabel}
+              onCenterLabelClick={
+                orchestrationCenterLabel ? onOrchestrationCenterLabelClick : undefined
+              }
               onPause={onOrchestrationPause}
               onResume={onOrchestrationResume}
               onResumeWithFreshAgent={onOrchestrationResumeWithFreshAgent}

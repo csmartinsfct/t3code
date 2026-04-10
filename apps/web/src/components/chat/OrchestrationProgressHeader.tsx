@@ -20,8 +20,8 @@ import { cn } from "~/lib/utils";
 
 interface OrchestrationProgressHeaderProps {
   run: OrchestrationRun | null;
-  /** Current ticket label, e.g. "ORCH-7 — Rename sidebar label" */
-  currentTicketLabel: string | null;
+  centerLabel: string | null;
+  onCenterLabelClick?: (() => void) | undefined;
   onPause: () => void;
   onResume: () => void;
   onResumeWithFreshAgent: () => void;
@@ -108,7 +108,8 @@ function SegmentedProgressBar({
 
 export function OrchestrationProgressHeader({
   run,
-  currentTicketLabel,
+  centerLabel,
+  onCenterLabelClick,
   onPause,
   onResume,
   onResumeWithFreshAgent,
@@ -130,26 +131,45 @@ export function OrchestrationProgressHeader({
 
   return (
     <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 backdrop-blur-sm sm:px-5 py-2">
-      <div className="mx-auto grid max-w-3xl grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-        <div className="min-w-0">
+      <div className="mx-auto grid max-w-3xl grid-cols-[auto_1fr_auto] items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <Badge variant={badge.variant} size="sm">
             {badge.icon}
             {badge.label}
           </Badge>
-        </div>
 
-        <div className="min-w-0 px-2">
-          {currentTicketLabel && !isTerminal ? (
-            <span className="block truncate text-center text-xs text-muted-foreground">
-              {currentTicketLabel}
+          {!isTerminal ? (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {completedCount}/{ticketCount}
             </span>
           ) : null}
         </div>
 
+        <div className="min-w-0 px-2">
+          {centerLabel ? (
+            onCenterLabelClick ? (
+              <button
+                type="button"
+                className="block w-full truncate text-center text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline underline-offset-4"
+                onClick={onCenterLabelClick}
+                title={centerLabel}
+              >
+                {centerLabel}
+              </button>
+            ) : (
+              <span className="block truncate text-center text-xs text-muted-foreground">
+                {centerLabel}
+              </span>
+            )
+          ) : null}
+        </div>
+
         <div className="ml-auto flex min-w-0 items-center justify-end gap-2.5">
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {completedCount}/{ticketCount}
-          </span>
+          {isTerminal ? (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {completedCount}/{ticketCount}
+            </span>
+          ) : null}
 
           {run.status === "running" && (
             <div className="flex items-center gap-1.5">
