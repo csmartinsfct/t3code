@@ -16,7 +16,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import ManagedRunsControl from "../ManagedRunsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { CollapsedSidebarTrigger } from "../ui/sidebar";
+import { useUiStateStore } from "../../uiStateStore";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadSwitcherDropdown } from "./ThreadSwitcherDropdown";
 
@@ -52,6 +53,12 @@ interface ChatHeaderProps {
   onToggleFileExplorer: () => void;
   orchestrationSwitcher: UseOrchestrationSwitcherReturn | null;
   onSwitchThread: ((threadId: string) => void) | undefined;
+}
+
+function ChatHeaderSidebarTrigger() {
+  const viewMode = useUiStateStore((s) => s.viewMode);
+  if (viewMode !== "chat") return null;
+  return <CollapsedSidebarTrigger className="size-7 shrink-0" />;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -90,7 +97,7 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <ChatHeaderSidebarTrigger />
         {orchestrationSwitcher?.visible && onSwitchThread ? (
           <ThreadSwitcherDropdown
             items={orchestrationSwitcher.items}

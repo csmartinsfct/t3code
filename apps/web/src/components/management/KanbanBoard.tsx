@@ -31,6 +31,7 @@ import { logWebTimeline } from "../../timelineLogger";
 import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
+import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { ALL_STATUSES } from "../settings/ticketUtils";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
@@ -589,11 +590,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       {/* Board header */}
       <div
         className={cn(
-          "flex items-center justify-between border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region h-[52px]" : "py-2 sm:py-3",
+          "flex h-[50px] items-center justify-between border-b border-border px-3 sm:px-5",
+          isElectron && "drag-region",
         )}
       >
         <div className="flex min-w-0 items-center gap-2">
+          <CollapsedSidebarTrigger className="size-7 shrink-0" />
           {selectedTicketId ? (
             <button
               type="button"

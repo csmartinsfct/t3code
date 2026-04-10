@@ -330,6 +330,13 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
   );
 }
 
+/** SidebarTrigger that only renders when the sidebar is collapsed. */
+function CollapsedSidebarTrigger(props: React.ComponentProps<typeof SidebarTrigger>) {
+  const { state } = useSidebar();
+  if (state !== "collapsed") return null;
+  return <SidebarTrigger {...props} />;
+}
+
 function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptions): number {
   return Math.max(options.minWidth, Math.min(width, options.maxWidth));
 }
@@ -1151,5 +1158,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  CollapsedSidebarTrigger,
   useSidebar,
 };
