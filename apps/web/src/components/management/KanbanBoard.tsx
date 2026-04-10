@@ -27,6 +27,7 @@ import { useProjectById } from "../../storeSelectors";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { useUiStateStore } from "../../uiStateStore";
 import { ensureNativeApi } from "../../nativeApi";
+import { logWebTimeline } from "../../timelineLogger";
 import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
@@ -120,6 +121,27 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     }
     return grouped;
   }, [tickets]);
+
+  useEffect(() => {
+    if (loading) return;
+    logWebTimeline("ticketing.board.derived", {
+      projectId,
+      selectedProjectId,
+      totalTicketCount: tickets.length,
+      topLevelTicketCount: ALL_STATUSES.reduce(
+        (count, status) => count + ticketsByStatus[status].length,
+        0,
+      ),
+      backlogCount: ticketsByStatus.backlog.length,
+      todoCount: ticketsByStatus.todo.length,
+      inProgressCount: ticketsByStatus.in_progress.length,
+      blockedCount: ticketsByStatus.blocked.length,
+      inReviewCount: ticketsByStatus.in_review.length,
+      doneCount: ticketsByStatus.done.length,
+      canceledCount: ticketsByStatus.canceled.length,
+      selectedTicketId: selectedTicketId ?? null,
+    });
+  }, [loading, projectId, selectedProjectId, selectedTicketId, tickets.length, ticketsByStatus]);
 
   // Compute epic progress: for each ticket with sub-tickets, count how many are done
   const epicProgressMap = useMemo(() => {

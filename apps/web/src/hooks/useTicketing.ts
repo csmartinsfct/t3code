@@ -2,6 +2,36 @@ import type { TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
+import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
+
+function summarizeTicketSet(tickets: ReadonlyArray<TicketSummary>): Record<string, number> {
+  const topLevelCount = tickets.filter((ticket) => ticket.parentId === null).length;
+  const epicCount = tickets.filter((ticket) => ticket.subTicketCount > 0).length;
+  return {
+    topLevelCount,
+    childCount: tickets.length - topLevelCount,
+    epicCount,
+    backlogCount: tickets.filter(
+      (ticket) => ticket.parentId === null && ticket.status === "backlog",
+    ).length,
+    todoCount: tickets.filter((ticket) => ticket.parentId === null && ticket.status === "todo")
+      .length,
+    inProgressCount: tickets.filter(
+      (ticket) => ticket.parentId === null && ticket.status === "in_progress",
+    ).length,
+    blockedCount: tickets.filter(
+      (ticket) => ticket.parentId === null && ticket.status === "blocked",
+    ).length,
+    inReviewCount: tickets.filter(
+      (ticket) => ticket.parentId === null && ticket.status === "in_review",
+    ).length,
+    doneCount: tickets.filter((ticket) => ticket.parentId === null && ticket.status === "done")
+      .length,
+    canceledCount: tickets.filter(
+      (ticket) => ticket.parentId === null && ticket.status === "canceled",
+    ).length,
+  };
+}
 
 export interface UseTicketingOptions {
   projectId?: string | undefined;
@@ -51,6 +81,13 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
       let projectList: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }> = [];
       let resolvedProjectId = selectedProjectId ?? options?.projectId ?? null;
 
+      logWebTimeline("ticketing.fetch.start", {
+        fetchId: currentFetchId,
+        selectedProjectId,
+        requestedProjectId: options?.projectId ?? null,
+        resolvedProjectId,
+      });
+
       try {
         const snapshot = await api.orchestration.getSnapshot();
         if (fetchIdRef.current !== currentFetchId) return;
@@ -61,7 +98,17 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
         }));
         setProjects(projectList);
         resolvedProjectId ??= projectList[0]?.id ?? null;
+        logWebTimeline("ticketing.snapshot.success", {
+          fetchId: currentFetchId,
+          projectCount: projectList.length,
+          resolvedProjectId,
+        });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnWebTimeline("ticketing.snapshot.failed", {
+          fetchId: currentFetchId,
+          error: message,
+        });
         console.warn("Failed to fetch ticketing project snapshot:", error);
       }
 
@@ -73,21 +120,35 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
       if (!resolvedProjectId) {
         if (fetchIdRef.current !== currentFetchId) return;
         setTickets([]);
+        logWebTimeline("ticketing.fetch.empty", {
+          fetchId: currentFetchId,
+          projectCount: projectList.length,
+        });
         return;
       }
 
       const ticketList = await api.ticketing.list({ projectId: resolvedProjectId as never });
       if (fetchIdRef.current !== currentFetchId) return;
       setTickets(ticketList);
+      logWebTimeline("ticketing.fetch.success", {
+        fetchId: currentFetchId,
+        projectId: resolvedProjectId,
+        ticketCount: ticketList.length,
+        ...summarizeTicketSet(ticketList),
+      });
     } catch (error) {
       if (fetchIdRef.current !== currentFetchId) return;
+      warnWebTimeline("ticketing.fetch.failed", {
+        fetchId: currentFetchId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       console.error("Failed to fetch tickets:", error);
     } finally {
       if (fetchIdRef.current === currentFetchId) {
         setLoading(false);
       }
     }
-  }, [selectedProjectId]);
+  }, [options?.projectId, selectedProjectId]);
 
   useEffect(() => {
     void fetchData();
