@@ -1,4 +1,6 @@
 import type {
+  ProjectId,
+  ThreadId,
   Ticket,
   TicketDependency,
   TicketLinkedThread,
@@ -9,8 +11,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildTicketDetailActionItems,
+  DECOMPOSE_PROMPT,
   DependencyTicketRow,
   KanbanTicketDetailDescription,
+  startTicketDetailDecomposeFlow,
   SubTicketRowButton,
   resolveTicketDetailStreamEventAction,
 } from "./KanbanTicketDetail";
@@ -20,7 +25,7 @@ import {
   TicketThreadRowButton,
 } from "./TicketOriginThreadSection";
 
-// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9.
+// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c.
 const DETAIL_DESCRIPTION = `- Detail list item
 
 Visit [spec](https://example.com/spec) with \`inline detail code\`.
@@ -150,6 +155,97 @@ describe("KanbanTicketDetail", () => {
     expect(html).toContain("Blocked");
     expect(html).toContain("T3CO-3");
     expect(html).toContain("Child ticket title");
+  });
+
+  it("includes the decompose action in the ticket actions menu and wires it to the handler", () => {
+    const onDecompose = vi.fn();
+    const actions = buildTicketDetailActionItems({
+      ticket: makeTicket(),
+      onOrchestrate: () => undefined,
+      onDecompose,
+      onDelete: () => undefined,
+    });
+
+    expect(actions.map((action) => action.key)).toEqual([
+      "orchestrate",
+      "decompose",
+      "separator",
+      "delete",
+    ]);
+
+    const decomposeAction = actions.find(
+      (action) => action.kind === "item" && action.key === "decompose",
+    );
+
+    expect(decomposeAction).toMatchObject({
+      kind: "item",
+      key: "decompose",
+      label: "Decompose",
+    });
+
+    if (!decomposeAction || decomposeAction.kind !== "item") {
+      throw new Error("Decompose action missing from ticket detail menu");
+    }
+
+    decomposeAction.onSelect();
+
+    expect(onDecompose).toHaveBeenCalledOnce();
+  });
+
+  it("decompose creates a draft thread, attaches the ticket, seeds the prompt, and navigates into the draft", () => {
+    const clearProjectDraftThreadId = vi.fn();
+    const setProjectDraftThreadId = vi.fn();
+    const applyStickyState = vi.fn();
+    const setPrompt = vi.fn();
+    const addTicketAttachment = vi.fn();
+    const initializeThreadBoardContextFromSource = vi.fn();
+    const navigateToThread = vi.fn();
+
+    const ticket = makeTicket({
+      id: "ticket-55" as Ticket["id"],
+      projectId: "project-55" as ProjectId,
+      identifier: "T3CO-55",
+      title: "Decompose parent ticket",
+    });
+
+    const threadId = startTicketDetailDecomposeFlow({
+      ticket,
+      routeThreadId: "thread-source" as ThreadId,
+      composerDraftStore: {
+        clearProjectDraftThreadId,
+        setProjectDraftThreadId,
+        applyStickyState,
+        setPrompt,
+        addTicketAttachment,
+      },
+      uiStateStore: {
+        initializeThreadBoardContextFromSource,
+      },
+      createThreadId: () => "thread-draft" as ThreadId,
+      now: () => "2026-04-10T18:22:00.000Z",
+      navigateToThread,
+    });
+
+    expect(threadId).toBe("thread-draft");
+    expect(clearProjectDraftThreadId).toHaveBeenCalledWith("project-55");
+    expect(initializeThreadBoardContextFromSource).toHaveBeenCalledWith({
+      sourceThreadId: "thread-source",
+      targetThreadId: "thread-draft",
+      projectId: "project-55",
+    });
+    expect(setProjectDraftThreadId).toHaveBeenCalledWith("project-55", "thread-draft", {
+      createdAt: "2026-04-10T18:22:00.000Z",
+      envMode: "local",
+      runtimeMode: "full-access",
+    });
+    expect(applyStickyState).toHaveBeenCalledWith("thread-draft");
+    expect(addTicketAttachment).toHaveBeenCalledWith("thread-draft", {
+      id: "ticket-55",
+      identifier: "T3CO-55",
+      title: "Decompose parent ticket",
+    });
+    expect(setPrompt).toHaveBeenCalledWith("thread-draft", DECOMPOSE_PROMPT);
+    expect(navigateToThread).toHaveBeenCalledWith("thread-draft");
   });
 
   it("wires dependency row click-through navigation", () => {

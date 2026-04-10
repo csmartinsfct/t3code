@@ -67,7 +67,7 @@ import {
   formatRelativeDate,
 } from "../settings/ticketUtils";
 
-const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
+export const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
 
 Instructions:
 1. Read the attached ticket thoroughly — its title, description, and acceptance criteria.
@@ -83,6 +83,170 @@ Instructions:
 8. After all sub-tickets are created, update the parent ticket: revise its description to a high-level overview and remove detailed acceptance criteria that are now covered by sub-tickets.
 
 Goal: Break this ticket into well-scoped units of work so that an AI agent can pick up and complete each one independently, within a single session.`;
+
+interface TicketDetailDecomposeComposerDraftStore {
+  clearProjectDraftThreadId: (projectId: ProjectId) => void;
+  setProjectDraftThreadId: (
+    projectId: ProjectId,
+    threadId: ThreadId,
+    state: {
+      createdAt: string;
+      envMode: "local";
+      runtimeMode: typeof DEFAULT_RUNTIME_MODE;
+    },
+  ) => void;
+  applyStickyState: (threadId: ThreadId) => void;
+  setPrompt: (threadId: ThreadId, prompt: string) => void;
+  addTicketAttachment: (
+    threadId: ThreadId,
+    attachment: Pick<Ticket, "id" | "identifier" | "title">,
+  ) => void;
+}
+
+interface TicketDetailDecomposeUiStateStore {
+  initializeThreadBoardContextFromSource: (input: {
+    sourceThreadId: ThreadId | null;
+    targetThreadId: ThreadId;
+    projectId: ProjectId;
+  }) => void;
+}
+
+export function startTicketDetailDecomposeFlow(input: {
+  ticket: Pick<Ticket, "id" | "identifier" | "title" | "projectId">;
+  routeThreadId: ThreadId | null;
+  composerDraftStore: TicketDetailDecomposeComposerDraftStore;
+  uiStateStore: TicketDetailDecomposeUiStateStore;
+  createThreadId?: () => ThreadId;
+  now?: () => string;
+  navigateToThread: (threadId: ThreadId) => void;
+}) {
+  const threadId = (input.createThreadId ?? newThreadId)();
+  const createdAt = (input.now ?? (() => new Date().toISOString()))();
+
+  input.composerDraftStore.clearProjectDraftThreadId(input.ticket.projectId);
+  input.uiStateStore.initializeThreadBoardContextFromSource({
+    sourceThreadId: input.routeThreadId,
+    targetThreadId: threadId,
+    projectId: input.ticket.projectId,
+  });
+  input.composerDraftStore.setProjectDraftThreadId(input.ticket.projectId, threadId, {
+    createdAt,
+    envMode: "local",
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+  });
+  input.composerDraftStore.applyStickyState(threadId);
+  input.composerDraftStore.addTicketAttachment(threadId, {
+    id: input.ticket.id,
+    identifier: input.ticket.identifier,
+    title: input.ticket.title,
+  });
+  input.composerDraftStore.setPrompt(threadId, DECOMPOSE_PROMPT);
+  input.navigateToThread(threadId);
+
+  return threadId;
+}
+
+export function TicketDetailActionsMenu({
+  ticket,
+  onOrchestrate,
+  onDecompose,
+  onDelete,
+}: {
+  ticket: Ticket;
+  onOrchestrate: ((ticket: Ticket) => void) | undefined;
+  onDecompose: () => void;
+  onDelete: () => void;
+}) {
+  const actions = buildTicketDetailActionItems({
+    ticket,
+    onOrchestrate,
+    onDecompose,
+    onDelete,
+  });
+
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Ticket actions"
+          />
+        }
+      >
+        <EllipsisVerticalIcon className="size-3.5" />
+      </MenuTrigger>
+      <MenuPopup align="end">
+        {actions.map((action) =>
+          action.kind === "separator" ? (
+            <MenuSeparator key={action.key} />
+          ) : (
+            <MenuItem
+              key={action.key}
+              variant={action.variant ?? "default"}
+              onClick={action.onSelect}
+            >
+              {action.icon}
+              {action.label}
+            </MenuItem>
+          ),
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+type TicketDetailActionItem =
+  | {
+      key: string;
+      kind: "item";
+      label: string;
+      icon: React.ReactNode;
+      onSelect: () => void;
+      variant?: "default" | "destructive";
+    }
+  | {
+      key: string;
+      kind: "separator";
+    };
+
+export function buildTicketDetailActionItems(input: {
+  ticket: Ticket;
+  onOrchestrate: ((ticket: Ticket) => void) | undefined;
+  onDecompose: () => void;
+  onDelete: () => void;
+}): TicketDetailActionItem[] {
+  return [
+    {
+      key: "orchestrate",
+      kind: "item",
+      label: "Orchestrate",
+      icon: <PlayIcon className="size-3.5" />,
+      onSelect: () => input.onOrchestrate?.(input.ticket),
+    },
+    {
+      key: "decompose",
+      kind: "item",
+      label: "Decompose",
+      icon: <ListTreeIcon className="size-3.5" />,
+      onSelect: input.onDecompose,
+    },
+    {
+      key: "separator",
+      kind: "separator",
+    },
+    {
+      key: "delete",
+      kind: "item",
+      label: "Delete",
+      icon: <TrashIcon className="size-3.5" />,
+      onSelect: input.onDelete,
+      variant: "destructive",
+    },
+  ];
+}
 
 type TicketRowButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   "data-ticket-selectable"?: boolean;
@@ -532,40 +696,15 @@ export function KanbanTicketDetail({
 
   const handleDecompose = useCallback(() => {
     if (!ticket) return;
-
-    const {
-      clearProjectDraftThreadId,
-      setProjectDraftThreadId,
-      applyStickyState,
-      setPrompt,
-      addTicketAttachment,
-    } = useComposerDraftStore.getState();
-
-    const typedProjectId = ticket.projectId;
-
-    clearProjectDraftThreadId(typedProjectId);
-
-    const threadId = newThreadId();
-    useUiStateStore.getState().initializeThreadBoardContextFromSource({
-      sourceThreadId: routeThreadId,
-      targetThreadId: threadId,
-      projectId: typedProjectId,
+    startTicketDetailDecomposeFlow({
+      ticket,
+      routeThreadId,
+      composerDraftStore: useComposerDraftStore.getState(),
+      uiStateStore: useUiStateStore.getState(),
+      navigateToThread: (threadId) => {
+        void navigate({ to: "/$threadId", params: { threadId } });
+      },
     });
-    setProjectDraftThreadId(typedProjectId, threadId, {
-      createdAt: new Date().toISOString(),
-      envMode: "local",
-      runtimeMode: DEFAULT_RUNTIME_MODE,
-    });
-    applyStickyState(threadId);
-
-    addTicketAttachment(threadId, {
-      id: ticket.id,
-      identifier: ticket.identifier,
-      title: ticket.title,
-    });
-    setPrompt(threadId, DECOMPOSE_PROMPT);
-
-    void navigate({ to: "/$threadId", params: { threadId } });
   }, [navigate, routeThreadId, ticket]);
 
   if (loading) {
@@ -626,35 +765,12 @@ export function KanbanTicketDetail({
                 }}
               />
             </div>
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label="Ticket actions"
-                  />
-                }
-              >
-                <EllipsisVerticalIcon className="size-3.5" />
-              </MenuTrigger>
-              <MenuPopup align="end">
-                <MenuItem onClick={() => ticket && onOrchestrate?.(ticket)}>
-                  <PlayIcon className="size-3.5" />
-                  Orchestrate
-                </MenuItem>
-                <MenuItem onClick={handleDecompose}>
-                  <ListTreeIcon className="size-3.5" />
-                  Decompose
-                </MenuItem>
-                <MenuSeparator />
-                <MenuItem variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-                  <TrashIcon className="size-3.5" />
-                  Delete
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
+            <TicketDetailActionsMenu
+              ticket={ticket}
+              onOrchestrate={onOrchestrate}
+              onDecompose={handleDecompose}
+              onDelete={() => setDeleteDialogOpen(true)}
+            />
           </div>
 
           {/* Status + Priority inline selectors */}
