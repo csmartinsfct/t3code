@@ -36,6 +36,7 @@ import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import type { SidebarThreadSummary, Thread } from "../types";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
@@ -399,91 +400,77 @@ function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
   rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
 }
 
+function buildMaterializedThread(thread: OrchestrationReadModel["threads"][number]): Thread {
+  return {
+    id: thread.id,
+    codexThreadId: null,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: thread.modelSelection,
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    session: null,
+    messages: [],
+    proposedPlans: [],
+    error: null,
+    createdAt: thread.createdAt,
+    archivedAt: null,
+    updatedAt: thread.updatedAt,
+    latestTurn: null,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    turnDiffSummaries: [],
+    activities: [],
+    isOrchestrationThread: thread.isOrchestrationThread,
+    parentThreadId: thread.parentThreadId,
+    ticketId: thread.ticketId,
+  };
+}
+
+function buildMaterializedSidebarThreadSummary(
+  thread: OrchestrationReadModel["threads"][number],
+): SidebarThreadSummary {
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session: null,
+    createdAt: thread.createdAt,
+    archivedAt: null,
+    updatedAt: thread.updatedAt,
+    latestTurn: null,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    isOrchestrationThread: thread.isOrchestrationThread,
+    parentThreadId: thread.parentThreadId,
+  };
+}
+
 function materializeThreadInStore(threadId: ThreadId): void {
   const thread = fixture.snapshot.threads.find((candidate) => candidate.id === threadId);
   if (!thread) {
     throw new Error(`Unable to materialize thread ${threadId} from the test snapshot.`);
   }
+  const materializedThread = buildMaterializedThread(thread);
+  const sidebarThreadSummary = buildMaterializedSidebarThreadSummary(thread);
 
   useStore.setState((state) => ({
     ...state,
     threads: state.threads.some((candidate) => candidate.id === threadId)
       ? state.threads
-      : [
-          ...state.threads,
-          {
-            id: thread.id,
-            codexThreadId: null,
-            projectId: thread.projectId,
-            title: thread.title,
-            modelSelection: thread.modelSelection,
-            runtimeMode: thread.runtimeMode,
-            interactionMode: thread.interactionMode,
-            session: null,
-            messages: [],
-            proposedPlans: [],
-            error: null,
-            createdAt: thread.createdAt,
-            archivedAt: null,
-            updatedAt: thread.updatedAt,
-            latestTurn: null,
-            branch: thread.branch,
-            worktreePath: thread.worktreePath,
-            turnDiffSummaries: [],
-            activities: [],
-            isOrchestrationThread: thread.isOrchestrationThread,
-            parentThreadId: thread.parentThreadId,
-            ticketId: thread.ticketId,
-          } as any,
-        ],
+      : [...state.threads, materializedThread],
     threadsById: {
       ...state.threadsById,
-      [threadId]: {
-        id: thread.id,
-        codexThreadId: null,
-        projectId: thread.projectId,
-        title: thread.title,
-        modelSelection: thread.modelSelection,
-        runtimeMode: thread.runtimeMode,
-        interactionMode: thread.interactionMode,
-        session: null,
-        messages: [],
-        proposedPlans: [],
-        error: null,
-        createdAt: thread.createdAt,
-        archivedAt: null,
-        updatedAt: thread.updatedAt,
-        latestTurn: null,
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        turnDiffSummaries: [],
-        activities: [],
-        isOrchestrationThread: thread.isOrchestrationThread,
-        parentThreadId: thread.parentThreadId,
-        ticketId: thread.ticketId,
-      } as any,
+      [threadId]: materializedThread,
     },
     sidebarThreadsById: {
       ...state.sidebarThreadsById,
-      [threadId]: {
-        id: thread.id,
-        projectId: thread.projectId,
-        title: thread.title,
-        interactionMode: thread.interactionMode,
-        session: null,
-        createdAt: thread.createdAt,
-        archivedAt: null,
-        updatedAt: thread.updatedAt,
-        latestTurn: null,
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        latestUserMessageAt: null,
-        hasPendingApprovals: false,
-        hasPendingUserInput: false,
-        hasActionableProposedPlan: false,
-        isOrchestrationThread: thread.isOrchestrationThread,
-        parentThreadId: thread.parentThreadId,
-      } as any,
+      [threadId]: sidebarThreadSummary,
     },
     threadIdsByProjectId: {
       ...state.threadIdsByProjectId,
@@ -2298,12 +2285,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
           );
           expect(request).toBeTruthy();
           const turnStartRequest = request as unknown as { message: { text: string } };
-          expect(turnStartRequest.message.text).toContain(
-            "Ticket ids: T3CO-123",
-          );
-          expect(turnStartRequest.message.text).toContain(
-            "Please pick this up next.",
-          );
+          expect(turnStartRequest.message.text).toContain("Ticket ids: T3CO-123");
+          expect(turnStartRequest.message.text).toContain("Please pick this up next.");
           expect(turnStartRequest.message.text).not.toContain("T3CO-456");
         },
         { timeout: 8_000, interval: 16 },

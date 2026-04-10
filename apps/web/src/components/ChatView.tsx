@@ -266,6 +266,8 @@ function formatTicketAttachmentsForModel(
   tickets: import("../composerDraftStore").ComposerTicketAttachment[],
 ): string {
   if (tickets.length === 0) return "";
+  // Keep the preamble compact and stable for prompts while the UI still shows
+  // full ticket titles in removable chips before send.
   return `Ticket ids: ${tickets.map((ticket) => ticket.identifier).join(", ")}`;
 }
 
