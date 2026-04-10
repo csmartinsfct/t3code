@@ -165,6 +165,52 @@ const makeTicketingService = Effect.gen(function* () {
       } satisfies Ticket;
     }).pipe(Effect.mapError(toOperationError("buildFullTicket")));
 
+  const publishTicketSummary = (
+    ticketId: TicketId,
+    operation: string,
+  ): Effect.Effect<void, TicketingError> =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(ticketId);
+      const labels = yield* repo
+        .listLabelsForTicket({ ticketId: ticket.id })
+        .pipe(Effect.mapError(toOperationError(operation)));
+      const subTicketCount = yield* repo
+        .countByParent({ parentId: ticket.id })
+        .pipe(Effect.mapError(toOperationError(operation)));
+      const dependencyCount = (yield* repo
+        .listDependencies({ ticketId: ticket.id })
+        .pipe(Effect.mapError(toOperationError(operation)))).length;
+
+      yield* publishEvent({
+        type: "ticket_upserted",
+        projectId: ticket.projectId,
+        ticket: buildTicketSummary(ticket, labels as Label[], subTicketCount, dependencyCount),
+      });
+    });
+
+  const listAffectedTicketIdsForLabel = (
+    labelId: LabelId,
+    projectId: Ticket["projectId"],
+    operation: string,
+  ): Effect.Effect<ReadonlyArray<TicketId>, TicketingError> =>
+    Effect.gen(function* () {
+      const tickets = yield* repo
+        .listByProject({ projectId, includeArchived: true })
+        .pipe(Effect.mapError(toOperationError(operation)));
+      const affectedTicketIds: TicketId[] = [];
+
+      for (const ticket of tickets) {
+        const labels = yield* repo
+          .listLabelsForTicket({ ticketId: ticket.id })
+          .pipe(Effect.mapError(toOperationError(operation)));
+        if (labels.some((label) => label.id === labelId)) {
+          affectedTicketIds.push(ticket.id);
+        }
+      }
+
+      return affectedTicketIds;
+    });
+
   const toLinkedThread = (
     rows: ReadonlyArray<TicketThreadLinkLookupRow>,
     options?: {
@@ -204,23 +250,7 @@ const makeTicketingService = Effect.gen(function* () {
 
   /** Re-publish a parent ticket's summary so clients see updated subTicketCount. */
   const notifyParent = (parentId: TicketId): Effect.Effect<void, TicketingError> =>
-    Effect.gen(function* () {
-      const parent = yield* resolveTicketOrFail(parentId);
-      const parentLabels = yield* repo
-        .listLabelsForTicket({ ticketId: parent.id })
-        .pipe(Effect.mapError(toOperationError("notifyParent")));
-      const parentSubCount = yield* repo
-        .countByParent({ parentId: parent.id })
-        .pipe(Effect.mapError(toOperationError("notifyParent")));
-      const parentDepCount = (yield* repo
-        .listDependencies({ ticketId: parent.id })
-        .pipe(Effect.mapError(toOperationError("notifyParent")))).length;
-      yield* publishEvent({
-        type: "ticket_upserted",
-        projectId: parent.projectId,
-        ticket: buildTicketSummary(parent, parentLabels as Label[], parentSubCount, parentDepCount),
-      });
-    });
+    publishTicketSummary(parentId, "notifyParent");
 
   const propagateEpicStatus = (
     ticketId: TicketId,
@@ -252,26 +282,7 @@ const makeTicketingService = Effect.gen(function* () {
           "system",
         ).pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
 
-        // Notify clients about the parent's status change
-        const parentLabels = yield* repo
-          .listLabelsForTicket({ ticketId: parent.id })
-          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
-        const parentSubCount = yield* repo
-          .countByParent({ parentId: parent.id })
-          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")));
-        const parentDepCount = (yield* repo
-          .listDependencies({ ticketId: parent.id })
-          .pipe(Effect.mapError(toOperationError("propagateEpicStatus")))).length;
-        yield* publishEvent({
-          type: "ticket_upserted",
-          projectId: updatedParent.projectId,
-          ticket: buildTicketSummary(
-            updatedParent,
-            parentLabels as Label[],
-            parentSubCount,
-            parentDepCount,
-          ),
-        });
+        yield* publishTicketSummary(parent.id, "propagateEpicStatus");
 
         yield* propagateEpicStatus(parent.id, depth + 1);
       }
@@ -494,20 +505,7 @@ const makeTicketingService = Effect.gen(function* () {
 
       const full = yield* buildFullTicket(ticket);
 
-      const labels = yield* repo
-        .listLabelsForTicket({ ticketId: id })
-        .pipe(Effect.mapError(toOperationError("create")));
-      const subCount = yield* repo
-        .countByParent({ parentId: id })
-        .pipe(Effect.mapError(toOperationError("create")));
-      const depCount = (yield* repo
-        .listDependencies({ ticketId: id })
-        .pipe(Effect.mapError(toOperationError("create")))).length;
-      yield* publishEvent({
-        type: "ticket_upserted",
-        projectId: input.projectId,
-        ticket: buildTicketSummary(ticket, labels as Label[], subCount, depCount),
-      });
+      yield* publishTicketSummary(id, "create");
 
       // Notify the parent so clients see the updated subTicketCount
       if (ticket.parentId) {
@@ -601,20 +599,7 @@ const makeTicketingService = Effect.gen(function* () {
 
       const full = yield* buildFullTicket(updated);
 
-      const labels = yield* repo
-        .listLabelsForTicket({ ticketId: input.id })
-        .pipe(Effect.mapError(toOperationError("update")));
-      const subCount = yield* repo
-        .countByParent({ parentId: input.id })
-        .pipe(Effect.mapError(toOperationError("update")));
-      const depCount = (yield* repo
-        .listDependencies({ ticketId: input.id })
-        .pipe(Effect.mapError(toOperationError("update")))).length;
-      yield* publishEvent({
-        type: "ticket_upserted",
-        projectId: updated.projectId,
-        ticket: buildTicketSummary(updated, labels as Label[], subCount, depCount),
-      });
+      yield* publishTicketSummary(input.id, "update");
 
       // When parentId changes, notify both old and new parents so counts stay fresh
       if (changes.parentId) {
@@ -891,6 +876,11 @@ const makeTicketingService = Effect.gen(function* () {
         onNone: () => Effect.fail<TicketingError>(new LabelNotFoundError({ labelId: input.id })),
         onSome: Effect.succeed,
       });
+      const affectedTicketIds = yield* listAffectedTicketIdsForLabel(
+        label.id,
+        label.projectId,
+        "updateLabel",
+      );
       const now = nowIso();
       const updated = {
         ...label,
@@ -900,15 +890,28 @@ const makeTicketingService = Effect.gen(function* () {
       };
       yield* repo.updateLabel(updated).pipe(Effect.mapError(toOperationError("updateLabel")));
       yield* publishEvent({ type: "label_upserted", label: updated as Label });
+      for (const ticketId of affectedTicketIds) {
+        yield* publishTicketSummary(ticketId, "updateLabel");
+      }
       return updated as Label;
     });
 
   const deleteLabel: TicketingServiceShape["deleteLabel"] = (input) =>
     Effect.gen(function* () {
+      const existing = yield* repo
+        .getLabel({ id: input.id })
+        .pipe(Effect.mapError(toOperationError("deleteLabel")));
+      const affectedTicketIds = yield* Option.match(existing, {
+        onNone: () => Effect.succeed([] as ReadonlyArray<TicketId>),
+        onSome: (label) => listAffectedTicketIdsForLabel(label.id, label.projectId, "deleteLabel"),
+      });
       yield* repo
         .deleteLabel({ id: input.id })
         .pipe(Effect.mapError(toOperationError("deleteLabel")));
       yield* publishEvent({ type: "label_deleted", labelId: input.id });
+      for (const ticketId of affectedTicketIds) {
+        yield* publishTicketSummary(ticketId, "deleteLabel");
+      }
     });
 
   const addTicketLabel: TicketingServiceShape["addTicketLabel"] = (input) =>
@@ -919,6 +922,7 @@ const makeTicketingService = Effect.gen(function* () {
       yield* recordHistory(input.ticketId, "label_added", { labelId: input.labelId }, "user").pipe(
         Effect.mapError(toOperationError("addTicketLabel")),
       );
+      yield* publishTicketSummary(input.ticketId, "addTicketLabel");
     });
 
   const removeTicketLabel: TicketingServiceShape["removeTicketLabel"] = (input) =>
@@ -932,6 +936,7 @@ const makeTicketingService = Effect.gen(function* () {
         { labelId: input.labelId },
         "user",
       ).pipe(Effect.mapError(toOperationError("removeTicketLabel")));
+      yield* publishTicketSummary(input.ticketId, "removeTicketLabel");
     });
 
   // Comments
