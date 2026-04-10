@@ -35,7 +35,23 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+async function unexpectedListWithoutResolvedProject() {
+  throw new Error("ticket listing should not run without a resolved project");
+}
+
 describe("resolveTicketingProjectResyncState", () => {
+  it("does not resync when no projectId prop is supplied", () => {
+    expect(
+      resolveTicketingProjectResyncState({
+        requestedProjectId: undefined,
+        selectedProjectId: "project-1",
+      }),
+    ).toEqual({
+      shouldResync: false,
+      nextProjectId: null,
+    });
+  });
+
   it("requests a reset when the caller switches to a different project while mounted", () => {
     expect(
       resolveTicketingProjectResyncState({
@@ -45,6 +61,18 @@ describe("resolveTicketingProjectResyncState", () => {
     ).toEqual({
       shouldResync: true,
       nextProjectId: "project-2",
+    });
+  });
+
+  it("requests a reset when the hook receives its first concrete projectId", () => {
+    expect(
+      resolveTicketingProjectResyncState({
+        requestedProjectId: "project-1",
+        selectedProjectId: null,
+      }),
+    ).toEqual({
+      shouldResync: true,
+      nextProjectId: "project-1",
     });
   });
 
@@ -91,6 +119,63 @@ describe("fetchTicketingState", () => {
       resolvedProjectId: "project-1",
       tickets,
       shouldSelectResolvedProject: true,
+      snapshotError: null,
+    });
+  });
+
+  it("returns snapshotError and no tickets when the project snapshot fails before any project is resolved", async () => {
+    const snapshotError = new Error("snapshot failed");
+    const api = {
+      orchestration: {
+        getSnapshot: async () => {
+          throw snapshotError;
+        },
+      },
+      ticketing: {
+        list: unexpectedListWithoutResolvedProject,
+      },
+    } as any;
+
+    const result = await fetchTicketingState({
+      api,
+      requestedProjectId: undefined,
+      selectedProjectId: null,
+      currentFetchId: 1,
+      isCurrentFetch: () => true,
+    });
+
+    expect(result).toEqual({
+      projects: [],
+      resolvedProjectId: null,
+      tickets: [],
+      shouldSelectResolvedProject: false,
+      snapshotError,
+    });
+  });
+
+  it("returns early with no tickets when neither the selection nor snapshot provides a project", async () => {
+    const api = {
+      orchestration: {
+        getSnapshot: async () => ({ projects: [] }),
+      },
+      ticketing: {
+        list: unexpectedListWithoutResolvedProject,
+      },
+    } as any;
+
+    const result = await fetchTicketingState({
+      api,
+      requestedProjectId: undefined,
+      selectedProjectId: null,
+      currentFetchId: 1,
+      isCurrentFetch: () => true,
+    });
+
+    expect(result).toEqual({
+      projects: [],
+      resolvedProjectId: null,
+      tickets: [],
+      shouldSelectResolvedProject: false,
       snapshotError: null,
     });
   });
