@@ -66,6 +66,7 @@ import {
   STATUS_CONFIG,
   formatRelativeDate,
 } from "../settings/ticketUtils";
+import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 export const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
 
@@ -1111,7 +1112,7 @@ export function KanbanTicketDetail({
 // Sub-ticket list with drag-to-chat and Alt/Shift+click multi-select
 // ---------------------------------------------------------------------------
 
-function SubTicketsList({
+export function SubTicketsList({
   projectId,
   subTickets,
   onNavigateToTicket,
@@ -1127,16 +1128,10 @@ function SubTicketsList({
 
   const handleSubTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, sub: TicketSummary) => {
-      if (e.altKey || e.metaKey) {
-        e.preventDefault();
-        toggleTicket(sub.id, sub);
-        return;
-      }
-      if (e.shiftKey) {
-        e.preventDefault();
-        rangeSelectTo(sub.id, subTickets);
-        return;
-      }
+      handleTicketMultiSelectGesture(e, sub, subTickets, {
+        toggleTicket,
+        rangeSelectTo,
+      });
     },
     [toggleTicket, rangeSelectTo, subTickets],
   );

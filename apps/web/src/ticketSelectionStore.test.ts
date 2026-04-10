@@ -66,6 +66,16 @@ describe("ticketSelectionStore", () => {
   });
 
   describe("rangeSelectTo", () => {
+    it("selects a single ticket when no anchor exists", () => {
+      useTicketSelectionStore.getState().rangeSelectTo(TICKET_C.id, ORDERED);
+
+      const state = useTicketSelectionStore.getState();
+      expect(state.selectedTicketIds.has(TICKET_C.id)).toBe(true);
+      expect(state.selectedTicketIds.size).toBe(1);
+      expect(state.selectedTickets.get(TICKET_C.id)).toEqual(TICKET_C);
+      expect(state.anchorTicketId).toBe(TICKET_C.id);
+    });
+
     it("selects the full anchor-to-target range and keeps ticket summaries in sync", () => {
       const store = useTicketSelectionStore.getState();
       store.toggleTicket(TICKET_B.id, TICKET_B);
@@ -81,6 +91,39 @@ describe("ticketSelectionStore", () => {
       ]);
       expect(state.selectedTickets.get(TICKET_C.id)).toEqual(TICKET_C);
       expect(state.anchorTicketId).toBe(TICKET_B.id);
+    });
+
+    it("selects the full anchor-to-target range when dragging backward through the ordered list", () => {
+      const store = useTicketSelectionStore.getState();
+      store.toggleTicket(TICKET_D.id, TICKET_D);
+
+      store.rangeSelectTo(TICKET_B.id, ORDERED);
+
+      const state = useTicketSelectionStore.getState();
+      expect(Array.from(state.selectedTicketIds)).toEqual([TICKET_D.id, TICKET_B.id, TICKET_C.id]);
+      expect(Array.from(state.selectedTickets.keys())).toEqual([
+        TICKET_D.id,
+        TICKET_B.id,
+        TICKET_C.id,
+      ]);
+      expect(state.anchorTicketId).toBe(TICKET_D.id);
+    });
+
+    it("keeps the original anchor stable across repeated range selections", () => {
+      const store = useTicketSelectionStore.getState();
+      store.toggleTicket(TICKET_B.id, TICKET_B);
+
+      store.rangeSelectTo(TICKET_D.id, ORDERED);
+      store.rangeSelectTo(TICKET_E.id, ORDERED);
+
+      const state = useTicketSelectionStore.getState();
+      expect(state.anchorTicketId).toBe(TICKET_B.id);
+      expect(Array.from(state.selectedTicketIds)).toEqual([
+        TICKET_B.id,
+        TICKET_C.id,
+        TICKET_D.id,
+        TICKET_E.id,
+      ]);
     });
 
     it("preserves previously selected tickets outside the new range", () => {
@@ -111,6 +154,32 @@ describe("ticketSelectionStore", () => {
       expect(state.selectedTicketIds.has(TICKET_A.id)).toBe(true);
       expect(state.selectedTicketIds.has(TICKET_C.id)).toBe(true);
       expect(state.selectedTickets.get(TICKET_C.id)).toEqual(TICKET_C);
+      expect(state.anchorTicketId).toBe(TICKET_C.id);
+    });
+
+    it("leaves selection unchanged when the range target is missing from the ordered list", () => {
+      const store = useTicketSelectionStore.getState();
+      store.toggleTicket(TICKET_B.id, TICKET_B);
+
+      const unknownTicket = makeTicket("ticket-unknown", 99);
+      store.rangeSelectTo(unknownTicket.id, ORDERED);
+
+      const state = useTicketSelectionStore.getState();
+      expect(Array.from(state.selectedTicketIds)).toEqual([TICKET_B.id]);
+      expect(Array.from(state.selectedTickets.keys())).toEqual([TICKET_B.id]);
+      expect(state.selectedTickets.get(unknownTicket.id)).toBeUndefined();
+      expect(state.anchorTicketId).toBe(TICKET_B.id);
+    });
+
+    it("keeps the single ticket selected when the anchor equals the target", () => {
+      const store = useTicketSelectionStore.getState();
+      store.toggleTicket(TICKET_C.id, TICKET_C);
+
+      store.rangeSelectTo(TICKET_C.id, ORDERED);
+
+      const state = useTicketSelectionStore.getState();
+      expect(Array.from(state.selectedTicketIds)).toEqual([TICKET_C.id]);
+      expect(Array.from(state.selectedTickets.keys())).toEqual([TICKET_C.id]);
       expect(state.anchorTicketId).toBe(TICKET_C.id);
     });
   });

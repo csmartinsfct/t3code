@@ -219,7 +219,7 @@ describe("composerDraftStore ticket attachments", () => {
   });
 
   it("deduplicates ticket attachments by ticket id and removes the draft when the last chip is removed", () => {
-    // Audit traceability: aa1e7da.
+    // Audit traceability: aa1e7da, 1f727cb.
     const store = useComposerDraftStore.getState();
 
     store.addTicketAttachment(threadId, {
@@ -248,6 +248,39 @@ describe("composerDraftStore ticket attachments", () => {
     );
   });
 
+  it("keeps multi-ticket drag attachments unique and in insertion order", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.addTicketAttachment(threadId, {
+      id: "ticket-1",
+      identifier: "T3CO-1",
+      title: "Board drag regression",
+    });
+    store.addTicketAttachment(threadId, {
+      id: "ticket-2",
+      identifier: "T3CO-2",
+      title: "Stacked drag overlay",
+    });
+    store.addTicketAttachment(threadId, {
+      id: "ticket-1",
+      identifier: "T3CO-1",
+      title: "Board drag regression",
+    });
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.ticketAttachments).toEqual([
+      {
+        id: "ticket-1",
+        identifier: "T3CO-1",
+        title: "Board drag regression",
+      },
+      {
+        id: "ticket-2",
+        identifier: "T3CO-2",
+        title: "Stacked drag overlay",
+      },
+    ]);
+  });
+
   it("clears ticket attachments alongside the rest of the composer draft content", () => {
     const store = useComposerDraftStore.getState();
 
@@ -261,6 +294,29 @@ describe("composerDraftStore ticket attachments", () => {
     store.clearComposerContent(threadId);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+
+  it("clears only ticket attachments when requested and preserves the rest of the draft", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setPrompt(threadId, "follow up");
+    store.addTicketAttachment(threadId, {
+      id: "ticket-2",
+      identifier: "T3CO-2",
+      title: "Composer continuity regression",
+    });
+    store.addTicketAttachment(threadId, {
+      id: "ticket-3",
+      identifier: "T3CO-3",
+      title: "Range selection regression",
+    });
+
+    store.clearTicketAttachments(threadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      prompt: "follow up",
+      ticketAttachments: [],
+    });
   });
 });
 

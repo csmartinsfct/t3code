@@ -15,7 +15,7 @@ import { useTicketSelectionStore } from "~/ticketSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import { SidebarProvider } from "../ui/sidebar";
 
-// Audit traceability: aa1e7da.
+// Audit traceability: aa1e7da, 1f727cb.
 
 const mockNavigate = vi.fn();
 let currentTicketsByProject: Record<string, TicketSummary[]> = {};
@@ -293,10 +293,21 @@ async function mountManagementView(input: { threadId: ThreadId | null; projectId
   };
 
   return {
+    host,
     cleanup,
     rerender: screen.rerender,
     [Symbol.asyncDispose]: cleanup,
   };
+}
+
+function findButtonByText(host: HTMLElement, text: string): HTMLButtonElement {
+  const button = [...host.querySelectorAll("button")].find((candidate) =>
+    candidate.textContent?.includes(text),
+  );
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Unable to find button containing "${text}"`);
+  }
+  return button;
 }
 
 function makeActiveEvent(ticket: TicketSummary): DragStartEvent {
@@ -484,7 +495,57 @@ describe("ManagementView", () => {
     });
   });
 
-  it("drops selected tickets onto chat and keeps composer ticket attachments in sync", async () => {
+  it("supports alt-toggle selection and shift range selection on board cards", async () => {
+    await using mounted = await mountManagementView({ threadId: null });
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Alpha ticket");
+      expect(document.body.textContent ?? "").toContain("Beta ticket");
+    });
+
+    const alpha = currentTicketsByProject["project-1"]![0]!;
+    const beta = currentTicketsByProject["project-1"]![1]!;
+    const alphaButton = findButtonByText(mounted.host, alpha.identifier);
+    const betaButton = findButtonByText(mounted.host, beta.identifier);
+
+    alphaButton.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }),
+    );
+
+    await vi.waitFor(() => {
+      const state = useTicketSelectionStore.getState();
+      expect(Array.from(state.selectedTicketIds)).toEqual([alpha.id]);
+      expect(Array.from(state.selectedTickets.keys())).toEqual([alpha.id]);
+      expect(state.anchorTicketId).toBe(alpha.id);
+    });
+
+    alphaButton.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }),
+    );
+
+    await vi.waitFor(() => {
+      const state = useTicketSelectionStore.getState();
+      expect(state.selectedTicketIds.size).toBe(0);
+      expect(state.selectedTickets.size).toBe(0);
+    });
+
+    alphaButton.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }),
+    );
+    betaButton.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+
+    await vi.waitFor(() => {
+      const state = useTicketSelectionStore.getState();
+      expect(Array.from(state.selectedTicketIds)).toEqual([alpha.id, beta.id]);
+      expect(Array.from(state.selectedTickets.keys())).toEqual([alpha.id, beta.id]);
+      expect(state.anchorTicketId).toBe(alpha.id);
+    });
+    await expect.element(page.getByText("2 selected")).toBeInTheDocument();
+  });
+
+  it("shows the stacked drag overlay for selected cards and drops them onto chat", async () => {
     const threadId = "thread-drop-target" as ThreadId;
     await using _ = await mountManagementView({ threadId });
 
@@ -506,6 +567,13 @@ describe("ManagementView", () => {
 
     const active = makeActiveEvent(alpha);
     latestDndHandlers?.onDragStart?.(active);
+
+    await vi.waitFor(() => {
+      const overlay = document.querySelector("[data-testid='management-drag-overlay']");
+      expect(overlay?.textContent ?? "").toContain(alpha.identifier);
+      expect(overlay?.textContent ?? "").toContain("2");
+    });
+
     latestDndHandlers?.onDragEnd?.({
       ...active,
       over: makeOverEvent({ id: "chat-composer" }),

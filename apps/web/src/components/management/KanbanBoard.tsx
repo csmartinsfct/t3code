@@ -38,6 +38,7 @@ import { KanbanColumn } from "./KanbanColumn";
 import { KanbanSelectionBar } from "./KanbanSelectionBar";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
 import { OrchestrateConfirmDialog } from "./OrchestrateConfirmDialog";
+import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 interface KanbanBoardProps {
   threadId: ThreadId | null;
@@ -237,16 +238,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const handleTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, ticket: TicketSummary) => {
-      if (e.altKey || e.metaKey) {
-        e.preventDefault();
-        toggleTicket(ticket.id, ticket);
-        return;
-      }
-      if (e.shiftKey) {
-        e.preventDefault();
-        rangeSelectTo(ticket.id, flatOrderedTickets);
-        return;
-      }
+      handleTicketMultiSelectGesture(e, ticket, flatOrderedTickets, {
+        toggleTicket,
+        rangeSelectTo,
+      });
     },
     [toggleTicket, rangeSelectTo, flatOrderedTickets],
   );
