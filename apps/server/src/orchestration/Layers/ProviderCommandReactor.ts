@@ -21,7 +21,11 @@ import { formatTimelineLog } from "@t3tools/shared/timeline";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderServiceError,
+  ProviderValidationError,
+} from "../../provider/Errors.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -135,6 +139,14 @@ function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServic
     return error.detail.toLowerCase().includes("unknown pending user-input request");
   }
   return Cause.pretty(cause).toLowerCase().includes("unknown pending user-input request");
+}
+
+function isMissingProviderBindingError(cause: Cause.Cause<ProviderServiceError>): boolean {
+  const error = Cause.squash(cause);
+  return (
+    Schema.is(ProviderValidationError)(error) &&
+    error.issue.includes("no persisted provider binding exists")
+  );
 }
 
 function stalePendingRequestDetail(
@@ -895,9 +907,17 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
-    if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
-    }
+    yield* providerService.stopSession({ threadId: thread.id }).pipe(
+      Effect.catchCause((cause) =>
+        isMissingProviderBindingError(cause)
+          ? Effect.logDebug(
+              formatTimelineLog("server.provider-reactor", "session-stop.binding-missing", {
+                threadId: thread.id,
+              }),
+            )
+          : Effect.failCause(cause),
+      ),
+    );
 
     yield* setThreadSession({
       threadId: thread.id,
