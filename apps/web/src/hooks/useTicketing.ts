@@ -48,28 +48,37 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
     const currentFetchId = ++fetchIdRef.current;
     try {
       const api = ensureNativeApi();
-      const snapshot = await api.orchestration.getSnapshot();
-      if (fetchIdRef.current !== currentFetchId) return;
-      const projectList = snapshot.projects.map((p) => ({
-        id: p.id,
-        title: p.title,
-        workspaceRoot: p.workspaceRoot,
-      }));
-      setProjects(projectList);
+      let projectList: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }> = [];
+      let resolvedProjectId = selectedProjectId ?? options?.projectId ?? null;
 
-      // If no project selected yet and there are projects, select the first one
-      const projectId = selectedProjectId ?? projectList[0]?.id ?? null;
-      if (projectId && !selectedProjectId) {
-        setSelectedProjectId(projectId);
-      }
-
-      if (projectId) {
-        const ticketList = await api.ticketing.list({ projectId: projectId as never });
+      try {
+        const snapshot = await api.orchestration.getSnapshot();
         if (fetchIdRef.current !== currentFetchId) return;
-        setTickets(ticketList);
-      } else {
-        setTickets([]);
+        projectList = snapshot.projects.map((p) => ({
+          id: p.id,
+          title: p.title,
+          workspaceRoot: p.workspaceRoot,
+        }));
+        setProjects(projectList);
+        resolvedProjectId ??= projectList[0]?.id ?? null;
+      } catch (error) {
+        console.warn("Failed to fetch ticketing project snapshot:", error);
       }
+
+      // If no project selected yet and there are projects, select the first one.
+      if (resolvedProjectId && !selectedProjectId) {
+        setSelectedProjectId(resolvedProjectId);
+      }
+
+      if (!resolvedProjectId) {
+        if (fetchIdRef.current !== currentFetchId) return;
+        setTickets([]);
+        return;
+      }
+
+      const ticketList = await api.ticketing.list({ projectId: resolvedProjectId as never });
+      if (fetchIdRef.current !== currentFetchId) return;
+      setTickets(ticketList);
     } catch (error) {
       if (fetchIdRef.current !== currentFetchId) return;
       console.error("Failed to fetch tickets:", error);
