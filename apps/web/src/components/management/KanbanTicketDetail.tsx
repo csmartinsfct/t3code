@@ -113,16 +113,15 @@ function TicketRelationRowButton({
   title,
   status,
   className,
-  buttonProps,
   buttonRef,
+  ...buttonProps
 }: {
   identifier: string;
   title: string;
   status: TicketStatus;
   className: string;
-  buttonProps?: TicketRowButtonProps;
-  buttonRef?: React.Ref<HTMLButtonElement>;
-}) {
+  buttonRef?: React.Ref<HTMLButtonElement> | undefined;
+} & TicketRowButtonProps) {
   const statusCfg = STATUS_CONFIG[status];
 
   return (
@@ -143,17 +142,14 @@ export function DependencyTicketRow({
   dependency: TicketDependency;
   onNavigateToTicket: (ticketId: TicketId) => void;
 }) {
-  return (
-    <TicketRelationRowButton
-      identifier={dependency.identifier}
-      title={dependency.title}
-      status={dependency.status}
-      className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30"
-      buttonProps={{
-        onClick: () => onNavigateToTicket(dependency.dependsOnTicketId),
-      }}
-    />
-  );
+  return TicketRelationRowButton({
+    identifier: dependency.identifier,
+    title: dependency.title,
+    status: dependency.status,
+    className:
+      "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/30",
+    onClick: () => onNavigateToTicket(dependency.dependsOnTicketId),
+  });
 }
 
 export function SubTicketRowButton({
@@ -168,24 +164,20 @@ export function SubTicketRowButton({
   isSelected: boolean;
   isDragging: boolean;
   onClick: React.MouseEventHandler<HTMLButtonElement>;
-  buttonRef?: React.Ref<HTMLButtonElement>;
+  buttonRef?: React.Ref<HTMLButtonElement> | undefined;
   buttonProps?: TicketRowButtonProps;
 }) {
-  return (
-    <TicketRelationRowButton
-      identifier={subTicket.identifier}
-      title={subTicket.title}
-      status={subTicket.status}
-      {...(buttonRef ? { buttonRef } : {})}
-      className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-        isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
-      } ${isDragging ? "opacity-40" : ""}`}
-      buttonProps={{
-        ...buttonProps,
-        onClick,
-      }}
-    />
-  );
+  return TicketRelationRowButton({
+    ...buttonProps,
+    identifier: subTicket.identifier,
+    title: subTicket.title,
+    status: subTicket.status,
+    buttonRef,
+    className: `flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+      isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+    } ${isDragging ? "opacity-40" : ""}`,
+    onClick,
+  });
 }
 
 export function KanbanTicketDetail({

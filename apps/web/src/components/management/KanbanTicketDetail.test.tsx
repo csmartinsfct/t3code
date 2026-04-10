@@ -103,7 +103,7 @@ describe("KanbanTicketDetail", () => {
       onNavigateToTicket,
     });
 
-    element.props.buttonProps.onClick();
+    element.props.onClick();
 
     expect(onNavigateToTicket).toHaveBeenCalledWith("ticket-99");
   });
@@ -117,7 +117,7 @@ describe("KanbanTicketDetail", () => {
       onClick,
     });
 
-    element.props.buttonProps.onClick();
+    element.props.onClick();
 
     expect(onClick).toHaveBeenCalledOnce();
   });
