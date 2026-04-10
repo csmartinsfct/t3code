@@ -11,8 +11,7 @@ describe("parseReviewOutputText", () => {
 {
   "changesNeeded": false,
   "summary": "Looks good.",
-  "comments": [],
-  "suggestions": []
+  "comments": []
 }
 \`\`\`
 
@@ -21,7 +20,28 @@ Return value above.`),
       changesNeeded: false,
       summary: "Looks good.",
       comments: [],
-      suggestions: [],
+    });
+  });
+
+  it("folds legacy suggestions into general suggestion comments", () => {
+    expect(
+      parseReviewOutputText(`{
+  "changesNeeded": true,
+  "summary": "Follow-up needed.",
+  "comments": [],
+  "suggestions": ["Add a regression test."]
+}`),
+    ).toEqual({
+      changesNeeded: true,
+      summary: "Follow-up needed.",
+      comments: [
+        {
+          file: null,
+          line: null,
+          severity: "suggestion",
+          body: "Add a regression test.",
+        },
+      ],
     });
   });
 

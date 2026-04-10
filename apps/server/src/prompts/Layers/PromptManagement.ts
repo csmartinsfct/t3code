@@ -95,8 +95,6 @@ const REPRESENTATIVE_PREVIEW_VALUES = {
     "apps/server/src/prompts/http.ts: Enforce explicit project scope validation.",
     "apps/server/src/prompts/Layers/PromptManagement.ts: Keep preview data deterministic.",
   ].join("\n"),
-  reviewSuggestions:
-    "Add route coverage for the MCP prompt tools and document the preview sample contract.",
 } as const satisfies Record<CanonicalPromptVariableKey, string>;
 
 function promptDefinition(promptId: OrchestrationPromptId): PromptDefinition {

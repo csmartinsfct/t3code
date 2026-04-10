@@ -834,7 +834,6 @@ describe("OrchestrationRunRunner", () => {
           changesNeeded: false,
           summary: "Looks good.",
           comments: [],
-          suggestions: [],
         }),
       ),
       runService: {
@@ -940,7 +939,6 @@ describe("OrchestrationRunRunner", () => {
           changesNeeded: false,
           summary: "Looks good.",
           comments: [],
-          suggestions: [],
         }),
       ),
       runService: {
@@ -1254,7 +1252,6 @@ describe("OrchestrationRunRunner", () => {
         changesNeeded: false,
         summary: "Looks good.",
         comments: [],
-        suggestions: [],
       }),
     );
 
@@ -1357,7 +1354,6 @@ describe("OrchestrationRunRunner", () => {
         changesNeeded: false,
         summary: "Project prompt review passed.",
         comments: [],
-        suggestions: [],
       }),
     );
 
@@ -1584,8 +1580,13 @@ describe("OrchestrationRunRunner", () => {
                   severity: "critical",
                   body: "Handle the missing token case.",
                 },
+                {
+                  file: null,
+                  line: null,
+                  severity: "suggestion",
+                  body: "Re-run the edge-case path.",
+                },
               ],
-              suggestions: ["Re-run the edge-case path."],
             }),
           });
           return;
@@ -1599,7 +1600,6 @@ describe("OrchestrationRunRunner", () => {
             changesNeeded: false,
             summary: "Ready to accept.",
             comments: [],
-            suggestions: [],
           }),
         });
       },
@@ -1616,10 +1616,6 @@ describe("OrchestrationRunRunner", () => {
                 {
                   when: { type: "exists", variable: "reviewComments" },
                   text: "\n${reviewComments}",
-                },
-                {
-                  when: { type: "exists", variable: "reviewSuggestions" },
-                  text: "\n${reviewSuggestions}",
                 },
               ],
             },
@@ -2216,8 +2212,7 @@ describe("OrchestrationRunRunner", () => {
 {
   "changesNeeded": false,
   "summary": "Looks good.",
-  "comments": [],
-  "suggestions": []
+  "comments": []
 }
 \`\`\``,
               turnId: TurnId.makeUnsafe("turn-review"),
@@ -2487,7 +2482,7 @@ describe("OrchestrationRunRunner", () => {
               role: "assistant",
               text: `{"kind":"metadata"}
 
-{"changesNeeded":false,"summary":"Looks good.","comments":[],"suggestions":[]}`,
+{"changesNeeded":false,"summary":"Looks good.","comments":[],"suggestions":["Legacy follow-up is still parseable."]}`,
               turnId: TurnId.makeUnsafe("turn-review"),
               streaming: false,
               createdAt: "2026-04-09T10:00:03.000Z",

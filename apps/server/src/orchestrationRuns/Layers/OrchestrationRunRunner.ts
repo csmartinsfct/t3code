@@ -21,7 +21,10 @@ import {
   OrchestrationRunError,
   ReviewOutput as ReviewOutputSchema,
 } from "@t3tools/contracts";
-import { parseReviewOutputJsonCandidates } from "@t3tools/shared/review";
+import {
+  normalizeReviewOutputCandidate,
+  parseReviewOutputJsonCandidates,
+} from "@t3tools/shared/review";
 import {
   renderPromptTemplate,
   resolveOrchestrationPromptDocuments,
@@ -157,9 +160,6 @@ const formatReviewComments = (review: ReviewOutput): string =>
     })
     .join("\n");
 
-const formatReviewSuggestions = (review: ReviewOutput): string =>
-  review.suggestions.map((suggestion) => `- ${suggestion}`).join("\n");
-
 const buildPromptVariableMap = (input: PromptRenderContext) => ({
   ticketId: input.ticket.identifier,
   ticketTitle: input.ticket.title,
@@ -172,7 +172,6 @@ const buildPromptVariableMap = (input: PromptRenderContext) => ({
   reviewIteration: typeof input.reviewIteration === "number" ? String(input.reviewIteration) : "",
   reviewSummary: input.review?.summary ?? "",
   reviewComments: input.review ? formatReviewComments(input.review) : "",
-  reviewSuggestions: input.review ? formatReviewSuggestions(input.review) : "",
 });
 
 const describePromptValidationErrors = (
@@ -401,7 +400,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
         let lastDecodeCause: unknown = null;
         for (const parsedCandidate of parsedCandidates) {
-          const decodedExit = yield* Effect.exit(decodeReviewOutput(parsedCandidate));
+          const decodedExit = yield* Effect.exit(
+            decodeReviewOutput(normalizeReviewOutputCandidate(parsedCandidate)),
+          );
           if (decodedExit._tag === "Success") {
             return decodedExit.value;
           }

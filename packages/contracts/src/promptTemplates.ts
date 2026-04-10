@@ -49,7 +49,6 @@ export const CANONICAL_PROMPT_VARIABLE_KEYS = [
   "reviewIteration",
   "reviewSummary",
   "reviewComments",
-  "reviewSuggestions",
 ] as const;
 export type CanonicalPromptVariableKey = (typeof CANONICAL_PROMPT_VARIABLE_KEYS)[number];
 export const CanonicalPromptVariableKey = Schema.Literals(CANONICAL_PROMPT_VARIABLE_KEYS);
@@ -175,7 +174,7 @@ export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
       },
       {
         when: null,
-        text: '\n\nDiff:\n${commitDiff}\n\nReview iteration: ${reviewIteration}\n\nReturn a JSON object matching this shape exactly:\n{\n  "changesNeeded": boolean,\n  "summary": string,\n  "comments": [\n    {\n      "file": string | null,\n      "line": number | null,\n      "severity": "critical" | "suggestion" | "nit",\n      "body": string\n    }\n  ],\n  "suggestions": string[]\n}\n\nIf the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.',
+        text: '\n\nDiff:\n${commitDiff}\n\nReview iteration: ${reviewIteration}\n\nReturn a JSON object matching this shape exactly:\n{\n  "changesNeeded": boolean,\n  "summary": string,\n  "comments": [\n    {\n      "file": string | null,\n      "line": number | null,\n      "severity": "critical" | "suggestion" | "nit",\n      "body": string\n    }\n  ]\n}\n\nIf the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.',
       },
     ],
   },
@@ -189,10 +188,6 @@ export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
       {
         when: { type: "exists", variable: "reviewComments" },
         text: "\n\nReview comments:\n${reviewComments}",
-      },
-      {
-        when: { type: "exists", variable: "reviewSuggestions" },
-        text: "\n\nRequested follow-up:\n${reviewSuggestions}",
       },
       {
         when: null,

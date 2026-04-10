@@ -3,6 +3,7 @@ import type { ProviderKind, ProviderRateLimitsSnapshot, ServerProvider } from "@
 
 import {
   buildReviewPrompt,
+  normalizeReviewOutputCandidate,
   parseReviewOutputJsonCandidates,
   parseReviewOutputJson,
   selectReviewModel,
@@ -84,8 +85,7 @@ Return a JSON object matching this shape exactly:
       "severity": "critical" | "suggestion" | "nit",
       "body": string
     }
-  ],
-  "suggestions": string[]
+  ]
 }
 
 If the ticket worktree is not null, treat it as part of the task context while reviewing. Set changesNeeded to true if the work should not yet be accepted. Set it to false only if the ticket is ready to be accepted as complete. Return JSON only.`);
@@ -115,8 +115,7 @@ describe("parseReviewOutputJson", () => {
 {
   "changesNeeded": false,
   "summary": "Ready to accept.",
-  "comments": [],
-  "suggestions": []
+  "comments": []
 }
 \`\`\`
 
@@ -125,7 +124,6 @@ No further action needed.`),
       changesNeeded: false,
       summary: "Ready to accept.",
       comments: [],
-      suggestions: [],
     });
   });
 
@@ -134,14 +132,26 @@ No further action needed.`),
       parseReviewOutputJson(`I checked the work carefully. {
   "changesNeeded": true,
   "summary": "One fix is still needed.",
-  "comments": [],
-  "suggestions": ["Update the label in the secondary view too."]
+  "comments": [
+    {
+      "file": null,
+      "line": null,
+      "severity": "suggestion",
+      "body": "Update the label in the secondary view too."
+    }
+  ]
 }`),
     ).toEqual({
       changesNeeded: true,
       summary: "One fix is still needed.",
-      comments: [],
-      suggestions: ["Update the label in the secondary view too."],
+      comments: [
+        {
+          file: null,
+          line: null,
+          severity: "suggestion",
+          body: "Update the label in the secondary view too.",
+        },
+      ],
     });
   });
 
@@ -157,7 +167,7 @@ No further action needed.`),
 {"kind":"metadata"}
 
 \`\`\`json
-{"changesNeeded":false,"summary":"Ready.","comments":[],"suggestions":[]}
+{"changesNeeded":false,"summary":"Ready.","comments":[]}
 \`\`\``),
     ).toEqual([
       { kind: "metadata" },
@@ -165,9 +175,32 @@ No further action needed.`),
         changesNeeded: false,
         summary: "Ready.",
         comments: [],
-        suggestions: [],
       },
     ]);
+  });
+});
+
+describe("normalizeReviewOutputCandidate", () => {
+  it("folds legacy suggestions into general suggestion comments", () => {
+    expect(
+      normalizeReviewOutputCandidate({
+        changesNeeded: true,
+        summary: "Needs more work.",
+        comments: [],
+        suggestions: ["Add one more regression test."],
+      }),
+    ).toEqual({
+      changesNeeded: true,
+      summary: "Needs more work.",
+      comments: [
+        {
+          file: null,
+          line: null,
+          severity: "suggestion",
+          body: "Add one more regression test.",
+        },
+      ],
+    });
   });
 });
 

@@ -1,5 +1,5 @@
 import type { ReviewCommentSeverity, ReviewOutput } from "@t3tools/contracts";
-import { CheckCircle2Icon, LightbulbIcon, SparklesIcon } from "lucide-react";
+import { SparklesIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge, type badgeVariants } from "../ui/badge";
 import type { VariantProps } from "class-variance-authority";
@@ -77,26 +77,9 @@ export function ReviewOutputCard({ output, heading, className }: ReviewOutputCar
         </div>
       )}
 
-      {output.suggestions.length > 0 && (
-        <div className="mt-3 rounded-lg border border-border/65 bg-background/60 p-2.5">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/60">
-            <LightbulbIcon className="size-3" />
-            <span>Suggestions</span>
-          </div>
-          <div className="mt-2 space-y-1.5">
-            {output.suggestions.map((suggestion) => (
-              <div key={suggestion} className="flex items-start gap-2 text-sm">
-                <CheckCircle2Icon className="mt-0.5 size-3 text-emerald-500" />
-                <span className="leading-6 text-foreground/80">{suggestion}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {output.comments.length === 0 && output.suggestions.length === 0 && (
+      {output.comments.length === 0 && (
         <div className="mt-3 rounded-lg border border-border/65 bg-background/60 px-2.5 py-2 text-sm text-muted-foreground/70">
-          No detailed comments or follow-up suggestions were included.
+          No detailed review comments were included.
         </div>
       )}
     </div>

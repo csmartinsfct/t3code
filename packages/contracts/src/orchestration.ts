@@ -1227,7 +1227,6 @@ export const ReviewOutput = Schema.Struct({
   changesNeeded: Schema.Boolean,
   summary: Schema.String,
   comments: Schema.Array(ReviewComment),
-  suggestions: Schema.Array(Schema.String),
 });
 export type ReviewOutput = typeof ReviewOutput.Type;
 

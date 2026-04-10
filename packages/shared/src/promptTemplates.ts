@@ -92,13 +92,6 @@ export const ORCHESTRATION_PROMPT_VARIABLE_REGISTRY = [
     description: "Formatted automated review comments.",
     aliases: [],
   },
-  {
-    key: "reviewSuggestions",
-    promptIds: ["reviewFeedback"],
-    label: "Review suggestions",
-    description: "Formatted follow-up suggestions from review.",
-    aliases: [],
-  },
 ] as const satisfies ReadonlyArray<PromptTemplateVariableDefinition>;
 
 export type PromptTemplateVariableMap = Partial<

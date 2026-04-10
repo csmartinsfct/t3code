@@ -186,8 +186,15 @@ describe("buildOrchestrationTimelineRows", () => {
     const reviewOutput: ReviewOutput = {
       changesNeeded: true,
       summary: "Tests still need coverage",
-      comments: [{ file: "src/review.ts", line: 18, severity: "suggestion", body: "Add coverage" }],
-      suggestions: ["Cover invalid review output handling"],
+      comments: [
+        { file: "src/review.ts", line: 18, severity: "suggestion", body: "Add coverage" },
+        {
+          file: null,
+          line: null,
+          severity: "suggestion",
+          body: "Cover invalid review output handling",
+        },
+      ],
     };
 
     const rows = buildOrchestrationTimelineRows({

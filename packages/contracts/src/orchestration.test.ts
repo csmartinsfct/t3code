@@ -289,7 +289,6 @@ it.effect("decodes ReviewOutput with nullable file and line fields", () =>
           body: "Tighten the wording in the summary.",
         },
       ],
-      suggestions: ["Persist the review output before advancing the run."],
     });
 
     assert.strictEqual(parsed.comments[0]?.file, "apps/server/src/orchestration/review.ts");
@@ -307,7 +306,6 @@ it.effect("decodes ReviewResult with ticket and review-thread context", () =>
         changesNeeded: false,
         summary: "Looks good.",
         comments: [],
-        suggestions: [],
       },
     });
 

@@ -22,6 +22,10 @@ export interface ReviewPromptTemplateInput {
   readonly ticketWorktree: string | null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function tryParseJson(text: string): { readonly ok: true; readonly value: unknown } | null {
   try {
     return {
@@ -134,6 +138,46 @@ export function parseReviewOutputJsonCandidates(text: string): ReadonlyArray<unk
 
 export function parseReviewOutputJson(text: string): unknown {
   return parseReviewOutputJsonCandidates(text)[0];
+}
+
+export function normalizeReviewOutputCandidate(candidate: unknown): unknown {
+  if (!isRecord(candidate) || !Array.isArray(candidate.suggestions)) {
+    return candidate;
+  }
+
+  const normalizedComments = Array.isArray(candidate.comments) ? [...candidate.comments] : [];
+  const seenSuggestionBodies = new Set(
+    normalizedComments.flatMap((comment) =>
+      isRecord(comment) && comment.severity === "suggestion" && typeof comment.body === "string"
+        ? [comment.body]
+        : [],
+    ),
+  );
+
+  for (const suggestion of candidate.suggestions) {
+    if (typeof suggestion !== "string" || suggestion.length === 0) {
+      continue;
+    }
+    if (seenSuggestionBodies.has(suggestion)) {
+      continue;
+    }
+    seenSuggestionBodies.add(suggestion);
+    normalizedComments.push({
+      file: null,
+      line: null,
+      severity: "suggestion",
+      body: suggestion,
+    });
+  }
+
+  const normalizedCandidate: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (key !== "suggestions") {
+      normalizedCandidate[key] = value;
+    }
+  }
+  normalizedCandidate.comments = normalizedComments;
+  return normalizedCandidate;
 }
 
 export function buildReviewPrompt(
