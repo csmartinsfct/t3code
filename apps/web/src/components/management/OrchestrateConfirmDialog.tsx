@@ -108,7 +108,10 @@ export function OrchestrateConfirmDialog({
   const implSel = settings.orchestrationImplementerModelSelection;
   const revSel = settings.orchestrationReviewerModelSelection;
   const implDisplayName = `${providerDisplayName(modelSelectionProviderKind(implSel))} / ${implSel.model}`;
-  const revDisplayName = `${providerDisplayName(modelSelectionProviderKind(revSel))} / ${revSel.model}`;
+  const revDisplayName =
+    settings.maxReviewIterations === 0
+      ? "Enable in the settings"
+      : `${providerDisplayName(modelSelectionProviderKind(revSel))} / ${revSel.model}`;
 
   const handleConfirm = useCallback(async () => {
     if (plan?.kind !== "valid" || isSubmitting) return;
