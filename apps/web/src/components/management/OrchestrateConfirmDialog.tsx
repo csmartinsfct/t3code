@@ -1,4 +1,6 @@
 import {
+  modelSelectionProviderKind,
+  providerDisplayName,
   type ModelSelection,
   type TicketId,
   type TicketSummary,
@@ -105,8 +107,8 @@ export function OrchestrateConfirmDialog({
   const settings = useSettings();
   const implSel = settings.orchestrationImplementerModelSelection;
   const revSel = settings.orchestrationReviewerModelSelection;
-  const implDisplayName = `${implSel.provider} / ${implSel.model}`;
-  const revDisplayName = `${revSel.provider} / ${revSel.model}`;
+  const implDisplayName = `${providerDisplayName(modelSelectionProviderKind(implSel))} / ${implSel.model}`;
+  const revDisplayName = `${providerDisplayName(modelSelectionProviderKind(revSel))} / ${revSel.model}`;
 
   const handleConfirm = useCallback(async () => {
     if (plan?.kind !== "valid" || isSubmitting) return;
