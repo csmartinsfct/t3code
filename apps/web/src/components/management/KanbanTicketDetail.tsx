@@ -2,6 +2,7 @@ import type {
   Ticket,
   TicketDependency,
   TicketId,
+  TicketLinkedThread,
   TicketPriority,
   TicketStatus,
   TicketSummary,
@@ -51,7 +52,10 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
-import { TicketOriginThreadSection } from "./TicketOriginThreadSection";
+import {
+  TicketOriginThreadSection,
+  TicketRelatedThreadsSection,
+} from "./TicketOriginThreadSection";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketHistory } from "../settings/TicketHistory";
@@ -180,6 +184,79 @@ export function SubTicketRowButton({
   });
 }
 
+export function resolveTicketDetailStreamEventAction(
+  ticketId: TicketId,
+  currentTicket: Ticket | null,
+  event: TicketingStreamEvent,
+): "back" | "refetch" | "ignore" {
+  if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
+    return "back";
+  }
+
+  if (currentTicket === null) {
+    return "ignore";
+  }
+
+  if (event.type === "ticket_deleted") {
+    return currentTicket.subTickets.some((subTicket) => subTicket.id === event.ticketId) ||
+      currentTicket.dependencies.some(
+        (dependency) => dependency.dependsOnTicketId === event.ticketId,
+      )
+      ? "refetch"
+      : "ignore";
+  }
+
+  if (event.type === "ticket_upserted") {
+    if (event.ticket.id === ticketId || event.ticket.parentId === ticketId) {
+      return "refetch";
+    }
+    if (currentTicket.subTickets.some((subTicket) => subTicket.id === event.ticket.id)) {
+      return "refetch";
+    }
+    return currentTicket.dependencies.some(
+      (dependency) => dependency.dependsOnTicketId === event.ticket.id,
+    )
+      ? "refetch"
+      : "ignore";
+  }
+
+  if (
+    (event.type === "comment_upserted" || event.type === "comment_deleted") &&
+    event.ticketId === ticketId
+  ) {
+    return "refetch";
+  }
+
+  return "ignore";
+}
+
+function shouldRefetchThreadLinks(
+  previousLinks: TicketThreadLinks | null,
+  nextLinks: TicketThreadLinks,
+): boolean {
+  if (previousLinks === null) {
+    return true;
+  }
+  const toSignature = (thread: TicketLinkedThread | null) =>
+    thread
+      ? [
+          thread.threadId,
+          thread.linkedAt,
+          thread.archivedAt ?? "",
+          thread.isOrchestrationThread ? "review" : "normal",
+          thread.isVisible ? "visible" : "hidden",
+          thread.linkTypes.join(","),
+        ].join("|")
+      : "null";
+
+  const previousRelated = previousLinks.relatedThreads.map(toSignature).join("||");
+  const nextRelated = nextLinks.relatedThreads.map(toSignature).join("||");
+  return (
+    toSignature(previousLinks.originThread) !== toSignature(nextLinks.originThread) ||
+    previousRelated !== nextRelated
+  );
+}
+
 export function KanbanTicketDetail({
   ticketId,
   projectId,
@@ -237,7 +314,7 @@ export function KanbanTicketDetail({
   const fetchTicket = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const [data, threadLinks] = await Promise.all([
+      const [data, nextThreadLinks] = await Promise.all([
         api.ticketing.getById({
           id: ticketId,
           projectId: projectId as ProjectId,
@@ -246,7 +323,9 @@ export function KanbanTicketDetail({
       ]);
       ticketRef.current = data;
       setTicket(data);
-      setThreadLinks(threadLinks);
+      setThreadLinks((currentLinks) =>
+        shouldRefetchThreadLinks(currentLinks, nextThreadLinks) ? nextThreadLinks : currentLinks,
+      );
     } catch (error) {
       console.error("Failed to fetch ticket:", error);
       setThreadLinks(null);
@@ -263,32 +342,10 @@ export function KanbanTicketDetail({
   useEffect(() => {
     const api = ensureNativeApi();
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
-      if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
+      const action = resolveTicketDetailStreamEventAction(ticketId, ticketRef.current, event);
+      if (action === "back") {
         onBack();
-      } else if (event.type === "ticket_deleted") {
-        // A sub-ticket was deleted — refetch if it was one of ours
-        const current = ticketRef.current;
-        if (current?.subTickets.some((s) => s.id === event.ticketId)) {
-          void fetchTicket();
-        }
-      } else if (event.type === "ticket_upserted") {
-        if (event.ticket.id === ticketId) {
-          // The current ticket itself was updated
-          void fetchTicket();
-        } else if (event.ticket.parentId === ticketId) {
-          // A sub-ticket was upserted
-          void fetchTicket();
-        } else {
-          // A dependency ticket was updated
-          const current = ticketRef.current;
-          if (current?.dependencies.some((d) => d.dependsOnTicketId === event.ticket.id)) {
-            void fetchTicket();
-          }
-        }
-      } else if (
-        (event.type === "comment_upserted" || event.type === "comment_deleted") &&
-        event.ticketId === ticketId
-      ) {
+      } else if (action === "refetch") {
         void fetchTicket();
       }
     });
@@ -798,6 +855,17 @@ export function KanbanTicketDetail({
         {threadLinks?.originThread && (
           <TicketOriginThreadSection
             thread={threadLinks.originThread}
+            onOpenThread={(nextThreadId) =>
+              void navigate({
+                to: "/$threadId",
+                params: { threadId: nextThreadId },
+              })
+            }
+          />
+        )}
+        {threadLinks && threadLinks.relatedThreads.length > 0 && (
+          <TicketRelatedThreadsSection
+            threads={threadLinks.relatedThreads}
             onOpenThread={(nextThreadId) =>
               void navigate({
                 to: "/$threadId",

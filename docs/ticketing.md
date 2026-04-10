@@ -319,31 +319,36 @@ Relationship reads use a dedicated RPC:
 
 ### Key Components
 
-| Component                  | File                           | Purpose                                                    |
-| -------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `TicketsPanel`             | `TicketsPanel.tsx`             | List view with project filter, real-time subscription      |
-| `TicketCard`               | `TicketCard.tsx`               | Compact card with status/priority dots, labels, identifier |
-| `TicketDetailPanel`        | `TicketDetailPanel.tsx`        | Full detail with inline status/priority dropdowns          |
-| `CreateTicketDialog`       | `CreateTicketDialog.tsx`       | New ticket form with dynamic acceptance criteria           |
-| `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata              |
-| `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                |
-| `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                     |
-| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with origin-thread section             |
-| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                |
+| Component                  | File                           | Purpose                                                      |
+| -------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| `TicketsPanel`             | `TicketsPanel.tsx`             | List view with project filter, real-time subscription        |
+| `TicketCard`               | `TicketCard.tsx`               | Compact card with status/priority dots, labels, identifier   |
+| `TicketDetailPanel`        | `TicketDetailPanel.tsx`        | Full detail with inline status/priority dropdowns            |
+| `CreateTicketDialog`       | `CreateTicketDialog.tsx`       | New ticket form with dynamic acceptance criteria             |
+| `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata                |
+| `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                  |
+| `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                       |
+| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with ticket relationship thread sections |
+| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                  |
 
 ### Ticket Detail Thread Sections
 
-The ticket detail panel shows a single thread relationship section when data exists:
+The ticket detail panel shows ticket-linked thread sections when data exists:
 
 - `Origin Thread`
-  The single thread that created the ticket, if any.
+  The earliest surviving `origin` link for the ticket.
+- `Related Threads`
+  Non-deleted linked threads that still have `bound` and/or `mention` links after the origin thread is chosen.
 
 Behavior:
 
+- source badges show every surviving link source on the rendered row: `Origin`, `Bound`, and `Mention`
+- rows also show a `Visible` or `Hidden` state badge based on whether the thread is still visible in the main sidebar (`archivedAt === null` and no `parentThreadId`)
 - archived threads stay visible and show an `Archived` badge
 - deleted threads are filtered out at read time
-- the row can also show a `Review` badge when the origin thread is an orchestration/review thread
-- the inline timestamp reflects the origin-link time, not the thread's own update time
+- orchestration/review threads show a `Review` badge
+- clicking any thread row navigates to that thread, even when the row is currently hidden from the sidebar
+- inline timestamps reflect the chosen link time for the row, not the thread's own update time
 
 ### Data Hook
 

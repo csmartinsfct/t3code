@@ -188,8 +188,25 @@ TicketingTestLayer("TicketingService", (it) => {
 
       assert.strictEqual(result.originThread?.threadId, originThreadId);
       assert.strictEqual(result.originThread?.archivedAt, "2026-04-09T10:30:00.000Z");
+      assert.deepStrictEqual(result.originThread?.linkTypes, ["origin"]);
+      assert.strictEqual(result.originThread?.isVisible, false);
       assert.strictEqual(result.originThread?.linkedAt, ticket.createdAt);
-      assert.ok(!("relatedThreads" in result));
+      assert.deepStrictEqual(
+        result.relatedThreads.map((thread) => ({
+          threadId: thread.threadId,
+          linkTypes: thread.linkTypes,
+          isVisible: thread.isVisible,
+          linkedAt: thread.linkedAt,
+        })),
+        [
+          {
+            threadId: relatedThreadId,
+            linkTypes: ["bound", "mention"],
+            isVisible: true,
+            linkedAt: "2026-04-09T11:00:00.000Z",
+          },
+        ],
+      );
     }),
   );
 
@@ -217,7 +234,7 @@ TicketingTestLayer("TicketingService", (it) => {
       const result = yield* ticketing.getThreadLinks({ ticketId: ticket.id });
 
       assert.strictEqual(result.originThread, null);
-      assert.ok(!("relatedThreads" in result));
+      assert.deepStrictEqual(result.relatedThreads, []);
     }),
   );
 });

@@ -1,4 +1,10 @@
-import type { Ticket, TicketDependency, TicketSummary } from "@t3tools/contracts";
+import type {
+  Ticket,
+  TicketDependency,
+  TicketLinkedThread,
+  TicketSummary,
+  TicketingStreamEvent,
+} from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,9 +12,15 @@ import {
   DependencyTicketRow,
   KanbanTicketDetailDescription,
   SubTicketRowButton,
+  resolveTicketDetailStreamEventAction,
 } from "./KanbanTicketDetail";
+import {
+  TicketOriginThreadSection,
+  TicketRelatedThreadsSection,
+  TicketThreadRowButton,
+} from "./TicketOriginThreadSection";
 
-// Audit traceability: c709853, a8b01f5, 4603fb8.
+// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9.
 const DETAIL_DESCRIPTION = `- Detail list item
 
 Visit [spec](https://example.com/spec) with \`inline detail code\`.
@@ -49,6 +61,50 @@ function makeSubTicket(overrides: Partial<TicketSummary> = {}): TicketSummary {
     labels: [],
     subTicketCount: 0,
     dependencyCount: 0,
+    createdAt: "2026-04-10T10:00:00.000Z",
+    updatedAt: "2026-04-10T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeLinkedThread(overrides: Partial<TicketLinkedThread> = {}): TicketLinkedThread {
+  return {
+    threadId: "thread-1" as TicketLinkedThread["threadId"],
+    title: "Orchestration JSON Parsing Regression",
+    createdAt: "2026-04-10T08:00:00.000Z",
+    updatedAt: "2026-04-10T08:00:00.000Z",
+    archivedAt: "2026-04-10T09:00:00.000Z",
+    isOrchestrationThread: true,
+    parentThreadId: "parent-thread-1" as TicketLinkedThread["threadId"],
+    linkTypes: ["origin"],
+    isVisible: false,
+    linkedAt: "2026-04-10T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
+  return {
+    id: "ticket-1" as Ticket["id"],
+    projectId: "project-1" as Ticket["projectId"],
+    parentId: null,
+    ticketNumber: 1,
+    identifier: "T3CO-1",
+    title: "Parent ticket",
+    description: DETAIL_DESCRIPTION,
+    status: "todo",
+    priority: "medium",
+    sortOrder: 0,
+    isArchived: false,
+    worktree: null,
+    implementerModelOverride: null,
+    reviewerModelOverride: null,
+    acceptanceCriteria: [],
+    labels: [],
+    dependencies: [],
+    subTickets: [],
+    comments: [],
+    artifacts: [],
     createdAt: "2026-04-10T10:00:00.000Z",
     updatedAt: "2026-04-10T10:00:00.000Z",
     ...overrides,
@@ -120,5 +176,123 @@ describe("KanbanTicketDetail", () => {
     element.props.onClick();
 
     expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it("refetches for related ticket_upserted events that add or remove sub-ticket and dependency relationships", () => {
+    const currentTicket = makeTicket({
+      dependencies: [makeDependency({ dependsOnTicketId: "ticket-2" as Ticket["id"] })],
+      subTickets: [makeSubTicket({ id: "ticket-3" as TicketSummary["id"] })],
+    });
+
+    const cases: TicketingStreamEvent[] = [
+      {
+        type: "ticket_upserted",
+        projectId: currentTicket.projectId,
+        ticket: makeSubTicket({ id: "ticket-3" as TicketSummary["id"], parentId: null }),
+      },
+      {
+        type: "ticket_upserted",
+        projectId: currentTicket.projectId,
+        ticket: makeSubTicket({
+          id: "ticket-4" as TicketSummary["id"],
+          parentId: currentTicket.id,
+        }),
+      },
+      {
+        type: "ticket_upserted",
+        projectId: currentTicket.projectId,
+        ticket: makeSubTicket({ id: "ticket-2" as TicketSummary["id"], parentId: null }),
+      },
+    ];
+
+    expect(
+      cases.map((event) =>
+        resolveTicketDetailStreamEventAction(currentTicket.id, currentTicket, event),
+      ),
+    ).toEqual(["refetch", "refetch", "refetch"]);
+  });
+
+  it("refetches for related delete events that remove dependency or sub-ticket rows", () => {
+    const currentTicket = makeTicket({
+      dependencies: [makeDependency({ dependsOnTicketId: "ticket-2" as Ticket["id"] })],
+      subTickets: [makeSubTicket({ id: "ticket-3" as TicketSummary["id"] })],
+    });
+
+    const dependencyDelete: TicketingStreamEvent = {
+      type: "ticket_deleted",
+      projectId: currentTicket.projectId,
+      ticketId: "ticket-2" as Ticket["id"],
+    };
+    const subTicketDelete: TicketingStreamEvent = {
+      type: "ticket_deleted",
+      projectId: currentTicket.projectId,
+      ticketId: "ticket-3" as Ticket["id"],
+    };
+
+    expect(
+      resolveTicketDetailStreamEventAction(currentTicket.id, currentTicket, dependencyDelete),
+    ).toBe("refetch");
+    expect(
+      resolveTicketDetailStreamEventAction(currentTicket.id, currentTicket, subTicketDelete),
+    ).toBe("refetch");
+  });
+
+  it("renders origin and related thread sections with source, state, and review badges", () => {
+    const html = renderToStaticMarkup(
+      <>
+        <TicketOriginThreadSection thread={makeLinkedThread()} onOpenThread={() => undefined} />
+        <TicketRelatedThreadsSection
+          threads={[
+            makeLinkedThread({
+              threadId: "thread-2" as TicketLinkedThread["threadId"],
+              title: "Visible implementation thread",
+              archivedAt: null,
+              isOrchestrationThread: false,
+              parentThreadId: null,
+              linkTypes: ["bound", "mention"],
+              isVisible: true,
+              linkedAt: "2026-04-10T11:00:00.000Z",
+            }),
+          ]}
+          onOpenThread={() => undefined}
+        />
+      </>,
+    );
+
+    expect(html).toContain("Origin Thread");
+    expect(html).toContain("Related Threads (1)");
+    expect(html).toContain("Origin");
+    expect(html).toContain("Bound");
+    expect(html).toContain("Mention");
+    expect(html).toContain("Archived");
+    expect(html).toContain("Review");
+    expect(html).toContain("Hidden");
+    expect(html).toContain("Visible");
+  });
+
+  it("wires thread-row navigation for both hidden and visible linked threads", () => {
+    const onOpenThread = vi.fn();
+
+    const hiddenThreadRow = TicketThreadRowButton({
+      thread: makeLinkedThread(),
+      onOpenThread,
+    });
+    const visibleThreadRow = TicketThreadRowButton({
+      thread: makeLinkedThread({
+        threadId: "thread-2" as TicketLinkedThread["threadId"],
+        archivedAt: null,
+        isOrchestrationThread: false,
+        parentThreadId: null,
+        linkTypes: ["bound", "mention"],
+        isVisible: true,
+      }),
+      onOpenThread,
+    });
+
+    hiddenThreadRow.props.onClick();
+    visibleThreadRow.props.onClick();
+
+    expect(onOpenThread).toHaveBeenNthCalledWith(1, "thread-1");
+    expect(onOpenThread).toHaveBeenNthCalledWith(2, "thread-2");
   });
 });

@@ -167,17 +167,25 @@ const makeTicketingService = Effect.gen(function* () {
 
   const toLinkedThread = (
     rows: ReadonlyArray<TicketThreadLinkLookupRow>,
+    options?: {
+      readonly preferredLinkTypes?: ReadonlyArray<TicketThreadLinkLookupRow["linkType"]>;
+    },
   ): TicketLinkedThread | null => {
     const firstRow = rows[0];
     if (!firstRow || firstRow.threadDeletedAt !== null) {
       return null;
     }
-    const earliestOriginRow = rows
-      .filter((row) => row.linkType === "origin")
-      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
-    if (!earliestOriginRow) {
+    const preferredLinkTypes = options?.preferredLinkTypes ?? ["origin", "bound", "mention"];
+    const relevantRows = rows
+      .filter((row) => preferredLinkTypes.includes(row.linkType))
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const linkedRow = relevantRows[0];
+    if (!linkedRow) {
       return null;
     }
+    const linkTypes = (["origin", "bound", "mention"] as const).filter((linkType) =>
+      rows.some((row) => row.linkType === linkType),
+    );
 
     return {
       threadId: firstRow.threadId,
@@ -187,7 +195,9 @@ const makeTicketingService = Effect.gen(function* () {
       archivedAt: firstRow.threadArchivedAt,
       isOrchestrationThread: firstRow.isOrchestrationThread,
       parentThreadId: firstRow.parentThreadId,
-      linkedAt: earliestOriginRow.createdAt,
+      linkTypes,
+      isVisible: firstRow.threadArchivedAt === null && firstRow.parentThreadId === null,
+      linkedAt: linkedRow.createdAt,
     };
   };
 
@@ -337,7 +347,7 @@ const makeTicketingService = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* resolveTicketOrFail(input.ticketId);
       const rows = yield* ticketThreadLinkRepository
-        .listByTicketId({ ticketId: input.ticketId, linkTypes: ["origin"] })
+        .listByTicketId({ ticketId: input.ticketId })
         .pipe(Effect.mapError(toOperationError("getThreadLinks")));
 
       const rowsByThreadId = new Map<string, TicketThreadLinkLookupRow[]>();
@@ -370,12 +380,22 @@ const makeTicketingService = Effect.gen(function* () {
       }
       const selectedOriginThreadId = originCandidates[0]?.threadId ?? null;
       const originThread = selectedOriginThreadId
-        ? toLinkedThread(rowsByThreadId.get(selectedOriginThreadId) ?? [])
+        ? toLinkedThread(rowsByThreadId.get(selectedOriginThreadId) ?? [], {
+            preferredLinkTypes: ["origin"],
+          })
         : null;
+      const relatedThreads = [...rowsByThreadId.entries()]
+        .filter(([threadId]) => threadId !== selectedOriginThreadId)
+        .map(([, threadRows]) =>
+          toLinkedThread(threadRows, { preferredLinkTypes: ["bound", "mention"] }),
+        )
+        .filter((thread): thread is TicketLinkedThread => thread !== null)
+        .toSorted((left, right) => right.linkedAt.localeCompare(left.linkedAt));
 
       return {
         ticketId: input.ticketId,
         originThread,
+        relatedThreads,
       } satisfies TicketThreadLinks;
     });
 

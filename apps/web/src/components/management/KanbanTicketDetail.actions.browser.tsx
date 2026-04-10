@@ -9,7 +9,7 @@ import { KanbanTicketDetail } from "~/components/management/KanbanTicketDetail";
 const mockNavigate = vi.fn();
 const mockUseParams = vi.fn(() => null);
 const mockGetById = vi.fn();
-const mockGetThreadLinks = vi.fn(async () => ({ originThread: null }));
+const mockGetThreadLinks = vi.fn(async () => ({ originThread: null, relatedThreads: [] }));
 const mockUpdate = vi.fn(async () => null);
 const mockDelete = vi.fn(async () => undefined);
 const mockOnEvent = vi.fn(() => () => {});
@@ -120,6 +120,7 @@ vi.mock("~/components/management/TicketMarkdown", () => ({
 
 vi.mock("~/components/management/TicketOriginThreadSection", () => ({
   TicketOriginThreadSection: () => null,
+  TicketRelatedThreadsSection: () => null,
 }));
 
 vi.mock("~/components/settings/TicketAcceptanceCriteria", () => ({
