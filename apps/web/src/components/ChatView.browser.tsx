@@ -40,6 +40,7 @@ import { getRouter } from "../router";
 import { useStore } from "../store";
 import type { SidebarThreadSummary, Thread } from "../types";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
+import { createReadyServerProvider } from "../test/providerTestUtils";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
@@ -179,24 +180,12 @@ function createProvider(input: {
   displayName?: string;
   models?: ServerProvider["models"];
 }): ServerProvider {
-  return {
-    provider: input.provider as never,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    enabled: true,
-    installed: true,
-    version: "1.0.0",
-    status: "ready",
-    auth: { status: "authenticated" },
+  return createReadyServerProvider({
+    ...input,
     checkedAt: NOW_ISO,
-    models: input.models ?? [
-      {
-        slug: input.provider === "codex" ? "gpt-5" : "claude-opus-4-6",
-        name: input.provider === "codex" ? "GPT-5" : "Claude Opus 4.6",
-        isCustom: false,
-        capabilities: null,
-      },
-    ],
-  };
+    defaultCodexModelSlug: "gpt-5",
+    defaultCodexModelName: "GPT-5",
+  });
 }
 
 function createUserMessage(options: {

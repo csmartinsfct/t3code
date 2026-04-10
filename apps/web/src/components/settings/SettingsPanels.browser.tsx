@@ -13,6 +13,7 @@ import { render } from "vitest-browser-react";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
+import { createReadyServerProvider } from "../../test/providerTestUtils";
 import { GeneralSettingsPanel } from "./SettingsPanels";
 
 function createBaseServerConfig(): ServerConfig {
@@ -35,24 +36,10 @@ function createBaseServerConfig(): ServerConfig {
 }
 
 function createProvider(input: { provider: string; displayName?: string }): ServerProvider {
-  return {
-    provider: input.provider as never,
-    ...(input.displayName ? { displayName: input.displayName } : {}),
-    enabled: true,
-    installed: true,
-    version: "1.0.0",
-    status: "ready",
-    auth: { status: "authenticated" },
+  return createReadyServerProvider({
+    ...input,
     checkedAt: "2026-04-10T00:00:00.000Z",
-    models: [
-      {
-        slug: input.provider === "codex" ? "gpt-5.4" : "claude-opus-4-6",
-        name: input.provider === "codex" ? "GPT-5.4" : "Claude Opus 4.6",
-        isCustom: false,
-        capabilities: null,
-      },
-    ],
-  };
+  });
 }
 
 describe("GeneralSettingsPanel observability", () => {

@@ -1,6 +1,6 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
 
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
@@ -277,6 +277,63 @@ TicketingTestLayer("TicketingService", (it) => {
 
       assert.strictEqual(afterClear.worktree, null);
       assert.strictEqual(listedAfterClear[0]?.worktree, null);
+    }),
+  );
+
+  it.effect("publishes ticket updates when labels are added and removed", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-label-events");
+      const ticketing = yield* TicketingService;
+
+      yield* seedProject(projectId, "Label events project");
+
+      const ticket = yield* ticketing.create({
+        projectId,
+        title: "Label event ticket",
+      });
+      const label = yield* ticketing.createLabel({
+        projectId,
+        name: "Backend",
+        color: "#3b82f6",
+      });
+
+      const eventsFiber = yield* ticketing.streamEvents.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* ticketing.addTicketLabel({
+        ticketId: ticket.id,
+        labelId: label.id,
+      });
+      yield* ticketing.removeTicketLabel({
+        ticketId: ticket.id,
+        labelId: label.id,
+      });
+
+      const events = yield* Fiber.join(eventsFiber);
+
+      assert.deepStrictEqual(
+        events.map((event) => ({
+          type: event.type,
+          ticketId: event.type === "ticket_upserted" ? event.ticket.id : null,
+          labels:
+            event.type === "ticket_upserted" ? event.ticket.labels.map((item) => item.name) : [],
+        })),
+        [
+          {
+            type: "ticket_upserted",
+            ticketId: ticket.id,
+            labels: ["Backend"],
+          },
+          {
+            type: "ticket_upserted",
+            ticketId: ticket.id,
+            labels: [],
+          },
+        ],
+      );
     }),
   );
 });

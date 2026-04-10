@@ -519,6 +519,80 @@ function makeProviderScopedModelSelection(
   } as ModelSelection;
 }
 
+type PersistedModelSelectionByProvider = NonNullable<
+  PersistedComposerThreadDraftState["modelSelectionByProvider"]
+>;
+
+type PersistedActiveProvider = NonNullable<PersistedComposerThreadDraftState["activeProvider"]>;
+
+function toPersistedModelSelectionByProvider(
+  selections: Partial<Record<ProviderKind, ModelSelection>>,
+): PersistedModelSelectionByProvider {
+  return selections as PersistedModelSelectionByProvider;
+}
+
+function toPersistedActiveProvider(provider: ProviderKind | null): PersistedActiveProvider {
+  return provider as PersistedActiveProvider;
+}
+
+function createPersistedThreadDraft(input: {
+  prompt: string;
+  attachments: PersistedComposerImageAttachment[];
+  terminalContexts: PersistedTerminalContextDraft[];
+  codeSnippets: PersistedComposerCodeSnippet[];
+  skills: PersistedComposerSkillAttachment[];
+  modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
+  activeProvider: ProviderKind | null;
+  runtimeMode: RuntimeMode | null;
+  interactionMode: ProviderInteractionMode | null;
+  hasModelData: boolean;
+}): DeepMutable<PersistedComposerThreadDraftState> {
+  const draft: Partial<DeepMutable<PersistedComposerThreadDraftState>> = {
+    prompt: input.prompt,
+    attachments: [...input.attachments],
+  };
+  if (input.terminalContexts.length > 0) {
+    draft.terminalContexts = [...input.terminalContexts];
+  }
+  if (input.codeSnippets.length > 0) {
+    draft.codeSnippets = [...input.codeSnippets];
+  }
+  if (input.skills.length > 0) {
+    draft.skills = [...input.skills];
+  }
+  if (input.hasModelData) {
+    draft.modelSelectionByProvider = toPersistedModelSelectionByProvider(
+      input.modelSelectionByProvider,
+    );
+    draft.activeProvider = toPersistedActiveProvider(input.activeProvider);
+  }
+  if (input.runtimeMode) {
+    draft.runtimeMode = input.runtimeMode;
+  }
+  if (input.interactionMode) {
+    draft.interactionMode = input.interactionMode;
+  }
+  return draft as DeepMutable<PersistedComposerThreadDraftState>;
+}
+
+function createPersistedDraftStoreState(input: {
+  draftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"];
+  draftThreadsByThreadId: PersistedComposerDraftStoreState["draftThreadsByThreadId"];
+  projectDraftThreadIdByProjectId: PersistedComposerDraftStoreState["projectDraftThreadIdByProjectId"];
+  stickyModelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
+  stickyActiveProvider: ProviderKind | null;
+}): PersistedComposerDraftStoreState {
+  return {
+    draftsByThreadId: input.draftsByThreadId,
+    draftThreadsByThreadId: input.draftThreadsByThreadId,
+    projectDraftThreadIdByProjectId: input.projectDraftThreadIdByProjectId,
+    stickyModelSelectionByProvider: toPersistedModelSelectionByProvider(
+      input.stickyModelSelectionByProvider,
+    ),
+    stickyActiveProvider: toPersistedActiveProvider(input.stickyActiveProvider),
+  };
+}
+
 function normalizeProviderModelOptions(
   value: unknown,
   provider?: ProviderKind | null,
@@ -1066,22 +1140,18 @@ function normalizePersistedDraftsByThreadId(
     ) {
       continue;
     }
-    nextDraftsByThreadId[threadId as ThreadId] = {
+    nextDraftsByThreadId[threadId as ThreadId] = createPersistedThreadDraft({
       prompt,
-      attachments: [...attachments],
-      ...(terminalContexts.length > 0 ? { terminalContexts: [...terminalContexts] } : {}),
-      ...(codeSnippets.length > 0 ? { codeSnippets: [...codeSnippets] } : {}),
-      ...(skills.length > 0 ? { skills: [...skills] } : {}),
-      ...(hasModelData
-        ? {
-            modelSelectionByProvider:
-              modelSelectionByProvider as PersistedComposerThreadDraftState["modelSelectionByProvider"],
-            activeProvider: activeProvider as PersistedComposerThreadDraftState["activeProvider"],
-          }
-        : {}),
-      ...(runtimeMode ? { runtimeMode } : {}),
-      ...(interactionMode ? { interactionMode } : {}),
-    } as DeepMutable<PersistedComposerThreadDraftState>;
+      attachments,
+      terminalContexts,
+      codeSnippets,
+      skills,
+      modelSelectionByProvider,
+      activeProvider,
+      runtimeMode,
+      interactionMode,
+      hasModelData,
+    });
   }
 
   return nextDraftsByThreadId;
@@ -1122,14 +1192,13 @@ function migratePersistedComposerDraftStoreState(
   const { draftThreadsByThreadId, projectDraftThreadIdByProjectId } =
     normalizePersistedDraftThreads(rawDraftThreadsByThreadId, rawProjectDraftThreadIdByProjectId);
   const draftsByThreadId = normalizePersistedDraftsByThreadId(rawDraftMap);
-  return {
+  return createPersistedDraftStoreState({
     draftsByThreadId,
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
     stickyModelSelectionByProvider,
-    stickyActiveProvider:
-      stickyActiveProvider as PersistedComposerDraftStoreState["stickyActiveProvider"],
-  } as PersistedComposerDraftStoreState;
+    stickyActiveProvider,
+  });
 }
 
 function partializeComposerDraftStoreState(
@@ -1156,64 +1225,49 @@ function partializeComposerDraftStoreState(
     ) {
       continue;
     }
-    const persistedDraft = {
+    const persistedDraft = createPersistedThreadDraft({
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
-      ...(draft.terminalContexts.length > 0
-        ? {
-            terminalContexts: draft.terminalContexts.map((context) => ({
-              id: context.id,
-              threadId: context.threadId,
-              createdAt: context.createdAt,
-              terminalId: context.terminalId,
-              terminalLabel: context.terminalLabel,
-              lineStart: context.lineStart,
-              lineEnd: context.lineEnd,
-            })),
-          }
-        : {}),
-      ...(draft.codeSnippets.length > 0
-        ? {
-            codeSnippets: draft.codeSnippets.map((s) => ({
-              id: s.id,
-              cwd: s.cwd,
-              relativePath: s.relativePath,
-              startLine: s.startLine,
-              endLine: s.endLine,
-              code: s.code,
-            })),
-          }
-        : {}),
-      ...(draft.skills.length > 0
-        ? {
-            skills: draft.skills.map((s) => ({
-              id: s.id,
-              name: s.name,
-              source: s.source,
-              absolutePath: s.absolutePath,
-              relativePath: s.relativePath,
-              group: s.group,
-            })),
-          }
-        : {}),
-      ...(hasModelData
-        ? {
-            modelSelectionByProvider: draft.modelSelectionByProvider,
-            activeProvider: draft.activeProvider,
-          }
-        : {}),
-      ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
-      ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
-    } as DeepMutable<PersistedComposerThreadDraftState>;
+      terminalContexts: draft.terminalContexts.map((context) => ({
+        id: context.id,
+        threadId: context.threadId,
+        createdAt: context.createdAt,
+        terminalId: context.terminalId,
+        terminalLabel: context.terminalLabel,
+        lineStart: context.lineStart,
+        lineEnd: context.lineEnd,
+      })),
+      codeSnippets: draft.codeSnippets.map((s) => ({
+        id: s.id,
+        cwd: s.cwd,
+        relativePath: s.relativePath,
+        startLine: s.startLine,
+        endLine: s.endLine,
+        code: s.code,
+      })),
+      skills: draft.skills.map((s) => ({
+        id: s.id,
+        name: s.name,
+        source: s.source,
+        absolutePath: s.absolutePath,
+        relativePath: s.relativePath,
+        group: s.group,
+      })),
+      modelSelectionByProvider: draft.modelSelectionByProvider,
+      activeProvider: draft.activeProvider,
+      runtimeMode: draft.runtimeMode,
+      interactionMode: draft.interactionMode,
+      hasModelData,
+    });
     persistedDraftsByThreadId[threadId as ThreadId] = persistedDraft;
   }
-  return {
+  return createPersistedDraftStoreState({
     draftsByThreadId: persistedDraftsByThreadId,
     draftThreadsByThreadId: state.draftThreadsByThreadId,
     projectDraftThreadIdByProjectId: state.projectDraftThreadIdByProjectId,
     stickyModelSelectionByProvider: state.stickyModelSelectionByProvider,
     stickyActiveProvider: state.stickyActiveProvider,
-  } as PersistedComposerDraftStoreState;
+  });
 }
 
 function normalizeCurrentPersistedComposerDraftStoreState(
@@ -1268,14 +1322,13 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     stickyActiveProvider = normalizeProviderKind(normalizedPersistedState.stickyProvider);
   }
 
-  return {
+  return createPersistedDraftStoreState({
     draftsByThreadId: normalizePersistedDraftsByThreadId(normalizedPersistedState.draftsByThreadId),
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
     stickyModelSelectionByProvider,
-    stickyActiveProvider:
-      stickyActiveProvider as PersistedComposerDraftStoreState["stickyActiveProvider"],
-  } as PersistedComposerDraftStoreState;
+    stickyActiveProvider,
+  });
 }
 
 function readPersistedAttachmentIdsFromStorage(threadId: ThreadId): string[] {
