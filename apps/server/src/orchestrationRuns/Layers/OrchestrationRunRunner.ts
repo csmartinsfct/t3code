@@ -20,6 +20,7 @@ import {
   MessageId,
   OrchestrationRunError,
   ReviewOutput as ReviewOutputSchema,
+  TurnId,
 } from "@t3tools/contracts";
 import {
   normalizeReviewOutputCandidate,
@@ -79,12 +80,17 @@ const SCOPE = "server.orchestration-runner";
 const TURN_TIMEOUT = Duration.minutes(30);
 
 type TurnOutcome =
-  | { readonly result: "completed" }
-  | { readonly result: "interrupted"; readonly reason: string | null }
+  | { readonly result: "completed"; readonly turnId: TurnId | null }
+  | {
+      readonly result: "interrupted";
+      readonly reason: string | null;
+      readonly turnId: TurnId | null;
+    }
   | {
       readonly result: "failed";
       readonly error: string | null;
       readonly promptId?: OrchestrationPromptId;
+      readonly turnId?: TurnId | null;
     };
 
 type ProviderTurnWatcherEvent = Extract<
@@ -420,31 +426,52 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         `Timed out waiting for completed checkpoint state on thread ${threadId}`,
       );
 
-    const getLatestAssistantMessageText = (threadId: ThreadId) =>
+    const getCompletedAssistantMessageForTurn = (input: {
+      readonly threadId: ThreadId;
+      readonly turnId: TurnId | null;
+    }) =>
       waitForThread(
-        threadId,
+        input.threadId,
         (thread) => {
-          const assistantMessageId = thread.latestTurn?.assistantMessageId;
-          const assistantMessage =
-            (assistantMessageId
-              ? thread.messages.find((message) => message.id === assistantMessageId)
-              : undefined) ??
-            thread.messages.toReversed().find((message) => message.role === "assistant");
-          return typeof assistantMessage?.text === "string" && assistantMessage.text.length > 0
-            ? assistantMessage.text
+          const latestTurn = thread.latestTurn;
+          if (
+            input.turnId === null ||
+            !latestTurn ||
+            latestTurn.turnId !== input.turnId ||
+            latestTurn.state !== "completed" ||
+            latestTurn.completedAt === null ||
+            latestTurn.assistantMessageId === null
+          ) {
+            return null;
+          }
+
+          const assistantMessage = thread.messages.find(
+            (message) => message.id === latestTurn.assistantMessageId,
+          );
+          return assistantMessage &&
+            assistantMessage.turnId === input.turnId &&
+            assistantMessage.role === "assistant" &&
+            assistantMessage.streaming === false &&
+            assistantMessage.updatedAt >= latestTurn.completedAt &&
+            assistantMessage.text.length > 0
+            ? assistantMessage
             : null;
         },
-        `Timed out waiting for assistant output on thread ${threadId}`,
+        `Timed out waiting for finalized assistant output on thread ${input.threadId} for turn ${String(input.turnId)}`,
       );
 
-    const parseReviewOutput = (threadId: ThreadId) =>
+    const parseReviewOutput = (input: {
+      readonly threadId: ThreadId;
+      readonly turnId: TurnId | null;
+    }) =>
       Effect.gen(function* () {
-        const rawText = yield* getLatestAssistantMessageText(threadId);
+        const assistantMessage = yield* getCompletedAssistantMessageForTurn(input);
+        const rawText = assistantMessage.text;
         const parsedCandidates = yield* Effect.try({
           try: () => parseReviewOutputJsonCandidates(rawText),
           catch: (cause) =>
             new OrchestrationRunError({
-              message: `Review output for thread ${threadId} was not valid JSON`,
+              message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} was not valid JSON`,
               cause,
             }),
         });
@@ -461,7 +488,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         }
 
         return yield* new OrchestrationRunError({
-          message: `Review output for thread ${threadId} did not match ReviewOutput`,
+          message: `Review output for thread ${input.threadId} turn ${String(input.turnId)} did not match ReviewOutput`,
           cause: lastDecodeCause,
         });
       });
@@ -556,6 +583,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 yield* Deferred.succeed(turnDone, {
                   result: "interrupted" as const,
                   reason: event.payload.reason,
+                  turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
                 });
                 return;
               }
@@ -568,7 +596,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     turnId: activeTurnId,
                   }),
                 );
-                yield* Deferred.succeed(turnDone, { result: "completed" as const });
+                yield* Deferred.succeed(turnDone, {
+                  result: "completed" as const,
+                  turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
+                });
                 return;
               }
 
@@ -586,6 +617,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 yield* Deferred.succeed(turnDone, {
                   result: "interrupted" as const,
                   reason,
+                  turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
                 });
                 return;
               }
@@ -603,6 +635,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               yield* Deferred.succeed(turnDone, {
                 result: "failed" as const,
                 error,
+                turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
               });
               return;
             }),
@@ -614,7 +647,11 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         );
         const outcome: TurnOutcome = Option.match(maybeOutcome, {
           onNone: () => {
-            return { result: "failed" as const, error: "Turn timed out after 30 minutes" };
+            return {
+              result: "failed" as const,
+              error: "Turn timed out after 30 minutes",
+              turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
+            };
           },
           onSome: (value) => value,
         });
@@ -1555,8 +1592,21 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 return "paused" as const;
               }
 
-              const reviewExit = yield* Effect.exit(parseReviewOutput(reviewThreadId));
+              const reviewExit = yield* Effect.exit(
+                parseReviewOutput({
+                  threadId: reviewThreadId,
+                  turnId: reviewOutcome.turnId,
+                }),
+              );
               if (reviewExit._tag === "Failure") {
+                yield* Effect.logWarning(
+                  formatTimelineLog(SCOPE, "runner.review-parse.failed", {
+                    ticketIdentifier: ticket.identifier,
+                    reviewThreadId,
+                    reviewTurnId: reviewOutcome.turnId,
+                    cause: Cause.pretty(reviewExit.cause),
+                  }),
+                );
                 yield* ticketing
                   .update({ id: entry.ticketId, status: "blocked" })
                   .pipe(Effect.catch(() => Effect.void));

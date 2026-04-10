@@ -2819,6 +2819,142 @@ describe("OrchestrationRunRunner", () => {
     );
   });
 
+  it("waits for the finalized assistant review message before parsing", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+    const completedRun = makeRun({
+      ...singleTicketRun,
+      status: "completed",
+      currentTicketIndex: 0,
+      currentPhase: "reviewing",
+    });
+    const workingThreadState = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({
+        changesNeeded: false,
+        summary: "unused",
+        comments: [],
+      }),
+    )[0]!;
+    const reviewThreadState = {
+      ...makeCompletedWorkAndReviewThreads("{}")[1]!,
+      latestTurn: null,
+      messages: [],
+      updatedAt: "2026-04-09T10:00:00.000Z",
+    } as OrchestrationThread;
+    const mutableReviewThreadState = reviewThreadState as {
+      latestTurn: OrchestrationThread["latestTurn"];
+      messages: OrchestrationThread["messages"];
+      updatedAt: OrchestrationThread["updatedAt"];
+    };
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        complete: () => Effect.succeed(completedRun),
+        pause: () => Effect.die("pause should not be called"),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
+      ]),
+      readModelThreads: [makeOrchestrationParentThread(), workingThreadState, reviewThreadState],
+      onDispatch: (command) => {
+        if (command.type !== "thread.turn.start" || command.threadId !== reviewThread1) {
+          return;
+        }
+
+        mutableReviewThreadState.latestTurn = {
+          turnId: TurnId.makeUnsafe("turn-review"),
+          state: "completed",
+          requestedAt: "2026-04-09T10:00:02.000Z",
+          startedAt: "2026-04-09T10:00:02.000Z",
+          completedAt: "2026-04-09T10:00:03.000Z",
+          assistantMessageId: MessageId.makeUnsafe("assistant-review-plain"),
+        };
+        mutableReviewThreadState.messages = [
+          {
+            id: MessageId.makeUnsafe("assistant-review-plain"),
+            role: "assistant",
+            text: "All 8 browser tests pass. Let me verify scope quickly.",
+            turnId: TurnId.makeUnsafe("turn-review"),
+            streaming: false,
+            createdAt: "2026-04-09T10:00:02.000Z",
+            updatedAt: "2026-04-09T10:00:02.000Z",
+          },
+        ];
+        mutableReviewThreadState.updatedAt = "2026-04-09T10:00:02.000Z";
+
+        setTimeout(() => {
+          mutableReviewThreadState.latestTurn = {
+            turnId: TurnId.makeUnsafe("turn-review"),
+            state: "completed",
+            requestedAt: "2026-04-09T10:00:02.000Z",
+            startedAt: "2026-04-09T10:00:02.000Z",
+            completedAt: "2026-04-09T10:00:03.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-review-final"),
+          };
+          mutableReviewThreadState.messages = [
+            {
+              id: MessageId.makeUnsafe("assistant-review-plain"),
+              role: "assistant",
+              text: "All 8 browser tests pass. Let me verify scope quickly.",
+              turnId: TurnId.makeUnsafe("turn-review"),
+              streaming: false,
+              createdAt: "2026-04-09T10:00:02.000Z",
+              updatedAt: "2026-04-09T10:00:02.000Z",
+            },
+            {
+              id: MessageId.makeUnsafe("assistant-review-final"),
+              role: "assistant",
+              text: JSON.stringify({
+                changesNeeded: false,
+                summary: "Ready to accept.",
+                comments: [],
+              }),
+              turnId: TurnId.makeUnsafe("turn-review"),
+              streaming: false,
+              createdAt: "2026-04-09T10:00:03.000Z",
+              updatedAt: "2026-04-09T10:00:03.000Z",
+            },
+          ];
+          mutableReviewThreadState.updatedAt = "2026-04-09T10:00:03.000Z";
+        }, 50);
+      },
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 125));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.ticket.review.approved",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.completed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).not.toContain(
+      "orchestration.run.paused",
+    );
+  });
+
   it("approves a review when metadata JSON appears before the review payload", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const singleTicketRun = makeRun({
