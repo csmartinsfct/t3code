@@ -105,6 +105,7 @@ interface MessagesTimelineProps {
   onProposeScheduledTask?: (event: import("../ChatMarkdown").ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
   onOpenFileLink?: (absolutePath: string, line?: number, column?: number) => void;
+  onOpenTicketLink?: (identifier: string) => void | Promise<void>;
   onMessageContextMenu?: (
     messageId: MessageId,
     messageRole: string,
@@ -140,6 +141,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onProposeScheduledTask,
   resolveProjectName,
   onOpenFileLink,
+  onOpenTicketLink,
   onVirtualizerSnapshot,
   onMessageContextMenu,
   onMessageSelectionClick,
@@ -544,6 +546,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
                       {...(resolveProjectName ? { resolveProjectName } : {})}
                       {...(onOpenFileLink ? { onOpenFileLink } : {})}
+                      {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
                     />
                   )}
                   {(() => {
@@ -624,6 +627,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             planMarkdown={row.proposedPlan.planMarkdown}
             cwd={markdownCwd}
             workspaceRoot={workspaceRoot}
+            {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
           />
         </div>
       )}

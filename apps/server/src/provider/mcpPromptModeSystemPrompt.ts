@@ -85,5 +85,6 @@ curl -s -X POST <ENDPOINT_URL> \\
 - Parse the JSON response — results are in the \`content\` array of the response body.
 - For managed runs: check what's already running before starting new services.
 - For ticketing: use list_tickets or search_tickets before creating duplicates.
+- When mentioning a ticket identifier in your chat reply, use markdown like \`[ZBD-7](t3://ticket/ZBD-7)\` with the exact identifier returned by the ticketing tool.
 - For prompts: use explicit scope arguments. Provider-issued bearer tokens only allow project scope, not global scope.`;
 }

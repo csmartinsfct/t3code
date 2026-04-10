@@ -7,6 +7,7 @@ export const TICKETING_SYSTEM_PROMPT = `## T3 Ticketing
 This project has T3 ticketing support via the t3_ticketing MCP server.
 
 **All ticket ID parameters use human-readable identifiers (e.g. "ZBD-7").** The server resolves identifiers automatically.
+When you mention a ticket in chat text, format it as markdown using the exact identifier, for example \`[ZBD-7](t3://ticket/ZBD-7)\`. This lets the UI open the ticket directly.
 
 When the user asks about tickets, tasks, issues, or project tracking:
 

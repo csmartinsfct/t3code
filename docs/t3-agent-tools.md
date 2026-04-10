@@ -101,6 +101,8 @@ Thread start (with active project)
 
 For ticketing specifically, the validated session context may also include `threadId`. The ticketing MCP route forwards that to the ticketing service so `create_ticket` can attach an `origin` ticket-thread link automatically.
 
+Ticket replies now have a small internal-link contract for chat output: when an agent references a ticket in prose, it should use markdown like `[T3CO-191](t3://ticket/T3CO-191)`. The reminder is injected briefly through the ticketing prompts and through selected ticket MCP `tools/list` descriptions. Ticket `tools/call` responses remain JSON-only so they stay predictable for agents and MCP clients.
+
 For prompts, managed-run bearer tokens are restricted to the issuing `projectId` and may only access project scope. Global prompt scope is only available through privileged contexts such as the dev bypass token.
 
 ### Condition Gate

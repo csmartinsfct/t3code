@@ -1,4 +1,11 @@
-import { ProjectId, type ModelSelection, type ThreadId, type TurnId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ModelSelection,
+  type ProjectId as ProjectIdValue,
+  type ThreadId,
+  type TicketId,
+  type TurnId,
+} from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -9,6 +16,7 @@ import {
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "../lib/terminalContext";
+import type { BoardContext, ViewMode } from "../uiStateStore";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -214,6 +222,82 @@ export function buildExpiredTerminalContextToastCopy(
     title: `${noun} omitted from message`,
     description: "Re-add it if you want that terminal output included.",
   };
+}
+
+export function buildTicketLinkCacheKey(projectId: ProjectIdValue, identifier: string): string {
+  return `${projectId}:${identifier.trim().toUpperCase()}`;
+}
+
+export async function openTicketLinkInThread(input: {
+  identifier: string;
+  threadId: ThreadId;
+  projectId: ProjectIdValue | null | undefined;
+  resolvedTicketIdCache: Map<string, TicketId>;
+  inFlightTicketResolutions: Map<string, Promise<TicketId>>;
+  getTicketByIdentifier: (input: {
+    identifier: string;
+    projectId: ProjectIdValue;
+  }) => Promise<{ id: TicketId }>;
+  getBoardContext: (threadId: ThreadId) => BoardContext | null | undefined;
+  setViewMode: (mode: ViewMode) => void;
+  pushThreadBoardTicket: (
+    threadId: ThreadId,
+    projectId: ProjectIdValue,
+    ticketId: TicketId,
+  ) => void;
+  showErrorToast: (input: { title: string; description?: string }) => void;
+}): Promise<void> {
+  const identifier = input.identifier.trim();
+  if (!input.projectId) {
+    input.showErrorToast({
+      title: "Ticket links only work in project threads",
+    });
+    return;
+  }
+
+  const cacheKey = buildTicketLinkCacheKey(input.projectId, identifier);
+  let ticketId = input.resolvedTicketIdCache.get(cacheKey);
+  if (!ticketId) {
+    let resolution = input.inFlightTicketResolutions.get(cacheKey);
+    if (!resolution) {
+      resolution = input
+        .getTicketByIdentifier({
+          identifier,
+          projectId: input.projectId,
+        })
+        .then((ticket) => {
+          input.resolvedTicketIdCache.set(cacheKey, ticket.id);
+          return ticket.id;
+        })
+        .finally(() => {
+          if (input.inFlightTicketResolutions.get(cacheKey) === resolution) {
+            input.inFlightTicketResolutions.delete(cacheKey);
+          }
+        });
+      input.inFlightTicketResolutions.set(cacheKey, resolution);
+    }
+    try {
+      ticketId = await resolution;
+    } catch (error) {
+      input.showErrorToast({
+        title: `Could not open ticket ${identifier}`,
+        description:
+          error instanceof Error
+            ? error.message
+            : "The ticket could not be resolved in this project.",
+      });
+      return;
+    }
+  }
+
+  input.setViewMode("management");
+  const currentBoardContext = input.getBoardContext(input.threadId);
+  const currentTicketStack =
+    currentBoardContext?.projectId === input.projectId ? currentBoardContext.ticketStack : [];
+  if (currentTicketStack[currentTicketStack.length - 1] === ticketId) {
+    return;
+  }
+  input.pushThreadBoardTicket(input.threadId, input.projectId, ticketId);
 }
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {

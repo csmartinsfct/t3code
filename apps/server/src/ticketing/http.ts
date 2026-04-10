@@ -69,6 +69,22 @@ function mcpError(message: string) {
   };
 }
 
+export const TICKET_CHAT_LINK_REMINDER =
+  "When referencing a ticket in chat, use markdown like `[ZBD-7](t3://ticket/ZBD-7)`.";
+export const TICKET_TOOL_NAMES_WITH_CHAT_LINK_REMINDER = [
+  "list_tickets",
+  "get_ticket",
+  "create_ticket",
+  "update_ticket",
+  "search_tickets",
+  "get_ticket_tree",
+  "create_comment",
+] as const;
+
+export function withTicketChatLinkReminder(description: string): string {
+  return `${description} ${TICKET_CHAT_LINK_REMINDER}`;
+}
+
 // ---------------------------------------------------------------------------
 // MCP response transformation — strip ticket UUIDs, use identifiers
 // ---------------------------------------------------------------------------
@@ -225,7 +241,9 @@ function createTicketingMcpServer(
     "list_tickets",
     {
       title: "List Tickets",
-      description: "List tickets for the current project with optional filters.",
+      description: withTicketChatLinkReminder(
+        "List tickets for the current project with optional filters.",
+      ),
       inputSchema: {
         status: z
           .array(
@@ -283,7 +301,9 @@ function createTicketingMcpServer(
     "get_ticket",
     {
       title: "Get Ticket",
-      description: "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
+      description: withTicketChatLinkReminder(
+        "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
+      ),
       inputSchema: {
         id: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
       },
@@ -307,7 +327,7 @@ function createTicketingMcpServer(
     "create_ticket",
     {
       title: "Create Ticket",
-      description: "Create a new ticket in the current project.",
+      description: withTicketChatLinkReminder("Create a new ticket in the current project."),
       inputSchema: {
         title: z.string().describe("Ticket title."),
         description: z.string().optional().describe("Ticket description."),
@@ -421,7 +441,7 @@ function createTicketingMcpServer(
     "update_ticket",
     {
       title: "Update Ticket",
-      description: "Update an existing ticket.",
+      description: withTicketChatLinkReminder("Update an existing ticket."),
       inputSchema: {
         id: z.string().describe("The ticket identifier (e.g. 'ZBD-7') to update."),
         title: z.string().optional().describe("New title."),
@@ -566,7 +586,7 @@ function createTicketingMcpServer(
     "search_tickets",
     {
       title: "Search Tickets",
-      description: "Search tickets by text query.",
+      description: withTicketChatLinkReminder("Search tickets by text query."),
       inputSchema: {
         query: z.string().describe("Search query."),
         limit: z.number().int().positive().optional().describe("Max results."),
@@ -594,7 +614,9 @@ function createTicketingMcpServer(
     "get_ticket_tree",
     {
       title: "Get Ticket Tree",
-      description: "Get hierarchical tree of tickets for the current project.",
+      description: withTicketChatLinkReminder(
+        "Get hierarchical tree of tickets for the current project.",
+      ),
       inputSchema: {
         rootTicketId: z
           .string()
@@ -984,7 +1006,7 @@ function createTicketingMcpServer(
     "create_comment",
     {
       title: "Create Comment",
-      description: "Add a comment to a ticket.",
+      description: withTicketChatLinkReminder("Add a comment to a ticket."),
       inputSchema: {
         ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
         parentId: z.string().optional().describe("Parent comment ID for threaded replies."),

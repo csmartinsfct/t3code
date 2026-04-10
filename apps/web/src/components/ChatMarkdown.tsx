@@ -14,7 +14,7 @@ import React, {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
@@ -25,8 +25,8 @@ import { isProposeActionBlock, parseProposeActionPayload } from "../lib/proposeA
 import {
   isProposeScheduledTaskBlock,
   parseProposeScheduledTaskPayload,
-  type ProposeScheduledTaskPayload,
 } from "../lib/proposeScheduledTaskParser";
+import { parseInternalLinkTarget } from "../lib/internalLinkTargets";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import { splitPathAndPosition } from "../terminal-links";
@@ -83,6 +83,7 @@ interface ChatMarkdownProps {
   onProposeScheduledTask?: (event: ProposeScheduledTaskEvent) => void;
   resolveProjectName?: (projectId: string) => string;
   onOpenFileLink?: (absolutePath: string, line?: number, column?: number) => void;
+  onOpenTicketLink?: (identifier: string) => void | Promise<void>;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -277,12 +278,32 @@ function ChatMarkdown({
   onProposeScheduledTask,
   resolveProjectName,
   onOpenFileLink,
+  onOpenTicketLink,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
+        const internalTarget = parseInternalLinkTarget(href);
+        if (internalTarget?.kind === "ticket") {
+          if (!onOpenTicketLink) {
+            return <span className={props.className}>{props.children}</span>;
+          }
+
+          return (
+            <a
+              {...props}
+              href={href}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void onOpenTicketLink(internalTarget.identifier);
+              }}
+            />
+          );
+        }
+
         const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
         if (!targetPath) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
@@ -383,6 +404,7 @@ function ChatMarkdown({
       diffThemeName,
       isStreaming,
       onOpenFileLink,
+      onOpenTicketLink,
       onProposeAction,
       onProposeScheduledTask,
       resolveProjectName,
@@ -391,7 +413,15 @@ function ChatMarkdown({
 
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+        urlTransform={(value) =>
+          typeof value === "string" && value.startsWith("t3://")
+            ? value
+            : defaultUrlTransform(value)
+        }
+      >
         {text}
       </ReactMarkdown>
     </div>

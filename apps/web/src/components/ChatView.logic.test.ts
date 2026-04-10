@@ -1,14 +1,16 @@
-import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import { ProjectId, ThreadId, TicketId, TurnId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 import type { Thread } from "../types";
 
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  buildTicketLinkCacheKey,
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  openTicketLinkInThread,
   reconcileMountedTerminalThreadIds,
   shouldAdvanceLiveClock,
   waitForStartedServerThread,
@@ -75,6 +77,187 @@ describe("buildExpiredTerminalContextToastCopy", () => {
     expect(buildExpiredTerminalContextToastCopy(2, "omitted")).toEqual({
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
+    });
+  });
+});
+
+describe("openTicketLinkInThread", () => {
+  it("opens board mode and pushes the resolved ticket", async () => {
+    const setViewMode = vi.fn();
+    const pushThreadBoardTicket = vi.fn();
+    const getTicketByIdentifier = vi.fn(async () => ({ id: TicketId.makeUnsafe("ticket-1") }));
+
+    await openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache: new Map(),
+      inFlightTicketResolutions: new Map(),
+      getTicketByIdentifier,
+      getBoardContext: () => null,
+      setViewMode,
+      pushThreadBoardTicket,
+      showErrorToast: vi.fn(),
+    });
+
+    expect(getTicketByIdentifier).toHaveBeenCalledWith({
+      identifier: "T3CO-191",
+      projectId: ProjectId.makeUnsafe("project-1"),
+    });
+    expect(setViewMode).toHaveBeenCalledWith("management");
+    expect(pushThreadBoardTicket).toHaveBeenCalledWith(
+      ThreadId.makeUnsafe("thread-1"),
+      ProjectId.makeUnsafe("project-1"),
+      TicketId.makeUnsafe("ticket-1"),
+    );
+  });
+
+  it("reuses in-flight resolutions for concurrent clicks", async () => {
+    let resolveTicket!: (value: { id: TicketId }) => void;
+    const resolution = new Promise<{ id: TicketId }>((resolve) => {
+      resolveTicket = resolve;
+    });
+    const getTicketByIdentifier = vi.fn(() => resolution);
+    const setViewMode = vi.fn();
+    const pushThreadBoardTicket = vi.fn();
+    const resolvedTicketIdCache = new Map<string, TicketId>();
+    const inFlightTicketResolutions = new Map<string, Promise<TicketId>>();
+
+    const first = openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache,
+      inFlightTicketResolutions,
+      getTicketByIdentifier,
+      getBoardContext: () => null,
+      setViewMode,
+      pushThreadBoardTicket,
+      showErrorToast: vi.fn(),
+    });
+    const second = openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache,
+      inFlightTicketResolutions,
+      getTicketByIdentifier,
+      getBoardContext: () => null,
+      setViewMode,
+      pushThreadBoardTicket,
+      showErrorToast: vi.fn(),
+    });
+
+    expect(getTicketByIdentifier).toHaveBeenCalledTimes(1);
+    resolveTicket({ id: TicketId.makeUnsafe("ticket-1") });
+    await Promise.all([first, second]);
+
+    expect(pushThreadBoardTicket).toHaveBeenCalledTimes(2);
+    expect(inFlightTicketResolutions.size).toBe(0);
+  });
+
+  it("uses the resolved cache on later clicks", async () => {
+    const getTicketByIdentifier = vi.fn(async () => ({ id: TicketId.makeUnsafe("ticket-1") }));
+    const resolvedTicketIdCache = new Map<string, TicketId>([
+      [
+        buildTicketLinkCacheKey(ProjectId.makeUnsafe("project-1"), "T3CO-191"),
+        TicketId.makeUnsafe("ticket-1"),
+      ],
+    ]);
+    const pushThreadBoardTicket = vi.fn();
+
+    await openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache,
+      inFlightTicketResolutions: new Map(),
+      getTicketByIdentifier,
+      getBoardContext: () => null,
+      setViewMode: vi.fn(),
+      pushThreadBoardTicket,
+      showErrorToast: vi.fn(),
+    });
+
+    expect(getTicketByIdentifier).not.toHaveBeenCalled();
+    expect(pushThreadBoardTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not push a duplicate when the ticket is already on top of the board stack", async () => {
+    const pushThreadBoardTicket = vi.fn();
+    const setViewMode = vi.fn();
+
+    await openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache: new Map([
+        [
+          buildTicketLinkCacheKey(ProjectId.makeUnsafe("project-1"), "T3CO-191"),
+          TicketId.makeUnsafe("ticket-1"),
+        ],
+      ]),
+      inFlightTicketResolutions: new Map(),
+      getTicketByIdentifier: vi.fn(),
+      getBoardContext: () => ({
+        projectId: ProjectId.makeUnsafe("project-1"),
+        ticketStack: [TicketId.makeUnsafe("ticket-1")],
+        boardScrollLeft: 0,
+        updatedAt: "2026-04-11T12:00:00.000Z",
+      }),
+      setViewMode,
+      pushThreadBoardTicket,
+      showErrorToast: vi.fn(),
+    });
+
+    expect(setViewMode).toHaveBeenCalledWith("management");
+    expect(pushThreadBoardTicket).not.toHaveBeenCalled();
+  });
+
+  it("shows a toast and stops when the thread has no project context", async () => {
+    const showErrorToast = vi.fn();
+    const getTicketByIdentifier = vi.fn();
+
+    await openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: null,
+      resolvedTicketIdCache: new Map(),
+      inFlightTicketResolutions: new Map(),
+      getTicketByIdentifier,
+      getBoardContext: () => null,
+      setViewMode: vi.fn(),
+      pushThreadBoardTicket: vi.fn(),
+      showErrorToast,
+    });
+
+    expect(showErrorToast).toHaveBeenCalledWith({
+      title: "Ticket links only work in project threads",
+    });
+    expect(getTicketByIdentifier).not.toHaveBeenCalled();
+  });
+
+  it("shows a fallback toast when resolution fails", async () => {
+    const showErrorToast = vi.fn();
+
+    await openTicketLinkInThread({
+      identifier: "T3CO-191",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      resolvedTicketIdCache: new Map(),
+      inFlightTicketResolutions: new Map(),
+      getTicketByIdentifier: vi.fn(async () => {
+        throw new Error("No matching ticket");
+      }),
+      getBoardContext: () => null,
+      setViewMode: vi.fn(),
+      pushThreadBoardTicket: vi.fn(),
+      showErrorToast,
+    });
+
+    expect(showErrorToast).toHaveBeenCalledWith({
+      title: "Could not open ticket T3CO-191",
+      description: "No matching ticket",
     });
   });
 });

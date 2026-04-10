@@ -62,6 +62,7 @@ This means the board and the right-hand chat panel are intentionally coupled:
 - the chat thread chooses the active project
 - the board restores the last relevant board state for that thread
 - the board must never render a ticket from a different project than the active thread
+- assistant-authored ticket links like `[T3CO-191](t3://ticket/T3CO-191)` can jump the current thread directly into Board view and open that ticket's detail panel
 
 ## Board Context Model
 

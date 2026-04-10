@@ -18,6 +18,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
   type ThreadId,
+  type TicketId,
   type TurnId,
   type KeybindingCommand,
   type ManagedRunSummary,
@@ -211,6 +212,7 @@ import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  openTicketLinkInThread,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
@@ -1071,6 +1073,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const fileExplorerOpen = rawSearch.fileExplorer === "1";
   const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
   const activeThreadId = activeThread?.id ?? null;
+  const resolvedTicketLinkCacheRef = useRef(new Map<string, TicketId>());
+  const inFlightTicketLinkResolutionsRef = useRef(new Map<string, Promise<TicketId>>());
   const existingOpenTerminalThreadIds = useMemo(() => {
     const existingThreadIds = new Set<ThreadId>([...serverThreadIds, ...draftThreadIds]);
     return openTerminalThreadIds.filter((nextThreadId) => existingThreadIds.has(nextThreadId));
@@ -1137,6 +1141,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
       });
     },
     [activeThread?.projectId, threadId],
+  );
+  const handleOpenTicketLink = useCallback(
+    async (identifier: string) => {
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+
+      await openTicketLinkInThread({
+        identifier,
+        threadId,
+        projectId: activeProject?.id,
+        resolvedTicketIdCache: resolvedTicketLinkCacheRef.current,
+        inFlightTicketResolutions: inFlightTicketLinkResolutionsRef.current,
+        getTicketByIdentifier: ({ identifier: targetIdentifier, projectId }) =>
+          api.ticketing.getByIdentifier({ identifier: targetIdentifier, projectId }),
+        getBoardContext: (targetThreadId) =>
+          useUiStateStore.getState().boardContextByThreadId[targetThreadId] ?? null,
+        setViewMode: (mode) => useUiStateStore.getState().setViewMode(mode),
+        pushThreadBoardTicket: (targetThreadId, projectId, ticketId) =>
+          useUiStateStore.getState().pushThreadBoardTicket(targetThreadId, projectId, ticketId),
+        showErrorToast: ({ title, description }) => {
+          toastManager.add({
+            type: "error",
+            title,
+            ...(description ? { description } : {}),
+            data: { threadId },
+          });
+        },
+      });
+    },
+    [activeProject?.id, threadId],
   );
 
   const openPullRequestDialog = useCallback(
@@ -5046,6 +5082,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     markdownCwd={gitCwd ?? undefined}
                     workspaceRoot={activeProject?.cwd ?? undefined}
                     onNavigateToThread={onNavigateToChildThread}
+                    onOpenTicketLink={handleOpenTicketLink}
                   />
                 </div>
                 {showScrollToBottom && (
@@ -5116,6 +5153,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       onProposeScheduledTask={handleProposeScheduledTask}
                       resolveProjectName={resolveProjectName}
                       onOpenFileLink={handleOpenFileLink}
+                      onOpenTicketLink={handleOpenTicketLink}
                       onMessageContextMenu={onMessageContextMenu}
                       onMessageSelectionClick={onMessageSelectionClick}
                       isReviewThread={isReviewOrchestrationChild}

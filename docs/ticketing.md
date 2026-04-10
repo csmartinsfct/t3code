@@ -2,6 +2,8 @@
 
 Ticketing adds project management capabilities to T3 Code — tickets with hierarchy (parent/child for epics), dependencies with cycle detection, project-scoped labels, threaded comments (human + LLM), polymorphic artifacts, acceptance criteria with verification tracking, full audit history, and ticket-to-thread relationships.
 
+Assistant replies can also reference tickets with internal markdown links like `[T3CO-191](t3://ticket/T3CO-191)`. In the main chat thread UI, clicking one of those links opens Board view and shows that ticket's detail panel for the active thread/project.
+
 ## Overview
 
 The system has five main moving parts:
@@ -157,7 +159,7 @@ When `maxReviewIterations === 0`, the server creates only the working thread for
 - marks the ticket `blocked` and pauses the orchestration run when review output is invalid or the review budget is exhausted
 - pauses the orchestration run with `orchestration.run.prompt.render.failed` when the effective prompt document for `implement`, `resume`, `resumeFreshAgent`, `review`, `reReview`, or `reviewFeedback` cannot be validated or rendered
 
-The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON.
+The chat UI uses that explicit `reviewThreadId` identity, when present, to keep working and review child threads grouped together in the thread switcher, show review iteration state in the orchestration header, and render structured `ReviewOutput` responses as review cards instead of raw JSON. The orchestration timeline itself is chronological across parent milestones plus working/review child-thread messages, so implementer follow-ups can appear between review passes instead of being dumped in per-thread blocks.
 
 When a run is paused, the orchestration header exposes two resume paths:
 
