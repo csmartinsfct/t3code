@@ -108,7 +108,10 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         const ticket = yield* (
           UUID_RE.test(ticketIdentifierOrId)
             ? ticketing.getById({ id: TicketIdSchema.makeUnsafe(ticketIdentifierOrId) })
-            : ticketing.getByIdentifier({ identifier: ticketIdentifierOrId })
+            : ticketing.getByIdentifier({
+                identifier: ticketIdentifierOrId,
+                projectId: projectId as never,
+              })
         ).pipe(
           Effect.mapError(
             (cause) =>

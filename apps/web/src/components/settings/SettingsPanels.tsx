@@ -13,7 +13,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  baseProviderKind,
+  modelSelectionProviderKind,
   type BaseProviderKind,
   type ProviderKind,
   type ServerProvider,
@@ -48,6 +48,7 @@ import {
 import {
   MAX_CUSTOM_MODEL_LENGTH,
   getCustomModelOptionsByProvider,
+  makeAppModelSelection,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
@@ -598,7 +599,7 @@ export function GeneralSettingsPanel() {
   })();
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenProvider = textGenerationModelSelection.provider;
+  const textGenProvider = modelSelectionProviderKind(textGenerationModelSelection);
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const gitModelOptionsByProvider = getCustomModelOptionsByProvider(
@@ -618,7 +619,7 @@ export function GeneralSettingsPanel() {
     },
     serverProviders,
   );
-  const managedRunInferenceProvider = managedRunInferenceModelSelection.provider;
+  const managedRunInferenceProvider = modelSelectionProviderKind(managedRunInferenceModelSelection);
   const managedRunInferenceModel = managedRunInferenceModelSelection.model;
   const managedRunInferenceModelOptions = managedRunInferenceModelSelection.options;
   const managedRunInferenceOptionsByProvider = getCustomModelOptionsByProvider(
@@ -638,7 +639,7 @@ export function GeneralSettingsPanel() {
     },
     serverProviders,
   );
-  const orchImplProvider = orchestrationImplementerSelection.provider;
+  const orchImplProvider = modelSelectionProviderKind(orchestrationImplementerSelection);
   const orchImplModel = orchestrationImplementerSelection.model;
   const orchImplModelOptions = orchestrationImplementerSelection.options;
   const orchImplOptionsByProvider = getCustomModelOptionsByProvider(
@@ -658,7 +659,7 @@ export function GeneralSettingsPanel() {
     },
     serverProviders,
   );
-  const orchRevProvider = orchestrationReviewerSelection.provider;
+  const orchRevProvider = modelSelectionProviderKind(orchestrationReviewerSelection);
   const orchRevModel = orchestrationReviewerSelection.model;
   const orchRevModelOptions = orchestrationReviewerSelection.options;
   const orchRevOptionsByProvider = getCustomModelOptionsByProvider(
@@ -1167,10 +1168,7 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: baseProviderKind(provider),
-                          model,
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
                       serverProviders,
                     ),
@@ -1195,11 +1193,11 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: textGenProvider,
-                          model: textGenModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(
+                          textGenProvider,
+                          textGenModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),
@@ -1241,10 +1239,7 @@ export function GeneralSettingsPanel() {
                     managedRunInferenceModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: baseProviderKind(provider),
-                          model,
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
                       serverProviders,
                     ),
@@ -1270,11 +1265,11 @@ export function GeneralSettingsPanel() {
                     managedRunInferenceModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: managedRunInferenceProvider,
-                          model: managedRunInferenceModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(
+                          managedRunInferenceProvider,
+                          managedRunInferenceModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),
@@ -1318,10 +1313,7 @@ export function GeneralSettingsPanel() {
                     orchestrationImplementerModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: baseProviderKind(provider),
-                          model,
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
                       serverProviders,
                     ),
@@ -1346,11 +1338,11 @@ export function GeneralSettingsPanel() {
                     orchestrationImplementerModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: orchImplProvider,
-                          model: orchImplModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(
+                          orchImplProvider,
+                          orchImplModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),
@@ -1392,10 +1384,7 @@ export function GeneralSettingsPanel() {
                     orchestrationReviewerModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: baseProviderKind(provider),
-                          model,
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
                       serverProviders,
                     ),
@@ -1420,11 +1409,11 @@ export function GeneralSettingsPanel() {
                     orchestrationReviewerModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: orchRevProvider,
-                          model: orchRevModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: makeAppModelSelection(
+                          orchRevProvider,
+                          orchRevModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),

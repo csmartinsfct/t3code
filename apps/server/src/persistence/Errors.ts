@@ -30,13 +30,44 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
   }
 }
 
+function renderCauseDetail(cause: unknown): string | null {
+  if (cause instanceof Error) {
+    if (cause.message) {
+      return cause.message;
+    }
+    return cause.name || null;
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  if (typeof cause === "number" || typeof cause === "boolean" || typeof cause === "bigint") {
+    return String(cause);
+  }
+  if (cause && typeof cause === "object") {
+    const message =
+      "message" in cause && typeof cause.message === "string"
+        ? cause.message
+        : "reason" in cause && typeof cause.reason === "string"
+          ? cause.reason
+          : null;
+    if (message) {
+      return message;
+    }
+  }
+  return null;
+}
+
 export function toPersistenceSqlError(operation: string) {
-  return (cause: unknown): PersistenceSqlError =>
-    new PersistenceSqlError({
+  return (cause: unknown): PersistenceSqlError => {
+    const causeDetail = renderCauseDetail(cause);
+    return new PersistenceSqlError({
       operation,
-      detail: `Failed to execute ${operation}`,
+      detail: causeDetail
+        ? `Failed to execute ${operation}: ${causeDetail}`
+        : `Failed to execute ${operation}`,
       cause,
     });
+  };
 }
 
 export function toPersistenceDecodeError(operation: string) {

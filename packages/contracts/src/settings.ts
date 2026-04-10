@@ -213,6 +213,7 @@ const ModelSelectionPatch = Schema.Union([
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("claudeAgent")),
+    profileId: Schema.optionalKey(TrimmedNonEmptyString),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
   }),

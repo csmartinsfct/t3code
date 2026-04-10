@@ -321,7 +321,10 @@ export const TicketGetByIdInput = Schema.Struct({
 });
 export type TicketGetByIdInput = typeof TicketGetByIdInput.Type;
 
-export const TicketGetByIdentifierInput = Schema.Struct({ identifier: TrimmedNonEmptyString });
+export const TicketGetByIdentifierInput = Schema.Struct({
+  identifier: TrimmedNonEmptyString,
+  projectId: Schema.optional(ProjectId),
+});
 export type TicketGetByIdentifierInput = typeof TicketGetByIdentifierInput.Type;
 
 export const TicketDeleteInput = Schema.Struct({ id: TicketId });

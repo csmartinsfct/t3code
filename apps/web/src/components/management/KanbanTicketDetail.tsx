@@ -21,7 +21,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { baseProviderKind, DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  modelSelectionProviderKind,
+  type ProjectId,
+} from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -50,6 +54,7 @@ import { useSettings } from "../../hooks/useSettings";
 import { useServerProviders } from "../../rpc/serverState";
 import {
   getCustomModelOptionsByProvider,
+  makeAppModelSelection,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
@@ -1058,13 +1063,14 @@ function ModelOverrideRow({
 }) {
   const hasOverride = override != null;
   const effective = hasOverride ? override : globalDefault;
+  const effectiveProvider = modelSelectionProviderKind(effective);
   const optionsByProvider = getCustomModelOptionsByProvider(
     settings,
     serverProviders,
-    effective.provider,
+    effectiveProvider,
     effective.model,
   );
-  const models = serverProviders.find((p) => p.provider === effective.provider)?.models ?? [];
+  const models = serverProviders.find((p) => p.provider === effectiveProvider)?.models ?? [];
 
   return (
     <div className="flex flex-col gap-2">
@@ -1083,7 +1089,7 @@ function ModelOverrideRow({
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <ProviderModelPicker
-          provider={effective.provider}
+          provider={effectiveProvider}
           model={effective.model}
           lockedProvider={null}
           providers={serverProviders}
@@ -1091,14 +1097,11 @@ function ModelOverrideRow({
           triggerVariant="ghost"
           triggerClassName={`h-6 text-[11px] px-1.5 ${hasOverride ? "text-foreground" : "text-muted-foreground"}`}
           onProviderModelChange={(provider, model) => {
-            onChange({
-              provider: baseProviderKind(provider),
-              model,
-            } as ModelSelection);
+            onChange(makeAppModelSelection(provider, model));
           }}
         />
         <TraitsPicker
-          provider={effective.provider}
+          provider={effectiveProvider}
           models={models}
           model={effective.model}
           prompt=""

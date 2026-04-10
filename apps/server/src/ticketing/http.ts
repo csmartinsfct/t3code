@@ -189,8 +189,23 @@ function createTicketingMcpServer(
     { capabilities: { tools: {} } },
   );
 
-  /** Resolve a ticket UUID or human-readable identifier (e.g. "ZBD-7") to the canonical TicketId. */
-  const resolve = (idOrIdentifier: string) => bridge.run(ticketing.resolveId(idOrIdentifier));
+  /** Resolve a ticket UUID or human-readable identifier within the current project. */
+  const resolve = async (idOrIdentifier: string) => {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      idOrIdentifier,
+    );
+    const ticket = isUuid
+      ? await bridge.run(
+          ticketing.getById({ id: idOrIdentifier as never, projectId: context.projectId }),
+        )
+      : await bridge.run(
+          ticketing.getByIdentifier({
+            identifier: idOrIdentifier,
+            projectId: context.projectId,
+          }),
+        );
+    return ticket.id;
+  };
 
   /** Resolve identifiers and transform a response object for MCP output. */
   async function mcpJson(response: unknown): Promise<string> {

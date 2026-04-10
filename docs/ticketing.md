@@ -67,7 +67,7 @@ The system has five main moving parts:
 
 ### Ticket Identifiers
 
-Each ticket gets a human-readable identifier like `T3CO-42` composed of `{prefix}-{number}`. The prefix is derived from the project title (or set explicitly via `ticket_prefix`). Numbers are allocated atomically inside a SQLite transaction.
+Each ticket gets a human-readable identifier like `T3CO-42` composed of `{prefix}-{number}`. The prefix is derived from the project title (or set explicitly via `ticket_prefix`). Identifiers are unique within a project, not globally across all projects. Numbers are allocated atomically inside a SQLite transaction.
 
 ### Ticket-To-Thread Relationships
 

@@ -66,7 +66,8 @@ const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
-const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL;
+const isDevelopment = Boolean(devServerUrl);
 const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
 const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
@@ -1476,7 +1477,7 @@ function createWindow(): BrowserWindow {
   });
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
+    void window.loadURL(devServerUrl as string);
     window.webContents.openDevTools({ mode: "detach" });
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);

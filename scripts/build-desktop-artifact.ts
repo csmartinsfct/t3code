@@ -179,6 +179,7 @@ interface StagePackageJson {
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly overrides?: Record<string, string>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -438,6 +439,26 @@ function resolveDesktopRuntimeDependencies(
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
 }
 
+function resolveEffectCatalogOverrides(catalog: Record<string, unknown>): Record<string, string> {
+  const overrides: Record<string, string> = {};
+
+  for (const [dependencyName, version] of Object.entries(catalog)) {
+    if (
+      typeof version === "string" &&
+      (dependencyName === "effect" || dependencyName.startsWith("@effect/"))
+    ) {
+      overrides[dependencyName] = version;
+    }
+  }
+
+  const platformNodeVersion = overrides["@effect/platform-node"];
+  if (platformNodeVersion) {
+    overrides["@effect/platform-node-shared"] = platformNodeVersion;
+  }
+
+  return overrides;
+}
+
 function resolveGitHubPublishConfig():
   | {
       readonly provider: "github";
@@ -595,6 +616,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const stageEffectOverrides = resolveEffectCatalogOverrides(rootPackageJson.workspaces.catalog);
 
   const appVersion = options.version ?? serverPackageJson.version;
   const commitHash = resolveGitCommitHash(repoRoot);
@@ -674,6 +696,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ...resolvedServerDependencies,
       ...resolvedDesktopRuntimeDependencies,
     },
+    // Keep the staged production install on the same Effect beta line as the workspace.
+    // Without this, Bun can float transitive @effect/* packages (for example
+    // @effect/platform-node-shared) to newer betas that are incompatible with the
+    // exact effect version we ship, which breaks the packaged desktop runtime.
+    overrides: stageEffectOverrides,
     devDependencies: {
       electron: electronVersion,
     },

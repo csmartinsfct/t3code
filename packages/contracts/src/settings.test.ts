@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,6 +6,7 @@ import {
   DEFAULT_MAX_REVIEW_ITERATIONS,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  ServerSettingsPatch,
 } from "./settings";
 import { ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS } from "./promptTemplates";
 
@@ -27,5 +29,25 @@ describe("settings defaults", () => {
     expect(DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration).toEqual(
       ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
     );
+  });
+
+  it("accepts Claude profile ids in model selection patches", () => {
+    const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        orchestrationReviewerModelSelection: {
+          provider: "claudeAgent",
+          profileId: "metric",
+          model: "claude-opus-4-6",
+        },
+      }),
+    ).toEqual({
+      orchestrationReviewerModelSelection: {
+        provider: "claudeAgent",
+        profileId: "metric",
+        model: "claude-opus-4-6",
+      },
+    });
   });
 });

@@ -11,6 +11,7 @@
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -44,6 +45,8 @@ import Migration0028 from "./Migrations/028_TicketingWorktree.ts";
 import Migration0029 from "./Migrations/029_OrchestrationRuns.ts";
 import Migration0030 from "./Migrations/030_TicketingModelOverrides.ts";
 import Migration0031 from "./Migrations/031_TicketThreadLinks.ts";
+import Migration0032 from "./Migrations/032_ProjectPromptOverrides.ts";
+import Migration0033 from "./Migrations/033_TicketIdentifiersProjectScope.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -87,7 +90,20 @@ export const migrationEntries = [
   [29, "OrchestrationRuns", Migration0029],
   [30, "TicketingModelOverrides", Migration0030],
   [31, "TicketThreadLinks", Migration0031],
+  [32, "ProjectPromptOverrides", Migration0032],
+  [33, "TicketIdentifiersProjectScope", Migration0033],
 ] as const;
+
+const migrationEntryById = new Map<number, string>(
+  migrationEntries.map(([id, name]) => [id, name] as const),
+);
+
+class MigrationHistoryConsistencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MigrationHistoryConsistencyError";
+  }
+}
 
 export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
@@ -97,6 +113,79 @@ export const makeMigrationLoader = (throughId?: number) =>
         .map(([id, name, migration]) => [`${id}_${name}`, migration]),
     ),
   );
+
+const loadAppliedMigrations = Effect.fn("loadAppliedMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  const trackingTableRows = yield* sql<{ readonly exists: number }>`
+    SELECT 1 AS "exists"
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'effect_sql_migrations'
+    LIMIT 1
+  `;
+
+  if (trackingTableRows.length === 0) {
+    return [] as ReadonlyArray<{ readonly migrationId: number; readonly name: string }>;
+  }
+
+  return yield* sql<{ readonly migrationId: number; readonly name: string }>`
+    SELECT migration_id AS "migrationId", name
+    FROM effect_sql_migrations
+    ORDER BY migration_id ASC
+  `;
+});
+
+const validateMigrationHistory = Effect.fn("validateMigrationHistory")(function* (
+  throughId?: number,
+) {
+  const appliedMigrations = yield* loadAppliedMigrations();
+  if (appliedMigrations.length === 0) {
+    return;
+  }
+
+  const knownEntries = migrationEntries.filter(
+    ([id]) => throughId === undefined || id <= throughId,
+  );
+  const knownIds = knownEntries.map(([id]) => id);
+  const knownIdSet = new Set<number>(knownIds);
+
+  for (const appliedMigration of appliedMigrations) {
+    if (!knownIdSet.has(appliedMigration.migrationId)) {
+      return yield* Effect.fail(
+        new MigrationHistoryConsistencyError(
+          `Migration history contains unknown migration ${appliedMigration.migrationId} (${appliedMigration.name}).`,
+        ),
+      );
+    }
+
+    const expectedName = migrationEntryById.get(appliedMigration.migrationId);
+    if (expectedName !== appliedMigration.name) {
+      return yield* Effect.fail(
+        new MigrationHistoryConsistencyError(
+          `Migration ${appliedMigration.migrationId} is recorded as "${appliedMigration.name}" but source expects "${expectedName}".`,
+        ),
+      );
+    }
+  }
+
+  const highestAppliedId = appliedMigrations[appliedMigrations.length - 1]?.migrationId;
+  if (highestAppliedId === undefined) {
+    return;
+  }
+
+  const expectedPrefixIds = knownIds.filter((id) => id <= highestAppliedId);
+  const appliedIdSet = new Set(appliedMigrations.map((migration) => migration.migrationId));
+  const missingIds = expectedPrefixIds.filter((id) => !appliedIdSet.has(id));
+
+  if (missingIds.length > 0) {
+    return yield* Effect.fail(
+      new MigrationHistoryConsistencyError(
+        `Migration history is inconsistent: missing applied migration(s) ${missingIds.join(", ")} before ${highestAppliedId}. ` +
+          "Applied migrations must be contiguous. This usually means a later migration was recorded before an earlier one.",
+      ),
+    );
+  }
+});
 
 /**
  * Migrator run function - no schema dumping needed
@@ -121,6 +210,7 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
+  yield* validateMigrationHistory(toMigrationInclusive);
   yield* Effect.log(
     toMigrationInclusive === undefined
       ? "Running all migrations..."

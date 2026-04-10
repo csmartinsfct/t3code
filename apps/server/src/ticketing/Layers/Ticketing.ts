@@ -333,7 +333,10 @@ const makeTicketingService = Effect.gen(function* () {
   const getByIdentifier: TicketingServiceShape["getByIdentifier"] = (input) =>
     Effect.gen(function* () {
       const opt = yield* repo
-        .getByIdentifier({ identifier: input.identifier })
+        .getByIdentifier({
+          identifier: input.identifier,
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+        })
         .pipe(Effect.mapError(toOperationError("getByIdentifier")));
       const ticket = yield* Option.match(opt, {
         onNone: () =>

@@ -2,7 +2,9 @@ import {
   baseProviderKind,
   type BaseProviderKind,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  modelSelectionProviderKind,
   type ModelSelection,
+  providerProfileId,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -154,20 +156,38 @@ export function getCustomModelOptionsByProvider(
   selectedProvider?: ProviderKind | null,
   selectedModel?: string | null,
 ): Record<BaseProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+  const selectedBaseProvider = selectedProvider ? baseProviderKind(selectedProvider) : null;
+
   return {
     codex: getAppModelOptions(
       settings,
       providers,
       "codex",
-      selectedProvider === "codex" ? selectedModel : undefined,
+      selectedBaseProvider === "codex" ? selectedModel : undefined,
     ),
     claudeAgent: getAppModelOptions(
       settings,
       providers,
       "claudeAgent",
-      selectedProvider === "claudeAgent" ? selectedModel : undefined,
+      selectedBaseProvider === "claudeAgent" ? selectedModel : undefined,
     ),
   };
+}
+
+export function makeAppModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ModelSelection["options"],
+): ModelSelection {
+  const baseProvider = baseProviderKind(provider);
+  const profileId = baseProvider === "claudeAgent" ? providerProfileId(provider) : undefined;
+
+  return {
+    provider: baseProvider,
+    model,
+    ...(profileId ? { profileId } : {}),
+    ...(options ? { options } : {}),
+  } as ModelSelection;
 }
 
 export function resolveAppModelSelectionState(
@@ -178,11 +198,12 @@ export function resolveAppModelSelectionState(
     provider: "codex" as const,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
   };
-  const provider = resolveSelectableProvider(providers, selection.provider);
+  const requestedProvider = modelSelectionProviderKind(selection);
+  const provider = resolveSelectableProvider(providers, requestedProvider);
 
   // When the provider changed due to fallback (e.g. selected provider was disabled),
   // don't carry over the old provider's model — use the fallback provider's default.
-  const selectedModel = provider === selection.provider ? selection.model : null;
+  const selectedModel = provider === requestedProvider ? selection.model : null;
   const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
   const { modelOptionsForDispatch } = getComposerProviderState({
     provider,
@@ -190,13 +211,9 @@ export function resolveAppModelSelectionState(
     models: getProviderModels(providers, provider),
     prompt: "",
     modelOptions: {
-      [provider]: provider === selection.provider ? selection.options : undefined,
+      [baseProviderKind(provider)]: provider === requestedProvider ? selection.options : undefined,
     },
   });
 
-  return {
-    provider: baseProviderKind(provider),
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
+  return makeAppModelSelection(provider, model, modelOptionsForDispatch);
 }

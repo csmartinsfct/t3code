@@ -127,7 +127,10 @@ export const TicketHistoryRow = Schema.Struct({
 export const TicketLookupInput = Schema.Struct({ id: TicketId });
 export type TicketLookupInput = typeof TicketLookupInput.Type;
 
-export const TicketIdentifierLookupInput = Schema.Struct({ identifier: Schema.String });
+export const TicketIdentifierLookupInput = Schema.Struct({
+  identifier: Schema.String,
+  projectId: Schema.optional(ProjectId),
+});
 export type TicketIdentifierLookupInput = typeof TicketIdentifierLookupInput.Type;
 
 export const LabelLookupInput = Schema.Struct({ id: LabelId });

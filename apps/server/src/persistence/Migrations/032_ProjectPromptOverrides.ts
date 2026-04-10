@@ -3,5 +3,15 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`ALTER TABLE projection_projects ADD COLUMN prompt_overrides_json TEXT DEFAULT NULL`;
+
+  const cols = yield* sql<{ readonly name: string }>`
+    SELECT name FROM pragma_table_info('projection_projects')
+    WHERE name = 'prompt_overrides_json'
+  `;
+
+  if (cols.length === 0) {
+    yield* sql.unsafe(
+      `ALTER TABLE projection_projects ADD COLUMN prompt_overrides_json TEXT DEFAULT NULL`,
+    );
+  }
 });

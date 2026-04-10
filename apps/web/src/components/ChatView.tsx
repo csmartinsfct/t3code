@@ -1392,6 +1392,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     localDispatchStartedAt,
   );
   const isComposerApprovalState = activePendingApproval !== null;
+  const isComposerLockedForAgentStart = isWaitingForAgentStart;
+  const isComposerInputDisabled = isConnecting || isComposerApprovalState || isWaitingForAgentStart;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -3634,7 +3636,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
-    if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    if (
+      !api ||
+      !activeThread ||
+      isSendBusy ||
+      isConnecting ||
+      isWaitingForAgentStart ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
@@ -4958,28 +4969,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 )}
               </div>
             </>
-          ) : isWaitingForAgentStart ? (
-            <>
-              <div className="flex min-h-0 flex-1 items-center justify-center">
-                <div className="flex items-center gap-2 text-muted-foreground/50">
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                  <span className="text-sm">Waiting for agent to start</span>
-                </div>
-              </div>
-              <div
-                className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
-              >
-                <div className="mx-auto w-full min-w-0 max-w-[52rem]">
-                  <div className="rounded-[20px] border border-border bg-card px-4 py-3">
-                    <div className="flex items-center justify-center gap-2 text-muted-foreground/50">
-                      <span className="text-sm">
-                        This thread will become interactive once the agent starts working on it
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
           ) : (
             <>
               {/* Messages Wrapper */}
@@ -4999,37 +4988,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   onTouchEnd={onMessagesTouchEnd}
                   onTouchCancel={onMessagesTouchEnd}
                 >
-                  <MessagesTimeline
-                    key={activeThread.id}
-                    hasMessages={timelineEntries.length > 0}
-                    isWorking={isWorking}
-                    activeTurnInProgress={isWorking || !latestTurnSettled}
-                    activeTurnStartedAt={activeWorkStartedAt}
-                    scrollContainer={messagesScrollElement}
-                    timelineEntries={timelineEntries}
-                    completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-                    completionSummary={completionSummary}
-                    turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                    nowIso={nowIso}
-                    expandedWorkGroups={expandedWorkGroups}
-                    onToggleWorkGroup={onToggleWorkGroup}
-                    onOpenTurnDiff={onOpenTurnDiff}
-                    revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                    onRevertUserMessage={onRevertUserMessage}
-                    isRevertingCheckpoint={isRevertingCheckpoint}
-                    onImageExpand={onExpandTimelineImage}
-                    markdownCwd={gitCwd ?? undefined}
-                    resolvedTheme={resolvedTheme}
-                    timestampFormat={timestampFormat}
-                    workspaceRoot={activeProject?.cwd ?? undefined}
-                    onProposeAction={handleProposeAction}
-                    onProposeScheduledTask={handleProposeScheduledTask}
-                    resolveProjectName={resolveProjectName}
-                    onOpenFileLink={handleOpenFileLink}
-                    onMessageContextMenu={onMessageContextMenu}
-                    onMessageSelectionClick={onMessageSelectionClick}
-                    isReviewThread={isReviewOrchestrationChild}
-                  />
+                  {isWaitingForAgentStart ? (
+                    <div className="flex min-h-full items-center justify-center">
+                      <div className="flex items-center gap-2 text-muted-foreground/50">
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                        <span className="text-sm">Waiting for agent to start</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <MessagesTimeline
+                      key={activeThread.id}
+                      hasMessages={timelineEntries.length > 0}
+                      isWorking={isWorking}
+                      activeTurnInProgress={isWorking || !latestTurnSettled}
+                      activeTurnStartedAt={activeWorkStartedAt}
+                      scrollContainer={messagesScrollElement}
+                      timelineEntries={timelineEntries}
+                      completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+                      completionSummary={completionSummary}
+                      turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                      nowIso={nowIso}
+                      expandedWorkGroups={expandedWorkGroups}
+                      onToggleWorkGroup={onToggleWorkGroup}
+                      onOpenTurnDiff={onOpenTurnDiff}
+                      revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                      onRevertUserMessage={onRevertUserMessage}
+                      isRevertingCheckpoint={isRevertingCheckpoint}
+                      onImageExpand={onExpandTimelineImage}
+                      markdownCwd={gitCwd ?? undefined}
+                      resolvedTheme={resolvedTheme}
+                      timestampFormat={timestampFormat}
+                      workspaceRoot={activeProject?.cwd ?? undefined}
+                      onProposeAction={handleProposeAction}
+                      onProposeScheduledTask={handleProposeScheduledTask}
+                      resolveProjectName={resolveProjectName}
+                      onOpenFileLink={handleOpenFileLink}
+                      onMessageContextMenu={onMessageContextMenu}
+                      onMessageSelectionClick={onMessageSelectionClick}
+                      isReviewThread={isReviewOrchestrationChild}
+                    />
+                  )}
                 </div>
 
                 {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -5071,8 +5069,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       className={cn(
                         "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
                         isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
+                        isComposerLockedForAgentStart && "opacity-80",
                         composerProviderState.composerSurfaceClassName,
                       )}
+                      aria-disabled={isComposerLockedForAgentStart || undefined}
+                      inert={isComposerLockedForAgentStart || undefined}
                     >
                       {activePendingApproval ? (
                         <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
@@ -5245,15 +5246,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             isComposerApprovalState
                               ? (activePendingApproval?.detail ??
                                 "Resolve this approval request to continue")
-                              : activePendingProgress
-                                ? "Type your own answer, or leave this blank to use the selected option"
-                                : showPlanFollowUpPrompt && activeProposedPlan
-                                  ? "Add feedback to refine the plan, or leave this blank to implement it"
-                                  : phase === "disconnected"
-                                    ? "Ask for follow-up changes or attach images"
-                                    : "Ask anything, @tag files/folders, or use / to show available commands"
+                              : isWaitingForAgentStart
+                                ? "This thread will become interactive once the agent starts working on it"
+                                : activePendingProgress
+                                  ? "Type your own answer, or leave this blank to use the selected option"
+                                  : showPlanFollowUpPrompt && activeProposedPlan
+                                    ? "Add feedback to refine the plan, or leave this blank to implement it"
+                                    : phase === "disconnected"
+                                      ? "Ask for follow-up changes or attach images"
+                                      : "Ask anything, @tag files/folders, or use / to show available commands"
                           }
-                          disabled={isConnecting || isComposerApprovalState}
+                          disabled={isComposerInputDisabled}
                         />
                       </div>
 
@@ -5297,6 +5300,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               lockedProvider={lockedProvider}
                               providers={providerStatuses}
                               modelOptionsByProvider={modelOptionsByProvider}
+                              disabled={isComposerLockedForAgentStart}
                               {...(composerProviderState.modelPickerIconClassName
                                 ? {
                                     activeProviderIconClassName:
@@ -5423,6 +5427,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               isConnecting={isConnecting}
                               isPreparingWorktree={isPreparingWorktree}
                               hasSendableContent={composerSendState.hasSendableContent}
+                              disabled={isComposerLockedForAgentStart}
                               onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                               onInterrupt={() => void onInterrupt()}
                               onImplementPlanInNewThread={() => void onImplementPlanInNewThread()}

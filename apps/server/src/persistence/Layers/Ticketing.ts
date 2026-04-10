@@ -171,13 +171,6 @@ const makeTicketingRepository = Effect.gen(function* () {
     execute: ({ id }) => sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE id = ${id}`,
   });
 
-  const getTicketByIdentifier = SqlSchema.findOneOption({
-    Request: TicketIdentifierLookupInput,
-    Result: TicketRow,
-    execute: ({ identifier }) =>
-      sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE identifier = ${identifier}`,
-  });
-
   const listTicketsByProject = SqlSchema.findAll({
     Request: TicketsByProjectInput,
     Result: TicketRow,
@@ -385,10 +378,15 @@ const makeTicketingRepository = Effect.gen(function* () {
         Effect.mapError(toPersistenceSqlError("TicketingRepository.getById:query")),
       ),
     getByIdentifier: (input) =>
-      getTicketByIdentifier(input).pipe(
-        Effect.map((opt) => opt.pipe(Option.map(toPersistedTicket))),
-        Effect.mapError(toPersistenceSqlError("TicketingRepository.getByIdentifier:query")),
-      ),
+      Effect.gen(function* () {
+        const rows =
+          input.projectId === undefined
+            ? yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE identifier = ${input.identifier}`
+            : yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE identifier = ${input.identifier} AND project_id = ${input.projectId}`;
+        const typedRows = rows as ReadonlyArray<typeof TicketRow.Type>;
+        const row = typedRows[0];
+        return row ? Option.some(toPersistedTicket(row)) : Option.none();
+      }).pipe(Effect.mapError(toPersistenceSqlError("TicketingRepository.getByIdentifier:query"))),
     listByProject: (input) =>
       Effect.gen(function* () {
         // For advanced filtering we build raw queries
