@@ -252,6 +252,7 @@ export function SettingsSection({
 }
 
 export function SettingsRow({
+  id,
   title,
   description,
   status,
@@ -259,6 +260,7 @@ export function SettingsRow({
   control,
   children,
 }: {
+  id?: string;
   title: ReactNode;
   description: string;
   status?: ReactNode;
@@ -267,7 +269,7 @@ export function SettingsRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5">
+    <div id={id} className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
@@ -1425,6 +1427,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          id="automated-review-cycles"
           title="Automated review cycles"
           description="Set how many automated review-requested fix cycles orchestration can attempt. 0 disables automated review."
           resetAction={

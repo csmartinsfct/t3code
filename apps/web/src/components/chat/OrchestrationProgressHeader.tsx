@@ -116,6 +116,7 @@ export function OrchestrationProgressHeader({
   const currentIndex = run.currentTicketIndex;
   const isTerminal =
     run.status === "completed" || run.status === "failed" || run.status === "canceled";
+  const reviewDisabled = run.maxReviewIterations === 0;
 
   const completedCount = isTerminal
     ? run.status === "completed"
@@ -137,6 +138,14 @@ export function OrchestrationProgressHeader({
           <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block">
             {currentTicketLabel}
           </span>
+        )}
+        {reviewDisabled && !isTerminal && (
+          <a
+            className="hidden shrink-0 text-xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground sm:block"
+            href="/settings/general#automated-review-cycles"
+          >
+            Automated review disabled. Enable it in settings.
+          </a>
         )}
 
         <span className="flex-1" />

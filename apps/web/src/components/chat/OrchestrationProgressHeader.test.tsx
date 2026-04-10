@@ -58,4 +58,29 @@ describe("OrchestrationProgressHeader", () => {
     expect(markup).toContain("Completed");
     expect(markup).toContain("1/1");
   });
+
+  it("shows a settings link when automated review is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun({
+          currentPhase: "working",
+          reviewIteration: 0,
+          maxReviewIterations: 0,
+          ticketOrder: [
+            {
+              ticketId: "ticket-1" as TicketId,
+              workingThreadId: "thread-1" as ThreadId,
+            },
+          ],
+        })}
+        currentTicketLabel="ORCH-1 — Fix sidebar"
+        onPause={() => {}}
+        onResume={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Automated review disabled. Enable it in settings.");
+    expect(markup).toContain('href="/settings/general#automated-review-cycles"');
+  });
 });

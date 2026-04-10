@@ -140,6 +140,13 @@ export function KanbanTicketDetail({
       ),
     [settings, serverProviders],
   );
+  const reviewerSettingsLinkProps =
+    settings.maxReviewIterations === 0
+      ? {
+          disabledHref: "/settings/general#automated-review-cycles",
+          disabledText: "Enable in the settings",
+        }
+      : {};
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -745,6 +752,7 @@ export function KanbanTicketDetail({
           label="Reviewer"
           override={ticket.reviewerModelOverride as ModelSelection | null}
           globalDefault={resolvedGlobalReviewer}
+          {...reviewerSettingsLinkProps}
           serverProviders={serverProviders}
           settings={settings}
           onChange={(value) => void handleModelOverrideChange("reviewerModelOverride", value)}
@@ -1050,6 +1058,8 @@ function ModelOverrideRow({
   label,
   override,
   globalDefault,
+  disabledHref,
+  disabledText,
   serverProviders,
   settings,
   onChange,
@@ -1057,10 +1067,28 @@ function ModelOverrideRow({
   label: string;
   override: ModelSelection | null | undefined;
   globalDefault: ModelSelection;
+  disabledHref?: string;
+  disabledText?: string;
   serverProviders: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
   settings: import("@t3tools/contracts").UnifiedSettings;
   onChange: (value: ModelSelection | null) => void;
 }) {
+  if (disabledHref && disabledText) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
+        </div>
+        <a
+          className="text-[11px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+          href={disabledHref}
+        >
+          {disabledText}
+        </a>
+      </div>
+    );
+  }
+
   const hasOverride = override != null;
   const effective = hasOverride ? override : globalDefault;
   const effectiveProvider = modelSelectionProviderKind(effective);
