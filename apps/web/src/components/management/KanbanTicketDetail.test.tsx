@@ -180,6 +180,16 @@ describe("KanbanTicketDetail", () => {
       action: "skip",
       nextValue: "Parent ticket",
     });
+
+    expect(
+      resolveRequiredInlineTextSave({
+        currentValue: "Parent ticket",
+        draft: "Parent ticket",
+      }),
+    ).toEqual({
+      action: "skip",
+      nextValue: "Parent ticket",
+    });
   });
 
   it("saves inline description edits and allows clearing the description", () => {

@@ -53,6 +53,16 @@ describe("ticketSelectionStore", () => {
       expect(state.selectedTickets.get(TICKET_B.id)).toEqual(TICKET_B);
       expect(state.anchorTicketId).toBe(TICKET_B.id);
     });
+
+    it("removes the ticket id and summary when toggled a second time", () => {
+      const store = useTicketSelectionStore.getState();
+      store.toggleTicket(TICKET_B.id, TICKET_B);
+      store.toggleTicket(TICKET_B.id, TICKET_B);
+
+      const state = useTicketSelectionStore.getState();
+      expect(state.selectedTicketIds.has(TICKET_B.id)).toBe(false);
+      expect(state.selectedTickets.has(TICKET_B.id)).toBe(false);
+    });
   });
 
   describe("rangeSelectTo", () => {
