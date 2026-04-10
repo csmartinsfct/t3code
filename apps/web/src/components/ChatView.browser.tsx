@@ -12,6 +12,7 @@ import {
   type ServerConfig,
   type ServerProvider,
   type ServerLifecycleWelcomePayload,
+  type SkillEntry,
   type TicketId,
   type ThreadId,
   type TurnId,
@@ -526,7 +527,7 @@ function materializeThreadInStore(threadId: ThreadId): void {
 
 function installTestNativeApi(input?: {
   resolveMcpServers?: () => Promise<{ serverNames: readonly string[] }>;
-  resolveSkills?: () => Promise<{ skills: readonly [] }>;
+  resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
 }): NativeApi {
   const base = createWsNativeApi();
   const api: NativeApi = {
@@ -1102,6 +1103,13 @@ async function waitForMcpServersButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="MCP servers"]'),
     "Unable to find MCP servers button.",
+  );
+}
+
+async function waitForSkillsButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[aria-label="Skills"]'),
+    "Unable to find Skills button.",
   );
 }
 
@@ -2481,6 +2489,194 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(text).toContain("Prompt Registry");
         expect(text).not.toContain("Project Tickets");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("discovers skills and keeps attach, dedupe, and chip removal in sync with draft state", async () => {
+    // Audit traceability: a5e40ae.
+    const resolveSkills = vi.fn(async () => ({
+      skills: [
+        {
+          id: "skill-build",
+          name: "Build",
+          source: "project",
+          absolutePath: "/repo/project/.claude/skills/build/SKILL.md",
+          relativePath: ".claude/skills/build/SKILL.md",
+          content: "# Build instructions",
+          group: null,
+        },
+      ] satisfies readonly SkillEntry[],
+    }));
+    installTestNativeApi({ resolveSkills });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-skill-picker-target" as MessageId,
+        targetText: "skill picker target",
+      }),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(resolveSkills).toHaveBeenCalled();
+      });
+
+      const skillsButton = await waitForSkillsButton();
+      skillsButton.click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Build");
+      });
+
+      await page.getByRole("menuitem", { name: "Build" }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.skills).toEqual([
+            {
+              id: "skill-build",
+              name: "Build",
+              source: "project",
+              absolutePath: "/repo/project/.claude/skills/build/SKILL.md",
+              relativePath: ".claude/skills/build/SKILL.md",
+              content: "# Build instructions",
+              group: null,
+            },
+          ]);
+          expect(document.body.textContent ?? "").toContain("Build");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      skillsButton.click();
+
+      await vi.waitFor(() => {
+        const attachedItem = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+        ).find((element) => element.textContent?.includes("Build"));
+        expect(attachedItem?.getAttribute("data-disabled")).toBe("");
+      });
+
+      skillsButton.click();
+      await page.getByRole("button", { name: "Remove Build skill" }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toBeUndefined();
+          expect(document.body.textContent ?? "").not.toContain("Remove Build skill");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("rehydrates persisted skills with null content and prefixes sends with the resolved skill block", async () => {
+    // Audit traceability: a5e40ae.
+    useComposerDraftStore.setState({
+      draftsByThreadId: {
+        [THREAD_ID]: {
+          prompt: "Use the attached skill.",
+          images: [],
+          nonPersistedImageIds: [],
+          persistedAttachments: [],
+          terminalContexts: [],
+          codeSnippets: [],
+          ticketAttachments: [],
+          skills: [
+            {
+              id: "skill-rehydrated",
+              name: "Deploy",
+              source: "project",
+              absolutePath: "/repo/project/.claude/skills/deploy/SKILL.md",
+              relativePath: ".claude/skills/deploy/SKILL.md",
+              content: null,
+              group: null,
+            },
+          ],
+          modelSelectionByProvider: {
+            codex: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+          },
+          activeProvider: "codex",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        },
+      },
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+
+    const resolveSkills = vi.fn(async () => ({
+      skills: [
+        {
+          id: "skill-rehydrated",
+          name: "Deploy",
+          source: "project",
+          absolutePath: "/repo/project/.claude/skills/deploy/SKILL.md",
+          relativePath: ".claude/skills/deploy/SKILL.md",
+          content: "Run `bun lint` before every deploy.",
+          group: null,
+        },
+      ] satisfies readonly SkillEntry[],
+    }));
+    installTestNativeApi({ resolveSkills });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-skill-rehydration-target" as MessageId,
+        targetText: "skill rehydration target",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(resolveSkills).toHaveBeenCalled();
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.skills).toEqual([
+            {
+              id: "skill-rehydrated",
+              name: "Deploy",
+              source: "project",
+              absolutePath: "/repo/project/.claude/skills/deploy/SKILL.md",
+              relativePath: ".claude/skills/deploy/SKILL.md",
+              content: "Run `bun lint` before every deploy.",
+              group: null,
+            },
+          ]);
+          expect(document.body.textContent ?? "").not.toContain("loading…");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const request = wsRequests.find(
+            (candidate) =>
+              candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              candidate.type === "thread.turn.start",
+          );
+          expect(request).toBeTruthy();
+
+          const turnStartRequest = request as unknown as { message: { text: string } };
+          expect(turnStartRequest.message.text).toContain('<skill name="Deploy"');
+          expect(turnStartRequest.message.text).toContain("Run `bun lint` before every deploy.");
+          expect(turnStartRequest.message.text).toContain("Use the attached skill.");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

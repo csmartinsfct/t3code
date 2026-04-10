@@ -2275,7 +2275,31 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         if (threadId.length === 0) return;
         set((state) => {
           const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
-          if (existing.skills.some((s) => s.id === skill.id)) return state;
+          const existingIndex = existing.skills.findIndex((s) => s.id === skill.id);
+          if (existingIndex >= 0) {
+            const existingSkill = existing.skills[existingIndex]!;
+            if (
+              existingSkill.name === skill.name &&
+              existingSkill.source === skill.source &&
+              existingSkill.absolutePath === skill.absolutePath &&
+              existingSkill.relativePath === skill.relativePath &&
+              existingSkill.content === skill.content &&
+              existingSkill.group === skill.group
+            ) {
+              return state;
+            }
+            const nextSkills = [...existing.skills];
+            nextSkills[existingIndex] = skill;
+            return {
+              draftsByThreadId: {
+                ...state.draftsByThreadId,
+                [threadId]: {
+                  ...existing,
+                  skills: nextSkills,
+                },
+              },
+            };
+          }
           const nextDraft: ComposerThreadDraftState = {
             ...existing,
             skills: [...existing.skills, skill],
