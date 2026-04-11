@@ -7,7 +7,6 @@ import {
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
-import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { useStore } from "../store";
@@ -99,16 +98,6 @@ export function useHandleNewThread() {
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
-        useUiStateStore.getState().initializeThreadBoardContextFromSource({
-          sourceThreadId: resolveThreadBoardContextSourceThreadId({
-            routeThreadId,
-            targetProjectId: projectId,
-            activeThreadProjectId: activeThread?.projectId ?? null,
-            activeDraftThreadProjectId: latestActiveDraftThread?.projectId ?? null,
-          }),
-          targetThreadId: threadId,
-          projectId,
-        });
         setProjectDraftThreadId(projectId, threadId, {
           createdAt,
           branch: options?.branch ?? null,
@@ -124,7 +113,7 @@ export function useHandleNewThread() {
         });
       })();
     },
-    [activeThread?.projectId, navigate, routeThreadId],
+    [navigate, routeThreadId],
   );
 
   return {

@@ -434,7 +434,7 @@ describe("wsNativeApi", () => {
     const api = createWsNativeApi();
     await api.orchestration.createRun({
       projectId: ProjectId.makeUnsafe("project-1"),
-      ticketIdentifiers: ["T3CO-2", "T3CO-1"] as never,
+      selectedTicketIdentifiers: ["T3CO-2", "T3CO-1"] as never,
       implementerModelSelection: {
         provider: "codex",
         model: "gpt-5.4",
@@ -447,7 +447,7 @@ describe("wsNativeApi", () => {
 
     expect(rpcClientMock.orchestration.createRun).toHaveBeenCalledWith({
       projectId: "project-1",
-      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      selectedTicketIdentifiers: ["T3CO-2", "T3CO-1"],
       implementerModelSelection: {
         provider: "codex",
         model: "gpt-5.4",

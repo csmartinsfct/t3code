@@ -66,7 +66,6 @@ import {
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import {
   isLinuxPlatform,
   isMacPlatform,
@@ -1316,16 +1315,6 @@ export default function Sidebar() {
 
         const forkThreadId = newThreadId();
         try {
-          useUiStateStore.getState().initializeThreadBoardContextFromSource({
-            sourceThreadId: resolveThreadBoardContextSourceThreadId({
-              routeThreadId,
-              targetProjectId: thread.projectId,
-              activeThreadProjectId: activeThread?.projectId ?? null,
-              activeDraftThreadProjectId: activeDraftThread?.projectId ?? null,
-            }),
-            targetThreadId: forkThreadId,
-            projectId: thread.projectId,
-          });
           await api.orchestration.dispatchCommand({
             type: "thread.fork",
             commandId: newCommandId(),

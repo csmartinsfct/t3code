@@ -5,7 +5,6 @@ import type {
   ProjectId,
   ProjectScript,
   ThreadId,
-  TicketId,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -89,7 +88,6 @@ function makeRun(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSummary 
 function Probe(props: {
   projectId: ProjectId | undefined;
   scripts: ReadonlyArray<ProjectScript> | undefined;
-  sourceThreadId: ThreadId | null;
 }) {
   probeHandleRunEvent = useManagedRunCompletionToasts(props).handleRunEvent;
   return null;
@@ -98,7 +96,6 @@ function Probe(props: {
 async function mountProbe(props: {
   projectId: ProjectId | undefined;
   scripts: ReadonlyArray<ProjectScript> | undefined;
-  sourceThreadId: ThreadId | null;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -127,15 +124,7 @@ describe("useManagedRunCompletionToasts", () => {
       projectOrder: [],
       threadLastVisitedAtById: {},
       startupRecoveryStateByThreadId: {},
-      boardContextByThreadId: {
-        [SOURCE_THREAD_ID]: {
-          projectId: PROJECT_ID,
-          ticketStack: ["ticket-1" as TicketId],
-          boardScrollLeft: 96,
-          updatedAt: NOW_ISO,
-        },
-      },
-      managementLastProjectId: null,
+      managementBoardContext: null,
       viewMode: "chat",
     });
     toastAddSpy.mockReset();
@@ -152,8 +141,7 @@ describe("useManagedRunCompletionToasts", () => {
     probeHandleRunEvent = null;
   });
 
-  it("preserves board context when Ask AI creates a draft thread from a managed-run failure", async () => {
-    const initializeThreadBoardContextFromSource = vi.fn();
+  it("creates a draft thread when Ask AI is triggered from a managed-run failure", async () => {
     const setProjectDraftThreadId = vi.fn();
     const applyStickyState = vi.fn();
     const setPrompt = vi.fn();
@@ -161,15 +149,11 @@ describe("useManagedRunCompletionToasts", () => {
 
     const threadId = await startManagedRunAskAiThread({
       projectId: PROJECT_ID,
-      sourceThreadId: SOURCE_THREAD_ID,
       prompt: "Explain why the managed run failed.",
       composerDraftStore: {
         setProjectDraftThreadId,
         applyStickyState,
         setPrompt,
-      },
-      uiStateStore: {
-        initializeThreadBoardContextFromSource,
       },
       createThreadId: () => "thread-draft" as ThreadId,
       now: () => NOW_ISO,
@@ -177,11 +161,6 @@ describe("useManagedRunCompletionToasts", () => {
     });
 
     expect(threadId).toBe("thread-draft");
-    expect(initializeThreadBoardContextFromSource).toHaveBeenCalledWith({
-      sourceThreadId: SOURCE_THREAD_ID,
-      targetThreadId: "thread-draft",
-      projectId: PROJECT_ID,
-    });
     expect(setProjectDraftThreadId).toHaveBeenCalledWith(PROJECT_ID, "thread-draft", {
       createdAt: NOW_ISO,
       runtimeMode: "full-access",
@@ -204,7 +183,6 @@ describe("useManagedRunCompletionToasts", () => {
           runOnWorktreeCreate: false,
         },
       ],
-      sourceThreadId: SOURCE_THREAD_ID,
     });
 
     try {
@@ -337,7 +315,6 @@ describe("useManagedRunCompletionToasts", () => {
           runOnWorktreeCreate: false,
         },
       ],
-      sourceThreadId: SOURCE_THREAD_ID,
     });
 
     try {
@@ -386,12 +363,6 @@ describe("useManagedRunCompletionToasts", () => {
       expect(draft?.prompt).toContain("Command: `bun run dev`");
       expect(draft?.prompt).toContain("Exit code: 137");
       expect(draft?.prompt).not.toContain("Output (last");
-
-      expect(useUiStateStore.getState().boardContextByThreadId[draftThreadId!]).toMatchObject({
-        projectId: PROJECT_ID,
-        ticketStack: ["ticket-1"],
-        boardScrollLeft: 96,
-      });
     } finally {
       await mounted.cleanup();
     }

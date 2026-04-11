@@ -12,7 +12,9 @@ import { resolveInitialManagementProjectId } from "./chatIndex";
 export function ChatIndexRouteView() {
   const viewMode = useUiStateStore((store) => store.viewMode);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const managementLastProjectId = useUiStateStore((store) => store.managementLastProjectId);
+  const managementBoardProjectId = useUiStateStore(
+    (store) => store.managementBoardContext?.projectId ?? null,
+  );
   const projects = useStore((store) => store.projects);
   const orderedProjects = useMemo(
     () =>
@@ -25,7 +27,7 @@ export function ChatIndexRouteView() {
   );
   const initialProjectId = resolveInitialManagementProjectId({
     orderedProjectIds: orderedProjects.map((project) => project.id),
-    managementLastProjectId,
+    managementBoardProjectId,
   });
 
   if (viewMode === "management" && initialProjectId) {

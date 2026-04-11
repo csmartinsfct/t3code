@@ -3,20 +3,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearStartupWasWorkingThread,
-  cloneThreadBoardContext,
   clearThreadUi,
-  initializeThreadBoardContextFromSource,
   markThreadUnread,
-  popThreadBoardTicket,
-  pushThreadBoardTicket,
+  popManagementBoardTicket,
+  pushManagementBoardTicket,
   reorderProjects,
   removeStartupRecoveryState,
-  sanitizeThreadBoardContext,
-  setManagementLastProjectId,
+  sanitizeManagementBoardContext,
+  setManagementBoardRoot,
+  setManagementBoardScrollLeft,
   setProjectExpanded,
   setStartupWasWorkingThreads,
-  setThreadBoardRoot,
-  setThreadBoardScrollLeft,
   syncProjects,
   syncThreads,
   type UiState,
@@ -28,8 +25,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectOrder: [],
     threadLastVisitedAtById: {},
     startupRecoveryStateByThreadId: {},
-    boardContextByThreadId: {},
-    managementLastProjectId: null,
+    managementBoardContext: null,
     viewMode: "chat",
     ...overrides,
   };
@@ -58,9 +54,7 @@ describe("uiStateStore pure functions", () => {
       },
     });
 
-    const next = markThreadUnread(initialState, threadId, null);
-
-    expect(next).toBe(initialState);
+    expect(markThreadUnread(initialState, threadId, null)).toBe(initialState);
   });
 
   it("reorderProjects moves a project to a target index", () => {
@@ -98,53 +92,32 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectExpandedById[project2]).toBe(false);
   });
 
-  it("syncProjects preserves manual order when a project is recreated with the same cwd", () => {
-    const oldProject1 = ProjectId.makeUnsafe("project-1");
-    const oldProject2 = ProjectId.makeUnsafe("project-2");
-    const recreatedProject2 = ProjectId.makeUnsafe("project-2b");
+  it("syncProjects remaps the global management board context by cwd when the project id changes", () => {
+    const oldProjectId = ProjectId.makeUnsafe("project-1");
+    const recreatedProjectId = ProjectId.makeUnsafe("project-1b");
+    const ticketId = TicketId.makeUnsafe("ticket-1");
     const initialState = syncProjects(
       makeUiState({
-        projectExpandedById: {
-          [oldProject1]: true,
-          [oldProject2]: false,
+        managementBoardContext: {
+          projectId: oldProjectId,
+          ticketStack: [ticketId],
+          boardScrollLeft: 120,
+          updatedAt: "2026-02-25T12:35:00.000Z",
         },
-        projectOrder: [oldProject2, oldProject1],
       }),
-      [
-        { id: oldProject1, cwd: "/tmp/project-1" },
-        { id: oldProject2, cwd: "/tmp/project-2" },
-      ],
+      [{ id: oldProjectId, cwd: "/tmp/project-1" }],
     );
 
-    const next = syncProjects(initialState, [
-      { id: oldProject1, cwd: "/tmp/project-1" },
-      { id: recreatedProject2, cwd: "/tmp/project-2" },
-    ]);
+    const next = syncProjects(initialState, [{ id: recreatedProjectId, cwd: "/tmp/project-1" }]);
 
-    expect(next.projectOrder).toEqual([recreatedProject2, oldProject1]);
-    expect(next.projectExpandedById[recreatedProject2]).toBe(false);
+    expect(next.managementBoardContext).toMatchObject({
+      projectId: recreatedProjectId,
+      ticketStack: [ticketId],
+      boardScrollLeft: 120,
+    });
   });
 
-  it("syncProjects returns a new state when only project cwd changes", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const initialState = syncProjects(
-      makeUiState({
-        projectExpandedById: {
-          [project1]: false,
-        },
-        projectOrder: [project1],
-      }),
-      [{ id: project1, cwd: "/tmp/project-1" }],
-    );
-
-    const next = syncProjects(initialState, [{ id: project1, cwd: "/tmp/project-1-renamed" }]);
-
-    expect(next).not.toBe(initialState);
-    expect(next.projectOrder).toEqual([project1]);
-    expect(next.projectExpandedById[project1]).toBe(false);
-  });
-
-  it("syncThreads prunes missing thread UI state", () => {
+  it("syncThreads prunes missing thread ui state without touching board state", () => {
     const thread1 = ThreadId.makeUnsafe("thread-1");
     const thread2 = ThreadId.makeUnsafe("thread-2");
     const project1 = ProjectId.makeUnsafe("project-1");
@@ -158,19 +131,11 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "active",
         [thread2]: "dismissed",
       },
-      boardContextByThreadId: {
-        [thread1]: {
-          projectId: project1,
-          ticketStack: [ticket1],
-          boardScrollLeft: 120,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
-        [thread2]: {
-          projectId: project1,
-          ticketStack: [],
-          boardScrollLeft: 0,
-          updatedAt: "2026-02-25T12:36:00.000Z",
-        },
+      managementBoardContext: {
+        projectId: project1,
+        ticketStack: [ticket1],
+        boardScrollLeft: 120,
+        updatedAt: "2026-02-25T12:35:00.000Z",
       },
     });
 
@@ -182,14 +147,7 @@ describe("uiStateStore pure functions", () => {
     expect(next.startupRecoveryStateByThreadId).toEqual({
       [thread1]: "active",
     });
-    expect(next.boardContextByThreadId).toEqual({
-      [thread1]: {
-        projectId: project1,
-        ticketStack: [ticket1],
-        boardScrollLeft: 120,
-        updatedAt: "2026-02-25T12:35:00.000Z",
-      },
-    });
+    expect(next.managementBoardContext).toEqual(initialState.managementBoardContext);
   });
 
   it("syncThreads seeds visit state for unseen snapshot threads", () => {
@@ -223,7 +181,7 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectOrder).toEqual([project1]);
   });
 
-  it("clearThreadUi removes visit state for deleted threads", () => {
+  it("clearThreadUi removes visit state for deleted threads without clearing the board context", () => {
     const thread1 = ThreadId.makeUnsafe("thread-1");
     const project1 = ProjectId.makeUnsafe("project-1");
     const initialState = makeUiState({
@@ -233,13 +191,11 @@ describe("uiStateStore pure functions", () => {
       startupRecoveryStateByThreadId: {
         [thread1]: "active",
       },
-      boardContextByThreadId: {
-        [thread1]: {
-          projectId: project1,
-          ticketStack: [],
-          boardScrollLeft: 48,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
+      managementBoardContext: {
+        projectId: project1,
+        ticketStack: [],
+        boardScrollLeft: 48,
+        updatedAt: "2026-02-25T12:35:00.000Z",
       },
     });
 
@@ -247,10 +203,10 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.threadLastVisitedAtById).toEqual({});
     expect(next.startupRecoveryStateByThreadId).toEqual({});
-    expect(next.boardContextByThreadId).toEqual({});
+    expect(next.managementBoardContext).toEqual(initialState.managementBoardContext);
   });
 
-  it("tracks startup Was working markers separately from persisted thread UI", () => {
+  it("tracks startup Was working markers separately from persisted thread ui", () => {
     const thread1 = ThreadId.makeUnsafe("thread-1");
     const thread2 = ThreadId.makeUnsafe("thread-2");
     const initialState = makeUiState();
@@ -287,213 +243,98 @@ describe("uiStateStore pure functions", () => {
     expect(clearStartupWasWorkingThread(dismissedState, thread1)).toBe(dismissedState);
   });
 
-  it("setThreadBoardRoot initializes board context for a thread", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("setManagementBoardRoot initializes the global board context", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
 
-    const next = setThreadBoardRoot(makeUiState(), thread1, project1);
+    const next = setManagementBoardRoot(makeUiState(), project1);
 
-    expect(next.boardContextByThreadId[thread1]).toMatchObject({
+    expect(next.managementBoardContext).toMatchObject({
       projectId: project1,
       ticketStack: [],
       boardScrollLeft: 0,
     });
   });
 
-  it("pushThreadBoardTicket appends ticket detail state for the active thread", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("pushManagementBoardTicket appends ticket detail state for the active project", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const ticket1 = TicketId.makeUnsafe("ticket-1");
     const ticket2 = TicketId.makeUnsafe("ticket-2");
-    const initialState = setThreadBoardRoot(makeUiState(), thread1, project1);
+    const initialState = setManagementBoardRoot(makeUiState(), project1);
 
-    const next = pushThreadBoardTicket(
-      pushThreadBoardTicket(initialState, thread1, project1, ticket1),
-      thread1,
+    const next = pushManagementBoardTicket(
+      pushManagementBoardTicket(initialState, project1, ticket1),
       project1,
       ticket2,
     );
 
-    expect(next.boardContextByThreadId[thread1]?.ticketStack).toEqual([ticket1, ticket2]);
+    expect(next.managementBoardContext?.ticketStack).toEqual([ticket1, ticket2]);
   });
 
-  it("popThreadBoardTicket returns to the previous ticket in the stack", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("popManagementBoardTicket returns to the previous ticket in the stack", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const ticket1 = TicketId.makeUnsafe("ticket-1");
     const ticket2 = TicketId.makeUnsafe("ticket-2");
-    const initialState = pushThreadBoardTicket(
-      pushThreadBoardTicket(
-        setThreadBoardRoot(makeUiState(), thread1, project1),
-        thread1,
-        project1,
-        ticket1,
-      ),
-      thread1,
+    const initialState = pushManagementBoardTicket(
+      pushManagementBoardTicket(setManagementBoardRoot(makeUiState(), project1), project1, ticket1),
       project1,
       ticket2,
     );
 
-    const next = popThreadBoardTicket(initialState, thread1);
+    const next = popManagementBoardTicket(initialState);
 
-    expect(next.boardContextByThreadId[thread1]?.ticketStack).toEqual([ticket1]);
+    expect(next.managementBoardContext?.ticketStack).toEqual([ticket1]);
   });
 
-  it("sanitizeThreadBoardContext removes tickets that no longer belong to the active project", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("sanitizeManagementBoardContext removes tickets that no longer belong to the active project", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const ticket1 = TicketId.makeUnsafe("ticket-1");
     const invalidTicket = TicketId.makeUnsafe("ticket-2");
     const initialState = makeUiState({
-      boardContextByThreadId: {
-        [thread1]: {
-          projectId: project1,
-          ticketStack: [ticket1, invalidTicket],
-          boardScrollLeft: 32,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
+      managementBoardContext: {
+        projectId: project1,
+        ticketStack: [ticket1, invalidTicket],
+        boardScrollLeft: 32,
+        updatedAt: "2026-02-25T12:35:00.000Z",
       },
     });
 
-    const next = sanitizeThreadBoardContext(initialState, thread1, project1, new Set([ticket1]));
+    const next = sanitizeManagementBoardContext(initialState, project1, new Set([ticket1]));
 
-    expect(next.boardContextByThreadId[thread1]).toMatchObject({
+    expect(next.managementBoardContext).toMatchObject({
       projectId: project1,
       ticketStack: [ticket1],
       boardScrollLeft: 32,
     });
   });
 
-  it("sanitizeThreadBoardContext resets mismatched projects to board root", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("sanitizeManagementBoardContext resets mismatched projects to the board root", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
     const ticket1 = TicketId.makeUnsafe("ticket-1");
     const initialState = makeUiState({
-      boardContextByThreadId: {
-        [thread1]: {
-          projectId: project1,
-          ticketStack: [ticket1],
-          boardScrollLeft: 32,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
+      managementBoardContext: {
+        projectId: project1,
+        ticketStack: [ticket1],
+        boardScrollLeft: 32,
+        updatedAt: "2026-02-25T12:35:00.000Z",
       },
     });
 
-    const next = sanitizeThreadBoardContext(initialState, thread1, project2, new Set());
+    const next = sanitizeManagementBoardContext(initialState, project2, new Set());
 
-    expect(next.boardContextByThreadId[thread1]).toMatchObject({
+    expect(next.managementBoardContext).toMatchObject({
       projectId: project2,
       ticketStack: [],
       boardScrollLeft: 0,
     });
   });
 
-  it("cloneThreadBoardContext copies stack and scroll for same-project contexts", () => {
-    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
-    const targetThreadId = ThreadId.makeUnsafe("thread-target");
+  it("setManagementBoardScrollLeft preserves the root board scroll globally", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
-    const ticket1 = TicketId.makeUnsafe("ticket-1");
-    const ticket2 = TicketId.makeUnsafe("ticket-2");
-    const initialState = makeUiState({
-      boardContextByThreadId: {
-        [sourceThreadId]: {
-          projectId: project1,
-          ticketStack: [ticket1, ticket2],
-          boardScrollLeft: 96,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
-      },
-    });
+    const initialState = setManagementBoardRoot(makeUiState(), project1);
 
-    const next = cloneThreadBoardContext(initialState, sourceThreadId, targetThreadId, project1);
+    const next = setManagementBoardScrollLeft(initialState, 240);
 
-    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
-      projectId: project1,
-      ticketStack: [ticket1, ticket2],
-      boardScrollLeft: 96,
-    });
-    expect(next.boardContextByThreadId[targetThreadId]?.ticketStack).not.toBe(
-      initialState.boardContextByThreadId[sourceThreadId]?.ticketStack,
-    );
-  });
-
-  it("cloneThreadBoardContext falls back to board root when source has no context", () => {
-    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
-    const targetThreadId = ThreadId.makeUnsafe("thread-target");
-    const project1 = ProjectId.makeUnsafe("project-1");
-
-    const next = cloneThreadBoardContext(makeUiState(), sourceThreadId, targetThreadId, project1);
-
-    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
-      projectId: project1,
-      ticketStack: [],
-      boardScrollLeft: 0,
-    });
-  });
-
-  it("cloneThreadBoardContext falls back to board root when source project mismatches", () => {
-    const sourceThreadId = ThreadId.makeUnsafe("thread-source");
-    const targetThreadId = ThreadId.makeUnsafe("thread-target");
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const project2 = ProjectId.makeUnsafe("project-2");
-    const ticket1 = TicketId.makeUnsafe("ticket-1");
-    const initialState = makeUiState({
-      boardContextByThreadId: {
-        [sourceThreadId]: {
-          projectId: project1,
-          ticketStack: [ticket1],
-          boardScrollLeft: 80,
-          updatedAt: "2026-02-25T12:35:00.000Z",
-        },
-      },
-    });
-
-    const next = cloneThreadBoardContext(initialState, sourceThreadId, targetThreadId, project2);
-
-    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
-      projectId: project2,
-      ticketStack: [],
-      boardScrollLeft: 0,
-    });
-  });
-
-  it("initializeThreadBoardContextFromSource falls back to root when source is null", () => {
-    const targetThreadId = ThreadId.makeUnsafe("thread-target");
-    const project1 = ProjectId.makeUnsafe("project-1");
-
-    const next = initializeThreadBoardContextFromSource(makeUiState(), {
-      sourceThreadId: null,
-      targetThreadId,
-      projectId: project1,
-    });
-
-    expect(next.boardContextByThreadId[targetThreadId]).toMatchObject({
-      projectId: project1,
-      ticketStack: [],
-      boardScrollLeft: 0,
-    });
-  });
-
-  it("setThreadBoardScrollLeft preserves root board scroll per thread", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const initialState = setThreadBoardRoot(makeUiState(), thread1, project1);
-
-    const next = setThreadBoardScrollLeft(initialState, thread1, 240);
-
-    expect(next.boardContextByThreadId[thread1]?.boardScrollLeft).toBe(240);
-  });
-
-  it("syncProjects remaps the last management project by cwd when recreated", () => {
-    const oldProject1 = ProjectId.makeUnsafe("project-1");
-    const recreatedProject1 = ProjectId.makeUnsafe("project-1b");
-    const initialState = syncProjects(setManagementLastProjectId(makeUiState(), oldProject1), [
-      { id: oldProject1, cwd: "/tmp/project-1" },
-    ]);
-
-    const next = syncProjects(initialState, [{ id: recreatedProject1, cwd: "/tmp/project-1" }]);
-
-    expect(next.managementLastProjectId).toBe(recreatedProject1);
+    expect(next.managementBoardContext?.boardScrollLeft).toBe(240);
   });
 });

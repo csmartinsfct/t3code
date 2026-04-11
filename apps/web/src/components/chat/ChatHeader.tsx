@@ -20,6 +20,7 @@ import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { useUiStateStore } from "../../uiStateStore";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadSwitcherDropdown } from "./ThreadSwitcherDropdown";
+import { TicketIdentifierBadge } from "../TicketIdentifierBadge";
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -53,6 +54,14 @@ interface ChatHeaderProps {
   onToggleFileExplorer: () => void;
   orchestrationSwitcher: UseOrchestrationSwitcherReturn | null;
   onSwitchThread: ((threadId: string) => void) | undefined;
+  activeTicketBadge?:
+    | {
+        identifier: string;
+        title: string;
+        onOpen: (identifier: string) => void | Promise<void>;
+      }
+    | null
+    | undefined;
 }
 
 function ChatHeaderSidebarTrigger() {
@@ -93,6 +102,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleFileExplorer,
   orchestrationSwitcher,
   onSwitchThread,
+  activeTicketBadge,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -117,6 +127,13 @@ export const ChatHeader = memo(function ChatHeader({
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         )}
+        {activeTicketBadge ? (
+          <TicketIdentifierBadge
+            identifier={activeTicketBadge.identifier}
+            title={activeTicketBadge.title}
+            onOpen={activeTicketBadge.onOpen}
+          />
+        ) : null}
         {activeProjectName && !isGitRepo && (
           <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git

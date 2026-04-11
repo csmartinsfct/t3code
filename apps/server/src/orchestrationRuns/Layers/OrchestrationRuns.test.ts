@@ -273,7 +273,7 @@ describe("OrchestrationRunService", () => {
       serviceEffect(layer, (service) =>
         service.create({
           projectId,
-          ticketIdentifiers: [ticket.identifier],
+          selectedTicketIdentifiers: [ticket.identifier],
           implementerModelSelection: baseModelSelection,
           reviewerModelSelection: baseModelSelection,
         }),
@@ -323,7 +323,7 @@ describe("OrchestrationRunService", () => {
       serviceEffect(layer, (service) =>
         service.create({
           projectId,
-          ticketIdentifiers: [ticket.identifier],
+          selectedTicketIdentifiers: [ticket.identifier],
           implementerModelSelection: baseModelSelection,
           reviewerModelSelection: baseModelSelection,
           maxReviewIterations: 0,
@@ -371,7 +371,7 @@ describe("OrchestrationRunService", () => {
         serviceEffect(layer, (service) =>
           service.create({
             projectId,
-            ticketIdentifiers: [foreignTicket.identifier],
+            selectedTicketIdentifiers: [foreignTicket.identifier],
             implementerModelSelection: baseModelSelection,
             reviewerModelSelection: baseModelSelection,
           }),
@@ -428,7 +428,7 @@ describe("OrchestrationRunService", () => {
         serviceEffect(layer, (service) =>
           service.create({
             projectId,
-            ticketIdentifiers: tickets.map((ticket) => ticket.identifier),
+            selectedTicketIdentifiers: tickets.map((ticket) => ticket.identifier),
             implementerModelSelection: baseModelSelection,
             reviewerModelSelection: baseModelSelection,
           }),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TicketId } from "@t3tools/contracts";
 
 import {
   formatModelSelectionSummary,
@@ -44,14 +45,17 @@ describe("OrchestrateConfirmDialog model labels", () => {
         orderedTickets: [
           {
             annotation: "warn-reprocess",
+            selectedTicketId: TicketId.makeUnsafe("ticket-2"),
             ticket: { identifier: "T3CO-2" } as never,
           },
           {
             annotation: "will-run",
+            selectedTicketId: TicketId.makeUnsafe("ticket-1"),
             ticket: { identifier: "T3CO-1" } as never,
           },
           {
             annotation: "skipped-done",
+            selectedTicketId: TicketId.makeUnsafe("ticket-9"),
             ticket: { identifier: "T3CO-9" } as never,
           },
         ],
@@ -101,10 +105,12 @@ describe("OrchestrateConfirmDialog model labels", () => {
           orderedTickets: [
             {
               annotation: "will-run",
+              selectedTicketId: TicketId.makeUnsafe("ticket-1"),
               ticket: { identifier: "T3CO-1" } as never,
             },
           ],
         },
+        selectedTicketIdentifiers: ["T3CO-1"],
         implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
         reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
         onConfirm,
@@ -125,10 +131,12 @@ describe("OrchestrateConfirmDialog model labels", () => {
           orderedTickets: [
             {
               annotation: "will-run",
+              selectedTicketId: TicketId.makeUnsafe("ticket-1"),
               ticket: { identifier: "T3CO-1" } as never,
             },
           ],
         },
+        selectedTicketIdentifiers: ["T3CO-1"],
         implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
         reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
         onConfirm,

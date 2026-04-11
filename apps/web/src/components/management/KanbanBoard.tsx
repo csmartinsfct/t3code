@@ -138,7 +138,7 @@ export async function launchBoardOrchestration(input: {
     };
   };
   projectId: ProjectId;
-  ticketIdentifiers: OrchestrationCreateRunInput["ticketIdentifiers"];
+  selectedTicketIdentifiers: OrchestrationCreateRunInput["selectedTicketIdentifiers"];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   orchestrateTickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>;
@@ -157,7 +157,7 @@ export async function launchBoardOrchestration(input: {
 
   const result = await input.api.orchestration.createRun({
     projectId: input.projectId,
-    ticketIdentifiers: input.ticketIdentifiers,
+    selectedTicketIdentifiers: input.selectedTicketIdentifiers,
     implementerModelSelection: input.implementerModelSelection,
     reviewerModelSelection: input.reviewerModelSelection,
   });
@@ -178,20 +178,21 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
-  const threadBoardContext = useUiStateStore((store) =>
-    threadId ? (store.boardContextByThreadId[threadId] ?? null) : null,
+  const managementBoardContext = useUiStateStore((store) => store.managementBoardContext);
+  const setManagementBoardRoot = useUiStateStore((store) => store.setManagementBoardRoot);
+  const pushManagementBoardTicket = useUiStateStore((store) => store.pushManagementBoardTicket);
+  const popManagementBoardTicket = useUiStateStore((store) => store.popManagementBoardTicket);
+  const setManagementBoardScrollLeft = useUiStateStore(
+    (store) => store.setManagementBoardScrollLeft,
   );
-  const setThreadBoardRoot = useUiStateStore((store) => store.setThreadBoardRoot);
-  const pushThreadBoardTicket = useUiStateStore((store) => store.pushThreadBoardTicket);
-  const popThreadBoardTicket = useUiStateStore((store) => store.popThreadBoardTicket);
-  const setThreadBoardScrollLeft = useUiStateStore((store) => store.setThreadBoardScrollLeft);
-  const sanitizeThreadBoardContext = useUiStateStore((store) => store.sanitizeThreadBoardContext);
-  const setManagementLastProjectId = useUiStateStore((store) => store.setManagementLastProjectId);
+  const sanitizeManagementBoardContext = useUiStateStore(
+    (store) => store.sanitizeManagementBoardContext,
+  );
   const project = useProjectById(typedProjectId);
   const boardBodyRef = useRef<HTMLDivElement | null>(null);
   const selectedTicketId =
-    threadId && threadBoardContext?.projectId === typedProjectId
-      ? (threadBoardContext.ticketStack[threadBoardContext.ticketStack.length - 1] ?? null)
+    managementBoardContext?.projectId === typedProjectId
+      ? (managementBoardContext.ticketStack[managementBoardContext.ticketStack.length - 1] ?? null)
       : null;
 
   const navigate = useNavigate();
@@ -203,15 +204,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   >(new Map());
 
   useEffect(() => {
-    setManagementLastProjectId(typedProjectId);
-  }, [setManagementLastProjectId, typedProjectId]);
-
-  useEffect(() => {
-    if (!threadId) return;
-    if (!threadBoardContext || threadBoardContext.projectId !== typedProjectId) {
-      setThreadBoardRoot(threadId, typedProjectId);
+    if (!managementBoardContext || managementBoardContext.projectId !== typedProjectId) {
+      setManagementBoardRoot(typedProjectId);
     }
-  }, [threadBoardContext, threadId, setThreadBoardRoot, typedProjectId]);
+  }, [managementBoardContext, setManagementBoardRoot, typedProjectId]);
 
   const ticketsByStatus = useMemo(() => {
     const grouped: Record<TicketStatus, TicketSummary[]> = {
@@ -302,32 +298,33 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     // remain visible for one render before the hook applies the new projectId.
     // Sanitizing against that stale ticket set would incorrectly clear the
     // saved ticket stack for the target thread.
-    if (!threadId || loading || selectedProjectId !== projectId) return;
-    sanitizeThreadBoardContext(threadId, typedProjectId, validTicketIds);
+    if (loading || selectedProjectId !== projectId) return;
+    sanitizeManagementBoardContext(typedProjectId, validTicketIds);
   }, [
     loading,
     projectId,
-    sanitizeThreadBoardContext,
+    sanitizeManagementBoardContext,
     selectedProjectId,
-    threadId,
     typedProjectId,
     validTicketIds,
   ]);
 
   useEffect(() => {
-    if (!threadId || selectedTicketId) return;
+    if (selectedTicketId) return;
     const element = boardBodyRef.current;
     if (!element) return;
 
     const targetScrollLeft =
-      threadBoardContext?.projectId === typedProjectId ? threadBoardContext.boardScrollLeft : 0;
+      managementBoardContext?.projectId === typedProjectId
+        ? managementBoardContext.boardScrollLeft
+        : 0;
     if (Math.abs(element.scrollLeft - targetScrollLeft) > 1) {
       element.scrollLeft = targetScrollLeft;
     }
-  }, [selectedTicketId, threadBoardContext, threadId, typedProjectId]);
+  }, [managementBoardContext, selectedTicketId, typedProjectId]);
 
   useEffect(() => {
-    if (!threadId || selectedTicketId) return;
+    if (selectedTicketId) return;
     const element = boardBodyRef.current;
     if (!element) return;
 
@@ -337,7 +334,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         window.cancelAnimationFrame(frameId);
       }
       frameId = window.requestAnimationFrame(() => {
-        setThreadBoardScrollLeft(threadId, element.scrollLeft);
+        setManagementBoardScrollLeft(element.scrollLeft);
       });
     };
 
@@ -348,7 +345,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [selectedTicketId, setThreadBoardScrollLeft, threadId]);
+  }, [selectedTicketId, setManagementBoardScrollLeft]);
 
   const handleTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, ticket: TicketSummary) => {
@@ -408,21 +405,19 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           title: "Board context changed",
           description: "That ticket no longer belongs to the active board project.",
         });
-        if (threadId) {
-          setThreadBoardRoot(threadId, typedProjectId);
-        }
+        setManagementBoardRoot(typedProjectId);
         return;
       }
 
       setOrchestrateTickets(resolution.selectedTickets);
       setOrchestrateDialogOpen(true);
     },
-    [setThreadBoardRoot, threadId, typedProjectId],
+    [setManagementBoardRoot, typedProjectId],
   );
 
   const handleConfirmOrchestrate = useCallback(
     async (
-      ticketIdentifiers: string[],
+      selectedTicketIdentifiers: string[],
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
     ) => {
@@ -430,7 +425,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       await launchBoardOrchestration({
         api,
         projectId: typedProjectId,
-        ticketIdentifiers,
+        selectedTicketIdentifiers,
         implementerModelSelection,
         reviewerModelSelection,
         orchestrateTickets,
@@ -441,9 +436,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             description: "Refresh the board and try starting orchestration again.",
           });
           setOrchestrateDialogOpen(false);
-          if (threadId) {
-            setThreadBoardRoot(threadId, typedProjectId);
-          }
+          setManagementBoardRoot(typedProjectId);
         },
         clearSelection,
         navigateToThread: (orchestrationThreadId) => {
@@ -454,7 +447,14 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         },
       });
     },
-    [clearSelection, navigate, orchestrateTickets, setThreadBoardRoot, threadId, typedProjectId],
+    [
+      clearSelection,
+      navigate,
+      orchestrateTickets,
+      setManagementBoardRoot,
+      threadId,
+      typedProjectId,
+    ],
   );
 
   // ---------------------------------------------------------------------------
@@ -659,26 +659,23 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const handleTicketClick = useCallback(
     (ticketId: TicketId) => {
-      if (!threadId) return;
       clearSelection();
-      pushThreadBoardTicket(threadId, typedProjectId, ticketId);
+      pushManagementBoardTicket(typedProjectId, ticketId);
     },
-    [clearSelection, pushThreadBoardTicket, threadId, typedProjectId],
+    [clearSelection, pushManagementBoardTicket, typedProjectId],
   );
 
   const handleBack = useCallback(() => {
-    if (!threadId) return;
     clearSelection();
-    popThreadBoardTicket(threadId);
-  }, [clearSelection, popThreadBoardTicket, threadId]);
+    popManagementBoardTicket();
+  }, [clearSelection, popManagementBoardTicket]);
 
   const handleNavigateToTicket = useCallback(
     (ticketId: TicketId) => {
-      if (!threadId) return;
       clearSelection();
-      pushThreadBoardTicket(threadId, typedProjectId, ticketId);
+      pushManagementBoardTicket(typedProjectId, ticketId);
     },
-    [clearSelection, pushThreadBoardTicket, threadId, typedProjectId],
+    [clearSelection, pushManagementBoardTicket, typedProjectId],
   );
 
   return (

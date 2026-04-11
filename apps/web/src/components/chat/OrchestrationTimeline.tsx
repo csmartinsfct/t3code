@@ -21,6 +21,7 @@ import { estimateOrchestrationTimelineRowHeight } from "../../hooks/useOrchestra
 import { parseReviewOutputText } from "../../lib/reviewOutput";
 import type { Thread } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
+import { buildTicketHref, TicketIdentifierBadge } from "../TicketIdentifierBadge";
 import { Badge } from "../ui/badge";
 import ReviewOutputCard from "./ReviewOutputCard";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -42,13 +43,6 @@ type BadgeVariant = "info" | "success" | "warning" | "error" | "outline";
 
 const SUMMARY_TICKET_LINK_CLASS_NAME =
   "font-mono underline decoration-transparent underline-offset-2 transition-colors hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background";
-const TICKET_BADGE_LINK_CLASS_NAME =
-  "font-mono !text-inherit !no-underline decoration-transparent hover:!text-inherit hover:!no-underline hover:decoration-transparent";
-
-function buildTicketHref(identifier: string): string {
-  return `t3://ticket/${encodeURIComponent(identifier)}`;
-}
-
 function normalizeTicketSummary(input: {
   summary: string;
   ticketIdentifier: string | undefined;
@@ -204,25 +198,7 @@ const OrchestrationSeparator = memo(function OrchestrationSeparator({
         })}
       </Badge>
       {row.ticketIdentifier && (
-        <Badge
-          variant="outline"
-          size="sm"
-          className={TICKET_BADGE_LINK_CLASS_NAME}
-          render={
-            onOpenTicketLink ? (
-              <a
-                href={buildTicketHref(row.ticketIdentifier)}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void onOpenTicketLink(row.ticketIdentifier!);
-                }}
-              />
-            ) : undefined
-          }
-        >
-          {row.ticketIdentifier}
-        </Badge>
+        <TicketIdentifierBadge identifier={row.ticketIdentifier} onOpen={onOpenTicketLink} />
       )}
       {row.reviewIteration !== undefined && (
         <Badge variant="outline" size="sm">

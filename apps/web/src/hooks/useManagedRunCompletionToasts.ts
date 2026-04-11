@@ -14,7 +14,6 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { toastManager } from "~/components/ui/toast";
-import { useUiStateStore } from "~/uiStateStore";
 
 const TERMINAL_STATUSES: ReadonlySet<ManagedRunStatus> = new Set([
   "completed",
@@ -82,20 +81,10 @@ interface ManagedRunAskAiComposerDraftStore {
   setPrompt: (threadId: ThreadId, prompt: string) => void;
 }
 
-interface ManagedRunAskAiUiStateStore {
-  initializeThreadBoardContextFromSource: (input: {
-    sourceThreadId: ThreadId | null;
-    targetThreadId: ThreadId;
-    projectId: ProjectId;
-  }) => void;
-}
-
 export async function startManagedRunAskAiThread(input: {
   projectId: ProjectId;
-  sourceThreadId: ThreadId | null;
   prompt: string;
   composerDraftStore: ManagedRunAskAiComposerDraftStore;
-  uiStateStore: ManagedRunAskAiUiStateStore;
   createThreadId?: () => ThreadId;
   now?: () => string;
   navigateToThread: (threadId: ThreadId) => Promise<void> | void;
@@ -103,11 +92,6 @@ export async function startManagedRunAskAiThread(input: {
   const threadId = (input.createThreadId ?? newThreadId)();
   const createdAt = (input.now ?? (() => new Date().toISOString()))();
 
-  input.uiStateStore.initializeThreadBoardContextFromSource({
-    sourceThreadId: input.sourceThreadId,
-    targetThreadId: threadId,
-    projectId: input.projectId,
-  });
   input.composerDraftStore.setProjectDraftThreadId(input.projectId, threadId, {
     createdAt,
     runtimeMode: DEFAULT_RUNTIME_MODE,
@@ -121,11 +105,10 @@ export async function startManagedRunAskAiThread(input: {
 export function useManagedRunCompletionToasts(options: {
   projectId: ProjectId | undefined;
   scripts: ReadonlyArray<ProjectScript> | undefined;
-  sourceThreadId: ThreadId | null;
 }): {
   handleRunEvent: (event: ManagedRunStreamEvent) => void;
 } {
-  const { projectId, scripts, sourceThreadId } = options;
+  const { projectId, scripts } = options;
   const notifiedRunIdsRef = useRef(new Set<string>());
   const navigate = useNavigate();
 
@@ -238,10 +221,8 @@ export function useManagedRunCompletionToasts(options: {
 
     await startManagedRunAskAiThread({
       projectId: currentProjectId,
-      sourceThreadId,
       prompt,
       composerDraftStore: useComposerDraftStore.getState(),
-      uiStateStore: useUiStateStore.getState(),
       navigateToThread: (threadId) => navigate({ to: "/$threadId", params: { threadId } }),
     });
 

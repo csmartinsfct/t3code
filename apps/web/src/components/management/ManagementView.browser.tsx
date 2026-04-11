@@ -248,8 +248,7 @@ function seedStores() {
 
   useUiStateStore.setState((state) => ({
     ...state,
-    boardContextByThreadId: {},
-    managementLastProjectId: null,
+    managementBoardContext: null,
   }));
 
   useTicketSelectionStore.setState({

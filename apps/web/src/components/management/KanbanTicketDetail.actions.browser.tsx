@@ -91,9 +91,7 @@ vi.mock("~/composerDraftStore", () => ({
 
 vi.mock("~/uiStateStore", () => ({
   useUiStateStore: {
-    getState: () => ({
-      initializeThreadBoardContextFromSource: vi.fn(),
-    }),
+    getState: () => ({}),
   },
 }));
 

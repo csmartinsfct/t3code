@@ -368,7 +368,6 @@ describe("KanbanTicketDetail", () => {
     const applyStickyState = vi.fn();
     const setPrompt = vi.fn();
     const addTicketAttachment = vi.fn();
-    const initializeThreadBoardContextFromSource = vi.fn();
     const navigateToThread = vi.fn();
 
     const ticket = makeTicket({
@@ -380,16 +379,12 @@ describe("KanbanTicketDetail", () => {
 
     const threadId = startTicketDetailDecomposeFlow({
       ticket,
-      routeThreadId: "thread-source" as ThreadId,
       composerDraftStore: {
         clearProjectDraftThreadId,
         setProjectDraftThreadId,
         applyStickyState,
         setPrompt,
         addTicketAttachment,
-      },
-      uiStateStore: {
-        initializeThreadBoardContextFromSource,
       },
       createThreadId: () => "thread-draft" as ThreadId,
       now: () => "2026-04-10T18:22:00.000Z",
@@ -398,11 +393,6 @@ describe("KanbanTicketDetail", () => {
 
     expect(threadId).toBe("thread-draft");
     expect(clearProjectDraftThreadId).toHaveBeenCalledWith("project-55");
-    expect(initializeThreadBoardContextFromSource).toHaveBeenCalledWith({
-      sourceThreadId: "thread-source",
-      targetThreadId: "thread-draft",
-      projectId: "project-55",
-    });
     expect(setProjectDraftThreadId).toHaveBeenCalledWith("project-55", "thread-draft", {
       createdAt: "2026-04-10T18:22:00.000Z",
       envMode: "local",

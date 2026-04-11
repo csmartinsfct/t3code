@@ -64,6 +64,10 @@
       "types": "./src/promptTemplates.ts",
       "import": "./src/promptTemplates.ts"
     },
+    "./orchestrationPlan": {
+      "types": "./src/orchestrationPlan.ts",
+      "import": "./src/orchestrationPlan.ts"
+    },
     "./toposort": {
       "types": "./src/toposort.ts",
       "import": "./src/toposort.ts"

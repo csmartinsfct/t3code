@@ -31,16 +31,12 @@ interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   viewMode?: ViewMode;
-  boardContextByThreadId?: Record<
-    string,
-    {
-      projectId?: string;
-      ticketStack?: string[];
-      boardScrollLeft?: number;
-      updatedAt?: string;
-    }
-  >;
-  managementLastProjectId?: string | null;
+  managementBoardContext?: {
+    projectId?: string;
+    ticketStack?: string[];
+    boardScrollLeft?: number;
+    updatedAt?: string;
+  } | null;
 }
 
 export interface UiProjectState {
@@ -54,8 +50,7 @@ export interface UiThreadState {
 }
 
 export interface UiBoardState {
-  boardContextByThreadId: Record<string, BoardContext>;
-  managementLastProjectId: ProjectId | null;
+  managementBoardContext: BoardContext | null;
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiBoardState {
@@ -77,16 +72,14 @@ const initialState: UiState = {
   projectOrder: [],
   threadLastVisitedAtById: {},
   startupRecoveryStateByThreadId: {},
-  boardContextByThreadId: {},
-  managementLastProjectId: null,
+  managementBoardContext: null,
   viewMode: "chat",
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 let persistedViewMode: ViewMode = "chat";
-let persistedBoardContextByThreadId: Record<string, BoardContext> = {};
-let persistedManagementLastProjectId: ProjectId | null = null;
+let persistedManagementBoardContext: BoardContext | null = null;
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -108,8 +101,7 @@ function readPersistedState(): UiState {
         return {
           ...initialState,
           viewMode: persistedViewMode,
-          boardContextByThreadId: persistedBoardContextByThreadId,
-          managementLastProjectId: persistedManagementLastProjectId,
+          managementBoardContext: persistedManagementBoardContext,
         };
       }
       return initialState;
@@ -118,8 +110,7 @@ function readPersistedState(): UiState {
     return {
       ...initialState,
       viewMode: persistedViewMode,
-      boardContextByThreadId: persistedBoardContextByThreadId,
-      managementLastProjectId: persistedManagementLastProjectId,
+      managementBoardContext: persistedManagementBoardContext,
     };
   } catch {
     return initialState;
@@ -129,8 +120,7 @@ function readPersistedState(): UiState {
 function hydratePersistedUiState(parsed: PersistedUiState): void {
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
-  persistedBoardContextByThreadId = {};
-  persistedManagementLastProjectId = null;
+  persistedManagementBoardContext = null;
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -144,17 +134,12 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
   persistedViewMode =
     parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
 
-  for (const [threadId, context] of Object.entries(parsed.boardContextByThreadId ?? {})) {
-    if (typeof threadId !== "string" || threadId.length === 0) {
-      continue;
-    }
-    if (typeof context?.projectId !== "string" || context.projectId.length === 0) {
-      continue;
-    }
+  const context = parsed.managementBoardContext;
+  if (typeof context?.projectId === "string" && context.projectId.length > 0) {
     const ticketStack = (context.ticketStack ?? []).filter(
       (ticketId): ticketId is TicketId => typeof ticketId === "string" && ticketId.length > 0,
     );
-    persistedBoardContextByThreadId[threadId] = {
+    persistedManagementBoardContext = {
       projectId: context.projectId as ProjectId,
       ticketStack,
       boardScrollLeft:
@@ -166,13 +151,6 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
           ? context.updatedAt
           : nowIso(),
     };
-  }
-
-  if (
-    typeof parsed.managementLastProjectId === "string" &&
-    parsed.managementLastProjectId.length > 0
-  ) {
-    persistedManagementLastProjectId = parsed.managementLastProjectId as ProjectId;
   }
 }
 
@@ -197,8 +175,7 @@ function persistState(state: UiState): void {
         expandedProjectCwds,
         projectOrderCwds,
         viewMode: state.viewMode,
-        boardContextByThreadId: state.boardContextByThreadId,
-        managementLastProjectId: state.managementLastProjectId,
+        managementBoardContext: state.managementBoardContext,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -238,30 +215,15 @@ function ticketStacksEqual(left: readonly TicketId[], right: readonly TicketId[]
   return left.length === right.length && left.every((ticketId, index) => ticketId === right[index]);
 }
 
-function boardContextsEqual(
-  left: Record<string, BoardContext>,
-  right: Record<string, BoardContext>,
-): boolean {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-  for (const [key, value] of leftEntries) {
-    const other = right[key];
-    if (!other) {
-      return false;
-    }
-    if (
-      value.projectId !== other.projectId ||
-      value.boardScrollLeft !== other.boardScrollLeft ||
-      value.updatedAt !== other.updatedAt ||
-      !ticketStacksEqual(value.ticketStack, other.ticketStack)
-    ) {
-      return false;
-    }
-  }
-  return true;
+function boardContextEqual(left: BoardContext | null, right: BoardContext | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.projectId === right.projectId &&
+    left.boardScrollLeft === right.boardScrollLeft &&
+    left.updatedAt === right.updatedAt &&
+    ticketStacksEqual(left.ticketStack, right.ticketStack)
+  );
 }
 
 function buildBoardContext(
@@ -276,40 +238,13 @@ function buildBoardContext(
   };
 }
 
-function setBoardContextForThread(
-  state: UiState,
-  threadId: ThreadId,
-  nextContext: BoardContext | null,
-): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
-  if (nextContext === null) {
-    if (!currentContext) {
-      return state;
-    }
-    const boardContextByThreadId = { ...state.boardContextByThreadId };
-    delete boardContextByThreadId[threadId];
-    return {
-      ...state,
-      boardContextByThreadId,
-    };
-  }
-
-  if (
-    currentContext &&
-    currentContext.projectId === nextContext.projectId &&
-    currentContext.boardScrollLeft === nextContext.boardScrollLeft &&
-    currentContext.updatedAt === nextContext.updatedAt &&
-    ticketStacksEqual(currentContext.ticketStack, nextContext.ticketStack)
-  ) {
+function setManagementBoardContext(state: UiState, nextContext: BoardContext | null): UiState {
+  if (boardContextEqual(state.managementBoardContext, nextContext)) {
     return state;
   }
-
   return {
     ...state,
-    boardContextByThreadId: {
-      ...state.boardContextByThreadId,
-      [threadId]: nextContext,
-    },
+    managementBoardContext: nextContext,
   };
 }
 
@@ -396,26 +331,26 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
           })
           .map((project) => project.id);
 
-  const nextManagementLastProjectId = (() => {
-    const current = state.managementLastProjectId;
+  const nextManagementBoardContext = (() => {
+    const current = state.managementBoardContext;
     if (!current) {
       return null;
     }
-    if (currentProjectCwdById.has(current)) {
+    if (currentProjectCwdById.has(current.projectId)) {
       return current;
     }
-    const previousCwd = previousProjectCwdById.get(current);
+    const previousCwd = previousProjectCwdById.get(current.projectId);
     if (!previousCwd) {
       return null;
     }
     const recreatedProjectId = mappedProjects.find((project) => project.cwd === previousCwd)?.id;
-    return recreatedProjectId ?? null;
+    return recreatedProjectId ? buildBoardContext(recreatedProjectId, current) : null;
   })();
 
   if (
     recordsEqual(state.projectExpandedById, nextExpandedById) &&
     projectOrdersEqual(state.projectOrder, nextProjectOrder) &&
-    state.managementLastProjectId === nextManagementLastProjectId &&
+    boardContextEqual(state.managementBoardContext, nextManagementBoardContext) &&
     !cwdMappingChanged
   ) {
     return state;
@@ -425,7 +360,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
     ...state,
     projectExpandedById: nextExpandedById,
     projectOrder: nextProjectOrder,
-    managementLastProjectId: nextManagementLastProjectId,
+    managementBoardContext: nextManagementBoardContext,
   };
 }
 
@@ -445,11 +380,6 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       nextThreadLastVisitedAtById[thread.id] = thread.seedVisitedAt;
     }
   }
-  const nextBoardContextByThreadId = Object.fromEntries(
-    Object.entries(state.boardContextByThreadId).filter(([threadId]) =>
-      retainedThreadIds.has(threadId as ThreadId),
-    ),
-  ) as Record<string, BoardContext>;
   const nextStartupRecoveryStateByThreadId = Object.fromEntries(
     Object.entries(state.startupRecoveryStateByThreadId).filter(([threadId]) =>
       retainedThreadIds.has(threadId as ThreadId),
@@ -458,8 +388,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
 
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
-    recordsEqual(state.startupRecoveryStateByThreadId, nextStartupRecoveryStateByThreadId) &&
-    boardContextsEqual(state.boardContextByThreadId, nextBoardContextByThreadId)
+    recordsEqual(state.startupRecoveryStateByThreadId, nextStartupRecoveryStateByThreadId)
   ) {
     return state;
   }
@@ -467,7 +396,6 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
-    boardContextByThreadId: nextBoardContextByThreadId,
   };
 }
 
@@ -520,21 +448,17 @@ export function markThreadUnread(
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
   const hasVisitState = threadId in state.threadLastVisitedAtById;
   const hasStartupRecoveryState = threadId in state.startupRecoveryStateByThreadId;
-  const hasBoardContext = threadId in state.boardContextByThreadId;
-  if (!hasVisitState && !hasStartupRecoveryState && !hasBoardContext) {
+  if (!hasVisitState && !hasStartupRecoveryState) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
   const nextStartupRecoveryStateByThreadId = { ...state.startupRecoveryStateByThreadId };
-  const nextBoardContextByThreadId = { ...state.boardContextByThreadId };
   delete nextThreadLastVisitedAtById[threadId];
   delete nextStartupRecoveryStateByThreadId[threadId];
-  delete nextBoardContextByThreadId[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
-    boardContextByThreadId: nextBoardContextByThreadId,
   };
 }
 
@@ -578,35 +502,25 @@ export function removeStartupRecoveryState(state: UiState, threadId: ThreadId): 
   };
 }
 
-export function setThreadBoardRoot(
-  state: UiState,
-  threadId: ThreadId,
-  projectId: ProjectId,
-): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
+export function setManagementBoardRoot(state: UiState, projectId: ProjectId): UiState {
+  const currentContext = state.managementBoardContext;
   const boardScrollLeft =
     currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0;
-  return setBoardContextForThread(
-    state,
-    threadId,
-    buildBoardContext(projectId, { boardScrollLeft }),
-  );
+  return setManagementBoardContext(state, buildBoardContext(projectId, { boardScrollLeft }));
 }
 
-export function pushThreadBoardTicket(
+export function pushManagementBoardTicket(
   state: UiState,
-  threadId: ThreadId,
   projectId: ProjectId,
   ticketId: TicketId,
 ): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
+  const currentContext = state.managementBoardContext;
   const currentStack = currentContext?.projectId === projectId ? currentContext.ticketStack : [];
   if (currentStack[currentStack.length - 1] === ticketId) {
     return state;
   }
-  return setBoardContextForThread(
+  return setManagementBoardContext(
     state,
-    threadId,
     buildBoardContext(projectId, {
       ticketStack: [...currentStack, ticketId],
       boardScrollLeft: currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0,
@@ -614,14 +528,13 @@ export function pushThreadBoardTicket(
   );
 }
 
-export function popThreadBoardTicket(state: UiState, threadId: ThreadId): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
+export function popManagementBoardTicket(state: UiState): UiState {
+  const currentContext = state.managementBoardContext;
   if (!currentContext || currentContext.ticketStack.length === 0) {
     return state;
   }
-  return setBoardContextForThread(
+  return setManagementBoardContext(
     state,
-    threadId,
     buildBoardContext(currentContext.projectId, {
       ticketStack: currentContext.ticketStack.slice(0, -1),
       boardScrollLeft: currentContext.boardScrollLeft,
@@ -629,16 +542,14 @@ export function popThreadBoardTicket(state: UiState, threadId: ThreadId): UiStat
   );
 }
 
-export function replaceThreadBoardStack(
+export function replaceManagementBoardStack(
   state: UiState,
-  threadId: ThreadId,
   projectId: ProjectId,
   ticketStack: readonly TicketId[],
 ): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
-  return setBoardContextForThread(
+  const currentContext = state.managementBoardContext;
+  return setManagementBoardContext(
     state,
-    threadId,
     buildBoardContext(projectId, {
       ticketStack: [...ticketStack],
       boardScrollLeft: currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0,
@@ -646,12 +557,8 @@ export function replaceThreadBoardStack(
   );
 }
 
-export function setThreadBoardScrollLeft(
-  state: UiState,
-  threadId: ThreadId,
-  scrollLeft: number,
-): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
+export function setManagementBoardScrollLeft(state: UiState, scrollLeft: number): UiState {
+  const currentContext = state.managementBoardContext;
   if (!currentContext) {
     return state;
   }
@@ -659,9 +566,8 @@ export function setThreadBoardScrollLeft(
   if (currentContext.boardScrollLeft === normalizedScrollLeft) {
     return state;
   }
-  return setBoardContextForThread(
+  return setManagementBoardContext(
     state,
-    threadId,
     buildBoardContext(currentContext.projectId, {
       ticketStack: currentContext.ticketStack,
       boardScrollLeft: normalizedScrollLeft,
@@ -669,56 +575,18 @@ export function setThreadBoardScrollLeft(
   );
 }
 
-export function clearThreadBoardContext(state: UiState, threadId: ThreadId): UiState {
-  return setBoardContextForThread(state, threadId, null);
+export function clearManagementBoardContext(state: UiState): UiState {
+  return setManagementBoardContext(state, null);
 }
 
-export function cloneThreadBoardContext(
+export function sanitizeManagementBoardContext(
   state: UiState,
-  sourceThreadId: ThreadId,
-  targetThreadId: ThreadId,
-  projectId: ProjectId,
-): UiState {
-  const sourceContext = state.boardContextByThreadId[sourceThreadId];
-  if (!sourceContext || sourceContext.projectId !== projectId) {
-    return setThreadBoardRoot(state, targetThreadId, projectId);
-  }
-
-  return setBoardContextForThread(
-    state,
-    targetThreadId,
-    buildBoardContext(projectId, {
-      ticketStack: [...sourceContext.ticketStack],
-      boardScrollLeft: sourceContext.boardScrollLeft,
-    }),
-  );
-}
-
-export function initializeThreadBoardContextFromSource(
-  state: UiState,
-  input: {
-    sourceThreadId: ThreadId | null;
-    targetThreadId: ThreadId;
-    projectId: ProjectId;
-  },
-): UiState {
-  const { sourceThreadId, targetThreadId, projectId } = input;
-  if (!sourceThreadId) {
-    return setThreadBoardRoot(state, targetThreadId, projectId);
-  }
-
-  return cloneThreadBoardContext(state, sourceThreadId, targetThreadId, projectId);
-}
-
-export function sanitizeThreadBoardContext(
-  state: UiState,
-  threadId: ThreadId,
   projectId: ProjectId,
   validTicketIds: ReadonlySet<TicketId>,
 ): UiState {
-  const currentContext = state.boardContextByThreadId[threadId];
+  const currentContext = state.managementBoardContext;
   if (!currentContext || currentContext.projectId !== projectId) {
-    return setThreadBoardRoot(state, threadId, projectId);
+    return setManagementBoardRoot(state, projectId);
   }
 
   const sanitizedStack = currentContext.ticketStack.filter((ticketId) =>
@@ -728,24 +596,13 @@ export function sanitizeThreadBoardContext(
     return state;
   }
 
-  return setBoardContextForThread(
+  return setManagementBoardContext(
     state,
-    threadId,
     buildBoardContext(projectId, {
       ticketStack: sanitizedStack,
       boardScrollLeft: currentContext.boardScrollLeft,
     }),
   );
-}
-
-export function setManagementLastProjectId(state: UiState, projectId: ProjectId | null): UiState {
-  if (state.managementLastProjectId === projectId) {
-    return state;
-  }
-  return {
-    ...state,
-    managementLastProjectId: projectId,
-  };
 }
 
 export function toggleProject(state: UiState, projectId: ProjectId): UiState {
@@ -810,32 +667,16 @@ interface UiStateStore extends UiState {
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId, latestTurnCompletedAt: string | null | undefined) => void;
   clearThreadUi: (threadId: ThreadId) => void;
-  setThreadBoardRoot: (threadId: ThreadId, projectId: ProjectId) => void;
-  pushThreadBoardTicket: (threadId: ThreadId, projectId: ProjectId, ticketId: TicketId) => void;
-  popThreadBoardTicket: (threadId: ThreadId) => void;
-  replaceThreadBoardStack: (
-    threadId: ThreadId,
-    projectId: ProjectId,
-    ticketStack: readonly TicketId[],
-  ) => void;
-  setThreadBoardScrollLeft: (threadId: ThreadId, scrollLeft: number) => void;
-  clearThreadBoardContext: (threadId: ThreadId) => void;
-  cloneThreadBoardContext: (
-    sourceThreadId: ThreadId,
-    targetThreadId: ThreadId,
-    projectId: ProjectId,
-  ) => void;
-  initializeThreadBoardContextFromSource: (input: {
-    sourceThreadId: ThreadId | null;
-    targetThreadId: ThreadId;
-    projectId: ProjectId;
-  }) => void;
-  sanitizeThreadBoardContext: (
-    threadId: ThreadId,
+  setManagementBoardRoot: (projectId: ProjectId) => void;
+  pushManagementBoardTicket: (projectId: ProjectId, ticketId: TicketId) => void;
+  popManagementBoardTicket: () => void;
+  replaceManagementBoardStack: (projectId: ProjectId, ticketStack: readonly TicketId[]) => void;
+  setManagementBoardScrollLeft: (scrollLeft: number) => void;
+  clearManagementBoardContext: () => void;
+  sanitizeManagementBoardContext: (
     projectId: ProjectId,
     validTicketIds: ReadonlySet<TicketId>,
   ) => void;
-  setManagementLastProjectId: (projectId: ProjectId | null) => void;
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
@@ -857,24 +698,17 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
-  setThreadBoardRoot: (threadId, projectId) =>
-    set((state) => setThreadBoardRoot(state, threadId, projectId)),
-  pushThreadBoardTicket: (threadId, projectId, ticketId) =>
-    set((state) => pushThreadBoardTicket(state, threadId, projectId, ticketId)),
-  popThreadBoardTicket: (threadId) => set((state) => popThreadBoardTicket(state, threadId)),
-  replaceThreadBoardStack: (threadId, projectId, ticketStack) =>
-    set((state) => replaceThreadBoardStack(state, threadId, projectId, ticketStack)),
-  setThreadBoardScrollLeft: (threadId, scrollLeft) =>
-    set((state) => setThreadBoardScrollLeft(state, threadId, scrollLeft)),
-  clearThreadBoardContext: (threadId) => set((state) => clearThreadBoardContext(state, threadId)),
-  cloneThreadBoardContext: (sourceThreadId, targetThreadId, projectId) =>
-    set((state) => cloneThreadBoardContext(state, sourceThreadId, targetThreadId, projectId)),
-  initializeThreadBoardContextFromSource: (input) =>
-    set((state) => initializeThreadBoardContextFromSource(state, input)),
-  sanitizeThreadBoardContext: (threadId, projectId, validTicketIds) =>
-    set((state) => sanitizeThreadBoardContext(state, threadId, projectId, validTicketIds)),
-  setManagementLastProjectId: (projectId) =>
-    set((state) => setManagementLastProjectId(state, projectId)),
+  setManagementBoardRoot: (projectId) => set((state) => setManagementBoardRoot(state, projectId)),
+  pushManagementBoardTicket: (projectId, ticketId) =>
+    set((state) => pushManagementBoardTicket(state, projectId, ticketId)),
+  popManagementBoardTicket: () => set((state) => popManagementBoardTicket(state)),
+  replaceManagementBoardStack: (projectId, ticketStack) =>
+    set((state) => replaceManagementBoardStack(state, projectId, ticketStack)),
+  setManagementBoardScrollLeft: (scrollLeft) =>
+    set((state) => setManagementBoardScrollLeft(state, scrollLeft)),
+  clearManagementBoardContext: () => set((state) => clearManagementBoardContext(state)),
+  sanitizeManagementBoardContext: (projectId, validTicketIds) =>
+    set((state) => sanitizeManagementBoardContext(state, projectId, validTicketIds)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
