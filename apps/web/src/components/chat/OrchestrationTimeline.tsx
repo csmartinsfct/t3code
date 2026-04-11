@@ -23,6 +23,7 @@ import type { Thread } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import ReviewOutputCard from "./ReviewOutputCard";
+import { WorkingIndicator } from "./WorkingIndicator";
 
 interface OrchestrationTimelineProps {
   thread: Thread;
@@ -32,6 +33,7 @@ interface OrchestrationTimelineProps {
   timestampFormat: TimestampFormat;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
+  nowIso: string;
   onNavigateToThread: ((threadId: string) => void) | undefined;
   onOpenTicketLink?: (identifier: string) => void | Promise<void>;
 }
@@ -47,12 +49,64 @@ function buildTicketHref(identifier: string): string {
   return `t3://ticket/${encodeURIComponent(identifier)}`;
 }
 
+function normalizeTicketSummary(input: {
+  summary: string;
+  ticketIdentifier: string | undefined;
+}): string {
+  const { summary, ticketIdentifier } = input;
+  if (!ticketIdentifier) {
+    return summary;
+  }
+
+  if (summary === `Completed ticket ${ticketIdentifier}`) {
+    return "Completed ticket";
+  }
+
+  const startedPrefix = `Starting work on ticket ${ticketIdentifier}: `;
+  if (summary.startsWith(startedPrefix)) {
+    return `Starting work on ticket: ${summary.slice(startedPrefix.length)}`;
+  }
+
+  if (summary === `Starting work on ticket ${ticketIdentifier}`) {
+    return "Starting work on ticket";
+  }
+
+  const replacements: Array<[prefix: string, replacement: string]> = [
+    [`Ticket ${ticketIdentifier} is blocked`, "Ticket is blocked"],
+    [`Ticket ${ticketIdentifier} failed unexpectedly`, "Ticket failed unexpectedly"],
+    [
+      `Ticket ${ticketIdentifier} still needs changes after exhausting the review budget`,
+      "Ticket still needs changes after exhausting the review budget",
+    ],
+    [`Ticket ${ticketIdentifier} failed: `, "Ticket failed: "],
+    [`Ticket ${ticketIdentifier} was interrupted`, "Ticket was interrupted"],
+    [`Review failed for ticket ${ticketIdentifier}: `, "Review failed for ticket: "],
+    [`Review for ticket ${ticketIdentifier} was interrupted`, "Review for ticket was interrupted"],
+    [
+      `Review output for ticket ${ticketIdentifier} was invalid`,
+      "Review output for ticket was invalid",
+    ],
+  ];
+
+  for (const [prefix, replacement] of replacements) {
+    if (summary === prefix) {
+      return replacement;
+    }
+    if (summary.startsWith(prefix)) {
+      return `${replacement}${summary.slice(prefix.length)}`;
+    }
+  }
+
+  return summary;
+}
+
 function renderSummaryWithTicketLink(input: {
   summary: string;
   ticketIdentifier: string | undefined;
   onOpenTicketLink: ((identifier: string) => void | Promise<void>) | undefined;
 }): React.ReactNode {
-  const { summary, ticketIdentifier, onOpenTicketLink } = input;
+  const { ticketIdentifier, onOpenTicketLink } = input;
+  const summary = normalizeTicketSummary(input);
   if (!ticketIdentifier) {
     return summary;
   }
@@ -339,6 +393,7 @@ export function OrchestrationTimeline({
   timestampFormat: _timestampFormat,
   markdownCwd,
   workspaceRoot: _workspaceRoot,
+  nowIso,
   onNavigateToThread,
   onOpenTicketLink,
 }: OrchestrationTimelineProps) {
@@ -411,6 +466,11 @@ export function OrchestrationTimeline({
               )}
               {row.kind === "loading" && <LoadingSkeleton />}
               {row.kind === "empty" && <EmptyState />}
+              {row.kind === "working" && (
+                <div className="py-0.5 pl-1.5">
+                  <WorkingIndicator createdAt={row.createdAt} nowIso={nowIso} />
+                </div>
+              )}
             </div>
           );
         })}

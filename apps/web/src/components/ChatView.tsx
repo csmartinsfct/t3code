@@ -1797,8 +1797,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
   }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
   const shouldTickLiveClock = useMemo(
-    () => shouldAdvanceLiveClock({ isWorking, timelineEntries }),
-    [isWorking, timelineEntries],
+    () =>
+      (isOrchestrationThread && activeOrchestrationRun?.status === "running") ||
+      shouldAdvanceLiveClock({ isWorking, timelineEntries }),
+    [activeOrchestrationRun?.status, isOrchestrationThread, isWorking, timelineEntries],
   );
   useEffect(() => {
     if (!shouldTickLiveClock) {
@@ -3003,6 +3005,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
   }, [phase, scheduleStickToBottom, timelineEntries]);
+  useEffect(() => {
+    if (!isOrchestrationThread) return;
+    if (!shouldAutoScrollRef.current) return;
+    scheduleStickToBottom();
+  }, [isOrchestrationThread, orchestrationTimeline.timelineRows, scheduleStickToBottom]);
 
   useEffect(() => {
     setExpandedWorkGroups({});
@@ -5107,6 +5114,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     timestampFormat={timestampFormat}
                     markdownCwd={gitCwd ?? undefined}
                     workspaceRoot={activeProject?.cwd ?? undefined}
+                    nowIso={nowIso}
                     onNavigateToThread={onNavigateToChildThread}
                     onOpenTicketLink={handleOpenTicketLink}
                   />

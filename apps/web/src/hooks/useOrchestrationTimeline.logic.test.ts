@@ -119,7 +119,7 @@ describe("buildOrchestrationTimelineRows", () => {
         makeActivity({
           id: "ticket-started",
           kind: "orchestration.run.ticket.started",
-          summary: "Starting work on ticket T3CO-24",
+          summary: "Starting work on ticket",
           createdAt: "2026-04-09T10:00:00.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
@@ -168,7 +168,7 @@ describe("buildOrchestrationTimelineRows", () => {
         makeActivity({
           id: "ticket-completed",
           kind: "orchestration.run.ticket.completed",
-          summary: "Completed ticket T3CO-24",
+          summary: "Completed ticket",
           createdAt: "2026-04-09T10:00:07.000Z",
           ticketId: "ticket-1",
           ticketIdentifier: "T3CO-24",
@@ -224,7 +224,7 @@ describe("buildOrchestrationTimelineRows", () => {
         return row.id;
       }),
     ).toEqual([
-      "Starting work on ticket T3CO-24",
+      "Starting work on ticket",
       "Initial implementation",
       "Reviewing ticket T3CO-24",
       JSON.stringify({
@@ -235,7 +235,7 @@ describe("buildOrchestrationTimelineRows", () => {
       "Addressed review feedback",
       "Reviewing ticket T3CO-24 again",
       JSON.stringify(finalReview),
-      "Completed ticket T3CO-24",
+      "Completed ticket",
     ]);
   });
 
@@ -451,9 +451,39 @@ describe("buildOrchestrationTimelineRows", () => {
     });
   });
 
+  it("preserves ticket metadata on paused ticket milestones", () => {
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "ticket-paused",
+          kind: "orchestration.run.paused",
+          summary: "Ticket TEST-11 is blocked",
+          createdAt: "2026-04-09T10:00:00.000Z",
+          tone: "error",
+          ticketId: "ticket-1",
+          ticketIdentifier: "TEST-11",
+        }),
+      ],
+      childThreads: [],
+      run: makeRun({ status: "paused" }),
+    });
+
+    expect(rows[0]).toMatchObject({
+      kind: "separator",
+      summary: "Ticket TEST-11 is blocked",
+      ticketIdentifier: "TEST-11",
+    });
+  });
+
   it("renders an old-style waiting implementation block when the active phase has no messages", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [
+        makeActivity({
+          id: "run-started",
+          kind: "orchestration.run.started",
+          summary: "Orchestration started",
+          createdAt: "2026-04-09T09:59:55.000Z",
+        }),
         makeActivity({
           id: "ticket-started",
           kind: "orchestration.run.ticket.started",
@@ -478,6 +508,10 @@ describe("buildOrchestrationTimelineRows", () => {
       emptyStateText: "Waiting for agent response...",
       messages: [],
       isActive: true,
+    });
+    expect(rows.at(-1)).toMatchObject({
+      kind: "working",
+      createdAt: "2026-04-09T09:59:55.000Z",
     });
   });
 
@@ -556,5 +590,58 @@ describe("buildOrchestrationTimelineRows", () => {
       sectionKind: "review",
       reviewIteration: 1,
     });
+  });
+
+  it("uses the latest resume event for the orchestration working timer", () => {
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "run-started",
+          kind: "orchestration.run.started",
+          summary: "Orchestration started",
+          createdAt: "2026-04-09T10:00:00.000Z",
+        }),
+        makeActivity({
+          id: "run-paused",
+          kind: "orchestration.run.paused",
+          summary: "Orchestration paused",
+          createdAt: "2026-04-09T10:02:00.000Z",
+        }),
+        makeActivity({
+          id: "run-resumed",
+          kind: "orchestration.run.resumed",
+          summary: "Orchestration resumed",
+          createdAt: "2026-04-09T10:03:00.000Z",
+        }),
+      ],
+      childThreads: [],
+      run: makeRun({
+        updatedAt: "2026-04-09T10:03:30.000Z",
+      }),
+    });
+
+    expect(rows.at(-1)).toMatchObject({
+      kind: "working",
+      createdAt: "2026-04-09T10:03:00.000Z",
+    });
+  });
+
+  it("omits the orchestration working timer when the run is paused", () => {
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "run-started",
+          kind: "orchestration.run.started",
+          summary: "Orchestration started",
+          createdAt: "2026-04-09T10:00:00.000Z",
+        }),
+      ],
+      childThreads: [],
+      run: makeRun({
+        status: "paused",
+      }),
+    });
+
+    expect(rows.some((row) => row.kind === "working")).toBe(false);
   });
 });

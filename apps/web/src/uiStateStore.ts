@@ -555,7 +555,7 @@ export function setStartupWasWorkingThreads(
 }
 
 export function clearStartupWasWorkingThread(state: UiState, threadId: ThreadId): UiState {
-  if (state.startupRecoveryStateByThreadId[threadId] === "dismissed") {
+  if (state.startupRecoveryStateByThreadId[threadId] !== "active") {
     return state;
   }
   const nextStartupRecoveryStateByThreadId = { ...state.startupRecoveryStateByThreadId };

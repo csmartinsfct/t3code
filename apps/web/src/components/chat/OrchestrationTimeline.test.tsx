@@ -225,6 +225,7 @@ describe("OrchestrationTimeline", () => {
         timestampFormat="locale"
         markdownCwd={undefined}
         workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
         onNavigateToThread={() => {}}
         onOpenTicketLink={() => {}}
       />,
@@ -285,6 +286,7 @@ describe("OrchestrationTimeline", () => {
         timestampFormat="locale"
         markdownCwd={undefined}
         workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
         onNavigateToThread={() => {}}
         onOpenTicketLink={onOpenTicketLink}
       />,
@@ -328,6 +330,7 @@ describe("OrchestrationTimeline", () => {
         timestampFormat="locale"
         markdownCwd={undefined}
         workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
         onNavigateToThread={() => {}}
         onOpenTicketLink={() => {}}
       />,
@@ -335,6 +338,50 @@ describe("OrchestrationTimeline", () => {
 
     expect(markup).toContain('href="t3://ticket/T3CO-169"');
     expect(markup).toContain(">T3CO-169</a>");
+    expect(markup).toContain("Starting work on ticket");
+    expect(markup).not.toContain("Starting work on ticket T3CO-169");
+  });
+
+  it("renders blocked ticket pauses without duplicating the identifier in the label", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "separator",
+          id: "sep:blocked",
+          activityKind: "orchestration.run.paused",
+          summary: "Ticket TEST-11 is blocked",
+          tone: "error",
+          createdAt: "2026-04-09T10:00:00.000Z",
+          ticketIdentifier: "TEST-11",
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
+        onNavigateToThread={() => {}}
+        onOpenTicketLink={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Ticket is blocked");
+    expect(markup).not.toContain("Ticket TEST-11 is blocked");
+    expect(markup).toContain('href="t3://ticket/TEST-11"');
+    expect(markup).toContain(">TEST-11</a>");
   });
 
   it("renders non-prompt review user messages when they are present in timeline blocks", async () => {
@@ -383,6 +430,7 @@ describe("OrchestrationTimeline", () => {
         timestampFormat="locale"
         markdownCwd={undefined}
         workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
         onNavigateToThread={() => {}}
       />,
     );
@@ -390,5 +438,39 @@ describe("OrchestrationTimeline", () => {
     expect(markup).toContain("Human review follow-up");
     expect(markup).toContain("Automated review 2 Approved Looks good now.");
     expect(markup).not.toContain("Continue.");
+  });
+
+  it("renders the shared working timer row for active orchestration runs", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "working",
+          id: "working-indicator-row",
+          createdAt: "2026-04-09T10:00:00.000Z",
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        nowIso="2026-04-09T10:02:21.000Z"
+        onNavigateToThread={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Working for 2m 21s");
   });
 });

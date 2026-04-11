@@ -273,6 +273,20 @@ describe("uiStateStore pure functions", () => {
     });
   });
 
+  it("only dismisses startup recovery markers that were actually active", () => {
+    const thread1 = ThreadId.makeUnsafe("thread-1");
+    const initialState = makeUiState();
+
+    expect(clearStartupWasWorkingThread(initialState, thread1)).toBe(initialState);
+
+    const dismissedState = makeUiState({
+      startupRecoveryStateByThreadId: {
+        [thread1]: "dismissed",
+      },
+    });
+    expect(clearStartupWasWorkingThread(dismissedState, thread1)).toBe(dismissedState);
+  });
+
   it("setThreadBoardRoot initializes board context for a thread", () => {
     const thread1 = ThreadId.makeUnsafe("thread-1");
     const project1 = ProjectId.makeUnsafe("project-1");

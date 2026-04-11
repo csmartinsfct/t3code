@@ -934,6 +934,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       runId: OrchestrationRunId,
       orchestrationThreadId: ThreadId,
       reason: string,
+      ticketContext?: {
+        readonly ticketId: Ticket["id"];
+        readonly ticketIdentifier: Ticket["identifier"];
+      },
     ) =>
       Effect.gen(function* () {
         yield* Effect.logWarning(
@@ -947,6 +951,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           kind: "orchestration.run.paused",
           summary: reason,
           tone: "error",
+          ...(ticketContext
+            ? {
+                payload: {
+                  ticketId: ticketContext.ticketId,
+                  ticketIdentifier: ticketContext.ticketIdentifier,
+                },
+              }
+            : {}),
         }).pipe(Effect.catch(() => Effect.void));
       });
 
@@ -973,7 +985,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           },
         }).pipe(Effect.catch(() => Effect.void));
 
-        yield* pauseRunWithReason(input.runId, input.orchestrationThreadId, reason);
+        yield* pauseRunWithReason(input.runId, input.orchestrationThreadId, reason, {
+          ticketId: input.ticketId,
+          ticketIdentifier: input.ticketIdentifier,
+        });
       });
     };
 
@@ -1371,7 +1386,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               yield* postActivity({
                 threadId: orchestrationThreadId,
                 kind: "orchestration.run.ticket.started",
-                summary: `Starting work on ticket ${ticket.identifier}: ${ticket.title}`,
+                summary: `Starting work on ticket: ${ticket.title}`,
                 payload: {
                   ticketId: entry.ticketId,
                   ticketIdentifier: ticket.identifier,
@@ -1436,6 +1451,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     runId,
                     orchestrationThreadId,
                     `Ticket ${ticket.identifier} failed: ${workOutcome.error ?? "unknown error"}`,
+                    {
+                      ticketId: entry.ticketId,
+                      ticketIdentifier: ticket.identifier,
+                    },
                   );
                   return "blocked" as const;
                 }
@@ -1450,6 +1469,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     runId,
                     orchestrationThreadId,
                     `Ticket ${ticket.identifier} was interrupted${workOutcome.reason ? `: ${workOutcome.reason}` : ""}`,
+                    {
+                      ticketId: entry.ticketId,
+                      ticketIdentifier: ticket.identifier,
+                    },
                   );
                   return "paused" as const;
                 }
@@ -1468,6 +1491,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     runId,
                     orchestrationThreadId,
                     `Ticket ${ticket.identifier} is blocked`,
+                    {
+                      ticketId: entry.ticketId,
+                      ticketIdentifier: ticket.identifier,
+                    },
                   );
                   return "blocked" as const;
                 }
@@ -1482,7 +1509,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   yield* postActivity({
                     threadId: orchestrationThreadId,
                     kind: "orchestration.run.ticket.completed",
-                    summary: `Completed ticket ${ticket.identifier}`,
+                    summary: "Completed ticket",
                     payload: {
                       ticketId: entry.ticketId,
                       ticketIdentifier: ticket.identifier,
@@ -1654,6 +1681,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   runId,
                   orchestrationThreadId,
                   `Review failed for ticket ${ticket.identifier}: ${reviewOutcome.error ?? "unknown error"}`,
+                  {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                  },
                 );
                 return "blocked" as const;
               }
@@ -1668,6 +1699,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   runId,
                   orchestrationThreadId,
                   `Review for ticket ${ticket.identifier} was interrupted${reviewOutcome.reason ? `: ${reviewOutcome.reason}` : ""}`,
+                  {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                  },
                 );
                 return "paused" as const;
               }
@@ -1694,6 +1729,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   runId,
                   orchestrationThreadId,
                   `Review output for ticket ${ticket.identifier} was invalid`,
+                  {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                  },
                 );
                 return "blocked" as const;
               }
@@ -1721,7 +1760,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 yield* postActivity({
                   threadId: orchestrationThreadId,
                   kind: "orchestration.run.ticket.completed",
-                  summary: `Completed ticket ${ticket.identifier}`,
+                  summary: "Completed ticket",
                   payload: {
                     ticketId: entry.ticketId,
                     ticketIdentifier: ticket.identifier,
@@ -1779,6 +1818,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 runId,
                 orchestrationThreadId,
                 `Ticket ${ticket.identifier} still needs changes after exhausting the review budget`,
+                {
+                  ticketId: entry.ticketId,
+                  ticketIdentifier: ticket.identifier,
+                },
               );
               return "blocked" as const;
             }
@@ -1806,6 +1849,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                   runId,
                   orchestrationThreadId,
                   `Ticket ${ticket.identifier} failed unexpectedly`,
+                  {
+                    ticketId: entry.ticketId,
+                    ticketIdentifier: ticket.identifier,
+                  },
                 );
                 return "paused" as const;
               }),

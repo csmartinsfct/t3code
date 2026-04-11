@@ -46,7 +46,18 @@ export interface EmptyRow {
   id: string;
 }
 
-export type OrchestrationTimelineRow = SeparatorRow | ThreadBlockRow | LoadingRow | EmptyRow;
+export interface WorkingRow {
+  kind: "working";
+  id: string;
+  createdAt: string | null;
+}
+
+export type OrchestrationTimelineRow =
+  | SeparatorRow
+  | ThreadBlockRow
+  | LoadingRow
+  | EmptyRow
+  | WorkingRow;
 
 interface BuildRowsInput {
   parentActivities: OrchestrationThreadActivity[];
@@ -153,6 +164,14 @@ export function buildOrchestrationTimelineRows({
   ]);
 
   const rows = partitionMergedItemsIntoRows(mergedItems);
+  const activeRunStartedAt = deriveActiveOrchestrationStartedAt(run, sortedActivities);
+  if (activeRunStartedAt) {
+    rows.push({
+      kind: "working",
+      id: "working-indicator-row",
+      createdAt: activeRunStartedAt,
+    });
+  }
   return rows;
 }
 
@@ -188,6 +207,8 @@ export function estimateOrchestrationTimelineRowHeight(row: OrchestrationTimelin
       return 420;
     case "empty":
       return 220;
+    case "working":
+      return 40;
   }
 }
 
@@ -787,4 +808,21 @@ function getReviewPhaseStart(
     );
 
   return relevant?.createdAt ?? null;
+}
+
+function deriveActiveOrchestrationStartedAt(
+  run: OrchestrationRun,
+  activities: OrchestrationThreadActivity[],
+): string | null {
+  if (run.status !== "running") {
+    return null;
+  }
+
+  const latestRunStartActivity = activities.toReversed().find((activity) => {
+    return (
+      activity.kind === "orchestration.run.started" || activity.kind === "orchestration.run.resumed"
+    );
+  });
+
+  return latestRunStartActivity?.createdAt ?? run.createdAt;
 }
