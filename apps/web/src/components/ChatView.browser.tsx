@@ -654,6 +654,61 @@ function queryToastTitles(): string[] {
   );
 }
 
+function expectNoRemovedConnectionSurfaceArtifacts(): void {
+  const text = document.body.textContent ?? "";
+  for (const removedCopy of [
+    "Cannot reach the T3 server",
+    "WebSocket connection unavailable",
+    "Show connection details",
+    "Some requests are slow",
+    "Disconnected from T3 Server",
+    "Reconnected to T3 Server",
+  ]) {
+    expect(text).not.toContain(removedCopy);
+  }
+
+  expect(queryToastTitles()).not.toEqual(
+    expect.arrayContaining([
+      "Some requests are slow",
+      "Disconnected from T3 Server",
+      "Reconnected to T3 Server",
+      "Offline",
+    ]),
+  );
+  expect(
+    Array.from(document.querySelectorAll("button")).some((button) => {
+      const label = button.textContent?.trim();
+      return label === "Retry" || label === "Retry now";
+    }),
+  ).toBe(false);
+}
+
+function ChatShellRegressionFixture() {
+  return <div data-testid="chat-shell-fixture">keep the chat shell visible</div>;
+}
+
+describe("ChatView shell regressions", () => {
+  it("keeps the reverted chat shell visible without reconnect or slow-request toast storms", async () => {
+    // Audit traceability: 69a1cec, b8a41f3.
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(<ChatShellRegressionFixture />, { container: host });
+
+    try {
+      window.dispatchEvent(new Event("offline"));
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("focus"));
+
+      await expect.element(page.getByTestId("chat-shell-fixture")).toBeInTheDocument();
+      expectNoRemovedConnectionSurfaceArtifacts();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+});
+
 async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
   await waitForWsClient();
   fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
@@ -1024,7 +1079,9 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return null;
   }
   if (tag === WS_METHODS.managedRunsLaunchProjectScript) {
-    const launchBody = body as unknown as Parameters<NativeApi["managedRuns"]["launchProjectScript"]>[0];
+    const launchBody = body as unknown as Parameters<
+      NativeApi["managedRuns"]["launchProjectScript"]
+    >[0];
     const runOverrides = managedRunLaunchSummaryResolver?.(launchBody) ?? {};
     return {
       run: createManagedRunSummary({
