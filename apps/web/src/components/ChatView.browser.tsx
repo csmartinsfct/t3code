@@ -78,6 +78,11 @@ let fixture: TestFixture;
 const rpcHarness = new BrowserWsRpcHarness();
 const wsRequests = rpcHarness.requests;
 let customWsRpcResolver: ((body: NormalizedWsRpcRequestBody) => unknown | undefined) | null = null;
+let managedRunLaunchSummaryResolver:
+  | ((
+      body: Parameters<NativeApi["managedRuns"]["launchProjectScript"]>[0],
+    ) => Partial<ManagedRunSummary> | undefined)
+  | null = null;
 let resolvedMcpServerNames: readonly string[] = [];
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
@@ -570,6 +575,9 @@ function installTestNativeApi(input?: {
   resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
   confirm?: (message: string) => boolean | Promise<boolean>;
   managedRunsOnEvent?: NativeApi["managedRuns"]["onEvent"];
+  managedRunLaunchSummary?: (
+    body: Parameters<NativeApi["managedRuns"]["launchProjectScript"]>[0],
+  ) => Partial<ManagedRunSummary> | undefined;
   dispatchCommand?: (
     input: Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0],
   ) => { sequence: number } | Promise<{ sequence: number }>;
@@ -578,6 +586,7 @@ function installTestNativeApi(input?: {
     position?: { x: number; y: number },
   ) => string | null | Promise<string | null>;
 }): NativeApi {
+  managedRunLaunchSummaryResolver = input?.managedRunLaunchSummary ?? null;
   const base = createWsNativeApi();
   const api: NativeApi = {
     ...base,
@@ -1015,37 +1024,25 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return null;
   }
   if (tag === WS_METHODS.managedRunsLaunchProjectScript) {
+    const launchBody = body as unknown as Parameters<NativeApi["managedRuns"]["launchProjectScript"]>[0];
+    const runOverrides = managedRunLaunchSummaryResolver?.(launchBody) ?? {};
     return {
-      run: {
-        runId: "run-project-script",
-        projectId: body.projectId,
-        scriptId: body.scriptId,
-        createdByThreadId: body.threadId,
-        lastTouchedByThreadId: body.threadId,
-        cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
-        launchMode: "attached",
-        status: "running",
-        detectedUrl: null,
-        detectedPort: null,
-        terminalThreadId: body.threadId,
+      run: createManagedRunSummary({
+        runId: "run-project-script" as ManagedRunSummary["runId"],
+        projectId: launchBody.projectId,
+        scriptId: launchBody.scriptId,
+        createdByThreadId: launchBody.threadId,
+        lastTouchedByThreadId: launchBody.threadId,
+        cwd: typeof launchBody.cwd === "string" ? launchBody.cwd : "/repo/project",
+        terminalThreadId: launchBody.threadId,
         terminalId: "default",
         terminalPid: 123,
-        createdAt: NOW_ISO,
-        updatedAt: NOW_ISO,
-        startedAt: NOW_ISO,
-        completedAt: null,
-        lastExitCode: null,
-        lastExitSignal: null,
-        declaredServices: [],
-        runtimeServices: [],
-        inferenceStatus: "pending",
-        inferenceUpdatedAt: null,
-        inferenceError: null,
-      },
+        ...runOverrides,
+      }),
       terminal: {
-        threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
+        threadId: typeof launchBody.threadId === "string" ? launchBody.threadId : THREAD_ID,
         terminalId: "default",
-        cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
+        cwd: typeof launchBody.cwd === "string" ? launchBody.cwd : "/repo/project",
         status: "running",
         pid: 123,
         history: "",
@@ -1517,6 +1514,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     document.body.innerHTML = "";
     wsRequests.length = 0;
     customWsRpcResolver = null;
+    managedRunLaunchSummaryResolver = null;
     resolvedMcpServerNames = [];
     useComposerDraftStore.setState({
       draftsByThreadId: {},
