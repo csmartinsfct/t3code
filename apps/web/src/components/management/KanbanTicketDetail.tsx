@@ -52,10 +52,7 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
-import {
-  TicketOriginThreadSection,
-  TicketRelatedThreadsSection,
-} from "./TicketOriginThreadSection";
+import { TicketOriginThreadSection } from "./TicketOriginThreadSection";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketLabelPicker } from "./TicketLabelPicker";
@@ -458,8 +455,6 @@ function linkedThreadSignature(thread: TicketLinkedThread | null): string {
         thread.linkedAt,
         thread.archivedAt ?? "",
         thread.isOrchestrationThread ? "review" : "normal",
-        thread.isVisible ? "visible" : "hidden",
-        thread.linkTypes.join(","),
       ].join("|")
     : "null";
 }
@@ -471,11 +466,9 @@ function shouldRefetchThreadLinks(
   if (previousLinks === null) {
     return true;
   }
-  const previousRelated = previousLinks.relatedThreads.map(linkedThreadSignature).join("||");
-  const nextRelated = nextLinks.relatedThreads.map(linkedThreadSignature).join("||");
   return (
     linkedThreadSignature(previousLinks.originThread) !==
-      linkedThreadSignature(nextLinks.originThread) || previousRelated !== nextRelated
+    linkedThreadSignature(nextLinks.originThread)
   );
 }
 
@@ -1029,17 +1022,6 @@ export function KanbanTicketDetail({
         {threadLinks?.originThread && (
           <TicketOriginThreadSection
             thread={threadLinks.originThread}
-            onOpenThread={(nextThreadId) =>
-              void navigate({
-                to: "/$threadId",
-                params: { threadId: nextThreadId },
-              })
-            }
-          />
-        )}
-        {threadLinks && threadLinks.relatedThreads.length > 0 && (
-          <TicketRelatedThreadsSection
-            threads={threadLinks.relatedThreads}
             onOpenThread={(nextThreadId) =>
               void navigate({
                 to: "/$threadId",

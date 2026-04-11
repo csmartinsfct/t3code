@@ -3,13 +3,7 @@ import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 
 // ── Preset palette for new labels ────────────────────────────────────
 
@@ -34,19 +28,13 @@ function pickNewLabelColor(existing: readonly Label[]): string {
 
 // ── Pure helpers (testable) ──────────────────────────────────────────
 
-export function filterLabels(
-  labels: readonly Label[],
-  query: string
-): readonly Label[] {
+export function filterLabels(labels: readonly Label[], query: string): readonly Label[] {
   const q = query.trim().toLowerCase();
   if (!q) return labels;
   return labels.filter((l) => l.name.toLowerCase().includes(q));
 }
 
-export function isLabelAttached(
-  attachedIds: ReadonlySet<string>,
-  labelId: string
-): boolean {
+export function isLabelAttached(attachedIds: ReadonlySet<string>, labelId: string): boolean {
   return attachedIds.has(labelId);
 }
 
@@ -71,10 +59,7 @@ export function TicketLabelPicker({
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const attachedIds = useMemo(
-    () => new Set(labels.map((l) => l.id as string)),
-    [labels]
-  );
+  const attachedIds = useMemo(() => new Set(labels.map((l) => l.id as string)), [labels]);
 
   const fetchLabels = useCallback(async () => {
     try {
@@ -96,10 +81,7 @@ export function TicketLabelPicker({
     }
   }, [open, fetchLabels]);
 
-  const filtered = useMemo(
-    () => filterLabels(allLabels, search),
-    [allLabels, search]
-  );
+  const filtered = useMemo(() => filterLabels(allLabels, search), [allLabels, search]);
 
   const handleToggleLabel = useCallback(
     async (label: Label) => {
@@ -116,7 +98,7 @@ export function TicketLabelPicker({
         console.error("Failed to toggle label:", error);
       }
     },
-    [ticketId, attachedIds, onUpdated]
+    [ticketId, attachedIds, onUpdated],
   );
 
   const handleRemoveLabel = useCallback(
@@ -129,7 +111,7 @@ export function TicketLabelPicker({
         console.error("Failed to remove label:", error);
       }
     },
-    [ticketId, onUpdated]
+    [ticketId, onUpdated],
   );
 
   const handleCreateLabel = useCallback(async () => {
@@ -153,22 +135,11 @@ export function TicketLabelPicker({
     } finally {
       setCreating(false);
     }
-  }, [
-    search,
-    creating,
-    allLabels,
-    projectId,
-    ticketId,
-    onUpdated,
-    fetchLabels,
-  ]);
+  }, [search, creating, allLabels, projectId, ticketId, onUpdated, fetchLabels]);
 
   const exactNameExists = useMemo(
-    () =>
-      allLabels.some(
-        (l) => l.name.toLowerCase() === search.trim().toLowerCase()
-      ),
-    [allLabels, search]
+    () => allLabels.some((l) => l.name.toLowerCase() === search.trim().toLowerCase()),
+    [allLabels, search],
   );
 
   return (
@@ -216,9 +187,7 @@ export function TicketLabelPicker({
                     style={{ backgroundColor: label.color }}
                   />
                   <span className="flex-1 truncate">{label.name}</span>
-                  {attached && (
-                    <CheckIcon className="size-3 shrink-0 opacity-80" />
-                  )}
+                  {attached && <CheckIcon className="size-3 shrink-0 opacity-80" />}
                 </MenuItem>
               );
             })}
@@ -233,10 +202,7 @@ export function TicketLabelPicker({
                 >
                   <PlusIcon className="size-3 shrink-0" />
                   <span className="text-muted-foreground">
-                    Create{" "}
-                    <span className="font-medium text-foreground">
-                      {search.trim()}
-                    </span>
+                    Create <span className="font-medium text-foreground">{search.trim()}</span>
                   </span>
                 </MenuItem>
               </>

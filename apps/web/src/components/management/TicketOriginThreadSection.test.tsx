@@ -13,8 +13,6 @@ function makeThread(overrides: Partial<TicketLinkedThread> = {}): TicketLinkedTh
     archivedAt: "2026-04-10T09:00:00.000Z",
     isOrchestrationThread: true,
     parentThreadId: "parent-thread-1" as TicketLinkedThread["threadId"],
-    linkTypes: ["origin"],
-    isVisible: false,
     linkedAt: "2026-04-10T10:00:00.000Z",
     ...overrides,
   };
@@ -35,7 +33,6 @@ describe("TicketOriginThreadSection", () => {
 
     expect(markup).toContain("Origin Thread");
     expect(markup).toContain("Orchestration JSON Parsing Regression");
-    expect(markup).toContain("Origin");
     expect(markup).toContain("Archived");
     expect(markup).toContain("Review");
     expect(markup).toContain("12h ago");

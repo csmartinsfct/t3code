@@ -9,11 +9,6 @@ interface TicketThreadRowButtonProps {
   readonly onOpenThread: (threadId: string) => void;
 }
 
-const LINK_BADGE_CONFIG = {
-  origin: { label: "Origin", variant: "outline" as const },
-  bound: { label: "Bound", variant: "secondary" as const },
-} satisfies Partial<Record<string, { label: string; variant: string }>>;
-
 export function TicketThreadRowButton({ thread, onOpenThread }: TicketThreadRowButtonProps) {
   return (
     <button
@@ -28,15 +23,6 @@ export function TicketThreadRowButton({ thread, onOpenThread }: TicketThreadRowB
       )}
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         <span className="truncate text-foreground">{thread.title}</span>
-        {thread.linkTypes.map((linkType) => {
-          const config = LINK_BADGE_CONFIG[linkType as keyof typeof LINK_BADGE_CONFIG];
-          if (!config) return null;
-          return (
-            <Badge key={linkType} size="sm" variant={config.variant}>
-              {config.label}
-            </Badge>
-          );
-        })}
         {thread.archivedAt && (
           <Badge size="sm" variant="outline">
             Archived
@@ -69,33 +55,6 @@ export function TicketOriginThreadSection({
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-medium text-muted-foreground">Origin Thread</h3>
       <TicketThreadRowButton thread={thread} onOpenThread={onOpenThread} />
-    </div>
-  );
-}
-
-interface TicketRelatedThreadsSectionProps {
-  readonly threads: readonly TicketLinkedThread[];
-  readonly onOpenThread: (threadId: string) => void;
-}
-
-export function TicketRelatedThreadsSection({
-  threads,
-  onOpenThread,
-}: TicketRelatedThreadsSectionProps) {
-  return (
-    <div className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium text-muted-foreground">
-        Related Threads ({threads.length})
-      </h3>
-      <div className="flex flex-col gap-1">
-        {threads.map((thread) => (
-          <TicketThreadRowButton
-            key={thread.threadId}
-            thread={thread}
-            onOpenThread={onOpenThread}
-          />
-        ))}
-      </div>
     </div>
   );
 }

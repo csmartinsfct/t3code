@@ -8,7 +8,7 @@ import type {
   TicketingStreamEvent,
 } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildTicketDetailLookupInput,
@@ -24,11 +24,7 @@ import {
   SubTicketRowButton,
   resolveTicketDetailStreamEventAction,
 } from "./KanbanTicketDetail";
-import {
-  TicketOriginThreadSection,
-  TicketRelatedThreadsSection,
-  TicketThreadRowButton,
-} from "./TicketOriginThreadSection";
+import { TicketOriginThreadSection, TicketThreadRowButton } from "./TicketOriginThreadSection";
 
 // Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c, b6dd6a5.
 const DETAIL_DESCRIPTION = `- Detail list item
@@ -86,8 +82,6 @@ function makeLinkedThread(overrides: Partial<TicketLinkedThread> = {}): TicketLi
     archivedAt: "2026-04-10T09:00:00.000Z",
     isOrchestrationThread: true,
     parentThreadId: "parent-thread-1" as TicketLinkedThread["threadId"],
-    linkTypes: ["origin"],
-    isVisible: false,
     linkedAt: "2026-04-10T10:00:00.000Z",
     ...overrides,
   };
@@ -122,6 +116,10 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 }
 
 describe("KanbanTicketDetail", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders the read-only ticket description with Markdown/GFM structure", () => {
     const html = renderToStaticMarkup(
       <div className="rounded-md px-3 py-2">
@@ -478,59 +476,30 @@ describe("KanbanTicketDetail", () => {
     ).toBe("refetch");
   });
 
-  it("renders origin and related thread sections with source, state, and review badges", () => {
+  it("renders the origin thread section with inline status and time metadata", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T22:00:00.000Z"));
+
     const html = renderToStaticMarkup(
-      <>
-        <TicketOriginThreadSection thread={makeLinkedThread()} onOpenThread={() => undefined} />
-        <TicketRelatedThreadsSection
-          threads={[
-            makeLinkedThread({
-              threadId: "thread-2" as TicketLinkedThread["threadId"],
-              title: "Visible implementation thread",
-              archivedAt: null,
-              isOrchestrationThread: false,
-              parentThreadId: null,
-              linkTypes: ["bound", "mention"],
-              isVisible: true,
-              linkedAt: "2026-04-10T11:00:00.000Z",
-            }),
-          ]}
-          onOpenThread={() => undefined}
-        />
-      </>,
+      <TicketOriginThreadSection thread={makeLinkedThread()} onOpenThread={() => undefined} />,
     );
 
     expect(html).toContain("Origin Thread");
-    expect(html).toContain("Related Threads (1)");
-    expect(html).toContain("Origin");
-    expect(html).toContain("Bound");
     expect(html).toContain("Archived");
     expect(html).toContain("Review");
+    expect(html).toContain("12h ago");
   });
 
-  it("wires thread-row navigation for both hidden and visible linked threads", () => {
+  it("wires thread-row navigation for the origin thread row", () => {
     const onOpenThread = vi.fn();
 
-    const hiddenThreadRow = TicketThreadRowButton({
+    const threadRow = TicketThreadRowButton({
       thread: makeLinkedThread(),
       onOpenThread,
     });
-    const visibleThreadRow = TicketThreadRowButton({
-      thread: makeLinkedThread({
-        threadId: "thread-2" as TicketLinkedThread["threadId"],
-        archivedAt: null,
-        isOrchestrationThread: false,
-        parentThreadId: null,
-        linkTypes: ["bound", "mention"],
-        isVisible: true,
-      }),
-      onOpenThread,
-    });
 
-    hiddenThreadRow.props.onClick();
-    visibleThreadRow.props.onClick();
+    threadRow.props.onClick();
 
-    expect(onOpenThread).toHaveBeenNthCalledWith(1, "thread-1");
-    expect(onOpenThread).toHaveBeenNthCalledWith(2, "thread-2");
+    expect(onOpenThread).toHaveBeenCalledWith("thread-1");
   });
 });

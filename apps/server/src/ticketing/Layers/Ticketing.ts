@@ -229,9 +229,6 @@ const makeTicketingService = Effect.gen(function* () {
     if (!linkedRow) {
       return null;
     }
-    const linkTypes = (["origin", "bound", "mention"] as const).filter((linkType) =>
-      rows.some((row) => row.linkType === linkType),
-    );
 
     return {
       threadId: firstRow.threadId,
@@ -241,9 +238,6 @@ const makeTicketingService = Effect.gen(function* () {
       archivedAt: firstRow.threadArchivedAt,
       isOrchestrationThread: firstRow.isOrchestrationThread,
       parentThreadId: firstRow.parentThreadId,
-      linkTypes,
-      // Keep this visibility rule in sync with the detail-view refresh signature on the web side.
-      isVisible: firstRow.threadArchivedAt === null && firstRow.parentThreadId === null,
       linkedAt: linkedRow.createdAt,
     };
   };
@@ -359,7 +353,7 @@ const makeTicketingService = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* resolveTicketOrFail(input.ticketId);
       const rows = yield* ticketThreadLinkRepository
-        .listByTicketId({ ticketId: input.ticketId })
+        .listByTicketId({ ticketId: input.ticketId, linkTypes: ["origin"] })
         .pipe(Effect.mapError(toOperationError("getThreadLinks")));
 
       const rowsByThreadId = new Map<string, TicketThreadLinkLookupRow[]>();
@@ -396,18 +390,10 @@ const makeTicketingService = Effect.gen(function* () {
             preferredLinkTypes: ["origin"],
           })
         : null;
-      const relatedThreads = [...rowsByThreadId.entries()]
-        .filter(([threadId]) => threadId !== selectedOriginThreadId)
-        .map(([, threadRows]) =>
-          toLinkedThread(threadRows, { preferredLinkTypes: ["bound", "mention"] }),
-        )
-        .filter((thread): thread is TicketLinkedThread => thread !== null)
-        .toSorted((left, right) => right.linkedAt.localeCompare(left.linkedAt));
 
       return {
         ticketId: input.ticketId,
         originThread,
-        relatedThreads,
       } satisfies TicketThreadLinks;
     });
 
