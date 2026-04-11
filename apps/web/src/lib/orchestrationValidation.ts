@@ -108,6 +108,7 @@ export function buildOrchestrationPlan(
     { dependsOnTicketId: TicketId; identifier: string; title: string; status: TicketStatus }[]
   >();
   const childIdsByParentId = new Map<TicketId, TicketId[]>();
+  const parentIdByChildId = new Map<TicketId, TicketId>();
 
   const addChildId = (parentId: TicketId, childId: TicketId) => {
     const existing = childIdsByParentId.get(parentId);
@@ -135,6 +136,7 @@ export function buildOrchestrationPlan(
         for (const child of node.children) {
           if (child?.ticket?.id) {
             addChildId(node.ticket.id, child.ticket.id);
+            parentIdByChildId.set(child.ticket.id, node.ticket.id);
           }
         }
         walkTree(node.children as readonly TicketTreeNode[]);
@@ -147,17 +149,76 @@ export function buildOrchestrationPlan(
   // might only appear as children).
   for (const t of allTickets) {
     if (!ticketById.has(t.id)) ticketById.set(t.id, t);
-    if (t.parentId) addChildId(t.parentId, t.id);
+    if (t.parentId) {
+      addChildId(t.parentId, t.id);
+      parentIdByChildId.set(t.id, t.parentId);
+    }
   }
 
   for (const [parentId, childIds] of childIdsByParentId) {
     childIdsByParentId.set(parentId, sortTicketIdsByBoardOrder(childIds, ticketById));
   }
 
+  const leafExecutionIdsByTicketId = new Map<TicketId, TicketId[]>();
   const collectLeafExecutionIds = (ticketId: TicketId): TicketId[] => {
+    const cached = leafExecutionIdsByTicketId.get(ticketId);
+    if (cached) return cached;
     const childIds = childIdsByParentId.get(ticketId) ?? [];
-    if (childIds.length === 0) return [ticketId];
-    return childIds.flatMap((childId) => collectLeafExecutionIds(childId));
+    const collected =
+      childIds.length === 0
+        ? [ticketId]
+        : childIds.flatMap((childId) => collectLeafExecutionIds(childId));
+    leafExecutionIdsByTicketId.set(ticketId, collected);
+    return collected;
+  };
+
+  const subtreeIdsByTicketId = new Map<TicketId, TicketId[]>();
+  const collectSelectedTreeIds = (ticketId: TicketId): TicketId[] => {
+    const cached = subtreeIdsByTicketId.get(ticketId);
+    if (cached) return cached;
+    const childIds = childIdsByParentId.get(ticketId) ?? [];
+    const collected = [ticketId, ...childIds.flatMap((childId) => collectSelectedTreeIds(childId))];
+    subtreeIdsByTicketId.set(ticketId, collected);
+    return collected;
+  };
+
+  const selectedTreeIds = new Set<TicketId>();
+  for (const selectedId of selectedIds) {
+    for (const treeId of collectSelectedTreeIds(selectedId)) {
+      selectedTreeIds.add(treeId);
+    }
+  }
+
+  const dependencyChainByTicketId = new Map<
+    TicketId,
+    { dependsOnTicketId: TicketId; identifier: string; title: string; status: TicketStatus }[]
+  >();
+  const collectInheritedDependencies = (
+    ticketId: TicketId,
+  ): { dependsOnTicketId: TicketId; identifier: string; title: string; status: TicketStatus }[] => {
+    const cached = dependencyChainByTicketId.get(ticketId);
+    if (cached) return cached;
+
+    const collected: {
+      dependsOnTicketId: TicketId;
+      identifier: string;
+      title: string;
+      status: TicketStatus;
+    }[] = [];
+    const seenDependencyIds = new Set<TicketId>();
+    let currentTicketId: TicketId | undefined = ticketId;
+
+    while (currentTicketId) {
+      for (const dependency of depsById.get(currentTicketId) ?? []) {
+        if (seenDependencyIds.has(dependency.dependsOnTicketId)) continue;
+        seenDependencyIds.add(dependency.dependsOnTicketId);
+        collected.push(dependency);
+      }
+      currentTicketId = parentIdByChildId.get(currentTicketId);
+    }
+
+    dependencyChainByTicketId.set(ticketId, collected);
+    return collected;
   };
 
   const executionIds = new Set<TicketId>();
@@ -180,15 +241,25 @@ export function buildOrchestrationPlan(
 
   const TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set(["done", "canceled"]);
   const externalDeps: ExternalDep[] = [];
+  const seenExternalDeps = new Set<string>();
 
   for (const ticket of selectedTickets) {
-    const deps = depsById.get(ticket.id) ?? [];
+    const deps = collectInheritedDependencies(ticket.id);
     for (const dep of deps) {
-      if (executionIds.has(dep.dependsOnTicketId)) continue; // internal
-      if (TERMINAL_STATUSES.has(dep.status)) continue; // already done
+      if (selectedTreeIds.has(dep.dependsOnTicketId)) continue; // internal
+      const depTicket = ticketById.get(dep.dependsOnTicketId);
+      const depStatus = depTicket?.status ?? dep.status;
+      if (TERMINAL_STATUSES.has(depStatus)) continue; // already done
+      const externalDepKey = `${ticket.id}:${dep.dependsOnTicketId}`;
+      if (seenExternalDeps.has(externalDepKey)) continue;
+      seenExternalDeps.add(externalDepKey);
       externalDeps.push({
         ticket,
-        dependsOn: { identifier: dep.identifier, title: dep.title, status: dep.status },
+        dependsOn: {
+          identifier: depTicket?.identifier ?? dep.identifier,
+          title: depTicket?.title ?? dep.title,
+          status: depStatus,
+        },
       });
     }
   }
@@ -210,13 +281,17 @@ export function buildOrchestrationPlan(
 
   const internalEdges: { from: TicketSummary; to: TicketSummary }[] = [];
   for (const ticket of runnableTickets) {
-    const deps = depsById.get(ticket.id) ?? [];
+    const deps = collectInheritedDependencies(ticket.id);
+    const seenInternalDependencyIds = new Set<TicketId>();
     for (const dep of deps) {
-      if (!executionIds.has(dep.dependsOnTicketId)) continue;
-      if (TERMINAL_STATUSES.has(dep.status)) continue; // skip done deps
-      const depTicket = ticketById.get(dep.dependsOnTicketId);
-      if (depTicket) {
+      if (!selectedTreeIds.has(dep.dependsOnTicketId)) continue;
+      for (const depExecutionId of collectLeafExecutionIds(dep.dependsOnTicketId)) {
+        if (!executionIds.has(depExecutionId)) continue;
+        if (depExecutionId === ticket.id || seenInternalDependencyIds.has(depExecutionId)) continue;
+        const depTicket = ticketById.get(depExecutionId);
+        if (!depTicket || TERMINAL_STATUSES.has(depTicket.status)) continue;
         internalEdges.push({ from: ticket, to: depTicket });
+        seenInternalDependencyIds.add(depExecutionId);
       }
     }
   }

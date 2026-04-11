@@ -122,6 +122,96 @@ describe("buildOrchestrationPlan", () => {
     }
   });
 
+  it("inherits parent dependencies when ordering selected leaf subtickets", () => {
+    const root = makeTicket({ id: "root" as TicketId, identifier: "T-ROOT" });
+    const phase2 = makeTicket({
+      id: "phase-2" as TicketId,
+      identifier: "T-PHASE-2",
+      parentId: "root" as TicketId,
+    });
+    const phase4 = makeTicket({
+      id: "phase-4" as TicketId,
+      identifier: "T-PHASE-4",
+      parentId: "root" as TicketId,
+    });
+    const phase2Leaf = makeTicket({
+      id: "phase-2-leaf" as TicketId,
+      identifier: "T-PHASE-2-LEAF",
+      parentId: "phase-2" as TicketId,
+      status: "todo",
+      sortOrder: 2000,
+    });
+    const phase4Leaf = makeTicket({
+      id: "phase-4-leaf" as TicketId,
+      identifier: "T-PHASE-4-LEAF",
+      parentId: "phase-4" as TicketId,
+      status: "backlog",
+      sortOrder: 1000,
+    });
+    const tree = [
+      makeTreeNode(
+        root,
+        [],
+        [
+          makeTreeNode(phase2, [], [makeTreeNode(phase2Leaf)]),
+          makeTreeNode(
+            phase4,
+            [makeDep("phase-4" as TicketId, "phase-2" as TicketId, "T-PHASE-2")],
+            [makeTreeNode(phase4Leaf)],
+          ),
+        ],
+      ),
+    ];
+
+    const plan = buildOrchestrationPlan(new Set(["root" as TicketId]), tree, [
+      root,
+      phase2,
+      phase4,
+      phase2Leaf,
+      phase4Leaf,
+    ]);
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
+      expect(plan.orderedTickets.map((entry) => entry.ticket.identifier)).toEqual([
+        "T-PHASE-2-LEAF",
+        "T-PHASE-4-LEAF",
+      ]);
+    }
+  });
+
+  it("blocks a selected leaf when its parent has an unmet external dependency", () => {
+    const phase2 = makeTicket({ id: "phase-2" as TicketId, identifier: "T-PHASE-2" });
+    const phase4 = makeTicket({ id: "phase-4" as TicketId, identifier: "T-PHASE-4" });
+    const phase4Leaf = makeTicket({
+      id: "phase-4-leaf" as TicketId,
+      identifier: "T-PHASE-4-LEAF",
+      parentId: "phase-4" as TicketId,
+    });
+    const tree = [
+      makeTreeNode(phase2),
+      makeTreeNode(
+        phase4,
+        [makeDep("phase-4" as TicketId, "phase-2" as TicketId, "T-PHASE-2")],
+        [makeTreeNode(phase4Leaf)],
+      ),
+    ];
+
+    const plan = buildOrchestrationPlan(new Set(["phase-4-leaf" as TicketId]), tree, [
+      phase2,
+      phase4,
+      phase4Leaf,
+    ]);
+    expect(plan.kind).toBe("blocked-external");
+    if (plan.kind === "blocked-external") {
+      expect(plan.externalDeps).toEqual([
+        expect.objectContaining({
+          ticket: expect.objectContaining({ identifier: "T-PHASE-4-LEAF" }),
+          dependsOn: expect.objectContaining({ identifier: "T-PHASE-2" }),
+        }),
+      ]);
+    }
+  });
+
   it("does not crash when sibling tree nodes arrive without nested dependency data", () => {
     const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
     const child = makeTicket({
