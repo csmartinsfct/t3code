@@ -1,3 +1,5 @@
+import { expect, vi } from "vitest";
+
 export function dispatchModifiedClick(
   element: HTMLButtonElement,
   modifiers: { altKey?: boolean; shiftKey?: boolean },
@@ -23,4 +25,44 @@ export function findButtonByText(host: HTMLElement, text: string): HTMLButtonEle
     throw new Error(`Unable to find button containing "${text}"`);
   }
   return button;
+}
+
+export async function waitForElement<T extends Element>(
+  query: () => T | null,
+  errorMessage: string,
+): Promise<T> {
+  let element: T | null = null;
+  await vi.waitFor(
+    () => {
+      element = query();
+      expect(element, errorMessage).toBeTruthy();
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  if (!element) {
+    throw new Error(errorMessage);
+  }
+  return element;
+}
+
+export function createTextClipboardData(text: string): DataTransfer {
+  return {
+    files: [],
+    items: [],
+    types: ["text/plain"],
+    getData: (type: string) => (type === "text/plain" ? text : ""),
+  } as unknown as DataTransfer;
+}
+
+export function dispatchTextPaste(target: HTMLElement, text: string): ClipboardEvent {
+  const event = new ClipboardEvent("paste", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: createTextClipboardData(text),
+  });
+  target.dispatchEvent(event);
+  return event;
 }

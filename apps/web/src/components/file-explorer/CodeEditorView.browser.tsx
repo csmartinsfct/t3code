@@ -9,6 +9,7 @@ import {
   type ClipboardSnippetEntry,
 } from "../../clipboardSnippetRegistry";
 import { DEFAULT_EDITOR_SETTINGS } from "../../fileExplorerEditorSettingsStore";
+import { waitForElement } from "../../test-utils/browser";
 
 import { CodeEditorView } from "./CodeEditorView";
 
@@ -20,21 +21,6 @@ const EXPECTED_ENTRY: ClipboardSnippetEntry = {
   startLine: 1,
   endLine: 2,
 };
-
-async function waitForElement<T extends Element>(
-  query: () => T | null,
-  errorMessage: string,
-): Promise<T> {
-  let element: T | null = null;
-  await vi.waitFor(
-    () => {
-      element = query();
-      expect(element, errorMessage).toBeTruthy();
-    },
-    { timeout: 8_000, interval: 16 },
-  );
-  return element!;
-}
 
 describe("CodeEditorView clipboard copy", () => {
   beforeEach(() => {

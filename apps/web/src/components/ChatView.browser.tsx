@@ -45,6 +45,7 @@ import { makeTabIdFromPath, useFileExplorerStore } from "../fileExplorerStore";
 import { relativePathWithinWorkspace } from "../fileLinkRouting";
 import { applyServerConfigEvent } from "../rpc/serverState";
 import { useStore } from "../store";
+import { dispatchTextPaste, waitForElement } from "../test-utils/browser";
 import type { SidebarThreadSummary, Thread } from "../types";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { createReadyServerProvider } from "../test/providerTestUtils";
@@ -1038,27 +1039,6 @@ async function waitForProductionStyles(): Promise<void> {
   );
 }
 
-async function waitForElement<T extends Element>(
-  query: () => T | null,
-  errorMessage: string,
-): Promise<T> {
-  let element: T | null = null;
-  await vi.waitFor(
-    () => {
-      element = query();
-      expect(element, errorMessage).toBeTruthy();
-    },
-    {
-      timeout: 8_000,
-      interval: 16,
-    },
-  );
-  if (!element) {
-    throw new Error(errorMessage);
-  }
-  return element;
-}
-
 async function waitForURL(
   router: ReturnType<typeof getRouter>,
   predicate: (pathname: string) => boolean,
@@ -1080,28 +1060,6 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
     () => document.querySelector<HTMLElement>('[contenteditable="true"]'),
     "Unable to find composer editor.",
   );
-}
-
-function createTextClipboardData(text: string): DataTransfer {
-  return {
-    files: [],
-    items: [],
-    types: ["text/plain"],
-    getData: (type: string) => (type === "text/plain" ? text : ""),
-  } as unknown as DataTransfer;
-}
-
-function dispatchTextPaste(target: HTMLElement, text: string): ClipboardEvent {
-  const event = new ClipboardEvent("paste", {
-    bubbles: true,
-    cancelable: true,
-  });
-  Object.defineProperty(event, "clipboardData", {
-    configurable: true,
-    value: createTextClipboardData(text),
-  });
-  target.dispatchEvent(event);
-  return event;
 }
 
 async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {

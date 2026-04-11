@@ -8,6 +8,7 @@ import { render } from "vitest-browser-react";
 
 import { __resetNativeApiForTests } from "~/nativeApi";
 import { makeTabIdFromPath, useFileExplorerStore } from "~/fileExplorerStore";
+import { waitForElement } from "../../test-utils/browser";
 
 import { FileExplorerPanelShell, type FileExplorerPanelMode } from "../FileExplorerPanelShell";
 import FileExplorer from "./FileExplorer";
@@ -101,21 +102,6 @@ async function renderExplorer(mode: FileExplorerPanelMode, onClose = vi.fn()) {
     unmount: () => screen.unmount(),
     onClose,
   };
-}
-
-async function waitForElement<T extends Element>(
-  query: () => T | null,
-  errorMessage: string,
-): Promise<T> {
-  let element: T | null = null;
-  await vi.waitFor(
-    () => {
-      element = query();
-      expect(element, errorMessage).toBeTruthy();
-    },
-    { timeout: 8_000, interval: 16 },
-  );
-  return element!;
 }
 
 describe("FileExplorer", () => {

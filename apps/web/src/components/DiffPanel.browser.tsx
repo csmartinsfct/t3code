@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { consumeClipboardSnippet } from "../clipboardSnippetRegistry";
+import { createTextClipboardData, waitForElement } from "../test-utils/browser";
 
 import { DiffPanelShell } from "./DiffPanelShell";
 
@@ -13,21 +14,6 @@ const DIFF_TEXT = [
   "-const before = 1;",
   "+const after = 2;",
 ].join("\n");
-
-async function waitForElement<T extends Element>(
-  query: () => T | null,
-  errorMessage: string,
-): Promise<T> {
-  let element: T | null = null;
-  await vi.waitFor(
-    () => {
-      element = query();
-      expect(element, errorMessage).toBeTruthy();
-    },
-    { timeout: 8_000, interval: 16 },
-  );
-  return element!;
-}
 
 describe("DiffPanel clipboard copy", () => {
   afterEach(() => {
@@ -67,10 +53,7 @@ describe("DiffPanel clipboard copy", () => {
       Object.defineProperty(copyEvent, "clipboardData", {
         configurable: true,
         value: {
-          files: [],
-          items: [],
-          types: ["text/plain"],
-          getData: () => DIFF_TEXT,
+          ...createTextClipboardData(DIFF_TEXT),
           setData: vi.fn(),
         },
       });
