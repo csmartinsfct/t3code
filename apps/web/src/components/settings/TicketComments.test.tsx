@@ -39,7 +39,7 @@ describe("TicketComments", () => {
     const reply = makeComment({
       id: "comment-2" as Comment["id"],
       parentId: rootComment.id,
-      body: "> Reply quote with \`reply code\`",
+      body: "> Reply quote with `reply code`",
     });
 
     const html = renderToStaticMarkup(

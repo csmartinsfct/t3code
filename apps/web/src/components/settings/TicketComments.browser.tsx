@@ -127,6 +127,8 @@ describe("TicketComments delete coverage", () => {
           ),
         )
         .toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Cancel" }).first().click();
     } finally {
       await mounted.cleanup();
     }
