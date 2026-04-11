@@ -21,9 +21,7 @@
           "title": "Improved sidebar run status visibility",
           "summary": "The sidebar now provides clearer status feedback for active runs, making it easier to track what the app is doing at a glance.",
           "category": "improvement",
-          "commitShas": [
-            "e2741c23462dba0545d9ae86d37a807514840696"
-          ]
+          "commitShas": ["e2741c23462dba0545d9ae86d37a807514840696"]
         },
         {
           "id": "c3ffb285a6289bf3",
@@ -72,9 +70,7 @@
           "title": "Ticket views now focus on the original thread",
           "summary": "Ticket details now link back to the origin thread in a simpler, more direct way, reducing clutter in ticket-related navigation.",
           "category": "improvement",
-          "commitShas": [
-            "d6d04f418541c5c2207cceb5cb126cb8725e8a20"
-          ]
+          "commitShas": ["d6d04f418541c5c2207cceb5cb126cb8725e8a20"]
         }
       ]
     },
@@ -138,9 +134,7 @@
           "title": "Sub-tickets can now be promoted to top-level board tickets",
           "summary": "You can now move sub-tickets onto the main board, including support for both single-ticket and bulk promotion flows.",
           "category": "feature",
-          "commitShas": [
-            "30186add436314d1a27b71155500fcffdb4d32b1"
-          ]
+          "commitShas": ["30186add436314d1a27b71155500fcffdb4d32b1"]
         },
         {
           "id": "e79e843538f2ba04",
@@ -158,36 +152,28 @@
           "title": "Follow-up review passes include better context",
           "summary": "Later review iterations now carry forward prior review context and delta-focused comparisons, making repeated review cycles easier to follow.",
           "category": "improvement",
-          "commitShas": [
-            "fdb94c8a1642921fc5122bba1ad102933c67fbd9"
-          ]
+          "commitShas": ["fdb94c8a1642921fc5122bba1ad102933c67fbd9"]
         },
         {
           "id": "35bc606c7606ca9a",
           "title": "Ticket details now focus on the origin thread",
           "summary": "Ticket details now show the originating thread more directly instead of aggregating related threads, making it easier to understand where work started.",
           "category": "improvement",
-          "commitShas": [
-            "36367c228566af25e35a94d1cca2a16c6558ea06"
-          ]
+          "commitShas": ["36367c228566af25e35a94d1cca2a16c6558ea06"]
         },
         {
           "id": "bb0fd7166f6b4466",
           "title": "Review feedback is shown in a more consistent format",
           "summary": "Review suggestions are now normalized into comments, improving compatibility across older and newer review outputs.",
           "category": "fix",
-          "commitShas": [
-            "e7b514de94ed68d0150955519bd8a1aeeb8bd199"
-          ]
+          "commitShas": ["e7b514de94ed68d0150955519bd8a1aeeb8bd199"]
         },
         {
           "id": "9b4eca0d8ffbd6e8",
           "title": "Collapsed sidebar navigation is easier to access",
           "summary": "A dedicated toggle now remains available when the sidebar is collapsed across chat, settings, and board views.",
           "category": "improvement",
-          "commitShas": [
-            "4fc2aa3a5237386ea6c979cf1a8ae363a0f39681"
-          ]
+          "commitShas": ["4fc2aa3a5237386ea6c979cf1a8ae363a0f39681"]
         },
         {
           "id": "d3043a3f1a61a4ee",
@@ -214,9 +200,7 @@
           "title": "Stopping sessions is more robust when bindings are already gone",
           "summary": "Session shutdown now handles missing provider bindings more gracefully, reducing avoidable failures during stop operations.",
           "category": "fix",
-          "commitShas": [
-            "75aeb263e28da40049d1c63d2d1b84bd36976cb4"
-          ]
+          "commitShas": ["75aeb263e28da40049d1c63d2d1b84bd36976cb4"]
         },
         {
           "id": "11256693f7fcead7",
@@ -244,45 +228,35 @@
           "title": "Runs can skip review threads entirely when automated review is disabled",
           "summary": "If automated review is turned off, orchestration now completes work directly without creating unnecessary review threads, making no-review runs faster and less cluttered.",
           "category": "improvement",
-          "commitShas": [
-            "cf1cd3d0ce48747876c73af2519cadd476097fc1"
-          ]
+          "commitShas": ["cf1cd3d0ce48747876c73af2519cadd476097fc1"]
         },
         {
           "id": "1fa9b9011091374a",
           "title": "Review output parsing is more resilient",
           "summary": "Review results now parse more reliably when returned as prose or fenced JSON, reducing failed review displays from wrapped responses.",
           "category": "fix",
-          "commitShas": [
-            "af068be047eaaf30e660adf7bdbe64f6f9ebc96b"
-          ]
+          "commitShas": ["af068be047eaaf30e660adf7bdbe64f6f9ebc96b"]
         },
         {
           "id": "fbf9926242d8b145",
           "title": "Orchestration confirmation now shows clearer provider names",
           "summary": "The orchestration confirmation dialog now uses normalized provider display names so model selections are easier to understand.",
           "category": "improvement",
-          "commitShas": [
-            "02d7f7e23d67700b6ce60ef570199a7498387b85"
-          ]
+          "commitShas": ["02d7f7e23d67700b6ce60ef570199a7498387b85"]
         },
         {
           "id": "78c17a69e8a8c432",
           "title": "Ticket identifiers are now project-scoped",
           "summary": "Ticket identifiers now resolve within a project instead of globally, which avoids collisions across projects and keeps ticket references predictable.",
           "category": "breaking",
-          "commitShas": [
-            "3dd639109702a10a12dc300e33ee509296f55d7e"
-          ]
+          "commitShas": ["3dd639109702a10a12dc300e33ee509296f55d7e"]
         },
         {
           "id": "bf2af1d7dc0e5e64",
           "title": "New threads now inherit the current board context",
           "summary": "Starting a new thread from the same project now carries forward the current board ticket stack and scroll position for a smoother workflow.",
           "category": "improvement",
-          "commitShas": [
-            "90a6727a4963a18bd7dfc37e359b3e0ad829a98f"
-          ]
+          "commitShas": ["90a6727a4963a18bd7dfc37e359b3e0ad829a98f"]
         },
         {
           "id": "5c5f15523da8fa57",
@@ -308,27 +282,21 @@
           "title": "Tickets can now track their linked conversation threads",
           "summary": "Tickets now keep track of their related threads, improving continuity between ticket work and the conversations created from it.",
           "category": "feature",
-          "commitShas": [
-            "96da4f9d692952771c0b1be329f961314c8e5040"
-          ]
+          "commitShas": ["96da4f9d692952771c0b1be329f961314c8e5040"]
         },
         {
           "id": "04e04f53e99abe8f",
           "title": "Board and ticket context is now scoped more safely by project",
           "summary": "Board state, ticket lookups, and orchestration startup now stay aligned to the selected project, reducing stale or cross-project state issues.",
           "category": "fix",
-          "commitShas": [
-            "be79d4bbc66346c541115b9972a098375034e40b"
-          ]
+          "commitShas": ["be79d4bbc66346c541115b9972a098375034e40b"]
         },
         {
           "id": "df63c807ba30b86c",
           "title": "Orchestration model selection is now explicit and configurable",
           "summary": "You can now choose implementer and reviewer models separately in orchestration settings, with optional per-ticket overrides for more predictable run behavior.",
           "category": "feature",
-          "commitShas": [
-            "6abc9675eaee17f7bbd3b15527c1dc137d5040a3"
-          ]
+          "commitShas": ["6abc9675eaee17f7bbd3b15527c1dc137d5040a3"]
         },
         {
           "id": "2056c330db17f1e8",
@@ -345,18 +313,14 @@
           "title": "Ticket settings now support deleting comments and replies",
           "summary": "Ticket settings now include delete actions for comments and replies, with confirmation before removal.",
           "category": "feature",
-          "commitShas": [
-            "f2b4ce3921d16154147e7a62215f83f2e148a4ab"
-          ]
+          "commitShas": ["f2b4ce3921d16154147e7a62215f83f2e148a4ab"]
         },
         {
           "id": "15cf8869ec3b29f3",
           "title": "Orchestration timeline and navigation were redesigned",
           "summary": "The orchestration timeline now better matches the rest of the app, with cleaner progress states, simpler thread navigation, and less visual noise while following run activity.",
           "category": "improvement",
-          "commitShas": [
-            "22cd7ddb83420f50fd19c753d606c863ccd671ff"
-          ]
+          "commitShas": ["22cd7ddb83420f50fd19c753d606c863ccd671ff"]
         },
         {
           "id": "dc0a8f485922c72c",
@@ -376,9 +340,7 @@
           "title": "Parent tickets now expand into subtasks during orchestration",
           "summary": "Orchestration now expands parent tickets into their subtasks so planned work is represented more accurately.",
           "category": "fix",
-          "commitShas": [
-            "8912d5e39a9d8050a8e15d5f6fecb87c48abb52f"
-          ]
+          "commitShas": ["8912d5e39a9d8050a8e15d5f6fecb87c48abb52f"]
         }
       ]
     }
