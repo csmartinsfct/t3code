@@ -1,4 +1,4 @@
-import type { NativeApi, ThreadId } from "@t3tools/contracts";
+import type { NativeApi, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -43,7 +43,7 @@ function makeThread(input: {
             orchestrationStatus: input.sessionStatus === "closed" ? "stopped" : "running",
             createdAt: "2026-04-11T08:00:00.000Z",
             updatedAt: "2026-04-11T08:00:00.000Z",
-            ...(input.sessionStatus === "running" ? { activeTurnId: "turn-1" as never } : {}),
+            ...(input.sessionStatus === "running" ? { activeTurnId: "turn-1" as TurnId } : {}),
           },
     messages: [],
     proposedPlans: [],

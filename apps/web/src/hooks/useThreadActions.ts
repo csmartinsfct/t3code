@@ -161,15 +161,15 @@ export async function deleteThreadWithCascade(
   }
 
   const shouldNavigateToFallback = routeThreadId === threadId;
-  const deletedThreadIdsForFallback =
-    deletedIds || cascadedDeletedThreadIds.size > 0
-      ? new Set<ThreadId>([...(deletedIds ?? []), ...cascadedDeletedThreadIds])
-      : null;
+  const deletedThreadIdsForFallback = new Set<ThreadId>([
+    ...(deletedIds ?? []),
+    ...cascadedDeletedThreadIds,
+  ]);
   const fallbackThreadId = getFallbackThreadIdAfterDelete({
     threads,
     deletedThreadId: threadId,
     sortOrder,
-    ...(deletedThreadIdsForFallback ? { deletedThreadIds: deletedThreadIdsForFallback } : {}),
+    deletedThreadIds: deletedThreadIdsForFallback,
   });
   await api.orchestration.dispatchCommand({
     type: "thread.delete",
