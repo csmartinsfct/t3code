@@ -2,6 +2,7 @@
 import "../index.css";
 
 import {
+  type ContextMenuItem,
   EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
@@ -31,6 +32,7 @@ import { render } from "vitest-browser-react";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { clearPromotedDraftThread } from "../composerDraftStore";
 import { registerClipboardSnippet } from "../clipboardSnippetRegistry";
+import { useMessageSelectionStore } from "../messageSelectionStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
@@ -534,10 +536,37 @@ function materializeThreadInStore(threadId: ThreadId): void {
 function installTestNativeApi(input?: {
   resolveMcpServers?: () => Promise<{ serverNames: readonly string[] }>;
   resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
+  confirm?: (message: string) => boolean | Promise<boolean>;
+  dispatchCommand?: (
+    input: Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0],
+  ) => { sequence: number } | Promise<{ sequence: number }>;
+  showContextMenu?: (
+    items: readonly ContextMenuItem<string>[],
+    position?: { x: number; y: number },
+  ) => string | null | Promise<string | null>;
 }): NativeApi {
   const base = createWsNativeApi();
   const api: NativeApi = {
     ...base,
+    dialogs: {
+      ...base.dialogs,
+      confirm: input?.confirm ? async (message) => input.confirm!(message) : base.dialogs.confirm,
+    },
+    contextMenu: {
+      ...base.contextMenu,
+      show: (input?.showContextMenu
+        ? async (items, position) =>
+            (await input.showContextMenu!(items as readonly ContextMenuItem<string>[], position)) as
+              | string
+              | null
+        : base.contextMenu.show) as NativeApi["contextMenu"]["show"],
+    },
+    orchestration: {
+      ...base.orchestration,
+      dispatchCommand: input?.dispatchCommand
+        ? async (payload) => input.dispatchCommand!(payload)
+        : base.orchestration.dispatchCommand,
+    },
     server: {
       ...base.server,
       resolveMcpServers:
@@ -3253,6 +3282,499 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(confirmButton).toBeVisible();
     } finally {
       localStorage.removeItem("t3code:client-settings:v1");
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the profiled provider rate-limit meter without hiding the plan toggle", async () => {
+    // Audit traceability: d725479, 2178f31.
+    installTestNativeApi();
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-rate-limit-profiled" as MessageId,
+      targetText: "profiled rate limit target",
+    });
+    const snapshot = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              modelSelection: {
+                provider: "claudeAgent" as const,
+                profileId: "metric",
+                model: "claude-opus-4-6",
+              },
+            }
+          : thread,
+      ),
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({
+              provider: "claudeAgent",
+              displayName: "Claude",
+              models: [
+                {
+                  slug: "claude-opus-4-6",
+                  name: "Claude Opus 4.6",
+                  isCustom: false,
+                  capabilities: {
+                    reasoningEffortLevels: [],
+                    supportsFastMode: false,
+                    supportsThinkingToggle: false,
+                    supportsPlan: true,
+                    contextWindowOptions: [],
+                    promptInjectedEffortLevels: [],
+                  },
+                },
+              ],
+            }),
+            createProvider({
+              provider: "claudeAgent:metric",
+              displayName: "Claude (metric)",
+              models: [
+                {
+                  slug: "claude-opus-4-6",
+                  name: "Claude Opus 4.6",
+                  isCustom: false,
+                  capabilities: {
+                    reasoningEffortLevels: [],
+                    supportsFastMode: false,
+                    supportsThinkingToggle: false,
+                    supportsPlan: true,
+                    contextWindowOptions: [],
+                    promptInjectedEffortLevels: [],
+                  },
+                },
+              ],
+            }),
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      applyServerConfigEvent({
+        version: 1,
+        type: "rateLimitsUpdated",
+        payload: {
+          rateLimits: [
+            {
+              provider: "claudeAgent:metric" as never,
+              rateLimitInfo: {
+                status: "allowed",
+                utilization: 0.82,
+                rateLimitType: "five_hour",
+                resetsAt: 1_800_000_000,
+              },
+              updatedAt: NOW_ISO,
+              oauthUsageTiers: [
+                {
+                  tier: "five_hour",
+                  utilization: 0.82,
+                  resetsAt: "2026-04-11T12:30:00.000Z",
+                },
+              ],
+              fetchWarning: "Usage data is temporarily unavailable while the provider backs off.",
+            },
+          ],
+        },
+      });
+
+      await expect
+        .element(page.getByRole("button", { name: "Rate limit 82% used" }))
+        .toBeInTheDocument();
+      expect(await waitForInteractionModeButton("Chat")).toBeTruthy();
+
+      await page.getByRole("button", { name: "Rate limit 82% used" }).click();
+      await expect
+        .element(
+          page.getByText("Usage data is temporarily unavailable while the provider backs off."),
+        )
+        .toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports message-selection range picks and exits selection mode on Escape", async () => {
+    installTestNativeApi({
+      showContextMenu: async () => "select",
+    });
+    const targetMessageId = "msg-user-selection-target" as MessageId;
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId,
+        targetText: "message selection target",
+      }),
+    });
+
+    try {
+      const targetMessage = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[data-message-role="user"]')).at(-1) ??
+          null,
+        "Unable to find the target message row.",
+      );
+      const selectedTargetMessageId = targetMessage.dataset.messageId as MessageId;
+      targetMessage.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 24,
+          clientY: 24,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const state = useMessageSelectionStore.getState();
+        expect(state.selectionMode).toBe(true);
+        expect(state.selectedMessageIds.has(selectedTargetMessageId)).toBe(true);
+      });
+
+      const uncheckedCheckbox = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"]')).find(
+            (element) => element.getAttribute("aria-checked") === "false",
+          ) ?? null,
+        "Unable to find an unchecked selection checkbox.",
+      );
+      uncheckedCheckbox.click();
+
+      await vi.waitFor(() => {
+        const state = useMessageSelectionStore.getState();
+        expect(state.selectedMessageIds.has(selectedTargetMessageId)).toBe(true);
+        expect(state.selectedMessageIds.size).toBeGreaterThan(1);
+        expect(document.querySelectorAll('[role="checkbox"]').length).toBeGreaterThan(1);
+      });
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const state = useMessageSelectionStore.getState();
+        expect(state.selectionMode).toBe(false);
+        expect(state.selectedMessageIds.size).toBe(0);
+        expect(document.querySelector('[role="checkbox"]')).toBeNull();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("deletes the selected messages from the multi-select context menu", async () => {
+    const confirmCalls: string[] = [];
+    const dispatchedCommands: Array<Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]> =
+      [];
+    let contextMenuCallCount = 0;
+    installTestNativeApi({
+      showContextMenu: async () => {
+        contextMenuCallCount += 1;
+        return contextMenuCallCount === 1 ? "select" : "delete";
+      },
+      confirm: async (message) => {
+        confirmCalls.push(message);
+        return true;
+      },
+      dispatchCommand: async (payload) => {
+        dispatchedCommands.push(payload);
+        return { sequence: 1 };
+      },
+    });
+    const targetMessageId = "msg-user-delete-target" as MessageId;
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId,
+        targetText: "message delete target",
+      }),
+    });
+
+    try {
+      const targetMessage = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[data-message-role="user"]')).at(-1) ??
+          null,
+        "Unable to find the target message row.",
+      );
+      targetMessage.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 18,
+          clientY: 18,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(useMessageSelectionStore.getState().selectionMode).toBe(true);
+      });
+
+      const uncheckedCheckbox = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"]')).find(
+            (element) => element.getAttribute("aria-checked") === "false",
+          ) ?? null,
+        "Unable to find an unchecked selection checkbox.",
+      );
+      uncheckedCheckbox.click();
+
+      targetMessage.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 18,
+          clientY: 18,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const request = dispatchedCommands.find(
+          (candidate) => candidate.type === "thread.messages.delete",
+        ) as
+          | {
+              messageIds: MessageId[];
+            }
+          | undefined;
+        expect(request).toBeTruthy();
+        expect(request?.messageIds.length ?? 0).toBeGreaterThan(1);
+      });
+
+      expect(confirmCalls[0] ?? "").toMatch(/^Delete \d+ messages\?/);
+      expect(useMessageSelectionStore.getState().selectionMode).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("confirms, dispatches, and reports sidebar Move to actions", async () => {
+    // Audit traceability: d725479.
+    const contextMenus: ReadonlyArray<ContextMenuItem<string>>[] = [];
+    const confirmCalls: string[] = [];
+    const dispatchedCommands: Array<Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]> =
+      [];
+    installTestNativeApi({
+      showContextMenu: async (items) => {
+        contextMenus.push(items);
+        return "move::project-2";
+      },
+      confirm: async (message) => {
+        confirmCalls.push(message);
+        return true;
+      },
+      dispatchCommand: async (payload) => {
+        dispatchedCommands.push(payload);
+        return { sequence: 1 };
+      },
+    });
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-move-target" as MessageId,
+      targetText: "sidebar move target",
+    });
+    const snapshot = {
+      ...baseSnapshot,
+      projects: [
+        ...baseSnapshot.projects,
+        {
+          id: "project-2" as ProjectId,
+          title: "Project Two",
+          workspaceRoot: "/repo/project-two",
+          defaultModelSelection: {
+            provider: "codex" as const,
+            model: "gpt-5",
+          },
+          scripts: [],
+          systemPrompt: null,
+          promptOverrides: { orchestration: {} },
+          createdAt: NOW_ISO,
+          updatedAt: NOW_ISO,
+          deletedAt: null,
+        },
+      ],
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
+      await expect.element(threadRow).toBeInTheDocument();
+      threadRow.element().dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 16,
+          clientY: 16,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const moveItem = contextMenus[0]?.find((item) => item.id === "move");
+        expect(moveItem?.disabled).toBe(false);
+        expect(moveItem?.children).toEqual([{ id: "move::project-2", label: "Project Two" }]);
+      });
+
+      await vi.waitFor(() => {
+        expect(confirmCalls[0]).toContain(
+          'Move thread "Browser test thread" to project "Project Two"?',
+        );
+        expect(confirmCalls[0]).toContain(
+          "The thread's worktree and branch association will be cleared.",
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          dispatchedCommands.some(
+            (candidate) =>
+              candidate.type === "thread.move" && candidate.targetProjectId === "project-2",
+          ),
+        ).toBe(true);
+      });
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Thread moved");
+        expect(text).toContain('Moved to "Project Two".');
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("navigates Fork with model into the created thread path and preserves board context", async () => {
+    // Audit traceability: fbe355c.
+    const contextMenus: ReadonlyArray<ContextMenuItem<string>>[] = [];
+    const dispatchedCommands: Array<Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]> =
+      [];
+    let forkThreadId: ThreadId | null = null;
+    installTestNativeApi({
+      showContextMenu: async (items) => {
+        contextMenus.push(items);
+        return "fork::claudeAgent:metric::claude-opus-4-6";
+      },
+      dispatchCommand: async (payload) => {
+        dispatchedCommands.push(payload);
+        if (payload.type === "thread.fork") {
+          forkThreadId = payload.threadId;
+          fixture.snapshot = addThreadToSnapshot(fixture.snapshot, forkThreadId);
+          materializeThreadInStore(forkThreadId);
+        }
+        return { sequence: 1 };
+      },
+    });
+    useUiStateStore.setState((state) => ({
+      ...state,
+      boardContextByThreadId: {
+        ...state.boardContextByThreadId,
+        [THREAD_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [ORCHESTRATION_TICKET_ID],
+          boardScrollLeft: 24,
+          updatedAt: NOW_ISO,
+        },
+      },
+    }));
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-fork-target" as MessageId,
+        targetText: "sidebar fork target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({
+              provider: "claudeAgent:metric",
+              displayName: "Claude (metric)",
+              models: [
+                {
+                  slug: "claude-opus-4-6",
+                  name: "Claude Opus 4.6",
+                  isCustom: false,
+                  capabilities: {
+                    reasoningEffortLevels: [],
+                    supportsFastMode: false,
+                    supportsThinkingToggle: false,
+                    supportsPlan: true,
+                    contextWindowOptions: [],
+                    promptInjectedEffortLevels: [],
+                  },
+                },
+              ],
+            }),
+          ],
+        };
+      },
+    });
+
+    try {
+      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
+      await expect.element(threadRow).toBeInTheDocument();
+      threadRow.element().dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 20,
+          clientY: 20,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const forkItem = contextMenus[0]?.find((item) => item.id === "fork");
+        expect(
+          forkItem?.children?.some(
+            (child) =>
+              child.id === "fork::claudeAgent:metric::claude-opus-4-6" &&
+              child.label === "Claude (metric) — Claude Opus 4.6",
+          ),
+        ).toBe(true);
+      });
+
+      await vi.waitFor(() => {
+        expect(forkThreadId).toBeTruthy();
+        expect(
+          dispatchedCommands.some(
+            (candidate) =>
+              candidate.type === "thread.fork" &&
+              candidate.sourceThreadId === THREAD_ID &&
+              candidate.modelSelection?.provider === "claudeAgent" &&
+              candidate.modelSelection?.profileId === "metric",
+          ),
+        ).toBe(true);
+      });
+
+      const expectedForkPath = `/${forkThreadId}`;
+      await waitForURL(
+        mounted.router,
+        (path) => path === expectedForkPath,
+        "Route should navigate to the forked thread path.",
+      );
+      expect(useUiStateStore.getState().boardContextByThreadId[forkThreadId!]).toMatchObject({
+        projectId: PROJECT_ID,
+        ticketStack: [ORCHESTRATION_TICKET_ID],
+        boardScrollLeft: 24,
+      });
+    } finally {
       await mounted.cleanup();
     }
   });

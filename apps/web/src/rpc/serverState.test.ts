@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applyServerConfigEvent,
   getServerConfig,
   onProvidersUpdated,
   onServerConfigUpdated,
@@ -17,6 +18,7 @@ import {
   resetServerStateForTests,
   startServerStateSync,
 } from "./serverState";
+import { toastManager } from "../components/ui/toast";
 
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);
@@ -315,6 +317,67 @@ describe("serverState", () => {
 
     unsubscribeProviders();
     unsubscribeConfig();
+    stop();
+  });
+
+  it("only shows the first fetch-warning toast until the warning state clears", async () => {
+    serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
+    const addToast = vi.spyOn(toastManager, "add");
+    const closeToast = vi.spyOn(toastManager, "close");
+    addToast.mockReturnValue("toast-rate-limit-warning" as never);
+
+    const stop = startServerStateSync(serverApi);
+
+    await waitFor(() => {
+      expect(getServerConfig()).toEqual(baseServerConfig);
+    });
+
+    const warningMessage = "Usage data is temporarily unavailable.";
+    const warningEvent = {
+      version: 1 as const,
+      type: "rateLimitsUpdated" as const,
+      payload: {
+        rateLimits: [
+          {
+            provider: "claudeAgent" as const,
+            rateLimitInfo: {
+              status: "allowed" as const,
+              utilization: 0.72,
+              rateLimitType: "five_hour" as const,
+              resetsAt: 1_800_000_000,
+            },
+            updatedAt: "2026-04-11T12:00:00.000Z",
+            fetchWarning: warningMessage,
+          },
+        ],
+      },
+    };
+
+    applyServerConfigEvent(warningEvent);
+    applyServerConfigEvent(warningEvent);
+
+    expect(addToast).toHaveBeenCalledTimes(1);
+    expect(addToast).toHaveBeenCalledWith({
+      type: "warning",
+      title: "Usage data unavailable",
+      description: warningMessage,
+    });
+    expect(closeToast).not.toHaveBeenCalled();
+
+    applyServerConfigEvent({
+      ...warningEvent,
+      payload: {
+        rateLimits: [
+          {
+            ...warningEvent.payload.rateLimits[0]!,
+            fetchWarning: undefined,
+          },
+        ],
+      },
+    });
+    applyServerConfigEvent(warningEvent);
+
+    expect(addToast).toHaveBeenCalledTimes(2);
     stop();
   });
 });

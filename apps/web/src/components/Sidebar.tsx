@@ -46,12 +46,14 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import {
   baseProviderKind,
+  type ContextMenuItem,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
   ProjectId,
   providerDisplayName,
   providerProfileId,
   type ProviderKind,
+  type ServerProvider,
   ThreadId,
   type GitStatusResult,
 } from "@t3tools/contracts";
@@ -181,6 +183,63 @@ interface PrStatusIndicator {
 }
 
 type ThreadPr = GitStatusResult["pr"];
+
+interface ThreadContextMenuProjectOption {
+  readonly id: ProjectId;
+  readonly name: string;
+}
+
+export function buildThreadContextMenuItems(input: {
+  readonly serverProviders: ReadonlyArray<ServerProvider>;
+  readonly projects: ReadonlyArray<ThreadContextMenuProjectOption>;
+  readonly threadProjectId: ProjectId;
+  readonly hasActiveSession: boolean;
+}): ReadonlyArray<ContextMenuItem<string>> {
+  const forkChildren = input.serverProviders
+    .filter((provider) => provider.enabled && provider.status === "ready")
+    .flatMap((provider) =>
+      provider.models.map((model) => ({
+        id: `fork::${provider.provider}::${model.slug}`,
+        label: `${providerDisplayName(provider.provider)} \u2014 ${model.name}`,
+      })),
+    );
+
+  const moveChildren = input.projects
+    .filter((project) => project.id !== input.threadProjectId)
+    .map((project) => ({ id: `move::${project.id}`, label: project.name }));
+
+  return [
+    { id: "rename", label: "Rename thread" },
+    { id: "mark-unread", label: "Mark unread" },
+    {
+      id: "fork",
+      label: "Fork with model",
+      children: forkChildren,
+      disabled: forkChildren.length === 0,
+    },
+    {
+      id: "move",
+      label: "Move to",
+      children: moveChildren,
+      disabled: moveChildren.length === 0 || input.hasActiveSession,
+    },
+    { id: "copy-path", label: "Copy Path" },
+    { id: "copy-thread-id", label: "Copy Thread ID" },
+    { id: "delete", label: "Delete", destructive: true },
+  ];
+}
+
+export function buildMoveThreadConfirmationMessage(input: {
+  readonly threadTitle: string;
+  readonly targetProjectName: string;
+  readonly clearsWorkspaceAssociation: boolean;
+}): string {
+  const parts = [`Move thread "${input.threadTitle}" to project "${input.targetProjectName}"?`];
+  if (input.clearsWorkspaceAssociation) {
+    parts.push("The thread's worktree and branch association will be cleared.");
+  }
+  return parts.join("\n\n");
+}
 
 function ThreadStatusLabel({
   status,
@@ -1185,43 +1244,17 @@ export default function Sidebar() {
       const threadWorkspacePath =
         thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null;
 
-      const forkChildren = serverProviders
-        .filter((sp) => sp.enabled && sp.status === "ready")
-        .flatMap((sp) =>
-          sp.models.map((model) => ({
-            id: `fork::${sp.provider}::${model.slug}`,
-            label: `${providerDisplayName(sp.provider)} \u2014 ${model.name}`,
-          })),
-        );
-
-      const moveChildren = projects
-        .filter((p) => p.id !== thread.projectId)
-        .map((p) => ({ id: `move::${p.id}`, label: p.name }));
-
       const hasActiveSession =
         thread.session != null &&
         (thread.session.status === "running" || thread.session.status === "connecting");
 
       const clicked = await api.contextMenu.show(
-        [
-          { id: "rename", label: "Rename thread" },
-          { id: "mark-unread", label: "Mark unread" },
-          {
-            id: "fork",
-            label: "Fork with model",
-            children: forkChildren,
-            disabled: forkChildren.length === 0,
-          },
-          {
-            id: "move",
-            label: "Move to",
-            children: moveChildren,
-            disabled: moveChildren.length === 0 || hasActiveSession,
-          },
-          { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
-          { id: "delete", label: "Delete", destructive: true },
-        ],
+        buildThreadContextMenuItems({
+          serverProviders,
+          projects: projects.map((project) => ({ id: project.id, name: project.name })),
+          threadProjectId: thread.projectId,
+          hasActiveSession,
+        }),
         position,
       );
 
@@ -1299,12 +1332,13 @@ export default function Sidebar() {
         const targetProject = projects.find((p) => p.id === clicked.slice("move::".length));
         if (!targetProject) return;
 
-        const parts = [`Move thread "${thread.title}" to project "${targetProject.name}"?`];
-        if (thread.worktreePath || thread.branch) {
-          parts.push("The thread's worktree and branch association will be cleared.");
-        }
-
-        const confirmed = await api.dialogs.confirm(parts.join("\n\n"));
+        const confirmed = await api.dialogs.confirm(
+          buildMoveThreadConfirmationMessage({
+            threadTitle: thread.title,
+            targetProjectName: targetProject.name,
+            clearsWorkspaceAssociation: Boolean(thread.worktreePath || thread.branch),
+          }),
+        );
         if (!confirmed) return;
 
         try {

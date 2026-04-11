@@ -247,6 +247,7 @@ export function startServerStateSync(client: ServerStateClient): () => void {
 
 export function resetServerStateForTests() {
   resetAppAtomRegistryForTests();
+  activeRateLimitWarningToastId = null;
   nextServerConfigUpdatedNotificationId = 1;
 }
 
