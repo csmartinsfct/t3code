@@ -16,6 +16,8 @@ import { render } from "vitest-browser-react";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { findButtonByText, waitForElement } from "../../test-utils/browser";
 
+// This ticket keeps the "TaskDetailPanel" filename for audit traceability, but the exercised
+// surface is the shared Kanban ticket detail view that powers the settings-adjacent task detail UX.
 const { mockNavigate, mockUseParams } = vi.hoisted(() => ({
   mockNavigate: vi.fn(async () => undefined),
   mockUseParams: vi.fn(() => null),

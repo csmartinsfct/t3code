@@ -448,20 +448,28 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 describe("KanbanTicketDetail ticketing stream coverage", () => {
   it("refetches when comment events target the current task detail", () => {
     // Audit traceability: 8b69f70.
+    const currentTicket = makePreviewTicket({
+      id: "ticket-live" as Ticket["id"],
+      parentId: null,
+      acceptanceCriteria: [],
+    });
+
     expect(
-      resolveTicketDetailStreamEventAction(
-        "ticket-live" as Ticket["id"],
-        makePreviewTicket({
-          id: "ticket-live" as Ticket["id"],
-          parentId: null,
-          acceptanceCriteria: [],
-        }),
-        { type: "comment_upserted", ticketId: "ticket-live" } as never,
-      ),
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "comment_upserted",
+        ticketId: "ticket-live",
+      } as never),
+    ).toBe("refetch");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "comment_deleted",
+        ticketId: "ticket-live",
+      } as never),
     ).toBe("refetch");
   });
 
-  it("refetches when sub-ticket or dependency updates change the rendered task detail", () => {
+  it("refetches when self, sub-ticket, or dependency updates change the rendered task detail", () => {
     const currentTicket = makePreviewTicket({
       id: "ticket-live" as Ticket["id"],
       parentId: null,
@@ -488,8 +496,30 @@ describe("KanbanTicketDetail ticketing stream coverage", () => {
         type: "ticket_upserted",
         projectId: "project-1",
         ticket: makeTicketSummary({
+          id: "ticket-live" as TicketSummary["id"],
+          parentId: null,
+        }),
+      } as never),
+    ).toBe("refetch");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_upserted",
+        projectId: "project-1",
+        ticket: makeTicketSummary({
           id: "sub-ticket" as TicketSummary["id"],
           parentId: "ticket-live" as TicketSummary["id"],
+        }),
+      } as never),
+    ).toBe("refetch");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_upserted",
+        projectId: "project-1",
+        ticket: makeTicketSummary({
+          id: "dependency-ticket" as TicketSummary["id"],
+          parentId: null,
         }),
       } as never),
     ).toBe("refetch");
@@ -514,5 +544,50 @@ describe("KanbanTicketDetail ticketing stream coverage", () => {
         { type: "ticket_deleted", ticketId: "ticket-live" } as never,
       ),
     ).toBe("back");
+  });
+
+  it("ignores unrelated stream events and events while the current task is not loaded", () => {
+    const currentTicket = makePreviewTicket({
+      id: "ticket-live" as Ticket["id"],
+      parentId: null,
+      subTickets: [],
+      dependencies: [],
+      acceptanceCriteria: [],
+    });
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], null, {
+        type: "ticket_upserted",
+        projectId: "project-1",
+        ticket: makeTicketSummary({
+          id: "ticket-live" as TicketSummary["id"],
+        }),
+      } as never),
+    ).toBe("ignore");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_upserted",
+        projectId: "project-1",
+        ticket: makeTicketSummary({
+          id: "another-ticket" as TicketSummary["id"],
+          parentId: null,
+        }),
+      } as never),
+    ).toBe("ignore");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_deleted",
+        ticketId: "another-ticket",
+      } as never),
+    ).toBe("ignore");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "comment_upserted",
+        ticketId: "another-ticket",
+      } as never),
+    ).toBe("ignore");
   });
 });
