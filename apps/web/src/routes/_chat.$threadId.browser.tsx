@@ -38,20 +38,8 @@ vi.mock("../components/ChatView", () => ({
     <div data-testid="chat-view">Chat view {threadId}</div>
   ),
 }));
-vi.mock("../components/ChatView.tsx", () => ({
-  default: ({ threadId }: { threadId: string }) => (
-    <div data-testid="chat-view">Chat view {threadId}</div>
-  ),
-}));
 
 vi.mock("../components/management/ManagementView", () => ({
-  ManagementView: ({ threadId, projectId }: { threadId: string; projectId: string }) => (
-    <div data-testid="management-view">
-      Management view {threadId}:{projectId}
-    </div>
-  ),
-}));
-vi.mock("../components/management/ManagementView.tsx", () => ({
   ManagementView: ({ threadId, projectId }: { threadId: string; projectId: string }) => (
     <div data-testid="management-view">
       Management view {threadId}:{projectId}
@@ -207,6 +195,7 @@ const ORCHESTRATION_CHILD_SIDEBAR_THREAD: SidebarThreadSummary = {
 
 async function mountRoute(input: {
   initialSearch: ChatThreadRouteSearch;
+  // Defaults to the base route thread unless a test needs a specific orchestration thread.
   initialThreadId?: string;
 }) {
   routeTestState.sheetPopups.length = 0;
