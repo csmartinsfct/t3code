@@ -24,6 +24,15 @@ interface TicketCommentsProps {
   onUpdated: () => void;
 }
 
+export const DELETE_COMMENT_BUTTON_CLASS_NAME =
+  "absolute bottom-1.5 right-1.5 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100";
+
+export function getDeleteCommentConfirmationText(replyCount: number): string {
+  return replyCount > 0
+    ? `This will permanently delete this comment and its ${replyCount === 1 ? "reply" : `${replyCount} replies`}. This action cannot be undone.`
+    : "This will permanently delete this comment. This action cannot be undone.";
+}
+
 // ---------------------------------------------------------------------------
 // Delete button (shared between top-level comments and replies)
 // ---------------------------------------------------------------------------
@@ -32,7 +41,7 @@ function DeleteCommentButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      className="absolute bottom-1.5 right-1.5 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+      className={DELETE_COMMENT_BUTTON_CLASS_NAME}
       onClick={onClick}
       aria-label="Delete comment"
     >
@@ -64,9 +73,7 @@ function DeleteCommentDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete comment?</AlertDialogTitle>
           <AlertDialogDescription>
-            {replyCount > 0
-              ? `This will permanently delete this comment and its ${replyCount === 1 ? "reply" : `${replyCount} replies`}. This action cannot be undone.`
-              : "This will permanently delete this comment. This action cannot be undone."}
+            {getDeleteCommentConfirmationText(replyCount)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
