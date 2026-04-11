@@ -1,40 +1,34 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-11T04:02:08.988Z",
-  "lastProcessedCommit": "e2741c23462dba0545d9ae86d37a807514840696",
+  "generatedAt": "2026-04-11T04:21:06.022Z",
+  "lastProcessedCommit": "856a8e5f0775ab3f233e478690daa4b88fc3cc17",
   "groups": [
     {
       "date": "2026-04-11",
       "entries": [
         {
-          "id": "2b18ef62d93c8b13",
-          "title": "Sidebar now reflects run status more clearly",
-          "summary": "Improved sidebar status handling so active orchestration state is surfaced more consistently, alongside updated system prompt coverage in the related UI.",
-          "category": "improvement",
-          "commitShas": ["e2741c23462dba0545d9ae86d37a807514840696"]
-        },
-        {
-          "id": "791645b18fb60621",
-          "title": "Simpler origin-thread links in ticket details",
-          "summary": "Ticket details now focus on the originating conversation thread, reducing link clutter and making the primary source of context clearer.",
-          "category": "improvement",
-          "commitShas": ["d6d04f418541c5c2207cceb5cb126cb8725e8a20"]
-        },
-        {
-          "id": "802c89e174d983bd",
-          "title": "Clickable ticket links across chat and orchestration views",
-          "summary": "Ticket mentions now open directly from chat messages and orchestration updates, making it easier to jump from discussion to the relevant work item.",
+          "id": "c998127e5fb96467",
+          "title": "Added a changelog page in Settings",
+          "summary": "T3 Code now includes a dedicated changelog view in Settings so you can review recent product updates directly in the app.",
           "category": "feature",
           "commitShas": [
-            "8e8d0812dcf174e67d1cd50bbafdc1bae108787a",
-            "a5a7b3fe582a515e6bc42202acaa4e918dcf323b",
-            "cf4ffc4644faf7da4c6613f779a3110eb2e40357"
+            "856a8e5f0775ab3f233e478690daa4b88fc3cc17",
+            "b784161c9b65181d34d827a47c6ef975c6870876"
           ]
         },
         {
-          "id": "dcd04e1e2a10799e",
-          "title": "Global ticket labels and reusable templates",
-          "summary": "Ticketing now includes shared labels and reusable templates, along with settings to manage them, so teams can standardize common ticket structure more quickly.",
+          "id": "516a54d9cea39f5d",
+          "title": "Improved sidebar run status visibility",
+          "summary": "The sidebar now provides clearer status feedback for active runs, making it easier to track what the app is doing at a glance.",
+          "category": "improvement",
+          "commitShas": [
+            "e2741c23462dba0545d9ae86d37a807514840696"
+          ]
+        },
+        {
+          "id": "c3ffb285a6289bf3",
+          "title": "Global ticket labels and templates are now available",
+          "summary": "You can now manage shared ticket labels and reusable ticket templates from Settings, with built-in defaults available on startup.",
           "category": "feature",
           "commitShas": [
             "8464243bd07bda5412a3e8adbbb67e10ac40cdf5",
@@ -42,9 +36,9 @@
           ]
         },
         {
-          "id": "c74c6be7e96fef6a",
-          "title": "Orchestration timeline is easier to scan while work is in progress",
-          "summary": "The orchestration timeline now groups implementation and review activity into clearer thread blocks, shows active work with cleaner labels, and preserves useful ticket context in the flow.",
+          "id": "8ba04a3cee6649a3",
+          "title": "Orchestration activity is easier to follow",
+          "summary": "Orchestration timelines now render as clearer thread-style blocks, show active work with cleaner labels, and preserve ticket context more consistently while work is running or paused.",
           "category": "improvement",
           "commitShas": [
             "1f681f990c47e26458e99b3504c09b603e7970cc",
@@ -53,14 +47,33 @@
           ]
         },
         {
-          "id": "5aedf58355b018f8",
-          "title": "Startup recovery for interrupted work",
-          "summary": "Threads and orchestration runs can now recover more cleanly after app restarts, with stale work surfaced on startup and recovery markers cleared automatically once live activity resumes.",
-          "category": "improvement",
+          "id": "b9c012319e258688",
+          "title": "Startup recovery is more reliable for interrupted work",
+          "summary": "T3 Code can better recover stale threads and orchestration runs after restart, and temporary recovery markers are cleared automatically once live activity resumes.",
+          "category": "fix",
           "commitShas": [
             "1885ecfc69994679e42da3ad14c58f2966f3110b",
-            "59f3dda03e5533c3d80607915ca8a01d707135b2",
-            "7c0ddce92edfe845b3eb986afa71651e2f433c28"
+            "59f3dda03e5533c3d80607915ca8a01d707135b2"
+          ]
+        },
+        {
+          "id": "09aa7022a9afec64",
+          "title": "Clickable ticket links now work across chat and orchestration views",
+          "summary": "Ticket references in assistant messages and orchestration updates now open directly from chat, including linked identifiers shown in timeline summaries and badges.",
+          "category": "feature",
+          "commitShas": [
+            "8e8d0812dcf174e67d1cd50bbafdc1bae108787a",
+            "a5a7b3fe582a515e6bc42202acaa4e918dcf323b",
+            "cf4ffc4644faf7da4c6613f779a3110eb2e40357"
+          ]
+        },
+        {
+          "id": "aa25a145943304ea",
+          "title": "Ticket views now focus on the original thread",
+          "summary": "Ticket details now link back to the origin thread in a simpler, more direct way, reducing clutter in ticket-related navigation.",
+          "category": "improvement",
+          "commitShas": [
+            "d6d04f418541c5c2207cceb5cb126cb8725e8a20"
           ]
         }
       ]
@@ -69,34 +82,10 @@
       "date": "2026-04-10",
       "entries": [
         {
-          "id": "461aa5d84ac0b333",
-          "title": "Review parsing waits for finalized output",
-          "summary": "Run review handling is more reliable by waiting for finalized review output before parsing, which helps avoid stale or partial results.",
-          "category": "fix",
-          "commitShas": [
-            "5f6ba14fd59497486b16e1d80adaf84ff5651e5b",
-            "984099948e73bc8af7b60fb8b5e2c205d5ae3e9c"
-          ]
-        },
-        {
-          "id": "339be24119bc9f07",
-          "title": "Ticket detail actions were expanded for editing and decomposition",
-          "summary": "The ticket detail experience was improved to better support editing ticket information, decomposing work, and handling related worktree flows from the same view.",
+          "id": "50f1481b9d438a80",
+          "title": "Ticket details stay current after relationship and label changes",
+          "summary": "Ticket detail views now refresh more reliably when relationships or labels change, so linked information and summaries stay in sync without stale data.",
           "category": "improvement",
-          "commitShas": [
-            "279861230215db5a9ee5d00dfbacea9e7981ea5c",
-            "373db3b841dc3081f4b23abe81d21a595441726a",
-            "9ff1707de7d9b94138d5bd8ff77b20dd4a34f442",
-            "a8b5175e31c3b6ccefaf6723f56dc2f3bd176c01",
-            "a91255ad329f3413f13ba627ca54cd6ba989090b",
-            "b7cac1e49f5f802117b6ce7163a62c4ae055df4c"
-          ]
-        },
-        {
-          "id": "40edf47597e4a309",
-          "title": "Ticket details stay in sync after relationship and label changes",
-          "summary": "Ticket detail views now refresh more reliably when relationships or labels change, so linked information and summaries stay current while you work.",
-          "category": "fix",
           "commitShas": [
             "220657bc0efe0fb5ee70487e1326678b83ad3ba6",
             "64b31a3cc5427124899c00a251e3ea7dbfc011b4",
@@ -104,9 +93,9 @@
           ]
         },
         {
-          "id": "5368a57b03e0459d",
-          "title": "Provider selection now better respects saved profiles",
-          "summary": "Provider and model picking was refined so profiled selections are handled more smoothly from chat and settings flows.",
+          "id": "6a93a4fa296d6a61",
+          "title": "Provider selection better respects saved profiles",
+          "summary": "The provider picker now handles profiled selections more consistently, making it easier to continue with the expected provider and model setup.",
           "category": "improvement",
           "commitShas": [
             "11a6e10588a66810cab7b2dd96b94c59464cf244",
@@ -114,27 +103,281 @@
           ]
         },
         {
-          "id": "0c7a82d8dd499943",
-          "title": "Board interactions are more capable and resilient",
-          "summary": "Management boards now better support mode switching, multi-select dragging, drag-and-drop continuity, and safer rollback behavior when reordering does not complete as expected.",
+          "id": "ac3c4cb88bffab4a",
+          "title": "Board context handling is safer across chat and sidebar flows",
+          "summary": "The app now applies stronger guards around board context, reducing cases where chat, sidebar, or ticket actions could act on the wrong board state.",
+          "category": "fix",
+          "commitShas": [
+            "036dda42bdb5fa0cd7845d6e1e23be4fb7b54a31",
+            "616c483a8ee7fa5ceb8343d7dd93977b23dca6bb"
+          ]
+        },
+        {
+          "id": "545442863016f14c",
+          "title": "Review results parsing is more reliable",
+          "summary": "Review workflows now wait for the finalized assistant output before parsing, reducing stale or incomplete review results.",
+          "category": "fix",
+          "commitShas": [
+            "5f6ba14fd59497486b16e1d80adaf84ff5651e5b",
+            "984099948e73bc8af7b60fb8b5e2c205d5ae3e9c"
+          ]
+        },
+        {
+          "id": "6d72d4c61103398a",
+          "title": "Management board drag and drop is more robust",
+          "summary": "Improved board interactions for moving tickets, including multi-select dragging and safer rollback behavior when reordering does not complete successfully.",
           "category": "improvement",
           "commitShas": [
-            "0dd06e3f449eb8e6602bfc684dfeeaca0aa839a0",
-            "2f4a264b1a6a13e9fbd85d8374e3ee43d81ef40e",
-            "4bd9b7fab3a172748a20159c4ab68a15f3a1a926",
             "82dd984778a3400491dcc730926d0e60d410424d",
             "c916f4fa89188a138bbe049f41b6089e96705157",
             "ece5770d57e6a39144348ba1e4caeed4bd354b7d"
           ]
         },
         {
-          "id": "6c66ecdeff3d5d0b",
-          "title": "Chat and board context handling is more predictable",
-          "summary": "The app now applies stronger board-context guards across chat and sidebar flows, reducing accidental carryover and making navigation between ticket management and conversations more consistent.",
+          "id": "cb4440269d90be7e",
+          "title": "Sub-tickets can now be promoted to top-level board tickets",
+          "summary": "You can now move sub-tickets onto the main board, including support for both single-ticket and bulk promotion flows.",
+          "category": "feature",
+          "commitShas": [
+            "30186add436314d1a27b71155500fcffdb4d32b1"
+          ]
+        },
+        {
+          "id": "e79e843538f2ba04",
+          "title": "Ticket details received visual cleanup",
+          "summary": "The ticket detail view has been simplified with a cleaner description presentation and more streamlined styling.",
+          "category": "improvement",
+          "commitShas": [
+            "132e6d65d46a3fa0531bf753fca4013ab56e46e0",
+            "376e602554f884b5e3d1d05093f84a028db19ebf",
+            "5ecff4d0211ee463c77535e46efc416c3909fa47"
+          ]
+        },
+        {
+          "id": "d66f4827a42b20bc",
+          "title": "Follow-up review passes include better context",
+          "summary": "Later review iterations now carry forward prior review context and delta-focused comparisons, making repeated review cycles easier to follow.",
+          "category": "improvement",
+          "commitShas": [
+            "fdb94c8a1642921fc5122bba1ad102933c67fbd9"
+          ]
+        },
+        {
+          "id": "35bc606c7606ca9a",
+          "title": "Ticket details now focus on the origin thread",
+          "summary": "Ticket details now show the originating thread more directly instead of aggregating related threads, making it easier to understand where work started.",
+          "category": "improvement",
+          "commitShas": [
+            "36367c228566af25e35a94d1cca2a16c6558ea06"
+          ]
+        },
+        {
+          "id": "bb0fd7166f6b4466",
+          "title": "Review feedback is shown in a more consistent format",
+          "summary": "Review suggestions are now normalized into comments, improving compatibility across older and newer review outputs.",
           "category": "fix",
           "commitShas": [
-            "036dda42bdb5fa0cd7845d6e1e23be4fb7b54a31",
-            "616c483a8ee7fa5ceb8343d7dd93977b23dca6bb"
+            "e7b514de94ed68d0150955519bd8a1aeeb8bd199"
+          ]
+        },
+        {
+          "id": "9b4eca0d8ffbd6e8",
+          "title": "Collapsed sidebar navigation is easier to access",
+          "summary": "A dedicated toggle now remains available when the sidebar is collapsed across chat, settings, and board views.",
+          "category": "improvement",
+          "commitShas": [
+            "4fc2aa3a5237386ea6c979cf1a8ae363a0f39681"
+          ]
+        },
+        {
+          "id": "d3043a3f1a61a4ee",
+          "title": "Orchestration progress is clearer across threads",
+          "summary": "Active orchestration progress now appears in child threads, with a centered status label you can use to jump between the orchestration timeline and the current working thread.",
+          "category": "improvement",
+          "commitShas": [
+            "217c188a1115e35d6240499f075e6241f79be233",
+            "301dca764c5a61b5f1bcc07f3e87c6cbcad2a7d0"
+          ]
+        },
+        {
+          "id": "97e24552f839aefc",
+          "title": "Orchestration can now resume with a fresh agent session",
+          "summary": "Paused orchestration runs can be resumed by restarting the current child session with a fresh agent, giving you a cleaner recovery path when a run needs to continue from a reset state.",
+          "category": "feature",
+          "commitShas": [
+            "10efdd2d774466ead3bef543a992ebde0a78c8f3",
+            "bdb0ca7a576af100b77a704e99c3d15b392b0c4e"
+          ]
+        },
+        {
+          "id": "be87e6229d31a603",
+          "title": "Stopping sessions is more robust when bindings are already gone",
+          "summary": "Session shutdown now handles missing provider bindings more gracefully, reducing avoidable failures during stop operations.",
+          "category": "fix",
+          "commitShas": [
+            "75aeb263e28da40049d1c63d2d1b84bd36976cb4"
+          ]
+        },
+        {
+          "id": "11256693f7fcead7",
+          "title": "Ticketing is more resilient and predictable",
+          "summary": "Ticket loading now falls back more gracefully when snapshot data is unavailable, unbounded ticket lists are preserved by default, and orchestration planning uses more stable ticket ordering.",
+          "category": "fix",
+          "commitShas": [
+            "546907d4d0ef3296eaefaa0888b0f4389fa3024b",
+            "b5ecd03fc75415916875f915561811d6dac185fa",
+            "ff64f83aa17330e2740f90d6f5cb0b678927bedd"
+          ]
+        },
+        {
+          "id": "d80d78980255850c",
+          "title": "Automated review settings are surfaced more clearly when reviews are turned off",
+          "summary": "When review cycles are disabled, the UI now makes that state clearer and points you to settings so you can re-enable automated review more easily.",
+          "category": "improvement",
+          "commitShas": [
+            "0a82bd60c65cfcc0fe802ea5b5636ff8a1939920",
+            "8d41859b7683f7f23e2011a6cec0ef1bba9a7a85"
+          ]
+        },
+        {
+          "id": "775495fb0bbb4ba7",
+          "title": "Runs can skip review threads entirely when automated review is disabled",
+          "summary": "If automated review is turned off, orchestration now completes work directly without creating unnecessary review threads, making no-review runs faster and less cluttered.",
+          "category": "improvement",
+          "commitShas": [
+            "cf1cd3d0ce48747876c73af2519cadd476097fc1"
+          ]
+        },
+        {
+          "id": "1fa9b9011091374a",
+          "title": "Review output parsing is more resilient",
+          "summary": "Review results now parse more reliably when returned as prose or fenced JSON, reducing failed review displays from wrapped responses.",
+          "category": "fix",
+          "commitShas": [
+            "af068be047eaaf30e660adf7bdbe64f6f9ebc96b"
+          ]
+        },
+        {
+          "id": "fbf9926242d8b145",
+          "title": "Orchestration confirmation now shows clearer provider names",
+          "summary": "The orchestration confirmation dialog now uses normalized provider display names so model selections are easier to understand.",
+          "category": "improvement",
+          "commitShas": [
+            "02d7f7e23d67700b6ce60ef570199a7498387b85"
+          ]
+        },
+        {
+          "id": "78c17a69e8a8c432",
+          "title": "Ticket identifiers are now project-scoped",
+          "summary": "Ticket identifiers now resolve within a project instead of globally, which avoids collisions across projects and keeps ticket references predictable.",
+          "category": "breaking",
+          "commitShas": [
+            "3dd639109702a10a12dc300e33ee509296f55d7e"
+          ]
+        },
+        {
+          "id": "bf2af1d7dc0e5e64",
+          "title": "New threads now inherit the current board context",
+          "summary": "Starting a new thread from the same project now carries forward the current board ticket stack and scroll position for a smoother workflow.",
+          "category": "improvement",
+          "commitShas": [
+            "90a6727a4963a18bd7dfc37e359b3e0ad829a98f"
+          ]
+        },
+        {
+          "id": "5c5f15523da8fa57",
+          "title": "Prompt management for orchestration is now available in Settings",
+          "summary": "A new Prompts area lets you manage orchestration prompts with global and project-level overrides, editing tools, validation, previews, and backend APIs to support those workflows.",
+          "category": "feature",
+          "commitShas": [
+            "03a6e3f58fe95cae98d567b2c523781cb9e00394",
+            "2e3bf6a7592ba827ce0cc9b141e498177ff22ea2",
+            "ae139fe9a39007a9d2d81d46a4c087b46d78231c",
+            "b515c40ba9ff421dd2bb445e28c8a9fe2257d1de",
+            "df614ac8aeae06b5d467ad447890432572160b74",
+            "f15c8df70712d76272940e4da8b4f02598c9911f"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-09",
+      "entries": [
+        {
+          "id": "2d6a9870b8a528ff",
+          "title": "Tickets can now track their linked conversation threads",
+          "summary": "Tickets now keep track of their related threads, improving continuity between ticket work and the conversations created from it.",
+          "category": "feature",
+          "commitShas": [
+            "96da4f9d692952771c0b1be329f961314c8e5040"
+          ]
+        },
+        {
+          "id": "04e04f53e99abe8f",
+          "title": "Board and ticket context is now scoped more safely by project",
+          "summary": "Board state, ticket lookups, and orchestration startup now stay aligned to the selected project, reducing stale or cross-project state issues.",
+          "category": "fix",
+          "commitShas": [
+            "be79d4bbc66346c541115b9972a098375034e40b"
+          ]
+        },
+        {
+          "id": "df63c807ba30b86c",
+          "title": "Orchestration model selection is now explicit and configurable",
+          "summary": "You can now choose implementer and reviewer models separately in orchestration settings, with optional per-ticket overrides for more predictable run behavior.",
+          "category": "feature",
+          "commitShas": [
+            "6abc9675eaee17f7bbd3b15527c1dc137d5040a3"
+          ]
+        },
+        {
+          "id": "2056c330db17f1e8",
+          "title": "Sidebar activity now reflects orchestration work more clearly",
+          "summary": "Active orchestration runs now show up as working activity in the sidebar, and child orchestration threads are hidden there to reduce clutter.",
+          "category": "improvement",
+          "commitShas": [
+            "0e39446bc3286ae01ba499881d5168faf6c0dd3a",
+            "c6cb176015fa4421446107105eb5d51f94609195"
+          ]
+        },
+        {
+          "id": "4cadec86f5685f93",
+          "title": "Ticket settings now support deleting comments and replies",
+          "summary": "Ticket settings now include delete actions for comments and replies, with confirmation before removal.",
+          "category": "feature",
+          "commitShas": [
+            "f2b4ce3921d16154147e7a62215f83f2e148a4ab"
+          ]
+        },
+        {
+          "id": "15cf8869ec3b29f3",
+          "title": "Orchestration timeline and navigation were redesigned",
+          "summary": "The orchestration timeline now better matches the rest of the app, with cleaner progress states, simpler thread navigation, and less visual noise while following run activity.",
+          "category": "improvement",
+          "commitShas": [
+            "22cd7ddb83420f50fd19c753d606c863ccd671ff"
+          ]
+        },
+        {
+          "id": "dc0a8f485922c72c",
+          "title": "Automated orchestration reviews are now built into runs",
+          "summary": "Orchestration can now run automated reviews with dedicated settings, clearer in-app review output, and more reliable handling of structured review responses.",
+          "category": "feature",
+          "commitShas": [
+            "06110d3b1545c8562ea4fcc3c0e18c910ae65f72",
+            "08f89692931b2625a39df6b5e14bcb0d5c634ade",
+            "0d23345353a53e12ff550a9fe342bc472bbcbe05",
+            "7b81a88453356fc2e1962ca6440f99a545f18cf1",
+            "a68de3de48911c525c6707e50e001db2ae7972fa"
+          ]
+        },
+        {
+          "id": "90411d1253f206af",
+          "title": "Parent tickets now expand into subtasks during orchestration",
+          "summary": "Orchestration now expands parent tickets into their subtasks so planned work is represented more accurately.",
+          "category": "fix",
+          "commitShas": [
+            "8912d5e39a9d8050a8e15d5f6fecb87c48abb52f"
           ]
         }
       ]
@@ -142,13 +385,83 @@
   ],
   "provenance": {
     "rebuiltFromScratch": true,
-    "rebuildCommitLimit": 50,
+    "rebuildCommitLimit": 100,
     "promptVersion": "2026-04-11.v1",
     "batches": [
       {
-        "generatedAt": "2026-04-11T04:01:41.287Z",
+        "generatedAt": "2026-04-11T04:20:00.252Z",
         "promptVersion": "2026-04-11.v1",
         "fromExclusiveCommit": null,
+        "toInclusiveCommit": "af068be047eaaf30e660adf7bdbe64f6f9ebc96b",
+        "commitShas": [
+          "8912d5e39a9d8050a8e15d5f6fecb87c48abb52f",
+          "0d23345353a53e12ff550a9fe342bc472bbcbe05",
+          "7b81a88453356fc2e1962ca6440f99a545f18cf1",
+          "08f89692931b2625a39df6b5e14bcb0d5c634ade",
+          "a68de3de48911c525c6707e50e001db2ae7972fa",
+          "06110d3b1545c8562ea4fcc3c0e18c910ae65f72",
+          "22cd7ddb83420f50fd19c753d606c863ccd671ff",
+          "0e39446bc3286ae01ba499881d5168faf6c0dd3a",
+          "f2b4ce3921d16154147e7a62215f83f2e148a4ab",
+          "c6cb176015fa4421446107105eb5d51f94609195",
+          "6abc9675eaee17f7bbd3b15527c1dc137d5040a3",
+          "432a8b602903531a88a2364ee4e534bab6fce42a",
+          "be79d4bbc66346c541115b9972a098375034e40b",
+          "96da4f9d692952771c0b1be329f961314c8e5040",
+          "b515c40ba9ff421dd2bb445e28c8a9fe2257d1de",
+          "2e3bf6a7592ba827ce0cc9b141e498177ff22ea2",
+          "ae139fe9a39007a9d2d81d46a4c087b46d78231c",
+          "df614ac8aeae06b5d467ad447890432572160b74",
+          "f15c8df70712d76272940e4da8b4f02598c9911f",
+          "03a6e3f58fe95cae98d567b2c523781cb9e00394",
+          "90a6727a4963a18bd7dfc37e359b3e0ad829a98f",
+          "3dd639109702a10a12dc300e33ee509296f55d7e",
+          "02d7f7e23d67700b6ce60ef570199a7498387b85",
+          "af068be047eaaf30e660adf7bdbe64f6f9ebc96b"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T04:20:24.738Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "af068be047eaaf30e660adf7bdbe64f6f9ebc96b",
+        "toInclusiveCommit": "30186add436314d1a27b71155500fcffdb4d32b1",
+        "commitShas": [
+          "cf1cd3d0ce48747876c73af2519cadd476097fc1",
+          "b5ecd03fc75415916875f915561811d6dac185fa",
+          "b6e829064c4a97acf25936b408821eb7d5078699",
+          "546907d4d0ef3296eaefaa0888b0f4389fa3024b",
+          "8d41859b7683f7f23e2011a6cec0ef1bba9a7a85",
+          "0a82bd60c65cfcc0fe802ea5b5636ff8a1939920",
+          "ff64f83aa17330e2740f90d6f5cb0b678927bedd",
+          "10efdd2d774466ead3bef543a992ebde0a78c8f3",
+          "75aeb263e28da40049d1c63d2d1b84bd36976cb4",
+          "bdb0ca7a576af100b77a704e99c3d15b392b0c4e",
+          "217c188a1115e35d6240499f075e6241f79be233",
+          "301dca764c5a61b5f1bcc07f3e87c6cbcad2a7d0",
+          "132e6d65d46a3fa0531bf753fca4013ab56e46e0",
+          "4fc2aa3a5237386ea6c979cf1a8ae363a0f39681",
+          "3ff26f882df0ca2fdc63711c27ef186c4134896f",
+          "e7b514de94ed68d0150955519bd8a1aeeb8bd199",
+          "36367c228566af25e35a94d1cca2a16c6558ea06",
+          "fdb94c8a1642921fc5122bba1ad102933c67fbd9",
+          "fa82814ef4c2ab27ab802b5ca2828a02e0fa8eca",
+          "b78836cd739b8495178492649e6832e514214d55",
+          "65c31d9ad7a98e5658d1cb3f035581cb94f8c6a3",
+          "376e602554f884b5e3d1d05093f84a028db19ebf",
+          "5ecff4d0211ee463c77535e46efc416c3909fa47",
+          "30186add436314d1a27b71155500fcffdb4d32b1"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T04:20:40.419Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "30186add436314d1a27b71155500fcffdb4d32b1",
         "toInclusiveCommit": "ca1271067551480adeeb7ad8b0132afe1797b990",
         "commitShas": [
           "9ff1707de7d9b94138d5bd8ff77b20dd4a34f442",
@@ -181,7 +494,7 @@
         "mcpDisabled": true
       },
       {
-        "generatedAt": "2026-04-11T04:01:58.168Z",
+        "generatedAt": "2026-04-11T04:20:54.934Z",
         "promptVersion": "2026-04-11.v1",
         "fromExclusiveCommit": "ca1271067551480adeeb7ad8b0132afe1797b990",
         "toInclusiveCommit": "33702304eff3b8c3ec0cf43d7b2390f1318b3dd0",
@@ -216,15 +529,17 @@
         "mcpDisabled": true
       },
       {
-        "generatedAt": "2026-04-11T04:02:08.888Z",
+        "generatedAt": "2026-04-11T04:21:05.911Z",
         "promptVersion": "2026-04-11.v1",
         "fromExclusiveCommit": "33702304eff3b8c3ec0cf43d7b2390f1318b3dd0",
-        "toInclusiveCommit": "e2741c23462dba0545d9ae86d37a807514840696",
+        "toInclusiveCommit": "856a8e5f0775ab3f233e478690daa4b88fc3cc17",
         "commitShas": [
           "577ea783c0b6d70aa1da377a5bfbca047f0efcc0",
-          "e2741c23462dba0545d9ae86d37a807514840696"
+          "e2741c23462dba0545d9ae86d37a807514840696",
+          "b784161c9b65181d34d827a47c6ef975c6870876",
+          "856a8e5f0775ab3f233e478690daa4b88fc3cc17"
         ],
-        "commitCount": 2,
+        "commitCount": 4,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

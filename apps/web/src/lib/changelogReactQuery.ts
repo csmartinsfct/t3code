@@ -8,6 +8,28 @@ export const changelogQueryKeys = {
   asset: () => ["changelog", "asset"] as const,
 };
 
+function normalizeLegacyChangelogAsset(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") {
+    return raw;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const provenance =
+    record.provenance && typeof record.provenance === "object"
+      ? ({ ...(record.provenance as Record<string, unknown>) } satisfies Record<string, unknown>)
+      : null;
+
+  if (!provenance || "rebuildCommitLimit" in provenance) {
+    return raw;
+  }
+
+  provenance.rebuildCommitLimit = 50;
+  return {
+    ...record,
+    provenance,
+  };
+}
+
 export function changelogQueryOptions() {
   return queryOptions({
     queryKey: changelogQueryKeys.asset(),
@@ -16,7 +38,8 @@ export function changelogQueryOptions() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      return Schema.decodeUnknownSync(ChangelogAssetFileSchema)(await response.json());
+      const raw = normalizeLegacyChangelogAsset(await response.json());
+      return Schema.decodeUnknownSync(ChangelogAssetFileSchema)(raw);
     },
     staleTime: Infinity,
   });

@@ -1,29 +1,34 @@
 import type { ChangelogAssetFile, ChangelogEntryCategory } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDaysIcon, FileClockIcon, LoaderIcon } from "lucide-react";
+import { FileClockIcon, LoaderIcon } from "lucide-react";
 
 import { changelogQueryOptions } from "../../lib/changelogReactQuery";
-import { Badge } from "../ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
+import { SettingsPageContainer } from "./SettingsPanels";
 
-const CATEGORY_BADGE_VARIANT: Record<
-  ChangelogEntryCategory,
-  "info" | "success" | "warning" | "error" | "outline"
-> = {
-  feature: "info",
-  improvement: "success",
-  fix: "outline",
-  performance: "success",
-  breaking: "warning",
-  security: "error",
-  internal: "outline",
+const CATEGORY_COLOR: Record<ChangelogEntryCategory, string> = {
+  feature: "bg-info",
+  improvement: "bg-success",
+  fix: "bg-muted-foreground",
+  performance: "bg-success",
+  breaking: "bg-warning",
+  security: "bg-destructive",
+  internal: "bg-muted-foreground/50",
 };
 
-function formatDateLabel(date: string): string {
+const CATEGORY_TEXT_COLOR: Record<ChangelogEntryCategory, string> = {
+  feature: "text-info-foreground",
+  improvement: "text-success-foreground",
+  fix: "text-muted-foreground",
+  performance: "text-success-foreground",
+  breaking: "text-warning-foreground",
+  security: "text-destructive-foreground",
+  internal: "text-muted-foreground",
+};
+
+function formatDateHeading(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
   });
@@ -36,18 +41,16 @@ export function ChangelogPanel() {
 
   return (
     <SettingsPageContainer>
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Changelog</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            AI-generated release notes baked into the app at build time from committed git history.
-          </p>
-        </div>
-        {data ? (
-          <Badge variant="outline" size="sm" className="font-mono text-[11px]">
-            {data.lastProcessedCommit?.slice(0, 12) ?? "no-commit"}
-          </Badge>
-        ) : null}
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Changelog</h1>
+        <p className="text-sm text-muted-foreground">
+          Release notes from committed git history.
+          {data?.lastProcessedCommit ? (
+            <span className="ml-2 font-mono text-[11px] text-muted-foreground/60">
+              {data.lastProcessedCommit.slice(0, 8)}
+            </span>
+          ) : null}
+        </p>
       </div>
 
       {changelogQuery.isPending ? (
@@ -79,48 +82,41 @@ export function ChangelogPanel() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <>
-          <SettingsSection title="Release Notes" icon={<CalendarDaysIcon className="size-3.5" />}>
-            <div className="divide-y divide-border">
-              {data.groups.map((group) => (
-                <section key={group.date} className="px-4 py-4 sm:px-5">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h2 className="text-sm font-medium text-foreground">
-                      {formatDateLabel(group.date)}
-                    </h2>
-                    <Badge variant="outline" size="sm">
-                      {group.entries.length} {group.entries.length === 1 ? "entry" : "entries"}
-                    </Badge>
-                  </div>
+        <div className="space-y-10">
+          {data.groups.map((group) => (
+            <section key={group.date}>
+              <h2 className="mb-4 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                {formatDateHeading(group.date)}
+              </h2>
 
-                  <div className="space-y-3">
-                    {group.entries.map((entry) => (
-                      <article
-                        key={entry.id}
-                        className="rounded-xl border border-border/70 bg-background/70 px-3 py-3"
+              <div className="space-y-0">
+                {group.entries.map((entry) => (
+                  <article
+                    key={entry.id}
+                    className="group relative border-l-2 border-border/40 py-3 pl-5 transition-colors hover:border-border"
+                  >
+                    <span
+                      className={`absolute -left-[5px] top-[18px] size-2 rounded-full ${CATEGORY_COLOR[entry.category]} ring-[3px] ring-background`}
+                    />
+                    <div className="flex items-baseline gap-2.5">
+                      <h3 className="text-[13px] font-medium leading-snug text-foreground/90 group-hover:text-foreground">
+                        {entry.title}
+                      </h3>
+                      <span
+                        className={`shrink-0 text-[10px] font-medium uppercase tracking-wider ${CATEGORY_TEXT_COLOR[entry.category]} opacity-60`}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-medium text-foreground">{entry.title}</h3>
-                          <Badge variant={CATEGORY_BADGE_VARIANT[entry.category]} size="sm">
-                            {entry.category}
-                          </Badge>
-                        </div>
-                        <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                          {entry.summary}
-                        </p>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </SettingsSection>
-
-          <div className="text-xs text-muted-foreground">
-            Generated {new Date(data.generatedAt).toLocaleString()} from commit history through{" "}
-            <code>{data.lastProcessedCommit?.slice(0, 12) ?? "unknown"}</code>.
-          </div>
-        </>
+                        {entry.category}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground/70">
+                      {entry.summary}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       )}
     </SettingsPageContainer>
   );
