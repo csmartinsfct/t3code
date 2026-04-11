@@ -284,6 +284,8 @@ All tools are authenticated via the managed run token system (same as scheduled 
 
 When the ticketing MCP server is injected into a live thread session, the request context also carries `threadId`. `create_ticket` uses that server-side context to persist an `origin` link automatically; `originThreadId` is not exposed as a public MCP tool argument.
 
+The ticketing service also seeds a small set of global labels and description templates on startup when they do not already exist. The shipped defaults now include the `idea` label plus an `Idea` template for early-stage exploration work alongside the existing `bug`, `feature`, and `research` defaults.
+
 ### MCP Delivery Modes
 
 The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) controls how these tools reach the AI model:

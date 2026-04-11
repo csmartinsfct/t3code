@@ -51,6 +51,7 @@ const toOperationError =
 // ---------------------------------------------------------------------------
 
 const SHIPPED_DEFAULT_LABELS: ReadonlyArray<{ name: string; color: string }> = [
+  { name: "idea", color: "#a855f7" },
   { name: "research", color: "#3b82f6" },
   { name: "bug", color: "#ef4444" },
   { name: "feature", color: "#22c55e" },
@@ -61,6 +62,11 @@ const SHIPPED_DEFAULT_TEMPLATES: ReadonlyArray<{
   description: string;
   body: string;
 }> = [
+  {
+    name: "Idea",
+    description: "Template for early-stage product ideas",
+    body: "## Summary\n\n## Problem / Opportunity\n\n## Why Now\n\n## Hypotheses\n\n## Unknowns / Risks\n\n## Research Questions",
+  },
   {
     name: "Bug",
     description: "Template for bug reports",
