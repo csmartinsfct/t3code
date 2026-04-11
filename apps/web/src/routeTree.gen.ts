@@ -17,6 +17,7 @@ import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.sc
 import { Route as SettingsRunsRouteImport } from './routes/settings.runs'
 import { Route as SettingsPromptsRouteImport } from './routes/settings.prompts'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsChangelogRouteImport } from './routes/settings.changelog'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
 import { Route as SettingsScheduledTasksIndexRouteImport } from './routes/settings.scheduled-tasks.index'
@@ -61,6 +62,11 @@ const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   path: '/general',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsChangelogRoute = SettingsChangelogRouteImport.update({
+  id: '/changelog',
+  path: '/changelog',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
+    | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/runs'
@@ -143,6 +153,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
+    | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/runs'
@@ -156,6 +167,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/_chat/$threadId'
     | '/settings/archived'
+    | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/runs'
@@ -229,6 +241,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsGeneralRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/changelog': {
+      id: '/settings/changelog'
+      path: '/changelog'
+      fullPath: '/settings/changelog'
+      preLoaderRoute: typeof SettingsChangelogRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/archived': {
       id: '/settings/archived'
       path: '/archived'
@@ -290,6 +309,7 @@ const SettingsScheduledTasksRouteWithChildren =
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
+  SettingsChangelogRoute: typeof SettingsChangelogRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
   SettingsRunsRoute: typeof SettingsRunsRoute
@@ -299,6 +319,7 @@ interface SettingsRouteChildren {
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
+  SettingsChangelogRoute: SettingsChangelogRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
   SettingsRunsRoute: SettingsRunsRoute,

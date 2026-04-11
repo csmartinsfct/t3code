@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   ClockIcon,
+  HistoryIcon,
   ScrollTextIcon,
   Settings2Icon,
   TagIcon,
@@ -26,7 +27,8 @@ export type SettingsSectionPath =
   | "/settings/scheduled-tasks"
   | "/settings/runs"
   | "/settings/prompts"
-  | "/settings/tickets";
+  | "/settings/tickets"
+  | "/settings/changelog";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
@@ -84,6 +86,17 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       <SidebarSeparator />
       <SidebarFooter className="p-2">
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="sm"
+              isActive={pathname === "/settings/changelog"}
+              className="gap-2 px-2 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => void navigate({ to: "/settings/changelog", replace: true })}
+            >
+              <HistoryIcon className="size-4" />
+              <span>Changelog</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               size="sm"

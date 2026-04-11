@@ -17,3 +17,4 @@ export * from "./ticketing";
 export * from "./rpc";
 export * from "./promptManagement";
 export * from "./promptTemplates";
+export * from "./changelog";

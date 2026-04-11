@@ -57,6 +57,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
 - [Startup Recovery](docs/startup-recovery.md) — Restart-time stale work detection, startup auto-resume, and the client-only `Was working` marker.
 - [Prompts](docs/prompts.md) — Prompt definitions, scope-aware overrides, validation, deterministic preview rendering, and prompt-management MCP APIs.
+- [Changelog](docs/changelog.md) — Build-time AI changelog generation, cache/runtime asset formats, Codex structured-output flow, and Settings UI integration.
 - [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
 - [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, MCP tools, and Settings UI.
 - [Agent Tools](docs/t3-agent-tools.md) — How MCP services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
