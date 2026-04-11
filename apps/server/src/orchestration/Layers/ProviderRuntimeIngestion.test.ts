@@ -331,6 +331,170 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("maps recoverable terminal reasons into ready sessions with informational errors", async () => {
+    const cases = [
+      {
+        reason: "max_turns",
+        expectedError: "Agent reached the maximum number of turns. Send a follow-up to continue.",
+      },
+      {
+        reason: "blocking_limit",
+        expectedError: "Rate limited — wait a moment and try again.",
+      },
+      {
+        reason: "rapid_refill_breaker",
+        expectedError: "Rate limited — wait a moment and try again.",
+      },
+    ] as const;
+
+    for (const [index, testCase] of cases.entries()) {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      const turnId = asTurnId(`turn-recoverable-${index}`);
+
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-turn-recoverable-started-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId,
+      });
+
+      await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+      );
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-turn-recoverable-completed-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        turnId,
+        payload: {
+          state: "failed",
+          terminalReason: testCase.reason,
+        },
+      });
+
+      const thread = await waitForThread(
+        harness.engine,
+        (entry) =>
+          entry.session?.status === "ready" &&
+          entry.session?.activeTurnId === null &&
+          entry.session?.lastError === testCase.expectedError,
+      );
+      expect(thread.session?.status).toBe("ready");
+      expect(thread.session?.lastError).toBe(testCase.expectedError);
+    }
+  });
+
+  it("maps terminal reasons that stop the session into error state messages", async () => {
+    const cases = [
+      {
+        reason: "prompt_too_long",
+        expectedError: "Context is too long. Try starting a new thread or compacting.",
+      },
+      {
+        reason: "stop_hook_prevented",
+        expectedError: "A hook prevented the agent from continuing.",
+      },
+      {
+        reason: "hook_stopped",
+        expectedError: "A hook prevented the agent from continuing.",
+      },
+    ] as const;
+
+    for (const [index, testCase] of cases.entries()) {
+      const harness = await createHarness();
+      const now = new Date().toISOString();
+      const turnId = asTurnId(`turn-terminal-error-${index}`);
+
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-turn-terminal-error-started-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId,
+      });
+
+      await waitForThread(
+        harness.engine,
+        (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+      );
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-turn-terminal-error-completed-${index}`),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        turnId,
+        payload: {
+          state: "failed",
+          terminalReason: testCase.reason,
+        },
+      });
+
+      const thread = await waitForThread(
+        harness.engine,
+        (entry) =>
+          entry.session?.status === "error" &&
+          entry.session?.activeTurnId === null &&
+          entry.session?.lastError === testCase.expectedError,
+      );
+      expect(thread.session?.status).toBe("error");
+      expect(thread.session?.lastError).toBe(testCase.expectedError);
+    }
+  });
+
+  it("falls back to the provider error message for unmapped terminal reasons like user aborts", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-user-abort-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-user-abort"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-user-abort",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-user-abort-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-user-abort"),
+      payload: {
+        state: "failed",
+        terminalReason: "user_abort",
+        errorMessage: "Cancelled by user.",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "error" &&
+        entry.session?.activeTurnId === null &&
+        entry.session?.lastError === "Cancelled by user.",
+    );
+    expect(thread.session?.status).toBe("error");
+    expect(thread.session?.lastError).toBe("Cancelled by user.");
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();

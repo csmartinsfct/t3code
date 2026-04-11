@@ -262,6 +262,36 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
   });
 
+  it("projects recoverable ready-session lastError values into the thread error state", () => {
+    const initialState = makeState(makeThread());
+    const recoverableErrors = [
+      "Agent reached the maximum number of turns. Send a follow-up to continue.",
+      "Rate limited — wait a moment and try again.",
+    ] as const;
+
+    for (const lastError of recoverableErrors) {
+      const next = syncServerReadModel(
+        initialState,
+        makeReadModel(
+          makeReadModelThread({
+            session: {
+              threadId: ThreadId.makeUnsafe("thread-1"),
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError,
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          }),
+        ),
+      );
+
+      expect(next.threads[0]?.session?.status).toBe("ready");
+      expect(next.threads[0]?.error).toBe(lastError);
+    }
+  });
+
   it("replaces projects using snapshot order during recovery", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
@@ -581,6 +611,29 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[0]?.session?.status).toBe("running");
     expect(next.threads[0]?.latestTurn?.state).toBe("completed");
     expect(next.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it("keeps recoverable ready-session updates visible in the thread error state", () => {
+    const state = makeState(makeThread());
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Rate limited — wait a moment and try again.",
+          updatedAt: "2026-02-27T00:00:02.000Z",
+        },
+      }),
+    );
+
+    expect(next.threads[0]?.session?.status).toBe("ready");
+    expect(next.threads[0]?.error).toBe("Rate limited — wait a moment and try again.");
   });
 
   it("maps message metadata from thread.message-sent events", () => {
