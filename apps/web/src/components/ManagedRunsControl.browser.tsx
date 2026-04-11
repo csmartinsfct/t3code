@@ -171,4 +171,29 @@ describe("ManagedRunsControl browser coverage", () => {
       await screen.unmount();
     }
   });
+
+  it("does not stop a run when the confirmation is canceled", async () => {
+    confirmSpy.mockResolvedValue(false);
+
+    const screen = await render(<ManagedRunsControl runs={[createRun()]} />);
+
+    try {
+      await page.getByRole("button", { name: /Runs/ }).click();
+      await page.getByText("dev-server").hover();
+      await page.getByRole("button", { name: "Stop" }).click();
+
+      await vi.waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalledWith(
+          [
+            'Stop run "dev-server"?',
+            "",
+            "This will stop the active managed run and any tracked services it owns.",
+          ].join("\n"),
+        );
+      });
+      expect(stopSpy).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
 });

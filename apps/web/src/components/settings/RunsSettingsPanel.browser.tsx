@@ -232,15 +232,25 @@ describe("RunsSettingsPanel browser coverage", () => {
       await expect.element(page.getByText("Deploy API")).toBeInTheDocument();
       await expect.element(page.getByText("Smoke Tests")).not.toBeInTheDocument();
 
+      await selectFilterOption(1, "All actions");
+      await vi.waitFor(() => {
+        expect(listInferenceRecordsSpy).toHaveBeenLastCalledWith({
+          limit: 100,
+          projectId: "project-2",
+        });
+      });
+      await expect.element(page.getByText("Deploy API")).toBeInTheDocument();
+      await expect.element(page.getByText("Smoke Tests")).toBeInTheDocument();
+
       await selectFilterOption(2, "Failed");
       await vi.waitFor(() => {
         expect(listInferenceRecordsSpy).toHaveBeenLastCalledWith({
           limit: 100,
           projectId: "project-2",
-          scriptId: "deploy-api",
         });
       });
       await expect.element(page.getByText("Deploy API")).toBeInTheDocument();
+      await expect.element(page.getByText("Smoke Tests")).not.toBeInTheDocument();
 
       await page.getByText("Deploy API").click();
       await vi.waitFor(() => {
@@ -271,6 +281,45 @@ describe("RunsSettingsPanel browser coverage", () => {
 
       await page.getByText("Deploy API").click();
       await expect.element(page.getByText("Run ID")).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows a failure message when inference detail loading rejects", async () => {
+    const records = [
+      createRecord({
+        inferenceId: "inf-error",
+        projectId: "project-1" as ProjectId,
+        scriptId: "dev-web",
+        scriptName: "Dev Web",
+        status: "ready",
+      }),
+    ] as const;
+
+    const getInferenceRecordSpy = vi.fn<NativeApi["managedRuns"]["getInferenceRecord"]>(
+      async () => {
+        throw new Error("detail load failed");
+      },
+    );
+
+    window.nativeApi = {
+      managedRuns: {
+        listInferenceRecords: vi.fn<NativeApi["managedRuns"]["listInferenceRecords"]>(
+          async () => records,
+        ),
+        getInferenceRecord: getInferenceRecordSpy,
+      },
+    } as unknown as NativeApi;
+
+    const screen = await render(<RunsSettingsPanel />);
+
+    try {
+      await page.getByText("Dev Web").click();
+      await vi.waitFor(() => {
+        expect(getInferenceRecordSpy).toHaveBeenCalledWith({ inferenceId: "inf-error" });
+      });
+      await expect.element(page.getByText("Failed to load detail.")).toBeInTheDocument();
     } finally {
       await screen.unmount();
     }
