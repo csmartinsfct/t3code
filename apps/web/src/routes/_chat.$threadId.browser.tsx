@@ -12,7 +12,11 @@ import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { waitForElement } from "../test-utils/browser";
 import type { Project, SidebarThreadSummary, Thread } from "../types";
-import { ChatThreadRouteView, type ChatThreadRouteSearch } from "./_chat.$threadId";
+import {
+  ChatThreadRouteView,
+  type ChatThreadRouteNavigate,
+  type ChatThreadRouteSearch,
+} from "./_chat.$threadId";
 
 const THREAD_ID = "thread-route-browser-test";
 const PROJECT_ID = "project-route-browser-test";
@@ -174,6 +178,29 @@ async function mountRoute(initialSearch: ChatThreadRouteSearch) {
   function Harness() {
     const [search, setSearch] = useState<ChatThreadRouteSearch>(initialSearch);
 
+    const setSearchState = (
+      searchUpdate:
+        | ChatThreadRouteSearch
+        | ((previous: ChatThreadRouteSearch) => ChatThreadRouteSearch | undefined),
+    ) => {
+      setSearch((previous) => {
+        const next =
+          typeof searchUpdate === "function" ? (searchUpdate(previous) ?? previous) : searchUpdate;
+        navigationState.currentSearch = next;
+        return next;
+      });
+    };
+
+    const navigate: ChatThreadRouteNavigate = (input) => {
+      if (input.to !== "/$threadId") return Promise.resolve();
+
+      const searchUpdate = input.search;
+      if (!searchUpdate) return Promise.resolve();
+
+      setSearchState(searchUpdate);
+      return Promise.resolve();
+    };
+
     return (
       <SidebarProvider>
         <ChatThreadRouteView
@@ -190,26 +217,7 @@ async function mountRoute(initialSearch: ChatThreadRouteSearch) {
               </button>
             </div>
           )}
-          navigate={
-            ((input: {
-              search?:
-                | ChatThreadRouteSearch
-                | ((previous: ChatThreadRouteSearch) => ChatThreadRouteSearch | undefined);
-            }) => {
-              const searchUpdate = input.search;
-              if (!searchUpdate) return Promise.resolve();
-
-              setSearch((previous) => {
-                const next =
-                  typeof searchUpdate === "function"
-                    ? (searchUpdate(previous) ?? previous)
-                    : searchUpdate;
-                navigationState.currentSearch = next;
-                return next;
-              });
-              return Promise.resolve();
-            }) as never
-          }
+          navigate={navigate}
         />
       </SidebarProvider>
     );

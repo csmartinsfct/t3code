@@ -275,12 +275,27 @@ const DiffPanelInlineSidebar = (props: {
 
 export type ChatThreadRouteSearch = DiffRouteSearch & FileExplorerRouteSearch;
 
+export type ChatThreadRouteNavigateInput =
+  | {
+      params: { threadId: ThreadId };
+      search?:
+        | ChatThreadRouteSearch
+        | ((previous: ChatThreadRouteSearch) => ChatThreadRouteSearch | undefined);
+      to: "/$threadId";
+    }
+  | {
+      replace: true;
+      to: "/";
+    };
+
+export type ChatThreadRouteNavigate = (input: ChatThreadRouteNavigateInput) => Promise<void>;
+
 export function ChatThreadRouteView(props: {
   diffPanelRenderer?: ((mode: DiffPanelMode) => ReactNode) | undefined;
   fileExplorerRenderer?:
     | ((input: { cwd: string; mode: FileExplorerPanelMode; onClose: () => void }) => ReactNode)
     | undefined;
-  navigate: ReturnType<typeof useNavigate>;
+  navigate: ChatThreadRouteNavigate;
   search: ChatThreadRouteSearch;
   threadId: ThreadId;
 }) {
@@ -302,7 +317,10 @@ export function ChatThreadRouteView(props: {
     void navigate({
       to: "/$threadId",
       params: { threadId },
-      search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+      search: (previous) => ({
+        ...stripDiffSearchParams(previous as Record<string, unknown>),
+        diff: undefined,
+      }),
     });
   }, [navigate, threadId]);
   const openDiff = useCallback(() => {
@@ -310,7 +328,7 @@ export function ChatThreadRouteView(props: {
       to: "/$threadId",
       params: { threadId },
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
+        const rest = stripDiffSearchParams(previous as Record<string, unknown>);
         return { ...rest, diff: "1" };
       },
     });
@@ -325,7 +343,7 @@ export function ChatThreadRouteView(props: {
       to: "/$threadId",
       params: { threadId },
       search: (previous) => ({
-        ...stripFileExplorerSearchParams(previous),
+        ...stripFileExplorerSearchParams(previous as Record<string, unknown>),
         fileExplorer: undefined,
       }),
     });
@@ -335,7 +353,7 @@ export function ChatThreadRouteView(props: {
       to: "/$threadId",
       params: { threadId },
       search: (previous) => {
-        const rest = stripFileExplorerSearchParams(previous);
+        const rest = stripFileExplorerSearchParams(previous as Record<string, unknown>);
         return { ...rest, fileExplorer: "1" };
       },
     });
@@ -466,7 +484,7 @@ export function ChatThreadRouteView(props: {
 }
 
 function ChatThreadRouteComponent() {
-  const navigate = useNavigate();
+  const navigate = useNavigate() as unknown as ChatThreadRouteNavigate;
   const threadId = Route.useParams({
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
