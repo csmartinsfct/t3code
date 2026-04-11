@@ -232,11 +232,9 @@ describe("buildOrchestrationTimelineRows", () => {
         summary: "Please make one more pass.",
         comments: [],
       }),
-      "Changes requested",
       "Addressed review feedback",
       "Reviewing ticket T3CO-24 again",
       JSON.stringify(finalReview),
-      "Approved",
       "Completed ticket T3CO-24",
     ]);
   });
@@ -348,7 +346,7 @@ describe("buildOrchestrationTimelineRows", () => {
     ).toHaveLength(1);
   });
 
-  it("orders same-timestamp milestones before blocks and blocks before terminal milestones", () => {
+  it("keeps review completion state on blocks even when the outcome milestone is hidden", () => {
     const rows = buildOrchestrationTimelineRows({
       parentActivities: [
         makeActivity({
@@ -388,7 +386,12 @@ describe("buildOrchestrationTimelineRows", () => {
       run: makeRun({ currentPhase: "reviewing" }),
     });
 
-    expect(rows.map((row) => row.kind)).toEqual(["separator", "thread-block", "separator"]);
+    expect(rows.map((row) => row.kind)).toEqual(["separator", "thread-block"]);
+    expect(rows[1]).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "review",
+      reviewOutcome: "approved",
+    });
   });
 
   it("keeps working user messages but hides review prompts", () => {

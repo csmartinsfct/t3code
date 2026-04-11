@@ -678,6 +678,7 @@ function inferThreadSectionKind(
 
 function shouldRenderActivityAsSeparator(activity: OrchestrationThreadActivity): boolean {
   if (activity.kind === "orchestration.run.started") return false;
+  if (isHiddenReviewOutcomeActivityKind(activity.kind)) return false;
   if (activity.kind.startsWith("orchestration.run.ticket.")) return true;
   return (
     activity.kind.includes("paused") ||
@@ -686,6 +687,14 @@ function shouldRenderActivityAsSeparator(activity: OrchestrationThreadActivity):
     activity.kind.includes("canceled") ||
     activity.kind.includes("takeover") ||
     activity.kind.includes("prompt-render-failed")
+  );
+}
+
+function isHiddenReviewOutcomeActivityKind(activityKind: string): boolean {
+  return (
+    activityKind.endsWith(".review.approved") ||
+    activityKind.endsWith(".review.requested-changes") ||
+    activityKind.endsWith(".review.exhausted")
   );
 }
 

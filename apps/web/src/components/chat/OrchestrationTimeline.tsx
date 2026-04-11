@@ -38,6 +38,58 @@ interface OrchestrationTimelineProps {
 
 type BadgeVariant = "info" | "success" | "warning" | "error" | "outline";
 
+const SUMMARY_TICKET_LINK_CLASS_NAME =
+  "font-mono underline decoration-transparent underline-offset-2 transition-colors hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background";
+const TICKET_BADGE_LINK_CLASS_NAME =
+  "font-mono !text-inherit !no-underline decoration-transparent hover:!text-inherit hover:!no-underline hover:decoration-transparent";
+
+function buildTicketHref(identifier: string): string {
+  return `t3://ticket/${encodeURIComponent(identifier)}`;
+}
+
+function renderSummaryWithTicketLink(input: {
+  summary: string;
+  ticketIdentifier: string | undefined;
+  onOpenTicketLink?: (identifier: string) => void | Promise<void>;
+}): React.ReactNode {
+  const { summary, ticketIdentifier, onOpenTicketLink } = input;
+  if (!ticketIdentifier) {
+    return summary;
+  }
+
+  const firstMatchIndex = summary.indexOf(ticketIdentifier);
+  if (firstMatchIndex < 0) {
+    return summary;
+  }
+
+  const href = buildTicketHref(ticketIdentifier);
+  const before = summary.slice(0, firstMatchIndex);
+  const after = summary.slice(firstMatchIndex + ticketIdentifier.length);
+  const linkedIdentifier = onOpenTicketLink ? (
+    <a
+      href={href}
+      className={SUMMARY_TICKET_LINK_CLASS_NAME}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void onOpenTicketLink(ticketIdentifier);
+      }}
+    >
+      {ticketIdentifier}
+    </a>
+  ) : (
+    <span className="font-mono">{ticketIdentifier}</span>
+  );
+
+  return (
+    <>
+      {before}
+      {linkedIdentifier}
+      {after}
+    </>
+  );
+}
+
 function resolveSeparatorBadgeVariant(row: SeparatorRow): {
   variant: BadgeVariant;
   icon: React.ReactNode;
@@ -80,8 +132,10 @@ function resolveSeparatorBadgeVariant(row: SeparatorRow): {
 
 const OrchestrationSeparator = memo(function OrchestrationSeparator({
   row,
+  onOpenTicketLink,
 }: {
   row: SeparatorRow;
+  onOpenTicketLink?: (identifier: string) => void | Promise<void>;
 }) {
   const { variant, icon } = resolveSeparatorBadgeVariant(row);
 
@@ -89,10 +143,30 @@ const OrchestrationSeparator = memo(function OrchestrationSeparator({
     <div className="my-3 flex items-center justify-center gap-1.5">
       <Badge variant={variant}>
         {icon}
-        {row.summary}
+        {renderSummaryWithTicketLink({
+          summary: row.summary,
+          ticketIdentifier: row.ticketIdentifier,
+          onOpenTicketLink,
+        })}
       </Badge>
       {row.ticketIdentifier && (
-        <Badge variant="outline" size="sm">
+        <Badge
+          variant="outline"
+          size="sm"
+          className={TICKET_BADGE_LINK_CLASS_NAME}
+          render={
+            onOpenTicketLink ? (
+              <a
+                href={buildTicketHref(row.ticketIdentifier)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void onOpenTicketLink(row.ticketIdentifier!);
+                }}
+              />
+            ) : undefined
+          }
+        >
           {row.ticketIdentifier}
         </Badge>
       )}
@@ -321,7 +395,12 @@ export function OrchestrationTimeline({
               className="absolute left-0 top-0 w-full pb-2"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
-              {row.kind === "separator" && <OrchestrationSeparator row={row} />}
+              {row.kind === "separator" && (
+                <OrchestrationSeparator
+                  row={row}
+                  {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
+                />
+              )}
               {row.kind === "thread-block" && (
                 <TimelineSection
                   row={row}

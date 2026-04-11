@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +36,23 @@ vi.mock("../ChatMarkdown", () => ({
 }));
 
 vi.mock("../ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => children,
+  Badge: ({
+    children,
+    render,
+  }: {
+    children: ReactNode;
+    render?: React.ReactElement | undefined;
+  }) => {
+    if (!render) {
+      return <span>{children}</span>;
+    }
+
+    return render.type === "a" ? (
+      <a {...render.props}>{children}</a>
+    ) : (
+      <render.type {...render.props}>{children}</render.type>
+    );
+  },
 }));
 
 vi.mock("./ReviewOutputCard", () => ({
@@ -149,17 +166,6 @@ describe("OrchestrationTimeline", () => {
         isActive: false,
       },
       {
-        kind: "separator",
-        id: "sep:changes",
-        activityKind: "orchestration.run.ticket.review.requested-changes",
-        summary: "Changes requested",
-        tone: "info",
-        createdAt: "2026-04-09T10:00:02.000Z",
-        ticketIdentifier: "T3CO-24",
-        reviewIteration: 1,
-        reviewState: "requested-changes",
-      },
-      {
         kind: "thread-block",
         id: "block:impl-2",
         threadId: "thread-impl",
@@ -174,6 +180,17 @@ describe("OrchestrationTimeline", () => {
           },
         ],
         isActive: false,
+      },
+      {
+        kind: "separator",
+        id: "sep:review-2",
+        activityKind: "orchestration.run.ticket.review.started",
+        summary: "Reviewing ticket T3CO-24 again",
+        tone: "info",
+        createdAt: "2026-04-09T10:00:03.500Z",
+        ticketIdentifier: "T3CO-24",
+        reviewIteration: 2,
+        reviewState: "started",
       },
       {
         kind: "thread-block",
@@ -213,6 +230,7 @@ describe("OrchestrationTimeline", () => {
         markdownCwd={undefined}
         workspaceRoot={undefined}
         onNavigateToThread={() => {}}
+        onOpenTicketLink={() => {}}
       />,
     );
 
@@ -221,14 +239,15 @@ describe("OrchestrationTimeline", () => {
     expect(markup).toContain("Open thread");
     expect(markup).not.toContain("Active");
     expect(markup.indexOf("Initial implementation")).toBeLessThan(
-      markup.indexOf("Changes requested"),
-    );
-    expect(markup.indexOf("Changes requested")).toBeLessThan(
       markup.indexOf("Addressed review feedback"),
     );
+    expect(markup).toContain("Reviewing ticket ");
+    expect(markup).toContain('href="t3://ticket/T3CO-24"');
+    expect(markup).toContain(" again");
     expect(markup.indexOf("Addressed review feedback")).toBeLessThan(
       markup.indexOf("Looks good now."),
     );
+    expect(markup).not.toContain("Changes requested");
     expect(markup).toContain("Automated review 2 Approved Looks good now.");
   });
 
@@ -281,6 +300,45 @@ describe("OrchestrationTimeline", () => {
         onOpenTicketLink,
       }),
     );
+  });
+
+  it("renders timeline ticket mentions as internal ticket anchors when a handler is available", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "separator",
+          id: "sep:start",
+          activityKind: "orchestration.run.ticket.started",
+          summary: "Starting work on ticket T3CO-169",
+          tone: "info",
+          createdAt: "2026-04-09T10:00:00.000Z",
+          ticketIdentifier: "T3CO-169",
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        onNavigateToThread={() => {}}
+        onOpenTicketLink={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('href="t3://ticket/T3CO-169"');
+    expect(markup).toContain(">T3CO-169</a>");
   });
 
   it("renders non-prompt review user messages when they are present in timeline blocks", async () => {
