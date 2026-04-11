@@ -20,6 +20,13 @@ export interface ExternalDep {
   dependsOn: { identifier: string; title: string; status: TicketStatus };
 }
 
+interface DependencyDescriptor {
+  dependsOnTicketId: TicketId;
+  identifier: string;
+  title: string;
+  status: TicketStatus;
+}
+
 export type OrchestrationPlan =
   | { kind: "valid"; orderedTickets: OrchestrationPlanTicket[] }
   | { kind: "blocked-external"; externalDeps: ExternalDep[] }
@@ -71,10 +78,7 @@ function buildTreeIndexes(input: {
   allTickets: readonly TicketSummary[];
 }) {
   const ticketById = new Map<TicketId, TicketSummary>();
-  const depsById = new Map<
-    TicketId,
-    { dependsOnTicketId: TicketId; identifier: string; title: string; status: TicketStatus }[]
-  >();
+  const depsById = new Map<TicketId, DependencyDescriptor[]>();
   const childIdsByParentId = new Map<TicketId, TicketId[]>();
   const parentIdByTicketId = new Map<TicketId, TicketId | null>();
 
@@ -228,17 +232,75 @@ export function buildOrchestrationPlan(
     if (ticket) selectedTickets.push(ticket);
   }
 
+  const leafExecutionIdsByTicketId = new Map<TicketId, TicketId[]>();
+  const collectLeafExecutionIdsMemo = (ticketId: TicketId): TicketId[] => {
+    const cached = leafExecutionIdsByTicketId.get(ticketId);
+    if (cached) return cached;
+    const collected = collectLeafExecutionIds({ ticketId, childIdsByParentId });
+    leafExecutionIdsByTicketId.set(ticketId, collected);
+    return collected;
+  };
+
+  const selectedTreeIdsByTicketId = new Map<TicketId, TicketId[]>();
+  const collectSelectedTreeIds = (ticketId: TicketId): TicketId[] => {
+    const cached = selectedTreeIdsByTicketId.get(ticketId);
+    if (cached) return cached;
+    const childIds = childIdsByParentId.get(ticketId) ?? [];
+    const collected = [ticketId, ...childIds.flatMap((childId) => collectSelectedTreeIds(childId))];
+    selectedTreeIdsByTicketId.set(ticketId, collected);
+    return collected;
+  };
+
+  const selectedTreeIds = new Set<TicketId>();
+  for (const selectedId of selectedIds) {
+    for (const treeId of collectSelectedTreeIds(selectedId)) {
+      selectedTreeIds.add(treeId);
+    }
+  }
+
+  const dependencyChainByTicketId = new Map<TicketId, DependencyDescriptor[]>();
+  const collectInheritedDependencies = (ticketId: TicketId): DependencyDescriptor[] => {
+    const cached = dependencyChainByTicketId.get(ticketId);
+    if (cached) return cached;
+
+    const collected: DependencyDescriptor[] = [];
+    const seenDependencyIds = new Set<TicketId>();
+    let currentTicketId: TicketId | null = ticketId;
+
+    while (currentTicketId) {
+      for (const dependency of depsById.get(currentTicketId) ?? []) {
+        if (seenDependencyIds.has(dependency.dependsOnTicketId)) continue;
+        seenDependencyIds.add(dependency.dependsOnTicketId);
+        collected.push(dependency);
+      }
+      currentTicketId = parentIdByTicketId.get(currentTicketId) ?? null;
+    }
+
+    dependencyChainByTicketId.set(ticketId, collected);
+    return collected;
+  };
+
   const TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set(["done", "canceled"]);
   const externalDeps: ExternalDep[] = [];
+  const seenExternalDeps = new Set<string>();
 
   for (const ticket of selectedTickets) {
-    const deps = depsById.get(ticket.id) ?? [];
+    const deps = collectInheritedDependencies(ticket.id);
     for (const dep of deps) {
-      if (executionIds.has(dep.dependsOnTicketId)) continue;
-      if (TERMINAL_STATUSES.has(dep.status)) continue;
+      if (selectedTreeIds.has(dep.dependsOnTicketId)) continue;
+      const depTicket = ticketById.get(dep.dependsOnTicketId);
+      const depStatus = depTicket?.status ?? dep.status;
+      if (TERMINAL_STATUSES.has(depStatus)) continue;
+      const externalDepKey = `${ticket.id}:${dep.dependsOnTicketId}`;
+      if (seenExternalDeps.has(externalDepKey)) continue;
+      seenExternalDeps.add(externalDepKey);
       externalDeps.push({
         ticket,
-        dependsOn: { identifier: dep.identifier, title: dep.title, status: dep.status },
+        dependsOn: {
+          identifier: depTicket?.identifier ?? dep.identifier,
+          title: depTicket?.title ?? dep.title,
+          status: depStatus,
+        },
       });
     }
   }
@@ -253,13 +315,17 @@ export function buildOrchestrationPlan(
 
   const internalEdges: { from: TicketSummary; to: TicketSummary }[] = [];
   for (const ticket of runnableTickets) {
-    const deps = depsById.get(ticket.id) ?? [];
+    const deps = collectInheritedDependencies(ticket.id);
+    const seenInternalDependencyIds = new Set<TicketId>();
     for (const dep of deps) {
-      if (!executionIds.has(dep.dependsOnTicketId)) continue;
-      if (TERMINAL_STATUSES.has(dep.status)) continue;
-      const depTicket = ticketById.get(dep.dependsOnTicketId);
-      if (depTicket) {
+      if (!selectedTreeIds.has(dep.dependsOnTicketId)) continue;
+      for (const depExecutionId of collectLeafExecutionIdsMemo(dep.dependsOnTicketId)) {
+        if (!executionIds.has(depExecutionId)) continue;
+        if (depExecutionId === ticket.id || seenInternalDependencyIds.has(depExecutionId)) continue;
+        const depTicket = ticketById.get(depExecutionId);
+        if (!depTicket || TERMINAL_STATUSES.has(depTicket.status)) continue;
         internalEdges.push({ from: ticket, to: depTicket });
+        seenInternalDependencyIds.add(depExecutionId);
       }
     }
   }
