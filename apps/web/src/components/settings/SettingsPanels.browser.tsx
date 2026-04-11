@@ -3,18 +3,45 @@ import "../../index.css";
 import {
   DEFAULT_SERVER_SETTINGS,
   type NativeApi,
+  type ProjectId,
   type ServerConfig,
   type ServerProvider,
+  type ThreadId,
 } from "@t3tools/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { waitForElement } from "../../test-utils/browser";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
+import { useStore } from "../../store";
 import { createReadyServerProvider } from "../../test/providerTestUtils";
-import { GeneralSettingsPanel } from "./SettingsPanels";
+import { useTerminalStateStore } from "../../terminalStateStore";
+import type { Project, Thread } from "../../types";
+import { ArchivedThreadsPanel, GeneralSettingsPanel } from "./SettingsPanels";
+
+const { mockNavigate, routeThreadIdState } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(async () => undefined),
+  routeThreadIdState: { current: null as ThreadId | null },
+}));
+
+vi.mock("@tanstack/react-router", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+    useParams: ({ select }: { select?: (value: { threadId?: string }) => unknown } = {}) => {
+      const params =
+        routeThreadIdState.current === null ? {} : { threadId: routeThreadIdState.current };
+      return select ? select(params) : params;
+    },
+  };
+});
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -40,6 +67,105 @@ function createProvider(input: { provider: string; displayName?: string }): Serv
     ...input,
     checkedAt: "2026-04-10T00:00:00.000Z",
   });
+}
+
+const PROJECT_ID = "project-1" as ProjectId;
+const NOW_ISO = "2026-04-11T12:00:00.000Z";
+
+const TEST_PROJECT: Project = {
+  id: PROJECT_ID,
+  name: "Alpha",
+  cwd: "/repo/alpha",
+  defaultModelSelection: {
+    provider: "codex",
+    model: "gpt-5",
+  },
+  systemPrompt: null,
+  promptOverrides: { orchestration: {} },
+  scripts: [],
+  createdAt: NOW_ISO,
+  updatedAt: NOW_ISO,
+};
+
+function createThread(input: {
+  id: ThreadId;
+  title: string;
+  archivedAt?: string | null;
+  createdAt?: string;
+  worktreePath?: string | null;
+}): Thread {
+  return {
+    id: input.id,
+    codexThreadId: null,
+    projectId: PROJECT_ID,
+    title: input.title,
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5",
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    session: null,
+    messages: [],
+    proposedPlans: [],
+    error: null,
+    createdAt: input.createdAt ?? NOW_ISO,
+    archivedAt: input.archivedAt ?? null,
+    updatedAt: input.archivedAt ?? input.createdAt ?? NOW_ISO,
+    latestTurn: null,
+    branch: null,
+    worktreePath: input.worktreePath ?? null,
+    turnDiffSummaries: [],
+    activities: [],
+    isOrchestrationThread: false,
+    parentThreadId: null,
+    ticketId: null,
+  };
+}
+
+function seedArchivedThreadsPanel(threads: Thread[]) {
+  useStore.setState({
+    projects: [TEST_PROJECT],
+    threads,
+    threadsById: Object.fromEntries(threads.map((thread) => [thread.id, thread])) as Record<
+      string,
+      Thread
+    >,
+    sidebarThreadsById: {},
+    threadIdsByProjectId: { [PROJECT_ID]: threads.map((thread) => thread.id) },
+    bootstrapComplete: true,
+    orchestrationRunStatusByThreadId: {},
+  });
+  useComposerDraftStore.setState({
+    draftsByThreadId: {},
+    draftThreadsByThreadId: {},
+    projectDraftThreadIdByProjectId: {},
+    stickyModelSelectionByProvider: {},
+    stickyActiveProvider: null,
+  });
+  useTerminalStateStore.setState({
+    terminalStateByThreadId: {},
+    terminalEventEntriesByKey: {},
+    nextTerminalEventId: 1,
+  });
+}
+
+async function renderArchivedThreadsPanel() {
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AppAtomRegistryProvider>
+        <ArchivedThreadsPanel />
+      </AppAtomRegistryProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function createDeferredPromise() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 describe("GeneralSettingsPanel observability", () => {
@@ -175,5 +301,223 @@ describe("GeneralSettingsPanel discovered Claude profiles", () => {
 
     await expect.element(page.getByText("Claude (metric) binary path")).toBeInTheDocument();
     await expect.element(page.getByText("Claude (zbd) binary path")).toBeInTheDocument();
+  });
+});
+
+describe("ArchivedThreadsPanel bulk delete", () => {
+  beforeEach(() => {
+    resetServerStateForTests();
+    __resetNativeApiForTests();
+    localStorage.clear();
+    document.body.innerHTML = "";
+    mockNavigate.mockReset();
+    routeThreadIdState.current = null;
+    seedArchivedThreadsPanel([]);
+  });
+
+  afterEach(() => {
+    resetServerStateForTests();
+    __resetNativeApiForTests();
+    document.body.innerHTML = "";
+    delete window.nativeApi;
+  });
+
+  it("covers the one-shot bulk-delete flow, orphaned-worktree prompt, parallel deletion, and single fallback navigation", async () => {
+    const firstThreadId = "thread-archived-1" as ThreadId;
+    const secondThreadId = "thread-archived-2" as ThreadId;
+    const deleteFirst = createDeferredPromise();
+    const deleteSecond = createDeferredPromise();
+    const confirmSpy = vi
+      .fn<NativeApi["dialogs"]["confirm"]>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
+    const dispatchCommandSpy = vi.fn<NativeApi["orchestration"]["dispatchCommand"]>(
+      async (command) => {
+        if (command.type !== "thread.delete") {
+          return { sequence: 1 };
+        }
+        if (command.threadId === firstThreadId) {
+          await deleteFirst.promise;
+        }
+        if (command.threadId === secondThreadId) {
+          await deleteSecond.promise;
+        }
+        useStore.setState((state) => {
+          const remainingThreads = state.threads.filter((thread) => thread.id !== command.threadId);
+          const { [command.threadId]: _deletedThread, ...remainingThreadsById } = state.threadsById;
+          return {
+            ...state,
+            threads: remainingThreads,
+            threadsById: remainingThreadsById,
+          };
+        });
+        return { sequence: 1 };
+      },
+    );
+    const terminalCloseSpy = vi.fn<NativeApi["terminal"]["close"]>().mockResolvedValue(undefined);
+    const removeWorktreeSpy = vi.fn<NativeApi["git"]["removeWorktree"]>().mockResolvedValue(
+      undefined,
+    );
+
+    routeThreadIdState.current = firstThreadId;
+    seedArchivedThreadsPanel([
+      createThread({
+        id: firstThreadId,
+        title: "Archived alpha",
+        archivedAt: "2026-04-11T14:00:00.000Z",
+        worktreePath: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
+      }),
+      createThread({
+        id: secondThreadId,
+        title: "Archived beta",
+        archivedAt: "2026-04-11T13:00:00.000Z",
+        worktreePath: "/tmp/custom-worktrees/beta-worktree",
+      }),
+      createThread({
+        id: "thread-active" as ThreadId,
+        title: "Active thread",
+      }),
+    ]);
+    window.nativeApi = {
+      dialogs: {
+        confirm: confirmSpy,
+      },
+      orchestration: {
+        dispatchCommand: dispatchCommandSpy,
+      },
+      terminal: {
+        close: terminalCloseSpy,
+      },
+      git: {
+        removeWorktree: removeWorktreeSpy,
+      },
+    } as unknown as NativeApi;
+
+    const screen = await renderArchivedThreadsPanel();
+
+    try {
+      const deleteAllButton = await waitForElement(
+        () =>
+          [...document.querySelectorAll("button")].find((button) =>
+            button.textContent?.includes("Delete all"),
+          ) ?? null,
+        "Unable to find the archived-thread bulk delete button.",
+      );
+      deleteAllButton.click();
+
+      await vi.waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalledTimes(2);
+      });
+      expect(confirmSpy).toHaveBeenNthCalledWith(
+        1,
+        [
+          "Delete 2 archived threads?",
+          "This permanently clears conversation history for these threads.",
+        ].join("\n"),
+      );
+      expect(confirmSpy).toHaveBeenNthCalledWith(
+        2,
+        [
+          "2 orphaned worktrees will be left behind:",
+          "  alpha-worktree",
+          "  beta-worktree",
+          "",
+          "Delete them too?",
+        ].join("\n"),
+      );
+
+      await vi.waitFor(() => {
+        const deletedThreadIds = dispatchCommandSpy.mock.calls
+          .map(([command]) => command)
+          .filter((command) => command.type === "thread.delete")
+          .map((command) => command.threadId);
+        expect(deletedThreadIds).toEqual(expect.arrayContaining([firstThreadId, secondThreadId]));
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      deleteSecond.resolve();
+      await vi.waitFor(() => {
+        expect(terminalCloseSpy).toHaveBeenCalledWith({
+          threadId: secondThreadId,
+          deleteHistory: true,
+        });
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      deleteFirst.resolve();
+
+      await vi.waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledTimes(1);
+      });
+      expect(mockNavigate).toHaveBeenCalledWith({
+        to: "/$threadId",
+        params: { threadId: "thread-active" },
+        replace: true,
+      });
+      expect(removeWorktreeSpy).toHaveBeenCalledTimes(2);
+      expect(removeWorktreeSpy).toHaveBeenCalledWith({
+        cwd: "/repo/alpha",
+        path: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
+        force: true,
+      });
+      expect(removeWorktreeSpy).toHaveBeenCalledWith({
+        cwd: "/repo/alpha",
+        path: "/tmp/custom-worktrees/beta-worktree",
+        force: true,
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not open the orphaned-worktree prompt when the bulk-delete confirmation is declined", async () => {
+    const archivedThreadId = "thread-archived-1" as ThreadId;
+    const confirmSpy = vi.fn<NativeApi["dialogs"]["confirm"]>().mockResolvedValue(false);
+    const dispatchCommandSpy = vi.fn<NativeApi["orchestration"]["dispatchCommand"]>();
+
+    seedArchivedThreadsPanel([
+      createThread({
+        id: archivedThreadId,
+        title: "Archived alpha",
+        archivedAt: "2026-04-11T14:00:00.000Z",
+        worktreePath: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
+      }),
+    ]);
+    window.nativeApi = {
+      dialogs: {
+        confirm: confirmSpy,
+      },
+      orchestration: {
+        dispatchCommand: dispatchCommandSpy,
+      },
+      terminal: {
+        close: vi.fn(async () => undefined),
+      },
+      git: {
+        removeWorktree: vi.fn(async () => undefined),
+      },
+    } as unknown as NativeApi;
+
+    const screen = await renderArchivedThreadsPanel();
+
+    try {
+      const deleteAllButton = await waitForElement(
+        () =>
+          [...document.querySelectorAll("button")].find((button) =>
+            button.textContent?.includes("Delete all"),
+          ) ?? null,
+        "Unable to find the archived-thread bulk delete button.",
+      );
+      deleteAllButton.click();
+
+      await vi.waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(dispatchCommandSpy).not.toHaveBeenCalled();
+      expect(mockNavigate).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
   });
 });

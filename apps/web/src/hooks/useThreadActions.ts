@@ -271,8 +271,6 @@ export function useThreadActions() {
 
       const { projects, threads, threadsById } = useStore.getState();
       const deletedIdSet = new Set<ThreadId>(threadIds);
-      const survivingThreads = threads.filter((entry) => !deletedIdSet.has(entry.id));
-
       // Pre-compute orphaned worktrees and ask once
       const orphanedWorktrees: Array<{
         threadId: ThreadId;
@@ -282,7 +280,10 @@ export function useThreadActions() {
       for (const id of threadIds) {
         const thread = threadsById[id];
         if (!thread) continue;
-        const orphanedPath = getOrphanedWorktreePathForThread(survivingThreads, id);
+        const threadsRemainingAfterBatchDelete = threads.filter(
+          (entry) => entry.id === id || !deletedIdSet.has(entry.id),
+        );
+        const orphanedPath = getOrphanedWorktreePathForThread(threadsRemainingAfterBatchDelete, id);
         if (!orphanedPath) continue;
         const project = projects.find((p) => p.id === thread.projectId);
         if (project) {
@@ -410,9 +411,8 @@ export function useThreadActions() {
 
       // Navigate once if the current route thread was among deleted
       if (routeThreadId && deletedIdSet.has(routeThreadId)) {
-        const remainingThreads = useStore.getState().threads;
         const fallbackThreadId = getFallbackThreadIdAfterDelete({
-          threads: remainingThreads,
+          threads,
           deletedThreadId: routeThreadId,
           deletedThreadIds: deletedIdSet,
           sortOrder: appSettings.sidebarThreadSortOrder,
