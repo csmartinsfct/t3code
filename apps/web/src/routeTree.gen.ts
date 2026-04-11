@@ -12,11 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as SettingsTicketsRouteImport } from './routes/settings.tickets'
 import { Route as SettingsScheduledTasksRouteImport } from './routes/settings.scheduled-tasks'
 import { Route as SettingsRunsRouteImport } from './routes/settings.runs'
 import { Route as SettingsPromptsRouteImport } from './routes/settings.prompts'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
-import { Route as SettingsTicketsRouteImport } from './routes/settings.tickets'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
 import { Route as SettingsScheduledTasksIndexRouteImport } from './routes/settings.scheduled-tasks.index'
@@ -36,6 +36,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ChatRoute,
 } as any)
+const SettingsTicketsRoute = SettingsTicketsRouteImport.update({
+  id: '/tickets',
+  path: '/tickets',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsScheduledTasksRoute = SettingsScheduledTasksRouteImport.update({
   id: '/scheduled-tasks',
   path: '/scheduled-tasks',
@@ -54,11 +59,6 @@ const SettingsPromptsRoute = SettingsPromptsRouteImport.update({
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsTicketsRoute = SettingsTicketsRouteImport.update({
-  id: '/tickets',
-  path: '/tickets',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
@@ -92,8 +92,8 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
-  '/settings/tickets': typeof SettingsTicketsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
+  '/settings/tickets': typeof SettingsTicketsRoute
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
   '/settings/scheduled-tasks/': typeof SettingsScheduledTasksIndexRoute
 }
@@ -118,8 +118,8 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
   '/settings/runs': typeof SettingsRunsRoute
-  '/settings/tickets': typeof SettingsTicketsRoute
   '/settings/scheduled-tasks': typeof SettingsScheduledTasksRouteWithChildren
+  '/settings/tickets': typeof SettingsTicketsRoute
   '/_chat/': typeof ChatIndexRoute
   '/settings/scheduled-tasks/$taskId': typeof SettingsScheduledTasksTaskIdRoute
   '/settings/scheduled-tasks/': typeof SettingsScheduledTasksIndexRoute
@@ -134,8 +134,8 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/runs'
-    | '/settings/tickets'
     | '/settings/scheduled-tasks'
+    | '/settings/tickets'
     | '/settings/scheduled-tasks/$taskId'
     | '/settings/scheduled-tasks/'
   fileRoutesByTo: FileRoutesByTo
@@ -159,8 +159,8 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/runs'
-    | '/settings/tickets'
     | '/settings/scheduled-tasks'
+    | '/settings/tickets'
     | '/_chat/'
     | '/settings/scheduled-tasks/$taskId'
     | '/settings/scheduled-tasks/'
@@ -194,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/settings/tickets': {
+      id: '/settings/tickets'
+      path: '/tickets'
+      fullPath: '/settings/tickets'
+      preLoaderRoute: typeof SettingsTicketsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/scheduled-tasks': {
       id: '/settings/scheduled-tasks'
       path: '/scheduled-tasks'
@@ -220,13 +227,6 @@ declare module '@tanstack/react-router' {
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/tickets': {
-      id: '/settings/tickets'
-      path: '/tickets'
-      fullPath: '/settings/tickets'
-      preLoaderRoute: typeof SettingsTicketsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/archived': {
@@ -293,8 +293,8 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
   SettingsRunsRoute: typeof SettingsRunsRoute
-  SettingsTicketsRoute: typeof SettingsTicketsRoute
   SettingsScheduledTasksRoute: typeof SettingsScheduledTasksRouteWithChildren
+  SettingsTicketsRoute: typeof SettingsTicketsRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -302,8 +302,8 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,
   SettingsRunsRoute: SettingsRunsRoute,
-  SettingsTicketsRoute: SettingsTicketsRoute,
   SettingsScheduledTasksRoute: SettingsScheduledTasksRouteWithChildren,
+  SettingsTicketsRoute: SettingsTicketsRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
