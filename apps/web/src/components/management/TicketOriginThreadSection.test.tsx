@@ -36,7 +36,6 @@ describe("TicketOriginThreadSection", () => {
     expect(markup).toContain("Origin Thread");
     expect(markup).toContain("Orchestration JSON Parsing Regression");
     expect(markup).toContain("Origin");
-    expect(markup).toContain("Hidden");
     expect(markup).toContain("Archived");
     expect(markup).toContain("Review");
     expect(markup).toContain("12h ago");

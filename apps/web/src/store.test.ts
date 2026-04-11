@@ -583,6 +583,44 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[0]?.messages).toHaveLength(1);
   });
 
+  it("maps message metadata from thread.message-sent events", () => {
+    const state = makeState(makeThread());
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("message-with-metadata"),
+        role: "user",
+        text: "Continue.",
+        metadata: {
+          origin: {
+            kind: "orchestration-prompt",
+            promptId: "resume",
+            phase: "working",
+            dispatchMode: "resume",
+          },
+        },
+        turnId: TurnId.makeUnsafe("turn-1"),
+        streaming: false,
+        createdAt: "2026-02-27T00:00:03.000Z",
+        updatedAt: "2026-02-27T00:00:03.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.messages[0]).toMatchObject({
+      text: "Continue.",
+      metadata: {
+        origin: {
+          kind: "orchestration-prompt",
+          promptId: "resume",
+          phase: "working",
+          dispatchMode: "resume",
+        },
+      },
+    });
+  });
+
   it("does not regress latestTurn when an older turn diff completes late", () => {
     const state = makeState(
       makeThread({

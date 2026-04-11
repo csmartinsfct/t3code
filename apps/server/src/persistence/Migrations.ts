@@ -47,6 +47,7 @@ import Migration0030 from "./Migrations/030_TicketingModelOverrides.ts";
 import Migration0031 from "./Migrations/031_TicketThreadLinks.ts";
 import Migration0032 from "./Migrations/032_ProjectPromptOverrides.ts";
 import Migration0033 from "./Migrations/033_TicketIdentifiersProjectScope.ts";
+import Migration0034 from "./Migrations/034_ProjectionThreadMessageMetadata.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -92,6 +93,7 @@ export const migrationEntries = [
   [31, "TicketThreadLinks", Migration0031],
   [32, "ProjectPromptOverrides", Migration0032],
   [33, "TicketIdentifiersProjectScope", Migration0033],
+  [34, "ProjectionThreadMessageMetadata", Migration0034],
 ] as const;
 
 const migrationEntryById = new Map<number, string>(

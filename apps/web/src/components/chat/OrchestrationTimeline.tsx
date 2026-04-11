@@ -168,10 +168,6 @@ const TimelineSection = memo(function TimelineSection({
       ) : (
         <div className="space-y-3">
           {row.messages.map((message) => {
-            if (isReview && message.role === "user") {
-              return null;
-            }
-
             if (message.role === "assistant") {
               const reviewOutput = isReview ? parseReviewOutputText(message.text) : null;
 

@@ -414,6 +414,19 @@ describe("buildOrchestrationTimelineRows", () => {
               role: "user",
               text: "Internal review prompt",
               createdAt: "2026-04-09T10:00:01.000Z",
+              metadata: {
+                origin: {
+                  kind: "orchestration-prompt",
+                  promptId: "review",
+                  phase: "reviewing",
+                  dispatchMode: "review",
+                },
+              },
+            }),
+            makeMessage("review-human", {
+              role: "user",
+              text: "Human follow-up in review thread",
+              createdAt: "2026-04-09T10:00:02.000Z",
             }),
           ],
         }),
@@ -422,11 +435,16 @@ describe("buildOrchestrationTimelineRows", () => {
     });
 
     const blocks = rows.filter((row) => row.kind === "thread-block");
-    expect(blocks).toHaveLength(1);
+    expect(blocks).toHaveLength(2);
     expect(blocks[0]).toMatchObject({
       kind: "thread-block",
       sectionKind: "working",
       messages: [expect.objectContaining({ text: "Working follow-up" })],
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "review",
+      messages: [expect.objectContaining({ text: "Human follow-up in review thread" })],
     });
   });
 
@@ -444,6 +462,56 @@ describe("buildOrchestrationTimelineRows", () => {
         }),
       ],
       childThreads: [makeChildThread({ id: "thread-impl", ticketId: "ticket-1" })],
+      run: makeRun({
+        currentPhase: "working",
+        updatedAt: "2026-04-09T10:00:05.000Z",
+      }),
+    });
+
+    const waitingBlock = rows.find((row) => row.kind === "thread-block");
+    expect(waitingBlock).toMatchObject({
+      kind: "thread-block",
+      sectionKind: "working",
+      emptyStateText: "Waiting for agent response...",
+      messages: [],
+      isActive: true,
+    });
+  });
+
+  it("keeps waiting when the only working-phase message is a hidden orchestration prompt", () => {
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "ticket-started",
+          kind: "orchestration.run.ticket.started",
+          summary: "Starting work",
+          createdAt: "2026-04-09T10:00:00.000Z",
+          ticketId: "ticket-1",
+          ticketIdentifier: "T3CO-24",
+          workingThreadId: "thread-impl",
+        }),
+      ],
+      childThreads: [
+        makeChildThread({
+          id: "thread-impl",
+          ticketId: "ticket-1",
+          messages: [
+            makeMessage("resume-prompt", {
+              role: "user",
+              text: "Continue.",
+              createdAt: "2026-04-09T10:00:01.000Z",
+              metadata: {
+                origin: {
+                  kind: "orchestration-prompt",
+                  promptId: "resume",
+                  phase: "working",
+                  dispatchMode: "resume",
+                },
+              },
+            }),
+          ],
+        }),
+      ],
       run: makeRun({
         currentPhase: "working",
         updatedAt: "2026-04-09T10:00:05.000Z",

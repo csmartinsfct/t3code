@@ -12,8 +12,7 @@ interface TicketThreadRowButtonProps {
 const LINK_BADGE_CONFIG = {
   origin: { label: "Origin", variant: "outline" as const },
   bound: { label: "Bound", variant: "secondary" as const },
-  mention: { label: "Mention", variant: "success" as const },
-};
+} satisfies Partial<Record<string, { label: string; variant: string }>>;
 
 export function TicketThreadRowButton({ thread, onOpenThread }: TicketThreadRowButtonProps) {
   return (
@@ -30,16 +29,14 @@ export function TicketThreadRowButton({ thread, onOpenThread }: TicketThreadRowB
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         <span className="truncate text-foreground">{thread.title}</span>
         {thread.linkTypes.map((linkType) => {
-          const config = LINK_BADGE_CONFIG[linkType];
+          const config = LINK_BADGE_CONFIG[linkType as keyof typeof LINK_BADGE_CONFIG];
+          if (!config) return null;
           return (
             <Badge key={linkType} size="sm" variant={config.variant}>
               {config.label}
             </Badge>
           );
         })}
-        <Badge size="sm" variant={thread.isVisible ? "outline" : "warning"}>
-          {thread.isVisible ? "Visible" : "Hidden"}
-        </Badge>
         {thread.archivedAt && (
           <Badge size="sm" variant="outline">
             Archived

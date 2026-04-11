@@ -747,6 +747,14 @@ describe("OrchestrationRunRunner", () => {
 
     expect(turnStarts).toHaveLength(1);
     expect(turnStarts[0]?.message.text).toBe("Resume custom T3CO-1 in Runner project");
+    expect(turnStarts[0]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "resume",
+        phase: "working",
+        dispatchMode: "resume",
+      },
+    });
     expect(parentActivities.map((command) => command.activity.kind)).toContain(
       "orchestration.run.resumed",
     );
@@ -834,6 +842,14 @@ describe("OrchestrationRunRunner", () => {
     expect(turnStarts[0]?.message.text).toContain(
       "You are taking over this ticket with a fresh agent session",
     );
+    expect(turnStarts[0]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "resumeFreshAgent",
+        phase: "working",
+        dispatchMode: "resumeFreshAgent",
+      },
+    });
     expect(resumeActivity?.activity.summary).toBe("Resumed T3CO-1 with fresh agent");
     expect(resumeActivity?.activity.payload).toMatchObject({
       resumeMode: "fresh-agent",
@@ -1276,6 +1292,14 @@ describe("OrchestrationRunRunner", () => {
 
     expect(turnStarts).toHaveLength(1);
     expect(turnStarts[0]?.message.text).toBe("Project fresh handoff T3CO-1 @ /tmp/runner-project");
+    expect(turnStarts[0]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "resumeFreshAgent",
+        phase: "working",
+        dispatchMode: "resumeFreshAgent",
+      },
+    });
   });
 
   it("uses customized global orchestration prompt templates from server settings", async () => {
@@ -1375,9 +1399,29 @@ describe("OrchestrationRunRunner", () => {
     expect(turnStarts.find((command) => command.threadId === workingThread1)?.message.text).toBe(
       "Custom implement T3CO-1 in Runner project",
     );
+    expect(
+      turnStarts.find((command) => command.threadId === workingThread1)?.message.metadata,
+    ).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "implement",
+        phase: "working",
+        dispatchMode: "start",
+      },
+    });
     expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
       "Review custom T3CO-1 :: patch",
     );
+    expect(
+      turnStarts.find((command) => command.threadId === reviewThread1)?.message.metadata,
+    ).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "review",
+        phase: "reviewing",
+        dispatchMode: "review",
+      },
+    });
   });
 
   it("prefers project prompt overrides over global orchestration prompt settings", async () => {
@@ -1696,6 +1740,14 @@ describe("OrchestrationRunRunner", () => {
     expect(workTurnStarts[1]?.message.text).toBe(
       "Feedback custom T3CO-1: Tighten the auth guard.\n- [critical] src/auth.ts:7 - Handle the missing token case.\n- [suggestion] general - Re-run the edge-case path.",
     );
+    expect(workTurnStarts[1]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "reviewFeedback",
+        phase: "working",
+        dispatchMode: "feedback",
+      },
+    });
   });
 
   it("uses reReview with prior summary and delta diff on later review iterations", async () => {
@@ -1890,9 +1942,25 @@ describe("OrchestrationRunRunner", () => {
 
     expect(reviewTurnStarts).toHaveLength(2);
     expect(reviewTurnStarts[0]?.message.text).toBe("Review T3CO-1 full-1 1");
+    expect(reviewTurnStarts[0]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "review",
+        phase: "reviewing",
+        dispatchMode: "review",
+      },
+    });
     expect(reviewTurnStarts[1]?.message.text).toBe(
       "ReReview T3CO-1\nTighten the auth guard.\ndelta-1-2\n2",
     );
+    expect(reviewTurnStarts[1]?.message.metadata).toEqual({
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "reReview",
+        phase: "reviewing",
+        dispatchMode: "reReview",
+      },
+    });
     expect(getFullThreadDiff).toHaveBeenCalledTimes(1);
     expect(getTurnDiff).toHaveBeenCalledTimes(1);
     expect(getTurnDiff).toHaveBeenCalledWith({

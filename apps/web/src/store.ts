@@ -126,6 +126,7 @@ function mapMessage(message: OrchestrationMessage): ChatMessage {
     id: message.id,
     role: message.role,
     text: message.text,
+    ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
     turnId: message.turnId,
     createdAt: message.createdAt,
     streaming: message.streaming,
@@ -908,6 +909,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           ...(event.payload.attachments !== undefined
             ? { attachments: event.payload.attachments }
             : {}),
+          ...(event.payload.metadata !== undefined ? { metadata: event.payload.metadata } : {}),
           turnId: event.payload.turnId,
           streaming: event.payload.streaming,
           createdAt: event.payload.createdAt,
@@ -926,6 +928,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                         ? message.text
                         : entry.text,
                     streaming: message.streaming,
+                    ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
                     ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
                     ...(message.streaming
                       ? entry.completedAt !== undefined

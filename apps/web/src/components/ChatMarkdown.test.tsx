@@ -53,6 +53,8 @@ describe("ChatMarkdown", () => {
     );
 
     expect(markup).toContain('href="t3://ticket/T3CO-191"');
+    expect(markup).toContain('data-slot="badge"');
+    expect(markup).toContain("font-mono");
     expect(markup).toContain(">T3CO-191</a>");
   });
 
@@ -62,6 +64,7 @@ describe("ChatMarkdown", () => {
       <ChatMarkdown text="[T3CO-191](t3://ticket/T3CO-191)" cwd={undefined} />,
     );
 
+    expect(markup).toContain('data-slot="badge"');
     expect(markup).toContain(">T3CO-191</span>");
     expect(markup).not.toContain('href="t3://ticket/T3CO-191"');
   });

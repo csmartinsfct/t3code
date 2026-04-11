@@ -110,6 +110,18 @@ interface ReviewContext {
   reviewOutcome?: "approved" | "requested-changes" | "blocked";
 }
 
+function isOrchestrationPromptMessage(message: ChatMessage): boolean {
+  return message.metadata?.origin?.kind === "orchestration-prompt";
+}
+
+function isVisibleOrchestrationTimelineMessage(message: ChatMessage): boolean {
+  if (isOrchestrationPromptMessage(message)) {
+    return false;
+  }
+
+  return !(message.role === "system" && !message.text);
+}
+
 export function buildOrchestrationTimelineRows({
   parentActivities,
   childThreads,
@@ -348,7 +360,7 @@ function buildMessageSources(input: {
 
       const messageItems: MessageItem[] = [];
       for (const message of sortedMessages) {
-        if (sectionKind === "review" && message.role === "user") {
+        if (isOrchestrationPromptMessage(message)) {
           continue;
         }
 
@@ -404,7 +416,7 @@ function buildWaitingItems(input: {
     const hasVisibleMessage = Boolean(
       thread?.messages.some(
         (message) =>
-          message.createdAt >= phaseStart && !(message.role === "system" && !message.text),
+          message.createdAt >= phaseStart && isVisibleOrchestrationTimelineMessage(message),
       ),
     );
     if (hasVisibleMessage) return [];
@@ -436,8 +448,7 @@ function buildWaitingItems(input: {
     const hasVisibleMessage = Boolean(
       thread?.messages.some(
         (message) =>
-          message.createdAt >= phaseStart &&
-          !(message.role === "user" || message.role === "system"),
+          message.createdAt >= phaseStart && isVisibleOrchestrationTimelineMessage(message),
       ),
     );
     if (hasVisibleMessage) return [];

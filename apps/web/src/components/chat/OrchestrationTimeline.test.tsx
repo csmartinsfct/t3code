@@ -282,4 +282,59 @@ describe("OrchestrationTimeline", () => {
       }),
     );
   });
+
+  it("renders non-prompt review user messages when they are present in timeline blocks", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "thread-block",
+          id: "block:review",
+          threadId: "thread-review",
+          sectionKind: "review",
+          isActive: false,
+          messages: [
+            {
+              id: "review-user" as Thread["messages"][number]["id"],
+              role: "user",
+              text: "Human review follow-up",
+              createdAt: "2026-04-09T10:00:01.000Z",
+              streaming: false,
+            },
+            {
+              id: "review-assistant" as Thread["messages"][number]["id"],
+              role: "assistant",
+              text: '{"changesNeeded":false,"summary":"Looks good now.","comments":[]}',
+              createdAt: "2026-04-09T10:00:02.000Z",
+              streaming: false,
+            },
+          ],
+          reviewIteration: 2,
+          reviewOutcome: "approved",
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        onNavigateToThread={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Human review follow-up");
+    expect(markup).toContain("Automated review 2 Approved Looks good now.");
+    expect(markup).not.toContain("Continue.");
+  });
 });

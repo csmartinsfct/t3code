@@ -1,4 +1,4 @@
-import { MessageId } from "@t3tools/contracts";
+import { MessageId, TurnId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -205,5 +205,76 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Critical");
     expect(markup).toContain("Add a regression test for review thread grouping.");
     expect(markup).not.toContain("&quot;changesNeeded&quot;");
+  });
+
+  it("renders changed files collapsed by default for a new turn summary", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const messageId = MessageId.makeUnsafe("message-diff-1");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-diff-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: messageId,
+              role: "assistant",
+              text: "Updated the relevant files.",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={
+          new Map([
+            [
+              messageId,
+              {
+                turnId: TurnId.makeUnsafe("turn-diff-1"),
+                completedAt: "2026-03-17T19:12:29.000Z",
+                files: [
+                  {
+                    path: "apps/web/src/components/chat/MessagesTimeline.tsx",
+                    additions: 10,
+                    deletions: 4,
+                  },
+                  {
+                    path: "apps/web/src/components/chat/ChangedFilesTree.tsx",
+                    additions: 8,
+                    deletions: 1,
+                  },
+                ],
+              },
+            ],
+          ])
+        }
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Expand all");
+    expect(markup).not.toContain("Collapse all");
+    expect(markup).toContain("apps/web/src/components/chat");
+    expect(markup).not.toContain("MessagesTimeline.tsx");
+    expect(markup).not.toContain("ChangedFilesTree.tsx");
   });
 });

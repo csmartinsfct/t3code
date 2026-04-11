@@ -712,6 +712,15 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly threadId: ThreadId;
       readonly text: string;
       readonly modelSelection?: ModelSelection;
+      readonly promptId?: OrchestrationPromptId;
+      readonly phase?: "working" | "reviewing";
+      readonly dispatchMode?:
+        | "start"
+        | "resume"
+        | "resumeFreshAgent"
+        | "feedback"
+        | "review"
+        | "reReview";
     }) => {
       const now = new Date().toISOString();
       const messageId = MessageId.makeUnsafe(crypto.randomUUID());
@@ -726,6 +735,18 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           role: "user",
           text: input.text,
           attachments: [],
+          ...(input.promptId && input.phase && input.dispatchMode
+            ? {
+                metadata: {
+                  origin: {
+                    kind: "orchestration-prompt" as const,
+                    promptId: input.promptId,
+                    phase: input.phase,
+                    dispatchMode: input.dispatchMode,
+                  },
+                },
+              }
+            : {}),
         },
         ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
         createdAt: now,
@@ -768,6 +789,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 dispatchThreadTurn({
                   threadId: input.workingThreadId,
                   text,
+                  promptId: "resume",
+                  phase: "working",
+                  dispatchMode: "resume",
                 }),
               ),
             );
@@ -786,6 +810,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 dispatchThreadTurn({
                   threadId: input.workingThreadId,
                   text,
+                  promptId: "resumeFreshAgent",
+                  phase: "working",
+                  dispatchMode: "resumeFreshAgent",
                 }),
               ),
             );
@@ -805,6 +832,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 dispatchThreadTurn({
                   threadId: input.workingThreadId,
                   text,
+                  promptId: "reviewFeedback",
+                  phase: "working",
+                  dispatchMode: "feedback",
                 }),
               ),
             );
@@ -822,6 +852,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               dispatchThreadTurn({
                 threadId: input.workingThreadId,
                 text,
+                promptId: "implement",
+                phase: "working",
+                dispatchMode: "start",
               }),
             ),
           );
@@ -1537,6 +1570,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                                 threadId: reviewThreadId,
                                 text,
                                 modelSelection: reviewModelSelection,
+                                promptId: "resume",
+                                phase: "reviewing",
+                                dispatchMode: "resume",
                               }),
                             ),
                           ),
@@ -1574,11 +1610,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                             dispatchedReviewPromptId = promptId;
                           }),
                         ),
-                        Effect.flatMap(({ prompt }) =>
+                        Effect.flatMap(({ prompt, promptId }) =>
                           dispatchThreadTurn({
                             threadId: reviewThreadId,
                             text: prompt,
                             modelSelection: reviewModelSelection,
+                            promptId,
+                            phase: "reviewing",
+                            dispatchMode: promptId,
                           }),
                         ),
                       ),

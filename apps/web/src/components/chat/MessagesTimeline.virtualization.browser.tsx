@@ -638,7 +638,7 @@ describe("MessagesTimeline virtualization harness", () => {
     }
   });
 
-  it("keeps the changed-files row virtualizer size in sync after collapsing directories", async () => {
+  it("keeps the changed-files row virtualizer size in sync after expanding directories", async () => {
     const beforeMessages = createFillerMessages({
       prefix: "before-collapse",
       startOffsetSeconds: 0,
@@ -702,7 +702,7 @@ describe("MessagesTimeline virtualization harness", () => {
     });
 
     try {
-      const beforeCollapse = await measureTimelineRow({
+      const beforeExpand = await measureTimelineRow({
         host: mounted.host,
         props,
         targetRowId: targetMessage.id,
@@ -712,33 +712,33 @@ describe("MessagesTimeline virtualization harness", () => {
       );
       expect(targetRowElement, "Unable to locate target changed-files row.").toBeTruthy();
 
-      const collapseAllButton =
+      const expandAllButton =
         Array.from(targetRowElement!.querySelectorAll<HTMLButtonElement>("button")).find(
-          (button) => button.textContent?.trim() === "Collapse all",
+          (button) => button.textContent?.trim() === "Expand all",
         ) ?? null;
-      expect(collapseAllButton, 'Unable to find "Collapse all" button.').toBeTruthy();
+      expect(expandAllButton, 'Unable to find "Expand all" button.').toBeTruthy();
 
-      collapseAllButton!.click();
+      expandAllButton!.click();
 
       await vi.waitFor(
         async () => {
-          const afterCollapse = await measureTimelineRow({
+          const afterExpand = await measureTimelineRow({
             host: mounted.host,
             props,
             targetRowId: targetMessage.id,
           });
-          expect(afterCollapse.actualHeightPx).toBeLessThan(beforeCollapse.actualHeightPx - 24);
+          expect(afterExpand.actualHeightPx).toBeGreaterThan(beforeExpand.actualHeightPx + 24);
         },
         { timeout: 8_000, interval: 16 },
       );
 
-      const afterCollapse = await measureTimelineRow({
+      const afterExpand = await measureTimelineRow({
         host: mounted.host,
         props,
         targetRowId: targetMessage.id,
       });
       expect(
-        Math.abs(afterCollapse.actualHeightPx - afterCollapse.virtualizerSizePx),
+        Math.abs(afterExpand.actualHeightPx - afterExpand.virtualizerSizePx),
       ).toBeLessThanOrEqual(8);
     } finally {
       await mounted.cleanup();

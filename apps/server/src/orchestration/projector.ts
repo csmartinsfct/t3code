@@ -409,6 +409,7 @@ export function projectEvent(
             role: payload.role,
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+            ...(payload.metadata !== undefined ? { metadata: payload.metadata } : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,
@@ -432,6 +433,7 @@ export function projectEvent(
                     streaming: message.streaming,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,
+                    ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),

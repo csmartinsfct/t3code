@@ -1,6 +1,10 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
 import { ClaudeModelOptions, CodexModelOptions } from "./model";
-import { OrchestrationPromptOverrides, OrchestrationPromptOverridesPatch } from "./promptTemplates";
+import {
+  OrchestrationPromptId,
+  OrchestrationPromptOverrides,
+  OrchestrationPromptOverridesPatch,
+} from "./promptTemplates";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -259,11 +263,38 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+export const OrchestrationPromptMessagePhase = Schema.Literals(["working", "reviewing"]);
+export type OrchestrationPromptMessagePhase = typeof OrchestrationPromptMessagePhase.Type;
+
+export const OrchestrationPromptDispatchMode = Schema.Literals([
+  "start",
+  "resume",
+  "resumeFreshAgent",
+  "feedback",
+  "review",
+  "reReview",
+]);
+export type OrchestrationPromptDispatchMode = typeof OrchestrationPromptDispatchMode.Type;
+
+export const OrchestrationPromptMessageOrigin = Schema.Struct({
+  kind: Schema.Literal("orchestration-prompt"),
+  promptId: OrchestrationPromptId,
+  phase: OrchestrationPromptMessagePhase,
+  dispatchMode: OrchestrationPromptDispatchMode,
+});
+export type OrchestrationPromptMessageOrigin = typeof OrchestrationPromptMessageOrigin.Type;
+
+export const OrchestrationMessageMetadata = Schema.Struct({
+  origin: Schema.optionalKey(OrchestrationPromptMessageOrigin),
+});
+export type OrchestrationMessageMetadata = typeof OrchestrationMessageMetadata.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -532,6 +563,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
     role: Schema.Literal("user"),
     text: Schema.String,
     attachments: Schema.Array(ChatAttachment),
+    metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -552,6 +584,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     role: Schema.Literal("user"),
     text: Schema.String,
     attachments: Schema.Array(UploadChatAttachment),
+    metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -878,6 +911,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,

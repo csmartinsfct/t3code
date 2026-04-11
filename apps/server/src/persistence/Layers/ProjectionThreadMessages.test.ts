@@ -110,4 +110,55 @@ layer("ProjectionThreadMessageRepository", (it) => {
       assert.deepEqual(rows[0]?.attachments, []);
     }),
   );
+
+  it.effect("preserves existing metadata when upsert omits metadata", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProjectionThreadMessageRepository;
+      const threadId = ThreadId.makeUnsafe("thread-preserve-metadata");
+      const messageId = MessageId.makeUnsafe("message-preserve-metadata");
+      const createdAt = "2026-02-28T19:20:00.000Z";
+      const persistedMetadata = {
+        origin: {
+          kind: "orchestration-prompt" as const,
+          promptId: "resume" as const,
+          phase: "working" as const,
+          dispatchMode: "resume" as const,
+        },
+      };
+
+      yield* repository.upsert({
+        messageId,
+        threadId,
+        turnId: null,
+        role: "user",
+        text: "Continue.",
+        metadata: persistedMetadata,
+        isStreaming: false,
+        createdAt,
+        updatedAt: "2026-02-28T19:20:01.000Z",
+      });
+
+      yield* repository.upsert({
+        messageId,
+        threadId,
+        turnId: null,
+        role: "user",
+        text: "Continue. updated",
+        isStreaming: false,
+        createdAt,
+        updatedAt: "2026-02-28T19:20:02.000Z",
+      });
+
+      const rows = yield* repository.listByThreadId({ threadId });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.text, "Continue. updated");
+      assert.deepEqual(rows[0]?.metadata, persistedMetadata);
+
+      const rowById = yield* repository.getByMessageId({ messageId });
+      assert.equal(rowById._tag, "Some");
+      if (rowById._tag === "Some") {
+        assert.deepEqual(rowById.value.metadata, persistedMetadata);
+      }
+    }),
+  );
 });

@@ -9,6 +9,7 @@ import {
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationMessage,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -17,6 +18,7 @@ import {
   ReviewResult,
   OrchestrationSession,
   ProjectCreateCommand,
+  ThreadMessageSentPayload,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -31,9 +33,11 @@ const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateComma
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
+const decodeThreadMessageSentPayload = Schema.decodeUnknownEffect(ThreadMessageSentPayload);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
+const decodeOrchestrationMessage = Schema.decodeUnknownEffect(OrchestrationMessage);
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
@@ -445,6 +449,77 @@ it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
       planId: "plan-1",
     });
   }),
+);
+
+it.effect("accepts orchestration prompt metadata in thread.turn.start messages", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-prompt-metadata",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-prompt-metadata",
+        role: "user",
+        text: "Continue.",
+        attachments: [],
+        metadata: {
+          origin: {
+            kind: "orchestration-prompt",
+            promptId: "resume",
+            phase: "working",
+            dispatchMode: "resume",
+          },
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(parsed.message.metadata, {
+      origin: {
+        kind: "orchestration-prompt",
+        promptId: "resume",
+        phase: "working",
+        dispatchMode: "resume",
+      },
+    });
+  }),
+);
+
+it.effect(
+  "accepts orchestration prompt metadata in thread.message-sent payloads and messages",
+  () =>
+    Effect.gen(function* () {
+      const payload = yield* decodeThreadMessageSentPayload({
+        threadId: "thread-1",
+        messageId: "msg-prompt-payload",
+        role: "user",
+        text: "Continue.",
+        metadata: {
+          origin: {
+            kind: "orchestration-prompt",
+            promptId: "resume",
+            phase: "working",
+            dispatchMode: "resume",
+          },
+        },
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      assert.strictEqual(payload.metadata?.origin?.promptId, "resume");
+
+      const message = yield* decodeOrchestrationMessage({
+        id: "msg-prompt-payload",
+        role: "user",
+        text: "Continue.",
+        metadata: payload.metadata,
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      assert.strictEqual(message.metadata?.origin?.dispatchMode, "resume");
+    }),
 );
 
 it.effect(

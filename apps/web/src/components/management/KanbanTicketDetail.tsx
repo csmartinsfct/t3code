@@ -58,6 +58,7 @@ import {
 } from "./TicketOriginThreadSection";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
+import { TicketLabelPicker } from "./TicketLabelPicker";
 import { TicketHistory } from "../settings/TicketHistory";
 import {
   ALL_PRIORITIES,
@@ -956,25 +957,12 @@ export function KanbanTicketDetail({
         )}
 
         {/* Labels */}
-        {ticket.labels.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {ticket.labels.map((label) => (
-                <span
-                  key={label.id}
-                  className="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-medium"
-                  style={{
-                    backgroundColor: `${label.color}14`,
-                    color: label.color,
-                  }}
-                >
-                  {label.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <TicketLabelPicker
+          ticketId={ticketId}
+          projectId={projectId}
+          labels={ticket.labels}
+          onUpdated={() => void fetchTicket()}
+        />
 
         {/* Dependencies */}
         {ticket.dependencies.length > 0 && (

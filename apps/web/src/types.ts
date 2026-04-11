@@ -1,5 +1,6 @@
 import type {
   ModelSelection,
+  OrchestrationMessageMetadata,
   OrchestrationLatestTurn,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
@@ -46,6 +47,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   text: string;
   attachments?: ChatAttachment[];
+  metadata?: OrchestrationMessageMetadata;
   turnId?: TurnId | null;
   createdAt: string;
   completedAt?: string | undefined;

@@ -504,11 +504,8 @@ describe("KanbanTicketDetail", () => {
     expect(html).toContain("Related Threads (1)");
     expect(html).toContain("Origin");
     expect(html).toContain("Bound");
-    expect(html).toContain("Mention");
     expect(html).toContain("Archived");
     expect(html).toContain("Review");
-    expect(html).toContain("Hidden");
-    expect(html).toContain("Visible");
   });
 
   it("wires thread-row navigation for both hidden and visible linked threads", () => {

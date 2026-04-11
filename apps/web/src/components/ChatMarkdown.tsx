@@ -32,6 +32,7 @@ import { readNativeApi } from "../nativeApi";
 import { splitPathAndPosition } from "../terminal-links";
 import ProposeActionCard from "./chat/ProposeActionCard";
 import ProposeScheduledTaskCard from "./chat/ProposeScheduledTaskCard";
+import { Badge } from "./ui/badge";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -287,20 +288,35 @@ function ChatMarkdown({
       a({ node: _node, href, ...props }) {
         const internalTarget = parseInternalLinkTarget(href);
         if (internalTarget?.kind === "ticket") {
+          const ticketBadgeClassName =
+            "font-mono !text-inherit !no-underline decoration-transparent hover:!text-inherit hover:!no-underline hover:decoration-transparent";
           if (!onOpenTicketLink) {
-            return <span className={props.className}>{props.children}</span>;
+            return (
+              <Badge variant="outline" size="sm" className={ticketBadgeClassName}>
+                {props.children}
+              </Badge>
+            );
           }
 
           return (
-            <a
-              {...props}
-              href={href}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void onOpenTicketLink(internalTarget.identifier);
-              }}
-            />
+            <Badge
+              variant="outline"
+              size="sm"
+              className={ticketBadgeClassName}
+              render={
+                <a
+                  {...props}
+                  href={href}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void onOpenTicketLink(internalTarget.identifier);
+                  }}
+                />
+              }
+            >
+              {props.children}
+            </Badge>
           );
         }
 
