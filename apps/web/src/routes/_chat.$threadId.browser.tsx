@@ -19,6 +19,8 @@ import {
 } from "./_chat.$threadId";
 
 const THREAD_ID = "thread-route-browser-test";
+const ORCHESTRATION_PARENT_THREAD_ID = "thread-route-orchestration-parent";
+const ORCHESTRATION_CHILD_THREAD_ID = "thread-route-orchestration-child";
 const PROJECT_ID = "project-route-browser-test";
 const PROJECT_CWD = "/repo/project";
 const NOW_ISO = "2026-04-11T10:00:00.000Z";
@@ -36,8 +38,20 @@ vi.mock("../components/ChatView", () => ({
     <div data-testid="chat-view">Chat view {threadId}</div>
   ),
 }));
+vi.mock("../components/ChatView.tsx", () => ({
+  default: ({ threadId }: { threadId: string }) => (
+    <div data-testid="chat-view">Chat view {threadId}</div>
+  ),
+}));
 
 vi.mock("../components/management/ManagementView", () => ({
+  ManagementView: ({ threadId, projectId }: { threadId: string; projectId: string }) => (
+    <div data-testid="management-view">
+      Management view {threadId}:{projectId}
+    </div>
+  ),
+}));
+vi.mock("../components/management/ManagementView.tsx", () => ({
   ManagementView: ({ threadId, projectId }: { threadId: string; projectId: string }) => (
     <div data-testid="management-view">
       Management view {threadId}:{projectId}
@@ -162,7 +176,39 @@ const ROUTE_SIDEBAR_THREAD: SidebarThreadSummary = {
   parentThreadId: ROUTE_THREAD.parentThreadId,
 };
 
-async function mountRoute(initialSearch: ChatThreadRouteSearch) {
+const ORCHESTRATION_PARENT_THREAD: Thread = {
+  ...ROUTE_THREAD,
+  id: ORCHESTRATION_PARENT_THREAD_ID as never,
+  title: "Route orchestration timeline",
+  isOrchestrationThread: true,
+};
+
+const ORCHESTRATION_CHILD_THREAD: Thread = {
+  ...ROUTE_THREAD,
+  id: ORCHESTRATION_CHILD_THREAD_ID as never,
+  title: "Route waiting child",
+  parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
+  ticketId: "ticket-route-orchestration-child" as never,
+};
+
+const ORCHESTRATION_PARENT_SIDEBAR_THREAD: SidebarThreadSummary = {
+  ...ROUTE_SIDEBAR_THREAD,
+  id: ORCHESTRATION_PARENT_THREAD.id,
+  title: ORCHESTRATION_PARENT_THREAD.title,
+  isOrchestrationThread: true,
+};
+
+const ORCHESTRATION_CHILD_SIDEBAR_THREAD: SidebarThreadSummary = {
+  ...ROUTE_SIDEBAR_THREAD,
+  id: ORCHESTRATION_CHILD_THREAD.id,
+  title: ORCHESTRATION_CHILD_THREAD.title,
+  parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
+};
+
+async function mountRoute(input: {
+  initialSearch: ChatThreadRouteSearch;
+  initialThreadId?: string;
+}) {
   routeTestState.sheetPopups.length = 0;
   const host = document.createElement("div");
   host.style.position = "fixed";
@@ -172,11 +218,12 @@ async function mountRoute(initialSearch: ChatThreadRouteSearch) {
   document.body.append(host);
 
   const navigationState = {
-    currentSearch: initialSearch,
+    currentSearch: input.initialSearch,
   };
 
   function Harness() {
-    const [search, setSearch] = useState<ChatThreadRouteSearch>(initialSearch);
+    const [search, setSearch] = useState<ChatThreadRouteSearch>(input.initialSearch);
+    const threadId = input.initialThreadId ?? THREAD_ID;
 
     const setSearchState = (
       searchUpdate:
@@ -204,7 +251,7 @@ async function mountRoute(initialSearch: ChatThreadRouteSearch) {
     return (
       <SidebarProvider>
         <ChatThreadRouteView
-          threadId={THREAD_ID as never}
+          threadId={threadId as never}
           search={search}
           diffPanelRenderer={(mode) => (
             <div data-testid={`diff-panel-${mode}`}>Diff panel body</div>
@@ -271,7 +318,7 @@ describe("chat route management overlays", () => {
   it("keeps the diff overlay mounted in management mode and wires sheet resizing", async () => {
     // Audit traceability: b984bf3.
     writePersistedPanelWidth("chat_diff_sheet_width", 300, 1_000);
-    const mounted = await mountRoute({ diff: "1" });
+    const mounted = await mountRoute({ initialSearch: { diff: "1" } });
 
     try {
       await vi.waitFor(() => {
@@ -300,7 +347,7 @@ describe("chat route management overlays", () => {
 
   it("keeps the file explorer overlay mounted in management mode and closes via its route callback", async () => {
     writePersistedPanelWidth("chat_file_explorer_sheet_width", 500, 1_000);
-    const mounted = await mountRoute({ fileExplorer: "1" });
+    const mounted = await mountRoute({ initialSearch: { fileExplorer: "1" } });
 
     try {
       await vi.waitFor(() => {
@@ -326,6 +373,54 @@ describe("chat route management overlays", () => {
       });
     } finally {
       await mounted.unmount();
+    }
+  });
+
+  it("keeps orchestration parent and child routes compatible with management overlays", async () => {
+    // Audit traceability: 3b13b26, 5b6a8b2.
+    useStore.setState((state) => ({
+      ...state,
+      threads: [ORCHESTRATION_PARENT_THREAD, ORCHESTRATION_CHILD_THREAD],
+      threadsById: {
+        [ORCHESTRATION_PARENT_THREAD_ID]: ORCHESTRATION_PARENT_THREAD,
+        [ORCHESTRATION_CHILD_THREAD_ID]: ORCHESTRATION_CHILD_THREAD,
+      },
+      sidebarThreadsById: {
+        [ORCHESTRATION_PARENT_THREAD_ID]: ORCHESTRATION_PARENT_SIDEBAR_THREAD,
+        [ORCHESTRATION_CHILD_THREAD_ID]: ORCHESTRATION_CHILD_SIDEBAR_THREAD,
+      },
+      threadIdsByProjectId: {
+        [PROJECT_ID]: [
+          ORCHESTRATION_PARENT_THREAD_ID as never,
+          ORCHESTRATION_CHILD_THREAD_ID as never,
+        ],
+      },
+    }));
+
+    const parentRoute = await mountRoute({
+      initialSearch: { diff: "1" },
+      initialThreadId: ORCHESTRATION_PARENT_THREAD_ID,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Diff panel body");
+      });
+    } finally {
+      await parentRoute.unmount();
+    }
+
+    const childRoute = await mountRoute({
+      initialSearch: { fileExplorer: "1" },
+      initialThreadId: ORCHESTRATION_CHILD_THREAD_ID,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain(`File explorer body ${PROJECT_CWD}`);
+      });
+    } finally {
+      await childRoute.unmount();
     }
   });
 });

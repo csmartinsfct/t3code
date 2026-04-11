@@ -1263,6 +1263,19 @@ async function waitForButtonContainingText(text: string): Promise<HTMLButtonElem
   );
 }
 
+function findMenuItemContainingText(text: string): HTMLElement | null {
+  return (Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) =>
+    item.textContent?.includes(text),
+  ) ?? null) as HTMLElement | null;
+}
+
+async function waitForMenuItemContainingText(text: string): Promise<HTMLElement> {
+  return waitForElement(
+    () => findMenuItemContainingText(text),
+    `Unable to find menu item containing "${text}".`,
+  );
+}
+
 async function expectComposerActionsContained(): Promise<void> {
   const footer = await waitForElement(
     () => document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]'),
@@ -2984,6 +2997,127 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders orchestration parent threads as timeline-only shells and switches between parent and child threads", async () => {
+    // Audit traceability: 3b13b26, 5b6a8b2.
+    installTestNativeApi();
+    const run = createOrchestrationRun("running");
+    const orchestrationTicket = {
+      id: ORCHESTRATION_TICKET_ID,
+      projectId: PROJECT_ID,
+      parentId: null,
+      ticketNumber: 168,
+      identifier: "T3CO-168",
+      title: "Composer wait coverage",
+      status: "in_progress" as const,
+      priority: "high" as const,
+      sortOrder: 0,
+      isArchived: false,
+      worktree: null,
+      labels: [],
+      subTicketCount: 0,
+      dependencyCount: 0,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createOrchestrationWaitingSnapshot(),
+      resolveRpc: (body) => {
+        const tag = String(body._tag);
+        if (tag === ORCHESTRATION_WS_METHODS.listRuns || tag.endsWith("listRuns")) {
+          return [
+            {
+              id: run.id,
+              orchestrationThreadId: run.orchestrationThreadId,
+              projectId: run.projectId,
+              status: run.status,
+              currentTicketIndex: run.currentTicketIndex,
+              ticketCount: run.ticketOrder.length,
+              currentPhase: run.currentPhase,
+              createdAt: run.createdAt,
+              updatedAt: run.updatedAt,
+            },
+          ];
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getRun || tag.endsWith("getRun")) {
+          return run;
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getChildThreads || tag.endsWith("getChildThreads")) {
+          return fixture.snapshot.threads.filter(
+            (thread) => thread.parentThreadId === ORCHESTRATION_PARENT_THREAD_ID,
+          );
+        }
+        if (tag === WS_METHODS.ticketingList || tag.endsWith("ticketing.list")) {
+          return [orchestrationTicket];
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: ORCHESTRATION_PARENT_THREAD_ID },
+      });
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_PARENT_THREAD_ID}`,
+        "Route should navigate to the orchestration parent thread.",
+      );
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Running");
+        expect(document.body.textContent ?? "").toContain("Waiting child thread");
+        expect(document.body.textContent ?? "").toContain("Orchestration");
+      });
+
+      expect(document.querySelector('[data-chat-composer-form="true"]')).toBeNull();
+      expect(document.querySelector('[contenteditable="true"]')).toBeNull();
+      expect(document.body.textContent ?? "").not.toContain("Waiting for agent to start");
+
+      const switcherButton = await waitForButtonContainingText("Orchestration timeline");
+      switcherButton.click();
+
+      const timelineItem = await waitForMenuItemContainingText("Timeline");
+      const childItem = await waitForMenuItemContainingText("T3CO-168");
+      expect(childItem.textContent ?? "").toContain("Waiting child thread");
+
+      childItem.click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${THREAD_ID}`,
+        "Route should navigate to the orchestration child thread.",
+      );
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Timeline");
+        expect(document.querySelector('[data-chat-composer-form="true"]')).toBeTruthy();
+      });
+
+      expect(findButtonContainingText("T3CO-168")).toBeTruthy();
+      expect(findComposerProviderModelPicker()).toBeTruthy();
+
+      const childSwitcherButton = await waitForButtonContainingText("T3CO-168");
+      childSwitcherButton.click();
+      (await waitForMenuItemContainingText("Timeline")).click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_PARENT_THREAD_ID}`,
+        "Route should navigate back to the orchestration parent thread.",
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-chat-composer-form="true"]')).toBeNull();
+        expect(document.body.textContent ?? "").toContain("Waiting child thread");
+      });
+
+      expect(timelineItem.textContent ?? "").toContain("Timeline");
     } finally {
       await mounted.cleanup();
     }

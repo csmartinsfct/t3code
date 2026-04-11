@@ -19,6 +19,7 @@ export default mergeConfig(
         "src/components/**/*.browser.tsx",
         "src/components/ChatMarkdown.test.tsx",
         "src/components/Sidebar.test.tsx",
+        "src/components/chat/ThreadSwitcherDropdown.test.tsx",
         "src/hooks/useManagedRunCompletionToasts.test.ts",
         "src/routes/**/*.browser.tsx",
         "src/components/ui/sheet.test.tsx",

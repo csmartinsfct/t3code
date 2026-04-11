@@ -350,4 +350,70 @@ describe("Sidebar project system prompt entry", () => {
       await screen.unmount();
     }
   });
+
+  it("hides orchestration child threads from the main sidebar list", async () => {
+    // Audit traceability: 3b13b26.
+    seedSidebarTestStores({
+      sidebarThreadsById: {
+        "thread-parent": {
+          id: "thread-parent",
+          projectId: "project-1",
+          title: "Orchestration parent",
+          interactionMode: "default",
+          session: null,
+          createdAt: "2026-04-11T00:00:00.000Z",
+          archivedAt: null,
+          updatedAt: "2026-04-11T00:00:00.000Z",
+          latestTurn: null,
+          branch: null,
+          worktreePath: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          isOrchestrationThread: true,
+          parentThreadId: null,
+        },
+        "thread-child": {
+          id: "thread-child",
+          projectId: "project-1",
+          title: "Hidden child thread",
+          interactionMode: "default",
+          session: null,
+          createdAt: "2026-04-11T00:00:00.000Z",
+          archivedAt: null,
+          updatedAt: "2026-04-11T00:00:00.000Z",
+          latestTurn: null,
+          branch: null,
+          worktreePath: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          isOrchestrationThread: false,
+          parentThreadId: "thread-parent",
+        },
+      },
+      threadIdsByProjectId: {
+        "project-1": ["thread-parent", "thread-child"],
+      },
+    });
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SidebarProvider defaultOpen>
+          <Sidebar />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Orchestration parent");
+      });
+      expect(document.body.textContent ?? "").not.toContain("Hidden child thread");
+    } finally {
+      await screen.unmount();
+    }
+  });
 });
