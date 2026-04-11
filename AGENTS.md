@@ -63,6 +63,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Agent Tools](docs/t3-agent-tools.md) — How MCP services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
 - [Multi-Layout](docs/multi-layout.md) — Board view with Kanban ticket management, drag-and-drop reordering/status changes, nested sidebar layout, and ticket composer attachments.
 - [Design Language](docs/design-language.md) — Prescriptive design system reference: color tokens, typography, spacing, component patterns, animations, layout recipes, and anti-patterns. Used as context for LLM-generated UIs.
+- [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via MCP.
 
 These docs must be kept up to date as related code changes.
 

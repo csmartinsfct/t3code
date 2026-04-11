@@ -1,0 +1,838 @@
+# Features
+
+T3 Code is a web GUI for AI coding agents. It wraps providers like Codex and Claude behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via MCP tools and WebSocket RPC).
+
+## Architecture
+
+| Package              | Role                                                                                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK), serves the React app, manages sessions, and hosts MCP endpoints.  |
+| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.               |
+| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling. |
+| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                     |
+| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                         |
+
+---
+
+## 1. Orchestration & Sessions
+
+The core of T3 Code is an event-sourced orchestration engine that manages all agent interactions.
+
+**Concepts:**
+
+- **Project** — A workspace context with a root path, scripts, system prompts, and prompt overrides.
+- **Thread** — A conversation/work session with an agent. Threads belong to a project.
+- **Turn** — A single back-and-forth exchange: user input → agent output. Turns belong to a thread.
+- **Message** — A text or system output with metadata (origin, phase, role, attachments). Messages belong to a turn.
+- **Command** — An action request (dispatch to agent, archive thread, send message). Commands are validated by invariants before producing events.
+- **Event** — An immutable fact (thread created, message added, turn completed). Events are persisted and projected into the read model.
+
+**Session state machine:** `idle` → `running` → `quiescing` → `idle`.
+
+**Turn flow:**
+
+1. User sends input → `thread.turn.start` command dispatched.
+2. Provider session starts or resumes.
+3. Provider streams runtime events back (tool calls, messages, approvals).
+4. Events are normalized into orchestration domain events and persisted.
+5. Projections update the in-memory read model.
+6. WebSocket pushes domain events to the browser in real time.
+7. Async work (checkpointing, command reactions) settles.
+8. `turn.processing.quiesced` receipt emitted.
+
+**User interaction:**
+
+- Create threads from the sidebar or board view.
+- Send messages via the composer.
+- Approve or decline agent decisions from the pending-approval panel.
+- Archive or delete threads from context menus.
+- View the full messages timeline with work log entries, tool usage, and file change summaries.
+
+**Agent interaction (WebSocket RPC):**
+
+- `orchestration.getSnapshot` — Full read model of projects, threads, messages, turns.
+- `orchestration.dispatchCommand` — Send any orchestration command.
+- `orchestration.getTurnDiff` / `orchestration.getFullThreadDiff` — Retrieve diffs.
+- `orchestration.replayEvents` — Replay events from a given sequence number.
+- `subscribeOrchestrationDomainEvents` — Stream all domain events in real time.
+- `subscribeOrchestrationRunEvents` — Stream events for a specific orchestration run.
+
+---
+
+## 2. Provider System
+
+T3 Code supports multiple AI providers behind a unified adapter interface.
+
+### Codex (OpenAI)
+
+- Runs `codex app-server` as a child process communicating via JSON-RPC over stdio.
+- Authentication via `codex login` CLI.
+- Configuration: global `~/.codex/config.toml` + project-scoped `.codex/config.toml`.
+- Project trust: the server auto-trusts the active project path.
+
+### Claude Agent (Anthropic)
+
+- Uses `@anthropic-ai/claude-agent-sdk` for direct SDK integration.
+- Authentication via `claude auth login`.
+- Configuration: global profile config + project `.mcp.json`.
+- **Profiles:** Multiple named profiles supported. Each profile can have its own binary path, config directory, and custom models. Profiles appear as separate provider entries.
+- Model selection: full Claude model family with per-session model and reasoning effort options.
+
+### Provider configuration
+
+Server settings expose per-provider configuration:
+
+- `providers.codex` — enabled/disabled, binaryPath, homePath, customModels.
+- `providers.claudeAgent` — enabled/disabled, binaryPath, configDir, customModels.
+- `providers.claudeProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, configDir, customModels).
+
+Model selection settings (each can target a specific provider + model):
+
+- `textGenerationModelSelection` — Default for LLM text generation (branch names, commit messages, PR descriptions).
+- `managedRunInferenceModelSelection` — For managed run service inference.
+- `orchestrationImplementerModelSelection` — For ticket implementation turns.
+- `orchestrationReviewerModelSelection` — For ticket review turns.
+
+### Rate limits
+
+Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and 7-day windows, per-model breakdowns). Rate limit state is streamed to the UI via `subscribeServerConfig`.
+
+**User interaction:**
+
+- Select provider and model for each thread.
+- Configure providers and models in Settings → General.
+- View provider health status with color-coded indicators.
+- Enable/disable providers and profiles with toggles.
+
+**Agent interaction (WebSocket RPC):**
+
+- `provider.startSession` / `provider.sendTurn` / `provider.interruptTurn` — Session lifecycle.
+- `server.refreshProviders` — Re-scan provider statuses.
+- `server.resolveMcpServers` — Get available MCP servers for the provider.
+
+---
+
+## 3. Conversation UI
+
+The main chat view is the primary interface for interacting with agents.
+
+### Messages timeline
+
+- User and assistant messages rendered with full markdown.
+- Configurable timestamp format (12-hour, 24-hour, locale default).
+- Copy button per message.
+- Multi-select with shift-click for bulk operations.
+- Virtualized rendering for large conversations.
+
+### Work log / timeline entries
+
+- Tool usage display (terminal commands, file operations, reviews).
+- Status indicators per entry (completed, in-progress, failed).
+- Collapsible work groups.
+- Terminal command snippets inline.
+- File change summaries with clickable diffs.
+- Review output cards with comment severity badges.
+- Ticket references rendered as links.
+- Elapsed time estimates.
+
+### Composer
+
+- Rich text input with markdown support.
+- **Slash command menu** — Type `/` to browse available commands and skills.
+- **Skill chips** — Selected skills displayed as removable chips above the input.
+- **Code snippet attachments** — Attach code blocks to messages.
+- **File drag-to-composer** — Drag files from the file explorer to reference them.
+- **Ticket drag-to-composer** — Drag tickets from the board to reference them.
+- **Draft persistence** — Drafts auto-save per thread and survive navigation.
+
+### Pending approval panel
+
+When an agent requests approval (e.g. before executing a command), the composer area displays decision buttons (approve/decline) with context about the requested action.
+
+### Pending user input panel
+
+When an agent requests structured input, a form panel appears in the composer area for the user to fill in.
+
+### Plan sidebar
+
+- Resizable side panel showing the agent's current plan.
+- Step-by-step breakdown with status indicators (completed, in-progress, pending).
+- Collapsible sections.
+- Copy, download, and export actions.
+
+### Interaction modes
+
+- **Default** — Normal back-and-forth conversation.
+- **Plan** — Plan-focused mode where the agent designs before executing.
+
+---
+
+## 4. Ticketing
+
+A full-featured issue tracker built into T3 Code. See [ticketing.md](ticketing.md) for implementation details.
+
+### Data model
+
+- **Ticket** — Title, description, status, priority, sort order, worktree assignment, model overrides, acceptance criteria.
+- **Status values:** `backlog`, `todo`, `in_progress`, `blocked`, `in_review`, `done`, `canceled`.
+- **Priority values:** `none`, `low`, `medium`, `high`, `urgent`.
+- **Hierarchy** — Tickets can have a parent (epic) and sub-tickets, forming a tree. Epic status is derived from children (recursive to 10 levels).
+- **Dependencies** — Directed acyclic graph between tickets. Cycle detection prevents invalid dependency chains.
+- **Labels** — Color-coded labels, both global and project-scoped. Assigned to tickets via a join table.
+- **Comments** — Threaded comments (single-depth replies). Author can be human or LLM.
+- **Artifacts** — Polymorphic attachments: Figma URLs, Mermaid diagrams, images.
+- **Acceptance criteria** — Checklist items with status (`pending`, `met`, `not_met`). Server-side verification stamping.
+- **Templates** — Reusable ticket templates with variable substitution for quick creation.
+- **History** — Audit trail: every mutation recorded with action type, JSON diff, and performer.
+
+### Ticket-to-thread relationships
+
+- `origin` — Ticket created from inside a thread.
+- `bound` — Thread explicitly associated with a ticket via `thread.ticketId`.
+- `mention` — Ticket referenced in a message by identifier (case-insensitive pattern matching).
+
+**User interaction:**
+
+- Create, edit, and delete tickets from the board view or settings.
+- Assign labels, set priorities, manage acceptance criteria.
+- Add comments and artifacts.
+- View ticket history (audit trail).
+- Drag tickets between status columns on the board.
+- Drop tickets onto the chat composer to reference them.
+- Multi-select tickets for bulk actions (archive, orchestrate).
+- Configure labels and templates in Settings → Tickets.
+
+**Agent interaction (MCP — `/mcp/ticketing`):**
+
+26+ tools including:
+
+- `list_tickets`, `get_ticket`, `search_tickets` — Query tickets.
+- `create_ticket`, `update_ticket`, `delete_ticket`, `reorder_ticket` — Mutate tickets.
+- `get_ticket_tree` — Retrieve hierarchy.
+- `set_dependencies`, `add_dependency`, `remove_dependency` — Manage dependency graph.
+- `list_labels`, `create_label`, `update_label`, `delete_label` — Label CRUD.
+- `list_comments`, `create_comment`, `update_comment`, `delete_comment` — Comment CRUD.
+- `list_artifacts`, `create_artifact`, `update_artifact`, `delete_artifact` — Artifact CRUD.
+- `list_templates`, `create_template`, `update_template`, `delete_template` — Template CRUD.
+- `update_criterion_status` — Mark acceptance criteria met/not met.
+- `get_ticket_history` — Audit trail.
+
+---
+
+## 5. Board View (Multi-Layout)
+
+A Kanban-style board for visual ticket management. See [multi-layout.md](multi-layout.md) for implementation details.
+
+**User interaction:**
+
+- **Kanban columns** — Tickets grouped by status, displayed as cards with title, identifier, priority indicator, labels, sub-ticket count, and dependency indicators.
+- **Drag-and-drop** — Reorder tickets within a column or drag between columns to change status.
+- **Ticket detail panel** — Click a card to open a drill-down panel with full ticket information, acceptance criteria checkboxes, comments, history, related threads, and label management.
+- **Multi-select** — Select multiple tickets with modifier keys. A selection bar appears with bulk action buttons (archive, orchestrate).
+- **Drop-to-chat** — Drag a ticket card onto the chat area to reference it in a message.
+- **Orchestration controls** — Confirmation dialog for running orchestration on selected tickets, with model selection for implementer and reviewer.
+
+---
+
+## 6. Managed Runs
+
+Launch, monitor, and manage long-running project scripts (dev servers, build watchers, docker-compose stacks). See [managed-runs.md](managed-runs.md) for implementation details.
+
+### Project scripts (actions)
+
+Each project can define scripts:
+
+```
+ProjectScript {
+  id         — kebab-case identifier
+  name       — display name (e.g. "Dev Server")
+  command    — shell command (e.g. "npm run dev")
+  icon       — visual icon type (play, test, build, etc.)
+  runOnWorktreeCreate — auto-launch when a worktree is created
+  services   — declared services with health check definitions
+}
+```
+
+### Run lifecycle
+
+`starting` → `running` → `completed` | `failed` | `stopped` | `lost`
+
+- Scripts run in a PTY terminal (120×30 default).
+- Environment variables injected: `T3CODE_PROJECT_ROOT`, `T3CODE_WORKTREE_PATH`.
+- Log retention: 48 hours.
+
+### Service health checks
+
+- **URL** — HTTP GET with expected status code.
+- **Docker** — Container state check.
+- **Port** — TCP connect test.
+- **Command** — Custom shell command.
+- Polling interval: 12 seconds.
+
+### Service inference
+
+An LLM analyzes script output logs to infer what services are running, their roles (frontend, backend, proxy, worker, database, devtool), URLs, and health status. Inference records include the model used, raw/normalized payloads, grounding evidence, and confidence levels.
+
+**User interaction:**
+
+- View running scripts in the sidebar with detected services and health indicators (healthy/unhealthy/unknown).
+- Click to see service details: role, URL (with copy/open buttons), validation status.
+- Launch scripts from the project action menu.
+- Stop scripts manually.
+- View inference records in Settings → Managed Runs with detailed JSON payloads.
+
+**Agent interaction (MCP — `/mcp/managed-runs`):**
+
+- `list_managed_runs` — List all runs with status and services.
+- `launch_project_script` — Start a script by ID.
+- `get_managed_run` — Get run details.
+- `get_managed_run_logs` — Retrieve terminal output.
+- `stop_managed_run` — Terminate a running script.
+- `propose_project_script` — Suggest a new script definition.
+
+**System prompt injection:**
+
+- In "tools" mode: `MANAGED_RUNS_SYSTEM_PROMPT` injected with tool descriptions.
+- In "prompt" mode: HTTP endpoint URL + bearer token injected into the system prompt for on-demand discovery.
+
+---
+
+## 7. Scheduled Tasks
+
+Cron-based automation that creates new threads on a schedule. See [scheduled-tasks.md](scheduled-tasks.md) for implementation details.
+
+### Task model
+
+```
+ScheduledTask {
+  jobId            — UUID
+  name             — display name
+  description      — optional description
+  cronExpression   — 5-field standard cron (e.g. "0 9 * * 1" for Mondays at 9am)
+  enabled          — on/off toggle
+  jobType          — currently only "new_thread"
+  newThreadConfig  — { projectId, skillIds?, prompt?, autoSend }
+  lastRunAt        — timestamp of most recent execution
+  nextRunAt        — calculated next execution time
+}
+```
+
+### Scheduler behavior
+
+- Ticks every 30 seconds, executes due jobs.
+- Catch-up on startup: missed tasks are executed immediately.
+- At most 1 execution per task per tick (deduplication).
+- Execution records track runId, status (`created`, `skipped`, `failed`), resulting threadId, and any error.
+
+**User interaction:**
+
+- Create, edit, enable/disable, and delete scheduled tasks in Settings → Scheduled Tasks.
+- View task detail with cron expression, project selector, prompt configuration.
+- Browse execution history with success/failure status.
+
+**Agent interaction (MCP — `/mcp/scheduled-tasks`):**
+
+- `list` / `get` — Query tasks.
+- `create` / `update` / `delete` — Manage tasks.
+- `toggle` — Enable or disable a task.
+- `run_now` — Force immediate execution.
+- `list_runs` — View execution history.
+- `propose` — Suggest a new scheduled task.
+
+**Stream event:** `job_fired` — Emitted when a job executes, includes runId and created threadId.
+
+---
+
+## 8. Prompt Management
+
+Customize the system prompts sent to AI providers for each orchestration phase. See [prompts.md](prompts.md) for implementation details.
+
+### Orchestration prompt types
+
+| Prompt ID          | When used                                      |
+| ------------------ | ---------------------------------------------- |
+| `implement`        | Initial implementation turn                    |
+| `resume`           | Resume after interruption (with history)       |
+| `resumeFreshAgent` | Resume with a fresh agent session (no history) |
+| `review`           | Initial code review pass                       |
+| `reReview`         | Review iteration 2+                            |
+| `reviewFeedback`   | Feedback to implementer after review           |
+
+### Prompt document format
+
+Prompts are block-based documents (version 1). Each block has:
+
+- `text` — Template string supporting `${variable}` interpolation.
+- `when` (optional) — Conditional rendering: `{ type: "exists", variable: "ticketId" }` includes the block only when the variable is present.
+
+### Scope resolution (3-tier)
+
+1. **Shipped defaults** — Built-in, read-only prompts.
+2. **Global overrides** — User customizations applied to all projects.
+3. **Project overrides** — Per-project customizations (highest priority).
+
+### Canonical variables
+
+- **Shared:** `ticketId`, `ticketTitle`, `ticketDescription`, `acceptanceCriteria`, `worktree`, `projectTitle`, `projectPath`.
+- **Review-specific:** `commitDiff`, `reviewIteration`, `reviewSummary`, `reviewComments`.
+
+**User interaction:**
+
+- Edit prompts in Settings → Prompts with a scope selector (global / project).
+- View state badges per prompt: Default, Customized, Inherited, Overridden.
+- Preview rendered prompts with sample variable data before saving.
+- Reset to shipped defaults.
+
+**Agent interaction (MCP — `/mcp/prompts`):**
+
+- `list_definitions` — Get available prompts and groups.
+- `get_document` — Get the effective (merged) prompt document.
+- `validate_document` — Syntax check a prompt document.
+- `preview_document` — Render a prompt with sample variables.
+- `update_document` — Save a global or project override.
+
+---
+
+## 9. Git Integration
+
+Built-in git operations for version control without leaving the app.
+
+### Core operations
+
+- **Status** — Staged/unstaged changes, branch, remote tracking info.
+- **Branches** — List, create, checkout, delete, set upstream. Local vs. remote deduplication.
+- **Pull** — Fetch + merge with conflict detection.
+- **Worktrees** — Create (with branch), remove, list. See [Worktree & Environment Modes](#10-worktree--environment-modes).
+- **Remotes** — Multi-remote support with upstream branch tracking (15-second refresh cache).
+
+### Stacked diff / PR workflow
+
+Multi-step workflow for preparing and shipping code:
+
+- **Actions:** `commit`, `push`, `create_pr`, `commit_push`, `commit_push_pr`.
+- Progress events emitted for each phase (branch, commit, push, PR creation).
+- PR metadata fetching (title, body, state, author).
+
+### LLM-assisted text generation
+
+The configured text generation model can auto-generate:
+
+- Branch names (from ticket context).
+- Commit messages (from staged changes).
+- PR titles and descriptions (from diff context).
+
+**User interaction:**
+
+- **Branch toolbar** — Switch branches, view current branch, see environment mode.
+- **Git actions control** — Commit, push, and open PRs from a toolbar menu. Progress tracking via toast notifications.
+- **Pull request checkout** — Check out a PR directly from the branch toolbar.
+- **Default branch confirmation** — Warning dialog when committing to the default branch.
+
+**Agent interaction (WebSocket RPC):**
+
+- `git.status`, `git.pull`, `git.listBranches`, `git.discoverRepos`.
+- `git.createBranch`, `git.checkout`, `git.init`.
+- `git.createWorktree`, `git.removeWorktree`.
+- `git.runStackedAction` — Execute a multi-step commit/push/PR workflow.
+- `git.resolvePullRequest` — Fetch PR metadata.
+- `git.preparePullRequestThread` — Prepare context for a review thread.
+
+---
+
+## 10. Worktree & Environment Modes
+
+Per-thread workspace isolation using git worktrees.
+
+### Environment modes
+
+- **Local** — All threads share the main working tree. Simpler, but changes from one thread are visible to others.
+- **Worktree** — Each thread gets an isolated git worktree with its own branch. Changes are fully isolated between threads.
+
+Configurable globally via `defaultThreadEnvMode` in server settings, or per-thread at creation time.
+
+### Worktree storage
+
+- Worktrees are created under `~/.t3/worktrees/` (or the configured data directory).
+- Each worktree gets a dedicated branch.
+- Worktrees are cleaned up when their thread is deleted.
+- Project scripts with `runOnWorktreeCreate: true` auto-launch in new worktrees.
+
+**User interaction:**
+
+- Toggle between Local and Worktree mode in the branch toolbar.
+- Choose environment mode when creating a new thread (Cmd+K for local, Cmd+Shift+K for worktree).
+- Set the default mode in Settings → General.
+
+**Agent interaction:**
+
+- Orchestration commands include worktree context when dispatching to providers.
+- Provider sessions receive the correct working directory based on the thread's environment mode.
+
+---
+
+## 11. Terminal
+
+PTY-based terminal sessions embedded in the UI, attached to threads.
+
+### Capabilities
+
+- Full PTY emulation (via Bun or node-pty backend).
+- Multiple terminals per thread (up to 4 per group).
+- Real-time stdout/stderr/pty streaming.
+- Resize (columns and rows).
+- Write input, clear, restart.
+- Session history persistence.
+- Environment variable injection (up to 128 vars, 8KB per value).
+- Terminal link detection (file:line:col patterns are clickable).
+- Theme synchronization with the app theme.
+
+**User interaction:**
+
+- **Terminal drawer** — Togglable panel at the bottom of the chat view.
+- Tab management: add, close, switch between terminals.
+- Draggable height divider.
+- Real-time output rendering via xterm.js.
+- Click detected links to open files in the editor.
+
+**Agent interaction (WebSocket RPC):**
+
+- `terminal.open` — Create a session at a specific cwd with environment variables.
+- `terminal.write` — Send input.
+- `terminal.resize` — Adjust dimensions.
+- `terminal.clear` / `terminal.restart` / `terminal.close` — Session control.
+
+**Stream events:**
+
+- `terminal.started` — Session initialized.
+- `terminal.output` — Data from pty/stdout/stderr.
+- `terminal.exited` — Process terminated (with exit code/signal).
+- `terminal.error` — Error occurred.
+
+---
+
+## 12. File Explorer
+
+A built-in file browser and editor for navigating project files.
+
+**User interaction:**
+
+- **Tree view** — Hierarchical file/directory listing with expand/collapse.
+- **Split panes** — Left/right editor split for side-by-side file viewing.
+- **Tabs** — Draggable tab bar for open files. Close, reorder, switch tabs.
+- **Git status indicators** — Modified, added, and deleted files are visually marked.
+- **Markdown preview** — Toggle between raw markdown and rendered preview.
+- **File search** — Cmd+P / Ctrl+P to quickly find and open files.
+- **Drag to composer** — Drag files from the explorer into the chat composer to reference them.
+- **Settings panel** — Explorer-specific configuration.
+
+**Agent interaction (WebSocket RPC):**
+
+- `projects.readFile` — Read file contents (with size/depth limits).
+- `projects.writeFile` — Write file contents (with conflict detection).
+- `projects.listDirectory` — Browse directory with metadata.
+- `projects.searchEntries` — Full-text search across project files.
+
+---
+
+## 13. Diff Viewer
+
+Visualize code changes from agent turns or git operations.
+
+**User interaction:**
+
+- **Side-by-side or stacked view** — Toggle between diff display modes.
+- **Syntax highlighting** — Language-aware code coloring.
+- **File navigation** — Previous/next file buttons to step through changed files.
+- **Word wrap toggle** — Configurable in settings and per-session.
+- **Adaptive layout** — Renders as an inline sidebar on wide viewports, or as a sheet overlay on narrow viewports (breakpoint: 1180px).
+- **Resizable width** — Draggable divider (width persisted to localStorage).
+
+**Agent interaction:**
+
+- Turn diffs are automatically generated from checkpoint comparisons (see [Checkpointing](#14-checkpointing)).
+- `orchestration.getTurnDiff` / `orchestration.getFullThreadDiff` — Retrieve diffs via RPC.
+
+---
+
+## 14. Checkpointing
+
+Git-ref based snapshots that track file state before and after each agent turn.
+
+### Lifecycle
+
+1. **Baseline captured** — At turn start, a git ref is stored as a hidden branch (`checkpoints/{threadId}/{turnId}`).
+2. **Turn executes** — Agent makes changes.
+3. **Finalized** — At turn completion, a second ref is stored. The diff between baseline and finalized refs produces the turn diff.
+
+### Diff generation
+
+- Incremental processing with progress publication.
+- Per-file change tracking (add/delete/modify) with insertion/deletion statistics.
+- Linked to turn ID for navigation in the timeline.
+
+**User interaction:**
+
+- Turn diffs appear as collapsible file change summaries in the work log timeline.
+- Click a file change to open the full diff viewer.
+
+**Agent interaction:**
+
+- Checkpoints are managed automatically by the `CheckpointReactor` — no manual agent interaction required.
+- Diff data is available via `orchestration.getTurnDiff`.
+
+---
+
+## 15. Settings & Configuration
+
+### Server settings
+
+| Setting                    | Description                                | Default          |
+| -------------------------- | ------------------------------------------ | ---------------- |
+| `enableAssistantStreaming` | Incremental assistant text delivery        | `false`          |
+| `resumeAgentsOnStartup`    | Auto-resume stale work on server restart   | `false`          |
+| `maxReviewIterations`      | Max review passes for tickets              | `3` (max 10)     |
+| `defaultThreadEnvMode`     | Thread workspace isolation                 | `"local"`        |
+| `mcpDeliveryMode`          | How MCP tools reach models                 | `"tools"`        |
+| Provider settings          | Codex, Claude Agent, profiles              | Per-provider     |
+| Model selections           | Text gen, inference, implementer, reviewer | Per-use-case     |
+| Observability              | OTLP traces/metrics URLs                   | Disabled         |
+| Orchestration prompts      | Global prompt overrides                    | Shipped defaults |
+
+### Client settings
+
+| Setting                   | Description               | Default        |
+| ------------------------- | ------------------------- | -------------- |
+| `timestampFormat`         | Message timestamp format  | `"locale"`     |
+| `sidebarProjectSortOrder` | Project sort in sidebar   | `"updated_at"` |
+| `sidebarThreadSortOrder`  | Thread sort in sidebar    | `"updated_at"` |
+| `diffWordWrap`            | Word wrap in diff viewer  | `true`         |
+| `confirmThreadArchive`    | Show archive confirmation | `false`        |
+| `confirmThreadDelete`     | Show delete confirmation  | `true`         |
+
+### Keybindings
+
+Custom keyboard shortcuts stored in `keybindings.json`:
+
+```
+KeybindingRule {
+  key      — e.g. "mod+j", "ctrl+shift+k"
+  command  — action to execute
+  when     — optional condition (e.g. "terminalFocus")
+}
+```
+
+Commands: `terminal.toggle`, `terminal.split`, `terminal.new`, `terminal.close`, `chat.new`, `chat.newLocal`, `thread.previous`, `thread.next`, `thread.jump.1-9`, `file.quickOpen`, `editor.openFavorite`, `script.{id}.run`.
+
+Conditions support `!`, `&&`, `||`, and parentheses. Available conditions: `terminalFocus`, `terminalOpen`.
+
+Limits: 256 rules max, 64-char key values, 256-char when expressions.
+
+**User interaction:**
+
+- Settings UI organized into tabs: General, Prompts, Tickets, Archived, Changelog, Managed Runs, Scheduled Tasks.
+- Theme toggle (System/Light/Dark).
+- All provider and model configuration in one place.
+
+**Agent interaction (WebSocket RPC):**
+
+- `server.getSettings` / `server.updateSettings` — Read and patch settings.
+- `server.upsertKeybinding` — Add or update keybinding rules.
+- `subscribeServerConfig` — Stream config changes, provider statuses, and rate limits.
+
+---
+
+## 16. MCP Delivery Modes
+
+Controls how MCP service tools are made available to AI providers. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
+
+### "tools" mode (default)
+
+- MCP servers are registered as native tool sets in the provider's tool list.
+- Each tool is directly callable by the model.
+- Per-service system prompts are injected alongside the tools.
+- Trade-off: 43+ tools injected upfront, consuming context window.
+
+### "prompt" mode
+
+- No MCP tool registration in the provider.
+- HTTP endpoint URLs and bearer tokens are injected into the system prompt.
+- The model uses code execution (e.g. `curl`) to discover and call tools on demand.
+- Trade-off: Extra round-trip per tool call; depends on the model's code execution capability.
+
+### Services exposed via MCP
+
+| Service         | Endpoint               | Tool count |
+| --------------- | ---------------------- | ---------- |
+| Ticketing       | `/mcp/ticketing`       | 26+        |
+| Managed Runs    | `/mcp/managed-runs`    | 6          |
+| Scheduled Tasks | `/mcp/scheduled-tasks` | 9          |
+| Prompts         | `/mcp/prompts`         | 5          |
+
+Configurable via `mcpDeliveryMode` in server settings.
+
+---
+
+## 17. Desktop App (Electron)
+
+The Electron shell wraps the server and web app into a native desktop application.
+
+### Features
+
+- **Native window** — Platform-appropriate title bar and window management.
+- **Protocol handler** — `t3://` scheme for internal navigation (e.g. `t3://ticket/T3CO-42`).
+- **Auto-update** — Checks every 4 hours via electron-updater. Supports prerelease channels. GitHub token support for higher rate limits.
+- **Shell environment sync** — Preserves the user's PATH and shell environment in the embedded server.
+- **Native dialogs** — File picker, confirm dialogs, context menus via IPC.
+- **Theme detection** — Follows system dark/light mode preference.
+
+### IPC channels
+
+- `desktop:pick-folder` — Native folder picker dialog.
+- `desktop:confirm` — Native confirmation dialog.
+- `desktop:set-theme` — Dark/light theme switching.
+- `desktop:context-menu` — Right-click context menus.
+- `desktop:open-external` — Open URLs and files externally.
+- `desktop:update-*` — Update lifecycle (check, download, install, progress).
+- `desktop:get-ws-url` — Get the backend WebSocket URL.
+
+### Build targets
+
+- macOS DMG: `bun run dist:desktop:dmg`
+- Linux AppImage: `bun run dist:desktop:linux`
+- Windows NSIS: `bun run dist:desktop:win`
+
+---
+
+## 18. Startup Recovery
+
+Handles server restarts gracefully when threads were mid-execution. See [startup-recovery.md](startup-recovery.md) for implementation details.
+
+### Stale work detection
+
+On startup, the server scans the orchestration state for sessions with `status === "running"` and active turns.
+
+### Recovery modes
+
+1. **Auto-resume enabled** (`resumeAgentsOnStartup: true`) — Server automatically re-enters the resume path for stale threads.
+2. **Auto-resume disabled or failed** — UI shows a client-only "Was working" marker on affected threads.
+   - Not persisted to orchestration state.
+   - Auto-clears when the thread is opened or live activity resumes.
+
+**User interaction:**
+
+- See "Was working" indicators on threads that were active at shutdown.
+- Manually resume threads by opening them and sending a new message.
+
+---
+
+## 19. Observability
+
+Logging, tracing, and metrics for debugging and monitoring.
+
+### Log destinations
+
+| Destination   | Format                                      | Purpose                     |
+| ------------- | ------------------------------------------- | --------------------------- |
+| stdout        | Human-readable                              | Development console output  |
+| Trace file    | NDJSON (`~/.t3/*/logs/server.trace.ndjson`) | Persisted spans with timing |
+| Desktop logs  | `desktop-main.log`, `server-child.log`      | Packaged app diagnostics    |
+| Timeline logs | `[timeline]` prefix, JSON                   | Structured event timeline   |
+
+### Trace file schema
+
+Each NDJSON record contains: `name`, `traceId`, `spanId`, `parentSpanId`, `durationMs`, `attributes`, `events`, and `exit` status (`Success`, `Failure`, `Interrupted`).
+
+### OTLP export (optional)
+
+- Traces: `T3CODE_OTLP_TRACES_URL` (default: disabled).
+- Metrics: `T3CODE_OTLP_METRICS_URL` (default: disabled).
+- Export interval: 10 seconds (configurable via `T3CODE_OTLP_EXPORT_INTERVAL_MS`).
+- Service name: `t3-server` (configurable via `T3CODE_OTLP_SERVICE_NAME`).
+
+### RPC instrumentation
+
+All WebSocket RPC calls are instrumented with request/response tracing, error tracking, and duration measurement.
+
+---
+
+## 20. Keyboard Shortcuts
+
+### Global shortcuts
+
+| Shortcut                       | Action                  |
+| ------------------------------ | ----------------------- |
+| `Cmd+K` / `Ctrl+K`             | New thread (local)      |
+| `Cmd+Shift+K` / `Ctrl+Shift+K` | New thread (worktree)   |
+| `1-9`                          | Jump to thread by index |
+| `←` / `→`                      | Previous / next thread  |
+| `Escape`                       | Clear thread selection  |
+
+### Chat shortcuts
+
+| Shortcut           | Action                            |
+| ------------------ | --------------------------------- |
+| `Cmd+P` / `Ctrl+P` | File search                       |
+| `Cmd+S` / `Ctrl+S` | Save file                         |
+| `Cmd+W` / `Ctrl+W` | Close tab                         |
+| `Escape`           | Close diff / file explorer panels |
+
+### Terminal-aware behavior
+
+Keyboard shortcuts are context-aware. When the terminal is focused, certain shortcuts (like arrow keys) pass through to the terminal instead of triggering navigation.
+
+### Custom keybindings
+
+Users can define custom shortcuts in `keybindings.json` with conditional expressions. See [Settings & Configuration](#15-settings--configuration) for the keybinding rule format.
+
+---
+
+## 21. Changelog
+
+AI-generated release notes from git commit history. See [changelog.md](changelog.md) for implementation details.
+
+### Generation
+
+- Built at build time from the commit range since the last processed commit.
+- An LLM (Codex with structured output) analyzes commits and produces categorized entries.
+- Results cached in `.generated/changelog/cache.json`.
+- Published as a static asset: `apps/web/public/generated/changelog.json`.
+- Validated against the contracts schema.
+- Provenance tracked: `lastProcessedCommit`, prompt version, rebuild caps.
+
+### Categories
+
+`feature`, `improvement`, `fix`, `performance`, `breaking`, `security`, `internal`.
+
+**User interaction:**
+
+- View changelog in Settings → Changelog.
+- Entries grouped by date with color-coded category badges.
+- Last processed commit reference displayed.
+
+---
+
+## 22. Attachment Storage
+
+Immutable file storage for chat attachments (images, documents, etc.).
+
+### Behavior
+
+- Unique ID generation per attachment.
+- Path traversal prevention.
+- MIME type detection.
+- Immutable cache-forever headers (max-age: 31536000).
+
+### HTTP endpoints
+
+- `GET /attachments/{id}` — Lookup by ID.
+- `GET /attachments/{relative/path}` — Lookup by relative path.
+
+**User interaction:**
+
+- Attach files to messages via the composer.
+- Inline image preview with expansion.
+
+**Agent interaction:**
+
+- Attachments are included in message metadata when sent to providers.
+- Provider responses can reference attachments by ID.
