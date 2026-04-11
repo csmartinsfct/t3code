@@ -3257,7 +3257,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(text).not.toContain("Current ticket");
       });
 
-      expect(findButtonContainingText("T3CO-189 Review")).toBeTruthy();
       const reviewSwitcherButton = await waitForButtonContainingText("T3CO-189 Review");
       reviewSwitcherButton.click();
       (await waitForMenuItemContainingText("Timeline")).click();

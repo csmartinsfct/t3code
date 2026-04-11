@@ -185,6 +185,7 @@ const ORCHESTRATION_REVIEW_THREAD: Thread = {
   id: ORCHESTRATION_REVIEW_THREAD_ID as never,
   title: "Route review child",
   parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
+  // Review children stay associated with the same ticket as the paired working child.
   ticketId: "ticket-route-orchestration-child" as never,
 };
 
