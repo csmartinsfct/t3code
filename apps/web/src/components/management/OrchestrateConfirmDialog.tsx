@@ -120,7 +120,6 @@ export function OrchestrateConfirmDialog({
     setError(null);
     const result = await submitOrchestrationConfirm({
       plan,
-      isSubmitting,
       implementerModelSelection: implSel,
       reviewerModelSelection: revSel,
       onConfirm,
@@ -233,7 +232,6 @@ export function isOrchestrationSubmitDisabled(input: {
 
 export async function submitOrchestrationConfirm(input: {
   plan: OrchestrationPlan | null;
-  isSubmitting: boolean;
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   onConfirm: (
@@ -242,7 +240,7 @@ export async function submitOrchestrationConfirm(input: {
     reviewerModelSelection: ModelSelection,
   ) => Promise<void> | void;
 }): Promise<{ kind: "noop" } | { kind: "started" } | { kind: "error"; message: string }> {
-  if (isOrchestrationSubmitDisabled({ plan: input.plan, isSubmitting: input.isSubmitting })) {
+  if (input.plan?.kind !== "valid") {
     return { kind: "noop" };
   }
 

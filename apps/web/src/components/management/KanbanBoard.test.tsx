@@ -656,7 +656,7 @@ describe("KanbanBoard", () => {
     const result = await launchBoardOrchestration({
       api,
       projectId: "project-1" as TicketSummary["projectId"],
-      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      ticketIdentifiers: ["T3CO-2", "T3CO-1"] as const,
       implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
       reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
       orchestrateTickets: new Map([[makeTicket().id, makeTicket()]]),
@@ -689,7 +689,7 @@ describe("KanbanBoard", () => {
     const result = await launchBoardOrchestration({
       api,
       projectId: "project-1" as TicketSummary["projectId"],
-      ticketIdentifiers: ["T3CO-1"],
+      ticketIdentifiers: ["T3CO-1"] as const,
       implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
       reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
       orchestrateTickets: new Map([

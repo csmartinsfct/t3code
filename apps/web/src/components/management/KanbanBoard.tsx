@@ -138,7 +138,7 @@ export async function launchBoardOrchestration(input: {
     };
   };
   projectId: ProjectId;
-  ticketIdentifiers: string[];
+  ticketIdentifiers: OrchestrationCreateRunInput["ticketIdentifiers"];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   orchestrateTickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>;
@@ -157,7 +157,7 @@ export async function launchBoardOrchestration(input: {
 
   const result = await input.api.orchestration.createRun({
     projectId: input.projectId,
-    ticketIdentifiers: input.ticketIdentifiers as never,
+    ticketIdentifiers: input.ticketIdentifiers,
     implementerModelSelection: input.implementerModelSelection,
     reviewerModelSelection: input.reviewerModelSelection,
   });
