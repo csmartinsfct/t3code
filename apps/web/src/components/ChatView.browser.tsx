@@ -23,6 +23,7 @@ import {
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { HttpResponse, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
+import { useState } from "react";
 import { page } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -39,6 +40,8 @@ import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardConte
 import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
+import { makeTabIdFromPath, useFileExplorerStore } from "../fileExplorerStore";
+import { relativePathWithinWorkspace } from "../fileLinkRouting";
 import { applyServerConfigEvent } from "../rpc/serverState";
 import { useStore } from "../store";
 import type { SidebarThreadSummary, Thread } from "../types";
@@ -47,6 +50,7 @@ import { createReadyServerProvider } from "../test/providerTestUtils";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { createWsNativeApi } from "../wsNativeApi";
+import ChatMarkdown from "./ChatMarkdown";
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const UUID_ROUTE_RE = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -1461,6 +1465,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
       projects: [],
       threads: [],
       bootstrapComplete: false,
+    });
+    useFileExplorerStore.setState({
+      workspaceStatesByCwd: {},
+      runtimeTabStateByTabId: {},
+      pendingScrollTargetByTabId: {},
+      pendingRevealPathByCwd: {},
     });
     useUiStateStore.setState({
       projectExpandedById: {},
@@ -2919,6 +2929,147 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("keeps snippet chips in sync with draft state and prefixes sends with snippet preambles", async () => {
+    // Audit traceability: 216652d, aba3612.
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Please use this snippet.");
+    useComposerDraftStore.getState().addCodeSnippet(THREAD_ID, {
+      id: "snippet-1",
+      cwd: "/repo/project",
+      relativePath: "src/app.ts",
+      startLine: 3,
+      endLine: 5,
+      code: "const value = 42;\nconsole.log(value);",
+    });
+    useComposerDraftStore.getState().addCodeSnippet(THREAD_ID, {
+      id: "snippet-2",
+      cwd: "/repo/project",
+      relativePath: "README.md",
+      startLine: 1,
+      endLine: 1,
+      code: "# README",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-snippet-send" as MessageId,
+        targetText: "snippet send target",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const text = document.body.textContent ?? "";
+          expect(text).toContain("app.ts:3–5");
+          expect(text).toContain("README.md:1");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await page.getByRole("button", { name: "Remove README.md snippet" }).click();
+
+      await vi.waitFor(
+        () => {
+          const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+          expect(draft?.codeSnippets).toEqual([
+            {
+              id: "snippet-1",
+              cwd: "/repo/project",
+              relativePath: "src/app.ts",
+              startLine: 3,
+              endLine: 5,
+              code: "const value = 42;\nconsole.log(value);",
+            },
+          ]);
+          expect(document.body.textContent ?? "").not.toContain("README.md:1");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const request = wsRequests.find(
+            (candidate) =>
+              candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              candidate.type === "thread.turn.start",
+          );
+          expect(request).toBeTruthy();
+          const turnStartRequest = request as unknown as { message: { text: string } };
+          expect(turnStartRequest.message.text).toContain("`src/app.ts` (lines 3–5):");
+          expect(turnStartRequest.message.text).toContain("const value = 42;");
+          expect(turnStartRequest.message.text).toContain("Please use this snippet.");
+          expect(turnStartRequest.message.text).not.toContain("`README.md`");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens markdown file links into the explorer, reuses existing tabs, and records line-column jumps", async () => {
+    useFileExplorerStore.getState().openFile("/repo/project", "src/app.ts", "primary");
+    const existingTabId = makeTabIdFromPath("/repo/project", "src/app.ts");
+    useFileExplorerStore.getState().createSplit("right", existingTabId, "/repo/project");
+
+    function FileLinkHarness() {
+      const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
+      const openFileAtLine = useFileExplorerStore((state) => state.openFileAtLine);
+
+      return (
+        <div>
+          <div data-testid="file-explorer-state">{fileExplorerOpen ? "open" : "closed"}</div>
+          <ChatMarkdown
+            text="Open [app](src/app.ts#L7C3)."
+            cwd="/repo/project"
+            onOpenFileLink={(absolutePath, line, column) => {
+              const relativePath =
+                relativePathWithinWorkspace(absolutePath, "/repo/project") ?? absolutePath;
+              openFileAtLine("/repo/project", relativePath, line, column, "primary");
+              setFileExplorerOpen(true);
+            }}
+          />
+        </div>
+      );
+    }
+
+    const screen = await render(<FileLinkHarness />);
+
+    try {
+      const fileLink = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLAnchorElement>("a")).find(
+            (element) => element.textContent?.trim() === "app",
+          ) ?? null,
+        "Unable to find markdown file link.",
+      );
+      fileLink.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="file-explorer-state"]')?.textContent).toBe(
+            "open",
+          );
+          const state = useFileExplorerStore.getState();
+          const workspace = state.workspaceStatesByCwd["/repo/project"];
+          expect(workspace).toBeDefined();
+          expect(workspace?.activePaneId).toBe("secondary");
+          expect(workspace?.panes.secondary.activeTabId).toBe(existingTabId);
+          expect(workspace?.panes.secondary.tabIds).toEqual([existingTabId]);
+          expect(state.pendingRevealPathByCwd["/repo/project"]).toBe("src/app.ts");
+          expect(state.pendingScrollTargetByTabId[existingTabId]).toEqual({ line: 7, column: 3 });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await screen.unmount();
     }
   });
 

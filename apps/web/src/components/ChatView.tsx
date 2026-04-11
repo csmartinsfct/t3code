@@ -45,6 +45,7 @@ import {
   parseFileExplorerRouteSearch,
   stripFileExplorerSearchParams,
 } from "../fileExplorerRouteSearch";
+import { relativePathWithinWorkspace } from "../fileLinkRouting";
 import { useFileExplorerStore } from "../fileExplorerStore";
 import { openInPreferredEditor } from "../editorPreferences";
 import { consumeClipboardSnippet } from "../clipboardSnippetRegistry";
@@ -2047,8 +2048,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const projectCwd = gitCwd;
       if (!projectCwd) return;
 
-      const prefix = projectCwd.endsWith("/") ? projectCwd : projectCwd + "/";
-      if (!absolutePath.startsWith(prefix)) {
+      const relativePath = relativePathWithinWorkspace(absolutePath, projectCwd);
+      if (relativePath === null) {
         // File outside workspace — fall back to external editor
         const api = readNativeApi();
         if (api) {
@@ -2060,7 +2061,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
-      const relativePath = absolutePath.slice(prefix.length);
       openFileAtLineAction(projectCwd, relativePath, line, column, "primary");
 
       if (!fileExplorerOpen) {
