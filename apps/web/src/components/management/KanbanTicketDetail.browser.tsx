@@ -419,6 +419,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
         projectId="project-1"
         subTickets={[subTicketOne, subTicketTwo]}
         onNavigateToTicket={() => {}}
+        onMoveToBoardRequest={() => {}}
       />,
       { container: dragHost },
     );
