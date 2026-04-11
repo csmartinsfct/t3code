@@ -4,8 +4,13 @@ import {
   formatModelSelectionSummary,
   resolveReviewerConfigurationSummary,
 } from "./orchestrationModelDisplay";
+import {
+  getRunnableTicketIdentifiers,
+  isOrchestrationSubmitDisabled,
+  submitOrchestrationConfirm,
+} from "./OrchestrateConfirmDialog";
 
-// Audit traceability: 3be0c6e, 0d23345, 6abc967.
+// Audit traceability: 3be0c6e, 0d23345, 6abc967, b3db7d6, 6d20dbf.
 describe("OrchestrateConfirmDialog model labels", () => {
   it("formats implementer and reviewer defaults using provider display names", () => {
     expect(
@@ -30,5 +35,108 @@ describe("OrchestrateConfirmDialog model labels", () => {
         model: "gpt-5.4-mini",
       }),
     ).toBe("Enable in the settings");
+  });
+
+  it("filters skipped tickets out of the startup handoff identifiers while preserving preview order", () => {
+    expect(
+      getRunnableTicketIdentifiers({
+        kind: "valid",
+        orderedTickets: [
+          {
+            annotation: "warn-reprocess",
+            ticket: { identifier: "T3CO-2" } as never,
+          },
+          {
+            annotation: "will-run",
+            ticket: { identifier: "T3CO-1" } as never,
+          },
+          {
+            annotation: "skipped-done",
+            ticket: { identifier: "T3CO-9" } as never,
+          },
+        ],
+      }),
+    ).toEqual(["T3CO-2", "T3CO-1"]);
+  });
+
+  it("disables submit whenever validation is blocked or startup is already in flight", () => {
+    expect(
+      isOrchestrationSubmitDisabled({
+        plan: null,
+        isSubmitting: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      isOrchestrationSubmitDisabled({
+        plan: { kind: "blocked-cycle", cycles: [] },
+        isSubmitting: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      isOrchestrationSubmitDisabled({
+        plan: { kind: "valid", orderedTickets: [] },
+        isSubmitting: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      isOrchestrationSubmitDisabled({
+        plan: { kind: "valid", orderedTickets: [] },
+        isSubmitting: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("surfaces inline startup errors when createRun -> startRun handoff fails", async () => {
+    const onConfirm = async () => {
+      throw new Error("Codex app server unavailable");
+    };
+
+    await expect(
+      submitOrchestrationConfirm({
+        plan: {
+          kind: "valid",
+          orderedTickets: [
+            {
+              annotation: "will-run",
+              ticket: { identifier: "T3CO-1" } as never,
+            },
+          ],
+        },
+        isSubmitting: false,
+        implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
+        reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+        onConfirm,
+      }),
+    ).resolves.toEqual({
+      kind: "error",
+      message: "Codex app server unavailable",
+    });
+  });
+
+  it("treats a successful confirm callback as a started orchestration handoff", async () => {
+    const onConfirm = async () => undefined;
+
+    await expect(
+      submitOrchestrationConfirm({
+        plan: {
+          kind: "valid",
+          orderedTickets: [
+            {
+              annotation: "will-run",
+              ticket: { identifier: "T3CO-1" } as never,
+            },
+          ],
+        },
+        isSubmitting: false,
+        implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
+        reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+        onConfirm,
+      }),
+    ).resolves.toEqual({
+      kind: "started",
+    });
   });
 });

@@ -113,26 +113,33 @@ export function OrchestrateConfirmDialog({
   const revDisplayName = resolveReviewerConfigurationSummary(settings.maxReviewIterations, revSel);
 
   const handleConfirm = useCallback(async () => {
-    if (plan?.kind !== "valid" || isSubmitting) return;
-    const identifiers = plan.orderedTickets
-      .filter((t) => t.annotation !== "skipped-done")
-      .map((t) => t.ticket.identifier);
+    if (isOrchestrationSubmitDisabled({ plan, isSubmitting })) {
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
-    try {
-      await onConfirm(identifiers, implSel, revSel);
+    const result = await submitOrchestrationConfirm({
+      plan,
+      isSubmitting,
+      implementerModelSelection: implSel,
+      reviewerModelSelection: revSel,
+      onConfirm,
+    });
+    if (result.kind === "started") {
       onOpenChange(false);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to start orchestration");
-    } finally {
-      setIsSubmitting(false);
+      return;
     }
+    if (result.kind === "error") {
+      setError(result.message);
+    }
+    setIsSubmitting(false);
   }, [isSubmitting, plan, implSel, revSel, onConfirm, onOpenChange]);
 
-  const runnableCount =
-    plan?.kind === "valid"
-      ? plan.orderedTickets.filter((t) => t.annotation !== "skipped-done").length
-      : 0;
+  const runnableCount = getRunnableTicketIdentifiers(plan).length;
+  const submitDisabled = isOrchestrationSubmitDisabled({
+    plan,
+    isSubmitting,
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -189,7 +196,7 @@ export function OrchestrateConfirmDialog({
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button onClick={() => void handleConfirm()} disabled={isSubmitting}>
+              <Button onClick={() => void handleConfirm()} disabled={submitDisabled}>
                 <PlayIcon className="size-3.5" />
                 {isSubmitting ? "Starting..." : "Start Orchestration"}
               </Button>
@@ -206,6 +213,52 @@ export function OrchestrateConfirmDialog({
       </DialogPopup>
     </Dialog>
   );
+}
+
+export function getRunnableTicketIdentifiers(plan: OrchestrationPlan | null): string[] {
+  if (plan?.kind !== "valid") {
+    return [];
+  }
+  return plan.orderedTickets
+    .filter((ticket) => ticket.annotation !== "skipped-done")
+    .map((ticket) => ticket.ticket.identifier);
+}
+
+export function isOrchestrationSubmitDisabled(input: {
+  plan: OrchestrationPlan | null;
+  isSubmitting: boolean;
+}): boolean {
+  return input.plan?.kind !== "valid" || input.isSubmitting;
+}
+
+export async function submitOrchestrationConfirm(input: {
+  plan: OrchestrationPlan | null;
+  isSubmitting: boolean;
+  implementerModelSelection: ModelSelection;
+  reviewerModelSelection: ModelSelection;
+  onConfirm: (
+    ticketIdentifiers: string[],
+    implementerModelSelection: ModelSelection,
+    reviewerModelSelection: ModelSelection,
+  ) => Promise<void> | void;
+}): Promise<{ kind: "noop" } | { kind: "started" } | { kind: "error"; message: string }> {
+  if (isOrchestrationSubmitDisabled({ plan: input.plan, isSubmitting: input.isSubmitting })) {
+    return { kind: "noop" };
+  }
+
+  try {
+    await input.onConfirm(
+      getRunnableTicketIdentifiers(input.plan),
+      input.implementerModelSelection,
+      input.reviewerModelSelection,
+    );
+    return { kind: "started" };
+  } catch (err: unknown) {
+    return {
+      kind: "error",
+      message: err instanceof Error ? err.message : "Failed to start orchestration",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

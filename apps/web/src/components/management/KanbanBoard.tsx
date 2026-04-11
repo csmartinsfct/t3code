@@ -1,5 +1,8 @@
 import type {
   ModelSelection,
+  OrchestrationCreateRunInput,
+  OrchestrationCreateRunResult,
+  OrchestrationStartRunInput,
   ProjectId,
   Ticket,
   TicketId,
@@ -63,6 +66,105 @@ export function hasBoardOrchestrationProjectMismatch(
     }
   }
   return false;
+}
+
+export function resolveBoardOrchestrateSelectionFromContextMenu(input: {
+  clickedItem: "orchestrate" | null;
+  ticket: TicketSummary;
+  selectedTicketIds: ReadonlySet<TicketId>;
+  selectedTickets: ReadonlyMap<TicketId, TicketSummary>;
+}): ReadonlyMap<TicketId, TicketSummary> | null {
+  if (input.clickedItem !== "orchestrate") {
+    return null;
+  }
+  const isInSelection = input.selectedTicketIds.has(input.ticket.id);
+  if (isInSelection && input.selectedTickets.size > 0) {
+    return new Map(input.selectedTickets);
+  }
+  return new Map([[input.ticket.id, input.ticket]]);
+}
+
+export function resolveBoardOrchestrateSelectionFromSelectionBar(
+  selectedTickets: ReadonlyMap<TicketId, TicketSummary>,
+): ReadonlyMap<TicketId, TicketSummary> {
+  return new Map(selectedTickets);
+}
+
+export function resolveBoardOrchestrateSelectionFromDetail(input: {
+  ticket: Ticket;
+  projectId: ProjectId;
+}):
+  | {
+      kind: "project-mismatch";
+    }
+  | {
+      kind: "open-dialog";
+      selectedTickets: ReadonlyMap<TicketId, TicketSummary>;
+    } {
+  if (input.ticket.projectId !== input.projectId) {
+    return { kind: "project-mismatch" };
+  }
+
+  const summary: TicketSummary = {
+    id: input.ticket.id,
+    projectId: input.ticket.projectId,
+    parentId: input.ticket.parentId,
+    ticketNumber: input.ticket.ticketNumber,
+    identifier: input.ticket.identifier,
+    title: input.ticket.title,
+    status: input.ticket.status,
+    priority: input.ticket.priority,
+    sortOrder: input.ticket.sortOrder,
+    isArchived: input.ticket.isArchived,
+    worktree: input.ticket.worktree,
+    labels: input.ticket.labels,
+    subTicketCount: input.ticket.subTickets.length,
+    dependencyCount: input.ticket.dependencies.length,
+    createdAt: input.ticket.createdAt,
+    updatedAt: input.ticket.updatedAt,
+  };
+
+  return {
+    kind: "open-dialog",
+    selectedTickets: new Map([[input.ticket.id, summary]]),
+  };
+}
+
+export async function launchBoardOrchestration(input: {
+  api: {
+    orchestration: {
+      createRun: (input: OrchestrationCreateRunInput) => Promise<OrchestrationCreateRunResult>;
+      startRun: (input: OrchestrationStartRunInput) => Promise<unknown>;
+    };
+  };
+  projectId: ProjectId;
+  ticketIdentifiers: string[];
+  implementerModelSelection: ModelSelection;
+  reviewerModelSelection: ModelSelection;
+  orchestrateTickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>;
+  onProjectMismatch: () => void;
+  clearSelection: () => void;
+  navigateToThread: (threadId: ThreadId) => void;
+}) {
+  const hasProjectMismatch = hasBoardOrchestrationProjectMismatch(
+    input.orchestrateTickets,
+    input.projectId,
+  );
+  if (hasProjectMismatch) {
+    input.onProjectMismatch();
+    return { kind: "project-mismatch" } as const;
+  }
+
+  const result = await input.api.orchestration.createRun({
+    projectId: input.projectId,
+    ticketIdentifiers: input.ticketIdentifiers as never,
+    implementerModelSelection: input.implementerModelSelection,
+    reviewerModelSelection: input.reviewerModelSelection,
+  });
+  await input.api.orchestration.startRun({ runId: result.runId });
+  input.clearSelection();
+  input.navigateToThread(result.orchestrationThreadId);
+  return { kind: "started", result } as const;
 }
 
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(
@@ -273,13 +375,15 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         x: e.clientX,
         y: e.clientY,
       });
+      const nextSelection = resolveBoardOrchestrateSelectionFromContextMenu({
+        clickedItem: clicked,
+        ticket,
+        selectedTicketIds,
+        selectedTickets,
+      });
 
-      if (clicked === "orchestrate") {
-        if (isInSelection && selectedTicketIds.size > 0) {
-          setOrchestrateTickets(new Map(selectedTickets));
-        } else {
-          setOrchestrateTickets(new Map([[ticket.id, ticket]]));
-        }
+      if (nextSelection) {
+        setOrchestrateTickets(nextSelection);
         setOrchestrateDialogOpen(true);
       }
     },
@@ -287,13 +391,18 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   );
 
   const openOrchestrateForSelection = useCallback(() => {
-    setOrchestrateTickets(new Map(selectedTickets));
+    setOrchestrateTickets(resolveBoardOrchestrateSelectionFromSelectionBar(selectedTickets));
     setOrchestrateDialogOpen(true);
   }, [selectedTickets]);
 
   const handleOrchestrateFromDetail = useCallback(
     (ticket: Ticket) => {
-      if (ticket.projectId !== typedProjectId) {
+      const resolution = resolveBoardOrchestrateSelectionFromDetail({
+        ticket,
+        projectId: typedProjectId,
+      });
+
+      if (resolution.kind === "project-mismatch") {
         toastManager.add({
           type: "error",
           title: "Board context changed",
@@ -305,25 +414,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         return;
       }
 
-      const summary: TicketSummary = {
-        id: ticket.id,
-        projectId: ticket.projectId,
-        parentId: ticket.parentId,
-        ticketNumber: ticket.ticketNumber,
-        identifier: ticket.identifier,
-        title: ticket.title,
-        status: ticket.status,
-        priority: ticket.priority,
-        sortOrder: ticket.sortOrder,
-        isArchived: ticket.isArchived,
-        worktree: ticket.worktree,
-        labels: ticket.labels,
-        subTicketCount: ticket.subTickets.length,
-        dependencyCount: ticket.dependencies.length,
-        createdAt: ticket.createdAt,
-        updatedAt: ticket.updatedAt,
-      } as TicketSummary;
-      setOrchestrateTickets(new Map([[ticket.id, summary]]));
+      setOrchestrateTickets(resolution.selectedTickets);
       setOrchestrateDialogOpen(true);
     },
     [setThreadBoardRoot, threadId, typedProjectId],
@@ -335,35 +426,32 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
     ) => {
-      const hasProjectMismatch = hasBoardOrchestrationProjectMismatch(
-        orchestrateTickets,
-        typedProjectId,
-      );
-      if (hasProjectMismatch) {
-        toastManager.add({
-          type: "error",
-          title: "Board context changed",
-          description: "Refresh the board and try starting orchestration again.",
-        });
-        setOrchestrateDialogOpen(false);
-        if (threadId) {
-          setThreadBoardRoot(threadId, typedProjectId);
-        }
-        return;
-      }
-
       const api = ensureNativeApi();
-      const result = await api.orchestration.createRun({
+      await launchBoardOrchestration({
+        api,
         projectId: typedProjectId,
-        ticketIdentifiers: ticketIdentifiers as never,
+        ticketIdentifiers,
         implementerModelSelection,
         reviewerModelSelection,
-      });
-      await api.orchestration.startRun({ runId: result.runId });
-      clearSelection();
-      void navigate({
-        to: "/$threadId",
-        params: { threadId: result.orchestrationThreadId },
+        orchestrateTickets,
+        onProjectMismatch: () => {
+          toastManager.add({
+            type: "error",
+            title: "Board context changed",
+            description: "Refresh the board and try starting orchestration again.",
+          });
+          setOrchestrateDialogOpen(false);
+          if (threadId) {
+            setThreadBoardRoot(threadId, typedProjectId);
+          }
+        },
+        clearSelection,
+        navigateToThread: (orchestrationThreadId) => {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: orchestrationThreadId },
+          });
+        },
       });
     },
     [clearSelection, navigate, orchestrateTickets, setThreadBoardRoot, threadId, typedProjectId],

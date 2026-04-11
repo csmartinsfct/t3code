@@ -27,7 +27,7 @@ import {
 import { resolveTicketModelOverrideState } from "./orchestrationModelDisplay";
 import { TicketOriginThreadSection, TicketThreadRowButton } from "./TicketOriginThreadSection";
 
-// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c, b6dd6a5.
+// Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c, b6dd6a5, b3db7d6, 6d20dbf.
 const DETAIL_DESCRIPTION = `- Detail list item
 
 Visit [spec](https://example.com/spec) with \`inline detail code\`.
@@ -275,6 +275,39 @@ describe("KanbanTicketDetail", () => {
       action: "save",
       nextValue: null,
     });
+  });
+
+  it("includes the orchestrate menu action and routes the ticket through the detail callback", () => {
+    const ticket = makeTicket();
+    const onOrchestrate = vi.fn();
+    const onDecompose = vi.fn();
+    const onDelete = vi.fn();
+
+    const actions = buildTicketDetailActionItems({
+      ticket,
+      onOrchestrate,
+      onDecompose,
+      onDelete,
+    });
+
+    const orchestrateAction = actions.find(
+      (action) => action.kind === "item" && action.key === "orchestrate",
+    );
+
+    expect(orchestrateAction).toMatchObject({
+      kind: "item",
+      label: "Orchestrate",
+    });
+
+    if (!orchestrateAction || orchestrateAction.kind !== "item") {
+      throw new Error("Expected orchestrate action");
+    }
+
+    orchestrateAction.onSelect();
+
+    expect(onOrchestrate).toHaveBeenCalledWith(ticket);
+    expect(onDecompose).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it("resolves blur actions so escape cancels and normal blur saves inline edits", () => {

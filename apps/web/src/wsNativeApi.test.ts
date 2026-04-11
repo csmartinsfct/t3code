@@ -424,6 +424,41 @@ describe("wsNativeApi", () => {
     expect(rpcClientMock.orchestration.startRun).toHaveBeenCalledWith({ runId: "run-1" });
   });
 
+  it("forwards orchestration run creation directly to the RPC client", async () => {
+    rpcClientMock.orchestration.createRun.mockResolvedValue({
+      runId: "run-1",
+      orchestrationThreadId: ThreadId.makeUnsafe("thread-1"),
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.orchestration.createRun({
+      projectId: ProjectId.makeUnsafe("project-1"),
+      ticketIdentifiers: ["T3CO-2", "T3CO-1"] as never,
+      implementerModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      reviewerModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+      },
+    });
+
+    expect(rpcClientMock.orchestration.createRun).toHaveBeenCalledWith({
+      projectId: "project-1",
+      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      implementerModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      reviewerModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+      },
+    });
+  });
+
   it("forwards provider refreshes directly to the RPC client", async () => {
     const nextProviders: ReadonlyArray<ServerProvider> = [
       {

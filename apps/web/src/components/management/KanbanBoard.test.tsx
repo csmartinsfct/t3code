@@ -3,9 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { STATUS_CONFIG } from "../settings/ticketUtils";
-import { hasBoardOrchestrationProjectMismatch } from "./KanbanBoard";
+import {
+  hasBoardOrchestrationProjectMismatch,
+  launchBoardOrchestration,
+  resolveBoardOrchestrateSelectionFromContextMenu,
+  resolveBoardOrchestrateSelectionFromDetail,
+  resolveBoardOrchestrateSelectionFromSelectionBar,
+} from "./KanbanBoard";
 
-// Audit traceability: 4973c83, b0b9d97, 9c5b9e2, 105f574, c709853.
+// Audit traceability: 4973c83, b0b9d97, 9c5b9e2, 105f574, c709853, b3db7d6, 6d20dbf.
 
 const mockNavigate = vi.fn();
 const mockUseNavigate = vi.fn(() => mockNavigate);
@@ -59,11 +65,19 @@ const selectionBarMockState: {
 } = {
   lastProps: null,
 };
+const columnMockState: {
+  lastProps: {
+    onCardContextMenu: (event: React.MouseEvent, ticket: TicketSummary) => void | Promise<void>;
+  } | null;
+} = {
+  lastProps: null,
+};
 const orchestrateDialogMockState: {
   lastProps: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     selectedTickets: ReadonlyMap<string, TicketSummary>;
+    allTickets: readonly TicketSummary[];
     projectId: string;
     onConfirm: (...args: unknown[]) => Promise<void> | void;
   } | null;
@@ -179,6 +193,29 @@ vi.mock("./KanbanSelectionBar", () => ({
   },
 }));
 
+vi.mock("./KanbanColumn", () => ({
+  KanbanColumn: (props: {
+    status?: TicketSummary["status"];
+    tickets?: TicketSummary[];
+    onCardContextMenu: (event: React.MouseEvent, ticket: TicketSummary) => void | Promise<void>;
+  }) => {
+    columnMockState.lastProps = props;
+    const statusConfig = props.status ? STATUS_CONFIG[props.status] : null;
+    return (
+      <section>
+        <div>{statusConfig?.label ?? props.status}</div>
+        <div>{statusConfig?.dotClass}</div>
+        {props.tickets?.map((ticket) => (
+          <div key={ticket.id}>
+            <span>{ticket.title}</span>
+            <span>{ticket.identifier}</span>
+          </div>
+        ))}
+      </section>
+    );
+  },
+}));
+
 vi.mock("./KanbanTicketDetail", () => ({
   KanbanTicketDetail: (props: {
     ticketId: TicketSummary["id"];
@@ -213,6 +250,7 @@ vi.mock("./OrchestrateConfirmDialog", () => ({
     open: boolean;
     onOpenChange: (open: boolean) => void;
     selectedTickets: ReadonlyMap<string, TicketSummary>;
+    allTickets: readonly TicketSummary[];
     projectId: string;
     onConfirm: (...args: unknown[]) => Promise<void> | void;
   }) => {
@@ -262,6 +300,7 @@ async function renderBoard({
   uiStateStoreState.boardContextByThreadId = boardContextByThreadId;
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
+  columnMockState.lastProps = null;
   orchestrateDialogMockState.lastProps = null;
   mockToastAdd.mockReset();
   mockCreateRun.mockReset();
@@ -510,5 +549,166 @@ describe("KanbanBoard", () => {
         "project-1" as TicketSummary["projectId"],
       ),
     ).toBe(false);
+  });
+
+  it("opens orchestration from the card context menu using the current multi-selection", () => {
+    const selectedTicket = makeTicket({
+      id: "ticket-2" as TicketSummary["id"],
+      identifier: "T3CO-2",
+      title: "Selected ticket",
+    });
+
+    const selection = resolveBoardOrchestrateSelectionFromContextMenu({
+      clickedItem: "orchestrate",
+      ticket: makeTicket(),
+      selectedTicketIds: new Set(["ticket-1" as TicketSummary["id"], selectedTicket.id]),
+      selectedTickets: new Map([
+        ["ticket-1" as TicketSummary["id"], makeTicket()],
+        [selectedTicket.id, selectedTicket],
+      ]),
+    });
+
+    expect([...(selection?.values() ?? [])].map((ticket) => ticket.identifier)).toEqual([
+      "T3CO-1",
+      "T3CO-2",
+    ]);
+  });
+
+  it("falls back to the clicked ticket when the context-menu card is not in the current selection", () => {
+    const clickedTicket = makeTicket({
+      id: "ticket-9" as TicketSummary["id"],
+      identifier: "T3CO-9",
+      title: "Clicked ticket",
+    });
+
+    const selection = resolveBoardOrchestrateSelectionFromContextMenu({
+      clickedItem: "orchestrate",
+      ticket: clickedTicket,
+      selectedTicketIds: new Set(["ticket-1" as TicketSummary["id"]]),
+      selectedTickets: new Map([["ticket-1" as TicketSummary["id"], makeTicket()]]),
+    });
+
+    expect(selection).toEqual(new Map([[clickedTicket.id, clickedTicket]]));
+  });
+
+  it("opens orchestration from the selection bar with the selected tickets", () => {
+    const selectedTicket = makeTicket({
+      id: "ticket-2" as TicketSummary["id"],
+      identifier: "T3CO-2",
+      title: "Selected ticket",
+    });
+    const selection = resolveBoardOrchestrateSelectionFromSelectionBar(
+      new Map([
+        ["ticket-1" as TicketSummary["id"], makeTicket()],
+        [selectedTicket.id, selectedTicket],
+      ]),
+    );
+
+    expect([...selection.values()].map((ticket) => ticket.identifier)).toEqual([
+      "T3CO-1",
+      "T3CO-2",
+    ]);
+  });
+
+  it("opens orchestration from ticket detail with a single-ticket preview selection", () => {
+    const ticket = {
+      ...makeTicket(),
+      description: null,
+      acceptanceCriteria: [],
+      dependencies: [],
+      subTickets: [],
+      comments: [],
+      artifacts: [],
+      implementerModelOverride: null,
+      reviewerModelOverride: null,
+    };
+
+    const resolution = resolveBoardOrchestrateSelectionFromDetail({
+      ticket,
+      projectId: "project-1" as TicketSummary["projectId"],
+    });
+
+    expect(resolution.kind).toBe("open-dialog");
+    if (resolution.kind !== "open-dialog") {
+      return;
+    }
+    expect([...resolution.selectedTickets.values()][0]).toMatchObject({
+      identifier: "T3CO-1",
+      subTicketCount: 0,
+      dependencyCount: 0,
+    });
+  });
+
+  it("creates, starts, and hands off navigation after orchestration launch", async () => {
+    const navigateToThread = vi.fn();
+    const clearSelection = vi.fn();
+    const api = {
+      orchestration: {
+        createRun: vi.fn(async () => ({
+          runId: "run-1" as never,
+          orchestrationThreadId: "thread-orch-1" as ThreadId,
+          workingThreadIds: [],
+        })),
+        startRun: vi.fn(async () => undefined),
+      },
+    };
+
+    const result = await launchBoardOrchestration({
+      api,
+      projectId: "project-1" as TicketSummary["projectId"],
+      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
+      reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+      orchestrateTickets: new Map([[makeTicket().id, makeTicket()]]),
+      onProjectMismatch: vi.fn(),
+      clearSelection,
+      navigateToThread,
+    });
+
+    expect(result.kind).toBe("started");
+    expect(api.orchestration.createRun).toHaveBeenCalledWith({
+      projectId: "project-1",
+      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
+      reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+    expect(api.orchestration.startRun).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(clearSelection).toHaveBeenCalledOnce();
+    expect(navigateToThread).toHaveBeenCalledWith("thread-orch-1");
+  });
+
+  it("stops orchestration launch early when the board selection no longer matches the active project", async () => {
+    const onProjectMismatch = vi.fn();
+    const api = {
+      orchestration: {
+        createRun: vi.fn(),
+        startRun: vi.fn(),
+      },
+    };
+
+    const result = await launchBoardOrchestration({
+      api,
+      projectId: "project-1" as TicketSummary["projectId"],
+      ticketIdentifiers: ["T3CO-1"],
+      implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
+      reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+      orchestrateTickets: new Map([
+        [
+          "ticket-99" as TicketSummary["id"],
+          makeTicket({
+            id: "ticket-99" as TicketSummary["id"],
+            projectId: "project-2" as TicketSummary["projectId"],
+          }),
+        ],
+      ]),
+      onProjectMismatch,
+      clearSelection: vi.fn(),
+      navigateToThread: vi.fn(),
+    });
+
+    expect(result.kind).toBe("project-mismatch");
+    expect(onProjectMismatch).toHaveBeenCalledOnce();
+    expect(api.orchestration.createRun).not.toHaveBeenCalled();
+    expect(api.orchestration.startRun).not.toHaveBeenCalled();
   });
 });
