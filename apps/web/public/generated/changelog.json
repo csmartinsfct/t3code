@@ -1,11 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-11T13:30:26.584Z",
-  "lastProcessedCommit": "0b066c7d471994b399da59a931b51aba623a4d6f",
+  "generatedAt": "2026-04-11T13:35:35.340Z",
+  "lastProcessedCommit": "147a1a69f3a41e2b3dfe53c0145a7864e142da26",
   "groups": [
     {
       "date": "2026-04-11",
       "entries": [
+        {
+          "id": "72362d5071f7afe7",
+          "title": "Changelog History Is Preserved Across Clean Builds",
+          "summary": "The in-app changelog now retains existing release history more reliably after clean builds, so past updates remain visible instead of being dropped.",
+          "category": "fix",
+          "commitShas": ["147a1a69f3a41e2b3dfe53c0145a7864e142da26"]
+        },
         {
           "id": "d008cdedd5a96b0d",
           "title": "New default idea label and template",
@@ -1116,6 +1123,16 @@
           "0b066c7d471994b399da59a931b51aba623a4d6f"
         ],
         "commitCount": 10,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T13:35:35.239Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "0b066c7d471994b399da59a931b51aba623a4d6f",
+        "toInclusiveCommit": "147a1a69f3a41e2b3dfe53c0145a7864e142da26",
+        "commitShas": ["147a1a69f3a41e2b3dfe53c0145a7864e142da26"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }
