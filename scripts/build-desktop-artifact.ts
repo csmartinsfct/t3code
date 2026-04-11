@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import path, { join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -119,6 +119,24 @@ function resolveGitCommitHash(repoRoot: string): string {
     return "unknown";
   }
   return hash.toLowerCase();
+}
+
+function runChangelogGenerator(repoRoot: string, verbose: boolean): void {
+  const scriptPath = path.join(repoRoot, "scripts/generate-changelog.ts");
+  const result = spawnSync("bun", [scriptPath, ...(verbose ? ["--verbose"] : [])], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: verbose ? "inherit" : "pipe",
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const detail = [result.stderr, result.stdout].join("\n").trim();
+    throw new Error(detail || `generate-changelog exited with code ${result.status ?? "null"}.`);
+  }
 }
 
 function resolvePythonForNodeGyp(): string | undefined {
@@ -633,6 +651,21 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     serverDist: path.join(repoRoot, "apps/server/dist"),
   };
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
+  const sourceChangelogAsset = path.join(repoRoot, "apps/web/public/generated/changelog.json");
+  const bundledClientChangelogAsset = path.join(
+    distDirs.serverDist,
+    "client/generated/changelog.json",
+  );
+
+  yield* Effect.log("[desktop-artifact] Generating changelog asset from committed history...");
+  yield* Effect.try({
+    try: () => runChangelogGenerator(repoRoot, options.verbose),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Failed to generate changelog asset.",
+        cause,
+      }),
+  });
 
   if (!options.skipBuild) {
     yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
@@ -659,6 +692,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       message: `Missing bundled server client at ${bundledClientEntry}. Run 'bun run build:desktop' first.`,
     });
   }
+
+  if (!(yield* fs.exists(sourceChangelogAsset))) {
+    return yield* new BuildScriptError({
+      message: `Generated changelog asset is missing at ${sourceChangelogAsset}.`,
+    });
+  }
+
+  yield* fs.makeDirectory(path.dirname(bundledClientChangelogAsset), { recursive: true });
+  yield* fs.copyFile(sourceChangelogAsset, bundledClientChangelogAsset);
 
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
 

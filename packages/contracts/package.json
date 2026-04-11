@@ -15,6 +15,11 @@
       "import": "./src/settings.ts",
       "require": "./src/settings.ts"
     },
+    "./changelog": {
+      "types": "./src/changelog.ts",
+      "import": "./src/changelog.ts",
+      "require": "./src/changelog.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
