@@ -168,6 +168,107 @@ function createDeferredPromise() {
   return { promise, resolve };
 }
 
+function findDeleteAllArchivedThreadsButton() {
+  return (
+    [...document.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes("Delete all"),
+    ) ?? null
+  );
+}
+
+async function clickDeleteAllArchivedThreads() {
+  const deleteAllButton = await waitForElement(
+    findDeleteAllArchivedThreadsButton,
+    "Unable to find the archived-thread bulk delete button.",
+  );
+  deleteAllButton.click();
+}
+
+function createArchivedThreadsBulkDeleteScenario() {
+  const firstThreadId = "thread-archived-1" as ThreadId;
+  const secondThreadId = "thread-archived-2" as ThreadId;
+  const activeThreadId = "thread-active" as ThreadId;
+  const deleteFirst = createDeferredPromise();
+  const deleteSecond = createDeferredPromise();
+  const confirmSpy = vi
+    .fn<NativeApi["dialogs"]["confirm"]>()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValueOnce(true);
+  const dispatchCommandSpy = vi.fn<NativeApi["orchestration"]["dispatchCommand"]>(
+    async (command) => {
+      if (command.type !== "thread.delete") {
+        return { sequence: 1 };
+      }
+      if (command.threadId === firstThreadId) {
+        await deleteFirst.promise;
+      }
+      if (command.threadId === secondThreadId) {
+        await deleteSecond.promise;
+      }
+      useStore.setState((state) => {
+        const remainingThreads = state.threads.filter((thread) => thread.id !== command.threadId);
+        const { [command.threadId]: _deletedThread, ...remainingThreadsById } = state.threadsById;
+        return {
+          ...state,
+          threads: remainingThreads,
+          threadsById: remainingThreadsById,
+        };
+      });
+      return { sequence: 1 };
+    },
+  );
+  const terminalCloseSpy = vi.fn<NativeApi["terminal"]["close"]>().mockResolvedValue(undefined);
+  const removeWorktreeSpy = vi
+    .fn<NativeApi["git"]["removeWorktree"]>()
+    .mockResolvedValue(undefined);
+
+  routeThreadIdState.current = firstThreadId;
+  seedArchivedThreadsPanel([
+    createThread({
+      id: firstThreadId,
+      title: "Archived alpha",
+      archivedAt: "2026-04-11T14:00:00.000Z",
+      worktreePath: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
+    }),
+    createThread({
+      id: secondThreadId,
+      title: "Archived beta",
+      archivedAt: "2026-04-11T13:00:00.000Z",
+      worktreePath: "/tmp/custom-worktrees/beta-worktree",
+    }),
+    createThread({
+      id: activeThreadId,
+      title: "Active thread",
+    }),
+  ]);
+  window.nativeApi = {
+    dialogs: {
+      confirm: confirmSpy,
+    },
+    orchestration: {
+      dispatchCommand: dispatchCommandSpy,
+    },
+    terminal: {
+      close: terminalCloseSpy,
+    },
+    git: {
+      removeWorktree: removeWorktreeSpy,
+    },
+  } as unknown as NativeApi;
+
+  return {
+    activeThreadId,
+    confirmSpy,
+    deleteFirst,
+    deleteSecond,
+    dispatchCommandSpy,
+    firstThreadId,
+    removeWorktreeSpy,
+    secondThreadId,
+    terminalCloseSpy,
+  };
+}
+
 describe("GeneralSettingsPanel observability", () => {
   beforeEach(() => {
     resetServerStateForTests();
@@ -322,88 +423,12 @@ describe("ArchivedThreadsPanel bulk delete", () => {
     delete window.nativeApi;
   });
 
-  it("covers the one-shot bulk-delete flow, orphaned-worktree prompt, parallel deletion, and single fallback navigation", async () => {
-    const firstThreadId = "thread-archived-1" as ThreadId;
-    const secondThreadId = "thread-archived-2" as ThreadId;
-    const deleteFirst = createDeferredPromise();
-    const deleteSecond = createDeferredPromise();
-    const confirmSpy = vi
-      .fn<NativeApi["dialogs"]["confirm"]>()
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true);
-    const dispatchCommandSpy = vi.fn<NativeApi["orchestration"]["dispatchCommand"]>(
-      async (command) => {
-        if (command.type !== "thread.delete") {
-          return { sequence: 1 };
-        }
-        if (command.threadId === firstThreadId) {
-          await deleteFirst.promise;
-        }
-        if (command.threadId === secondThreadId) {
-          await deleteSecond.promise;
-        }
-        useStore.setState((state) => {
-          const remainingThreads = state.threads.filter((thread) => thread.id !== command.threadId);
-          const { [command.threadId]: _deletedThread, ...remainingThreadsById } = state.threadsById;
-          return {
-            ...state,
-            threads: remainingThreads,
-            threadsById: remainingThreadsById,
-          };
-        });
-        return { sequence: 1 };
-      },
-    );
-    const terminalCloseSpy = vi.fn<NativeApi["terminal"]["close"]>().mockResolvedValue(undefined);
-    const removeWorktreeSpy = vi.fn<NativeApi["git"]["removeWorktree"]>().mockResolvedValue(
-      undefined,
-    );
-
-    routeThreadIdState.current = firstThreadId;
-    seedArchivedThreadsPanel([
-      createThread({
-        id: firstThreadId,
-        title: "Archived alpha",
-        archivedAt: "2026-04-11T14:00:00.000Z",
-        worktreePath: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
-      }),
-      createThread({
-        id: secondThreadId,
-        title: "Archived beta",
-        archivedAt: "2026-04-11T13:00:00.000Z",
-        worktreePath: "/tmp/custom-worktrees/beta-worktree",
-      }),
-      createThread({
-        id: "thread-active" as ThreadId,
-        title: "Active thread",
-      }),
-    ]);
-    window.nativeApi = {
-      dialogs: {
-        confirm: confirmSpy,
-      },
-      orchestration: {
-        dispatchCommand: dispatchCommandSpy,
-      },
-      terminal: {
-        close: terminalCloseSpy,
-      },
-      git: {
-        removeWorktree: removeWorktreeSpy,
-      },
-    } as unknown as NativeApi;
-
+  it("shows the bulk-delete confirmation and orphaned-worktree prompt in sequence", async () => {
+    const { confirmSpy } = createArchivedThreadsBulkDeleteScenario();
     const screen = await renderArchivedThreadsPanel();
 
     try {
-      const deleteAllButton = await waitForElement(
-        () =>
-          [...document.querySelectorAll("button")].find((button) =>
-            button.textContent?.includes("Delete all"),
-          ) ?? null,
-        "Unable to find the archived-thread bulk delete button.",
-      );
-      deleteAllButton.click();
+      await clickDeleteAllArchivedThreads();
 
       await vi.waitFor(() => {
         expect(confirmSpy).toHaveBeenCalledTimes(2);
@@ -425,6 +450,25 @@ describe("ArchivedThreadsPanel bulk delete", () => {
           "Delete them too?",
         ].join("\n"),
       );
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("dispatches archived-thread deletions in parallel and navigates once after the active thread resolves", async () => {
+    const {
+      activeThreadId,
+      deleteFirst,
+      deleteSecond,
+      dispatchCommandSpy,
+      firstThreadId,
+      secondThreadId,
+      terminalCloseSpy,
+    } = createArchivedThreadsBulkDeleteScenario();
+    const screen = await renderArchivedThreadsPanel();
+
+    try {
+      await clickDeleteAllArchivedThreads();
 
       await vi.waitFor(() => {
         const deletedThreadIds = dispatchCommandSpy.mock.calls
@@ -452,10 +496,27 @@ describe("ArchivedThreadsPanel bulk delete", () => {
       });
       expect(mockNavigate).toHaveBeenCalledWith({
         to: "/$threadId",
-        params: { threadId: "thread-active" },
+        params: { threadId: activeThreadId },
         replace: true,
       });
-      expect(removeWorktreeSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("removes orphaned worktrees for each deleted archived thread after confirmation", async () => {
+    const { deleteFirst, deleteSecond, removeWorktreeSpy } =
+      createArchivedThreadsBulkDeleteScenario();
+    const screen = await renderArchivedThreadsPanel();
+
+    try {
+      await clickDeleteAllArchivedThreads();
+      deleteSecond.resolve();
+      deleteFirst.resolve();
+
+      await vi.waitFor(() => {
+        expect(removeWorktreeSpy).toHaveBeenCalledTimes(2);
+      });
       expect(removeWorktreeSpy).toHaveBeenCalledWith({
         cwd: "/repo/alpha",
         path: "/Users/cristianomartins/.t3/worktrees/t3code/alpha-worktree",
@@ -502,14 +563,7 @@ describe("ArchivedThreadsPanel bulk delete", () => {
     const screen = await renderArchivedThreadsPanel();
 
     try {
-      const deleteAllButton = await waitForElement(
-        () =>
-          [...document.querySelectorAll("button")].find((button) =>
-            button.textContent?.includes("Delete all"),
-          ) ?? null,
-        "Unable to find the archived-thread bulk delete button.",
-      );
-      deleteAllButton.click();
+      await clickDeleteAllArchivedThreads();
 
       await vi.waitFor(() => {
         expect(confirmSpy).toHaveBeenCalledTimes(1);
