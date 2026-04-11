@@ -68,6 +68,7 @@ describe("ManagedRunsControl browser coverage", () => {
   const clipboardWriteText = vi.fn<(value: string) => Promise<void>>();
   const openSpy =
     vi.fn<(url?: string | URL, target?: string, features?: string) => Window | null>();
+  let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     clipboardWriteText.mockReset();
@@ -75,6 +76,7 @@ describe("ManagedRunsControl browser coverage", () => {
     openSpy.mockReset();
     openSpy.mockReturnValue(null);
 
+    originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
@@ -86,6 +88,11 @@ describe("ManagedRunsControl browser coverage", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      delete (navigator as { clipboard?: Clipboard }).clipboard;
+    }
     document.body.innerHTML = "";
   });
 
@@ -114,18 +121,14 @@ describe("ManagedRunsControl browser coverage", () => {
       await expect.element(page.getByText("http://localhost:3773")).toBeInTheDocument();
       await expect.element(page.getByText("healthy")).toBeInTheDocument();
 
-      const copyButton = document.querySelector<HTMLButtonElement>('button[title="Copy URL"]');
-      expect(copyButton).toBeTruthy();
-      copyButton!.click();
+      await expect.element(page.getByTitle("Copy URL")).toBeInTheDocument();
+      document.querySelector<HTMLButtonElement>('button[title="Copy URL"]')?.click();
       await vi.waitFor(() => {
         expect(clipboardWriteText).toHaveBeenCalledWith("http://localhost:3773");
       });
 
-      const openButton = document.querySelector<HTMLButtonElement>(
-        'button[title="Open in browser"]',
-      );
-      expect(openButton).toBeTruthy();
-      openButton!.click();
+      await expect.element(page.getByTitle("Open in browser")).toBeInTheDocument();
+      document.querySelector<HTMLButtonElement>('button[title="Open in browser"]')?.click();
       expect(openSpy).toHaveBeenCalledWith(
         "http://localhost:3773",
         "_blank",
