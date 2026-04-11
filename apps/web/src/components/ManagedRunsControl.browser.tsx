@@ -3,6 +3,7 @@ import "../index.css";
 import type {
   ManagedRunRuntimeService,
   ManagedRunSummary,
+  NativeApi,
   ProjectId,
   ProjectScript,
 } from "@t3tools/contracts";
@@ -10,6 +11,7 @@ import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { __resetNativeApiForTests } from "../nativeApi";
 import ManagedRunsControl from "./ManagedRunsControl";
 
 const PROJECT_ID = "project-1" as ProjectId;
@@ -68,13 +70,20 @@ describe("ManagedRunsControl browser coverage", () => {
   const clipboardWriteText = vi.fn<(value: string) => Promise<void>>();
   const openSpy =
     vi.fn<(url?: string | URL, target?: string, features?: string) => Window | null>();
+  const confirmSpy = vi.fn<NativeApi["dialogs"]["confirm"]>();
+  const stopSpy = vi.fn<NativeApi["managedRuns"]["stop"]>();
   let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
+    __resetNativeApiForTests();
     clipboardWriteText.mockReset();
     clipboardWriteText.mockResolvedValue();
     openSpy.mockReset();
     openSpy.mockReturnValue(null);
+    confirmSpy.mockReset();
+    confirmSpy.mockResolvedValue(true);
+    stopSpy.mockReset();
+    stopSpy.mockResolvedValue(undefined);
 
     originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", {
@@ -84,20 +93,30 @@ describe("ManagedRunsControl browser coverage", () => {
       },
     });
     vi.stubGlobal("open", openSpy);
+    window.nativeApi = {
+      dialogs: {
+        confirm: confirmSpy,
+      },
+      managedRuns: {
+        stop: stopSpy,
+      },
+    } as unknown as NativeApi;
   });
 
   afterEach(() => {
+    __resetNativeApiForTests();
     vi.unstubAllGlobals();
     if (originalClipboardDescriptor) {
       Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
     } else {
       delete (navigator as { clipboard?: Clipboard }).clipboard;
     }
+    delete window.nativeApi;
     document.body.innerHTML = "";
   });
 
-  it("covers service hover details, copy, and open-in-browser actions", async () => {
-    // Audit traceability: eb1fe8e.
+  it("covers the run hover card plus confirmed stop-run behavior", async () => {
+    // Audit traceability: e647687.
     const scripts: readonly ProjectScript[] = [
       {
         id: "dev-server",
@@ -134,6 +153,20 @@ describe("ManagedRunsControl browser coverage", () => {
         "_blank",
         "noopener,noreferrer",
       );
+
+      await page.getByText("Dev Server").hover();
+      await page.getByRole("button", { name: "Stop" }).click();
+
+      await vi.waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalledWith(
+          [
+            'Stop run "Dev Server"?',
+            "",
+            "This will stop the active managed run and any tracked services it owns.",
+          ].join("\n"),
+        );
+      });
+      expect(stopSpy).toHaveBeenCalledWith({ runId: "run-1" });
     } finally {
       await screen.unmount();
     }
