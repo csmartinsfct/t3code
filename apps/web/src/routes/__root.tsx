@@ -42,6 +42,7 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
+import { deriveStartupRecoveryClearThreadIds } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { logWebTimeline } from "../timelineLogger";
 import { getWsRpcClient } from "~/wsRpcClient";
@@ -204,6 +205,7 @@ function EventRouter() {
   const syncThreads = useUiStateStore((store) => store.syncThreads);
   const setStartupWasWorkingThreads = useUiStateStore((store) => store.setStartupWasWorkingThreads);
   const clearThreadUi = useUiStateStore((store) => store.clearThreadUi);
+  const removeStartupRecoveryState = useUiStateStore((store) => store.removeStartupRecoveryState);
   const removeTerminalState = useTerminalStateStore((store) => store.removeTerminalState);
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
@@ -389,6 +391,13 @@ function EventRouter() {
       }
 
       applyOrchestrationEvents(uiEvents);
+      const startupRecoveryClearThreadIds = deriveStartupRecoveryClearThreadIds({
+        events: nextEvents,
+        threadsById: useStore.getState().threadsById,
+      });
+      for (const threadId of startupRecoveryClearThreadIds) {
+        removeStartupRecoveryState(threadId);
+      }
       if (needsProjectUiSync) {
         const projects = useStore.getState().projects;
         syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
@@ -587,6 +596,7 @@ function EventRouter() {
     removeTerminalState,
     removeOrphanedTerminalStates,
     clearThreadUi,
+    removeStartupRecoveryState,
     setProjectExpanded,
     syncProjects,
     syncServerReadModel,

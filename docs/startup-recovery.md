@@ -43,5 +43,8 @@ The web app stores that marker in client-only UI state:
 - it renders as `Was working` in orange text
 - it has no spinner
 - it clears automatically when the user opens that thread
+- it also clears automatically as soon as the client observes authoritative live activity again
+  for that thread (or for an orchestration child/run that proves the parent orchestration thread is
+  genuinely working again)
 
 This keeps the sidebar honest while still giving users a quick reminder of what had been active before shutdown.

@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/contracts";
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { useUiStateStore } from "../uiStateStore";
 import { getWsRpcClient } from "../wsRpcClient";
 
 /**
@@ -16,6 +17,7 @@ import { getWsRpcClient } from "../wsRpcClient";
  */
 export function useOrchestrationRunStatusSync(): void {
   const projects = useStore((s) => s.projects);
+  const removeStartupRecoveryState = useUiStateStore((state) => state.removeStartupRecoveryState);
 
   useEffect(() => {
     if (projects.length === 0) return;
@@ -44,6 +46,7 @@ export function useOrchestrationRunStatusSync(): void {
                 [event.run.orchestrationThreadId]: event.run.status,
               },
             }));
+            removeStartupRecoveryState(event.run.orchestrationThreadId);
           }
         },
       ),
@@ -54,5 +57,5 @@ export function useOrchestrationRunStatusSync(): void {
         unsub();
       }
     };
-  }, [projects]);
+  }, [projects, removeStartupRecoveryState]);
 }

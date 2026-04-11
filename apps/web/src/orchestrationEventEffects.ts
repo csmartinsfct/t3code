@@ -92,3 +92,62 @@ export function deriveOrchestrationBatchEffects(
     needsProviderInvalidation,
   };
 }
+
+type ThreadParentLookup = Partial<
+  Record<string, { readonly id: ThreadId; readonly parentThreadId: string | null } | undefined>
+>;
+
+function addThreadAndParentIds(
+  output: Set<ThreadId>,
+  threadsById: ThreadParentLookup,
+  threadId: ThreadId,
+): void {
+  const thread = threadsById[threadId];
+  if (!thread) {
+    return;
+  }
+
+  output.add(thread.id);
+  if (thread.parentThreadId !== null) {
+    output.add(thread.parentThreadId as ThreadId);
+  }
+}
+
+export function deriveStartupRecoveryClearThreadIds(input: {
+  events: readonly OrchestrationEvent[];
+  threadsById: ThreadParentLookup;
+}): ThreadId[] {
+  const clearThreadIds = new Set<ThreadId>();
+
+  for (const event of input.events) {
+    switch (event.type) {
+      case "thread.turn-start-requested": {
+        addThreadAndParentIds(clearThreadIds, input.threadsById, event.payload.threadId);
+        break;
+      }
+
+      case "thread.session-set": {
+        if (
+          event.payload.session.status === "running" &&
+          event.payload.session.activeTurnId !== null
+        ) {
+          addThreadAndParentIds(clearThreadIds, input.threadsById, event.payload.threadId);
+        }
+        break;
+      }
+
+      case "thread.message-sent": {
+        if (event.payload.role === "assistant" && event.payload.streaming) {
+          addThreadAndParentIds(clearThreadIds, input.threadsById, event.payload.threadId);
+        }
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  }
+
+  return [...clearThreadIds];
+}

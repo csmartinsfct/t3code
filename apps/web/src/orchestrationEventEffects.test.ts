@@ -9,7 +9,10 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { deriveOrchestrationBatchEffects } from "./orchestrationEventEffects";
+import {
+  deriveOrchestrationBatchEffects,
+  deriveStartupRecoveryClearThreadIds,
+} from "./orchestrationEventEffects";
 
 function makeEvent<T extends OrchestrationEvent["type"]>(
   type: T,
@@ -130,5 +133,83 @@ describe("deriveOrchestrationBatchEffects", () => {
     expect(effects.clearPromotedDraftThreadIds).toEqual([]);
     expect(effects.clearDeletedThreadIds).toEqual([]);
     expect(effects.removeTerminalStateThreadIds).toEqual([]);
+  });
+});
+
+describe("deriveStartupRecoveryClearThreadIds", () => {
+  it("clears startup recovery markers when a thread starts live work again", () => {
+    const parentThreadId = ThreadId.makeUnsafe("thread-parent");
+    const childThreadId = ThreadId.makeUnsafe("thread-child");
+
+    expect(
+      deriveStartupRecoveryClearThreadIds({
+        events: [
+          makeEvent("thread.turn-start-requested", {
+            threadId: childThreadId,
+            messageId: MessageId.makeUnsafe("message-1"),
+            modelSelection: { provider: "codex", model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: "2026-02-27T00:00:00.000Z",
+          }),
+        ],
+        threadsById: {
+          [parentThreadId]: { id: parentThreadId, parentThreadId: null },
+          [childThreadId]: { id: childThreadId, parentThreadId },
+        },
+      }),
+    ).toEqual([childThreadId, parentThreadId]);
+  });
+
+  it("clears startup recovery markers when a running session is re-established", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+
+    expect(
+      deriveStartupRecoveryClearThreadIds({
+        events: [
+          makeEvent("thread.session-set", {
+            threadId,
+            session: {
+              threadId,
+              providerName: "codex",
+              runtimeMode: "full-access",
+              status: "running",
+              activeTurnId: TurnId.makeUnsafe("turn-1"),
+              lastError: null,
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          }),
+        ],
+        threadsById: {
+          [threadId]: { id: threadId, parentThreadId: null },
+        },
+      }),
+    ).toEqual([threadId]);
+  });
+
+  it("ignores non-live session updates", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+
+    expect(
+      deriveStartupRecoveryClearThreadIds({
+        events: [
+          makeEvent("thread.session-set", {
+            threadId,
+            session: {
+              threadId,
+              providerName: "codex",
+              runtimeMode: "full-access",
+              status: "ready",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          }),
+        ],
+        threadsById: {
+          [threadId]: { id: threadId, parentThreadId: null },
+        },
+      }),
+    ).toEqual([]);
   });
 });
