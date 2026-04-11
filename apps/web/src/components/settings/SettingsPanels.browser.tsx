@@ -407,6 +407,8 @@ describe("GeneralSettingsPanel observability", () => {
 
     const implementerDefault = document.querySelector("[data-implementer-model]");
     const reviewerDefault = document.querySelector("[data-reviewer-model]");
+    // These values come from the useSettings/default settings baseline, so this assertion
+    // intentionally documents the component's current dependency on that shared default.
     expect(implementerDefault?.textContent).toBe("gpt-5.4-mini");
     expect(reviewerDefault?.textContent).toBe("gpt-5.4-mini");
   });
