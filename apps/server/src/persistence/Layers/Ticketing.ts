@@ -18,14 +18,19 @@ import {
   HistoryByTicketInput,
   LabelLookupInput,
   LabelRow,
+  LabelsByLabelIdInput,
   LabelsByProjectInput,
   LabelsByTicketInput,
   PersistedArtifact,
   PersistedComment,
   PersistedLabel,
+  PersistedTemplate,
   PersistedTicket,
   PersistedTicketHistoryEntry,
   SetDependenciesRepoInput,
+  TemplateLookupInput,
+  TemplateRow,
+  TemplatesByProjectInput,
   TicketHistoryRow,
   TicketIdentifierLookupInput,
   TicketingRepository,
@@ -253,12 +258,77 @@ const makeTicketingRepository = Effect.gen(function* () {
     execute: ({ id }) => sql`SELECT ${sql.literal(LABEL_SELECT)} FROM labels WHERE id = ${id}`,
   });
 
-  const listLabelsByProject = SqlSchema.findAll({
-    Request: LabelsByProjectInput,
-    Result: LabelRow,
-    execute: ({ projectId }) =>
-      sql`SELECT ${sql.literal(LABEL_SELECT)} FROM labels WHERE project_id = ${projectId} ORDER BY name ASC`,
+  const listLabelsByProject = (input: typeof LabelsByProjectInput.Type) =>
+    Effect.gen(function* () {
+      const rows = input.projectId
+        ? yield* sql`SELECT ${sql.literal(LABEL_SELECT)} FROM labels WHERE project_id = ${input.projectId} OR project_id IS NULL ORDER BY name ASC`
+        : yield* sql`SELECT ${sql.literal(LABEL_SELECT)} FROM labels WHERE project_id IS NULL ORDER BY name ASC`;
+      return rows as unknown as ReadonlyArray<typeof LabelRow.Type>;
+    });
+
+  const listGlobalLabels_ = () =>
+    Effect.gen(function* () {
+      const rows =
+        yield* sql`SELECT ${sql.literal(LABEL_SELECT)} FROM labels WHERE project_id IS NULL ORDER BY name ASC`;
+      return rows as unknown as ReadonlyArray<typeof LabelRow.Type>;
+    });
+
+  const TicketIdRow = Schema.Struct({ ticketId: Schema.String });
+
+  const listTicketIdsByLabelId_ = SqlSchema.findAll({
+    Request: LabelsByLabelIdInput,
+    Result: TicketIdRow,
+    execute: ({ labelId }) =>
+      sql`SELECT ticket_id AS "ticketId" FROM ticket_labels WHERE label_id = ${labelId}`,
   });
+
+  // ---- Templates ----
+
+  const TEMPLATE_SELECT = `
+    id,
+    project_id AS "projectId",
+    name,
+    description,
+    body,
+    created_at AS "createdAt",
+    updated_at AS "updatedAt"
+  `;
+
+  const writeTemplate = SqlSchema.void({
+    Request: PersistedTemplate,
+    execute: (row) =>
+      sql`
+        INSERT INTO ticket_templates (id, project_id, name, description, body, created_at, updated_at)
+        VALUES (${row.id}, ${row.projectId}, ${row.name}, ${row.description}, ${row.body}, ${row.createdAt}, ${row.updatedAt})
+        ON CONFLICT (id) DO UPDATE SET
+          name = excluded.name,
+          description = excluded.description,
+          body = excluded.body,
+          updated_at = excluded.updated_at
+      `,
+  });
+
+  const getTemplate_ = SqlSchema.findOneOption({
+    Request: TemplateLookupInput,
+    Result: TemplateRow,
+    execute: ({ id }) =>
+      sql`SELECT ${sql.literal(TEMPLATE_SELECT)} FROM ticket_templates WHERE id = ${id}`,
+  });
+
+  const listTemplatesByScope = (input: typeof TemplatesByProjectInput.Type) =>
+    Effect.gen(function* () {
+      const rows = input.projectId
+        ? yield* sql`SELECT ${sql.literal(TEMPLATE_SELECT)} FROM ticket_templates WHERE project_id = ${input.projectId} OR project_id IS NULL ORDER BY name ASC`
+        : yield* sql`SELECT ${sql.literal(TEMPLATE_SELECT)} FROM ticket_templates WHERE project_id IS NULL ORDER BY name ASC`;
+      return rows as unknown as ReadonlyArray<typeof TemplateRow.Type>;
+    });
+
+  const listGlobalTemplates_ = () =>
+    Effect.gen(function* () {
+      const rows =
+        yield* sql`SELECT ${sql.literal(TEMPLATE_SELECT)} FROM ticket_templates WHERE project_id IS NULL ORDER BY name ASC`;
+      return rows as unknown as ReadonlyArray<typeof TemplateRow.Type>;
+    });
 
   // ---- Comments ----
 
@@ -532,6 +602,15 @@ const makeTicketingRepository = Effect.gen(function* () {
       listLabelsByProject(input).pipe(
         Effect.mapError(toPersistenceSqlError("TicketingRepository.listLabels:query")),
       ),
+    listGlobalLabels: () =>
+      listGlobalLabels_().pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.listGlobalLabels:query")),
+      ),
+    listTicketIdsByLabelId: (input) =>
+      listTicketIdsByLabelId_(input).pipe(
+        Effect.map((rows) => rows.map((r) => r.ticketId as import("@t3tools/contracts").TicketId)),
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.listTicketIdsByLabelId:query")),
+      ),
     deleteLabel: ({ id }) =>
       sql`DELETE FROM labels WHERE id = ${id}`.pipe(
         Effect.asVoid,
@@ -565,6 +644,33 @@ const makeTicketingRepository = Effect.gen(function* () {
         return rawRows as unknown as ReadonlyArray<typeof LabelRow.Type>;
       }).pipe(
         Effect.mapError(toPersistenceSqlError("TicketingRepository.listLabelsForTicket:query")),
+      ),
+
+    // Templates
+    createTemplate: (input) =>
+      writeTemplate(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.createTemplate:query")),
+      ),
+    updateTemplate: (input) =>
+      writeTemplate(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.updateTemplate:query")),
+      ),
+    getTemplate: (input) =>
+      getTemplate_(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.getTemplate:query")),
+      ),
+    listTemplates: (input) =>
+      listTemplatesByScope(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.listTemplates:query")),
+      ),
+    listGlobalTemplates: () =>
+      listGlobalTemplates_().pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.listGlobalTemplates:query")),
+      ),
+    deleteTemplate: ({ id }) =>
+      sql`DELETE FROM ticket_templates WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.deleteTemplate:query")),
       ),
 
     // Comments

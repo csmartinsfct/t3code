@@ -6,6 +6,7 @@ import {
   ClockIcon,
   ScrollTextIcon,
   Settings2Icon,
+  TagIcon,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -24,7 +25,8 @@ export type SettingsSectionPath =
   | "/settings/archived"
   | "/settings/scheduled-tasks"
   | "/settings/runs"
-  | "/settings/prompts";
+  | "/settings/prompts"
+  | "/settings/tickets";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
@@ -35,6 +37,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "Runs", to: "/settings/runs", icon: ActivityIcon },
   { label: "Scheduled Tasks", to: "/settings/scheduled-tasks", icon: ClockIcon },
   { label: "Prompts", to: "/settings/prompts", icon: ScrollTextIcon },
+  { label: "Tickets", to: "/settings/tickets", icon: TagIcon },
 
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];

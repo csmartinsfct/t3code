@@ -15,6 +15,12 @@ import type {
   LabelListInput,
   LabelUpdateInput,
   SetDependenciesInput,
+  Template,
+  TemplateCreateInput,
+  TemplateDeleteInput,
+  TemplateGetInput,
+  TemplateListInput,
+  TemplateUpdateInput,
   Ticket,
   TicketCreateInput,
   TicketUpdateInput,
@@ -95,6 +101,18 @@ export interface TicketingServiceShape {
   readonly deleteLabel: (input: LabelDeleteInput) => Effect.Effect<void, TicketingError>;
   readonly addTicketLabel: (input: TicketLabelInput) => Effect.Effect<void, TicketingError>;
   readonly removeTicketLabel: (input: TicketLabelInput) => Effect.Effect<void, TicketingError>;
+
+  // Templates
+  readonly listTemplates: (
+    input: TemplateListInput,
+  ) => Effect.Effect<ReadonlyArray<Template>, TicketingError>;
+  readonly getTemplate: (input: TemplateGetInput) => Effect.Effect<Template, TicketingError>;
+  readonly createTemplate: (input: TemplateCreateInput) => Effect.Effect<Template, TicketingError>;
+  readonly updateTemplate: (input: TemplateUpdateInput) => Effect.Effect<Template, TicketingError>;
+  readonly deleteTemplate: (input: TemplateDeleteInput) => Effect.Effect<void, TicketingError>;
+
+  // Shipped defaults
+  readonly ensureShippedDefaults: () => Effect.Effect<void, TicketingError>;
 
   // Comments
   readonly listComments: (

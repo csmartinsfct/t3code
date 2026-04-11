@@ -114,6 +114,12 @@ import {
   Artifact,
   Comment,
   Label,
+  Template,
+  TemplateCreateInput,
+  TemplateDeleteInput,
+  TemplateGetInput,
+  TemplateListInput,
+  TemplateUpdateInput,
 } from "./ticketing";
 import {
   ProjectListDirectoryError,
@@ -276,6 +282,11 @@ export const WS_METHODS = {
   ticketingListArtifacts: "ticketing.listArtifacts",
   ticketingCreateArtifact: "ticketing.createArtifact",
   ticketingDeleteArtifact: "ticketing.deleteArtifact",
+  ticketingListTemplates: "ticketing.listTemplates",
+  ticketingGetTemplate: "ticketing.getTemplate",
+  ticketingCreateTemplate: "ticketing.createTemplate",
+  ticketingUpdateTemplate: "ticketing.updateTemplate",
+  ticketingDeleteTemplate: "ticketing.deleteTemplate",
 
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
@@ -923,6 +934,35 @@ export const WsTicketingDeleteArtifactRpc = Rpc.make(WS_METHODS.ticketingDeleteA
   error: TicketingError,
 });
 
+export const WsTicketingListTemplatesRpc = Rpc.make(WS_METHODS.ticketingListTemplates, {
+  payload: TemplateListInput,
+  success: Schema.Array(Template),
+  error: TicketingError,
+});
+
+export const WsTicketingGetTemplateRpc = Rpc.make(WS_METHODS.ticketingGetTemplate, {
+  payload: TemplateGetInput,
+  success: Template,
+  error: TicketingError,
+});
+
+export const WsTicketingCreateTemplateRpc = Rpc.make(WS_METHODS.ticketingCreateTemplate, {
+  payload: TemplateCreateInput,
+  success: Template,
+  error: TicketingError,
+});
+
+export const WsTicketingUpdateTemplateRpc = Rpc.make(WS_METHODS.ticketingUpdateTemplate, {
+  payload: TemplateUpdateInput,
+  success: Template,
+  error: TicketingError,
+});
+
+export const WsTicketingDeleteTemplateRpc = Rpc.make(WS_METHODS.ticketingDeleteTemplate, {
+  payload: TemplateDeleteInput,
+  error: TicketingError,
+});
+
 export const WsSubscribeTicketingEventsRpc = Rpc.make(WS_METHODS.subscribeTicketingEvents, {
   payload: Schema.Struct({}),
   success: TicketingStreamEvent,
@@ -1017,6 +1057,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingListArtifactsRpc,
   WsTicketingCreateArtifactRpc,
   WsTicketingDeleteArtifactRpc,
+  WsTicketingListTemplatesRpc,
+  WsTicketingGetTemplateRpc,
+  WsTicketingCreateTemplateRpc,
+  WsTicketingUpdateTemplateRpc,
+  WsTicketingDeleteTemplateRpc,
   WsSubscribeTicketingEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,

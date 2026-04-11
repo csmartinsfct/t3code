@@ -70,6 +70,12 @@ import type {
   ArtifactCreateInput,
   ArtifactDeleteInput,
   ArtifactListInput,
+  Template,
+  TemplateCreateInput,
+  TemplateDeleteInput,
+  TemplateGetInput,
+  TemplateListInput,
+  TemplateUpdateInput,
   Comment,
   CommentCreateInput,
   CommentDeleteInput,
@@ -343,6 +349,11 @@ export interface NativeApi {
     listArtifacts: (input: ArtifactListInput) => Promise<ReadonlyArray<Artifact>>;
     createArtifact: (input: ArtifactCreateInput) => Promise<Artifact>;
     deleteArtifact: (input: ArtifactDeleteInput) => Promise<void>;
+    listTemplates: (input: TemplateListInput) => Promise<ReadonlyArray<Template>>;
+    getTemplate: (input: TemplateGetInput) => Promise<Template>;
+    createTemplate: (input: TemplateCreateInput) => Promise<Template>;
+    updateTemplate: (input: TemplateUpdateInput) => Promise<Template>;
+    deleteTemplate: (input: TemplateDeleteInput) => Promise<void>;
     onEvent: (callback: (event: TicketingStreamEvent) => void) => () => void;
   };
   orchestration: {

@@ -37,6 +37,9 @@ export type ArtifactId = typeof ArtifactId.Type;
 export const TicketHistoryId = TrimmedNonEmptyString.pipe(Schema.brand("TicketHistoryId"));
 export type TicketHistoryId = typeof TicketHistoryId.Type;
 
+export const TemplateId = TrimmedNonEmptyString.pipe(Schema.brand("TemplateId"));
+export type TemplateId = typeof TemplateId.Type;
+
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
@@ -118,13 +121,24 @@ export type AcceptanceCriterion = typeof AcceptanceCriterion.Type;
 
 export const Label = Schema.Struct({
   id: LabelId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   name: TrimmedNonEmptyString,
   color: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type Label = typeof Label.Type;
+
+export const Template = Schema.Struct({
+  id: TemplateId,
+  projectId: Schema.NullOr(ProjectId),
+  name: TrimmedNonEmptyString,
+  description: Schema.NullOr(Schema.String),
+  body: Schema.String,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type Template = typeof Template.Type;
 
 export const TicketDependency = Schema.Struct({
   ticketId: TicketId,
@@ -277,6 +291,7 @@ export const TicketCreateInput = Schema.Struct({
   reviewerModelOverride: Schema.optional(Schema.NullOr(TicketModelSelection)),
   labelIds: Schema.optional(Schema.Array(LabelId)),
   dependencyIds: Schema.optional(Schema.Array(TicketId)),
+  templateId: Schema.optional(Schema.NullOr(TemplateId)),
 });
 export type TicketCreateInput = typeof TicketCreateInput.Type;
 
@@ -368,7 +383,7 @@ export const UpdateCriterionStatusInput = Schema.Struct({
 export type UpdateCriterionStatusInput = typeof UpdateCriterionStatusInput.Type;
 
 export const LabelCreateInput = Schema.Struct({
-  projectId: ProjectId,
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
   name: TrimmedNonEmptyString,
   color: TrimmedNonEmptyString,
 });
@@ -384,7 +399,9 @@ export type LabelUpdateInput = typeof LabelUpdateInput.Type;
 export const LabelDeleteInput = Schema.Struct({ id: LabelId });
 export type LabelDeleteInput = typeof LabelDeleteInput.Type;
 
-export const LabelListInput = Schema.Struct({ projectId: ProjectId });
+export const LabelListInput = Schema.Struct({
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
+});
 export type LabelListInput = typeof LabelListInput.Type;
 
 export const TicketLabelInput = Schema.Struct({
@@ -392,6 +409,41 @@ export const TicketLabelInput = Schema.Struct({
   labelId: LabelId,
 });
 export type TicketLabelInput = typeof TicketLabelInput.Type;
+
+// ---------------------------------------------------------------------------
+// Template input schemas
+// ---------------------------------------------------------------------------
+
+export const TemplateCreateInput = Schema.Struct({
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  body: Schema.String,
+});
+export type TemplateCreateInput = typeof TemplateCreateInput.Type;
+
+export const TemplateUpdateInput = Schema.Struct({
+  id: TemplateId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  body: Schema.optional(Schema.String),
+});
+export type TemplateUpdateInput = typeof TemplateUpdateInput.Type;
+
+export const TemplateDeleteInput = Schema.Struct({ id: TemplateId });
+export type TemplateDeleteInput = typeof TemplateDeleteInput.Type;
+
+export const TemplateListInput = Schema.Struct({
+  projectId: Schema.optional(Schema.NullOr(ProjectId)),
+});
+export type TemplateListInput = typeof TemplateListInput.Type;
+
+export const TemplateGetInput = Schema.Struct({ id: TemplateId });
+export type TemplateGetInput = typeof TemplateGetInput.Type;
+
+// ---------------------------------------------------------------------------
+// Comment / Artifact input schemas
+// ---------------------------------------------------------------------------
 
 export const CommentCreateInput = Schema.Struct({
   ticketId: TicketId,
@@ -474,6 +526,14 @@ export const TicketingStreamEvent = Schema.Union([
     ticketId: TicketId,
     commentId: CommentId,
   }),
+  Schema.Struct({
+    type: Schema.Literal("template_upserted"),
+    template: Template,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("template_deleted"),
+    templateId: TemplateId,
+  }),
 ]);
 export type TicketingStreamEvent = typeof TicketingStreamEvent.Type;
 
@@ -500,6 +560,17 @@ export class LabelNotFoundError extends Schema.TaggedErrorClass<LabelNotFoundErr
 ) {
   override get message() {
     return `Unknown label: ${this.labelId}`;
+  }
+}
+
+export class TemplateNotFoundError extends Schema.TaggedErrorClass<TemplateNotFoundError>()(
+  "TemplateNotFoundError",
+  {
+    templateId: TemplateId,
+  },
+) {
+  override get message() {
+    return `Unknown template: ${this.templateId}`;
   }
 }
 
@@ -547,6 +618,7 @@ export class TicketingValidationError extends Schema.TaggedErrorClass<TicketingV
 export const TicketingError = Schema.Union([
   TicketNotFoundError,
   LabelNotFoundError,
+  TemplateNotFoundError,
   CommentNotFoundError,
   DependencyCycleError,
   TicketingOperationError,

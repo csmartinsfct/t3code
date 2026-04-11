@@ -5,6 +5,8 @@ import {
   DependencyCycleError,
   LabelId,
   LabelNotFoundError,
+  TemplateId,
+  TemplateNotFoundError,
   TicketHistoryId,
   TicketId,
   TicketNotFoundError,
@@ -13,6 +15,7 @@ import {
   type Artifact,
   type Comment,
   type Label,
+  type Template,
   type Ticket,
   type TicketDependency,
   type TicketLinkedThread,
@@ -42,6 +45,38 @@ const toOperationError =
       message: cause instanceof Error ? cause.message : String(cause),
       cause,
     });
+
+// ---------------------------------------------------------------------------
+// Shipped defaults
+// ---------------------------------------------------------------------------
+
+const SHIPPED_DEFAULT_LABELS: ReadonlyArray<{ name: string; color: string }> = [
+  { name: "research", color: "#3b82f6" },
+  { name: "bug", color: "#ef4444" },
+  { name: "feature", color: "#22c55e" },
+];
+
+const SHIPPED_DEFAULT_TEMPLATES: ReadonlyArray<{
+  name: string;
+  description: string;
+  body: string;
+}> = [
+  {
+    name: "Bug",
+    description: "Template for bug reports",
+    body: "## Steps to Reproduce\n\n## Expected Behavior\n\n## Actual Behavior\n\n## Additional Context",
+  },
+  {
+    name: "Feature",
+    description: "Template for feature requests",
+    body: "## Summary\n\n## Motivation\n\n## Acceptance Criteria\n\n## Additional Context",
+  },
+  {
+    name: "Research",
+    description: "Template for research tasks",
+    body: "## Objective\n\n## Background\n\n## Key Questions\n\n## Findings",
+  },
+];
 
 const deriveEpicStatus = (children: ReadonlyArray<{ status: TicketStatus }>): TicketStatus => {
   if (children.length === 0) return "backlog";
@@ -190,26 +225,9 @@ const makeTicketingService = Effect.gen(function* () {
 
   const listAffectedTicketIdsForLabel = (
     labelId: LabelId,
-    projectId: Ticket["projectId"],
     operation: string,
   ): Effect.Effect<ReadonlyArray<TicketId>, TicketingError> =>
-    Effect.gen(function* () {
-      const tickets = yield* repo
-        .listByProject({ projectId, includeArchived: true })
-        .pipe(Effect.mapError(toOperationError(operation)));
-      const affectedTicketIds: TicketId[] = [];
-
-      for (const ticket of tickets) {
-        const labels = yield* repo
-          .listLabelsForTicket({ ticketId: ticket.id })
-          .pipe(Effect.mapError(toOperationError(operation)));
-        if (labels.some((label) => label.id === labelId)) {
-          affectedTicketIds.push(ticket.id);
-        }
-      }
-
-      return affectedTicketIds;
-    });
+    repo.listTicketIdsByLabelId({ labelId }).pipe(Effect.mapError(toOperationError(operation)));
 
   const toLinkedThread = (
     rows: ReadonlyArray<TicketThreadLinkLookupRow>,
@@ -432,6 +450,22 @@ const makeTicketingService = Effect.gen(function* () {
         .allocateTicketNumber({ projectId: input.projectId })
         .pipe(Effect.mapError(toOperationError("create")));
 
+      // If a templateId is provided and no description was given, pre-fill from template
+      let description = input.description ?? null;
+      if (input.templateId && !input.description) {
+        const templateOpt = yield* repo
+          .getTemplate({ id: input.templateId })
+          .pipe(Effect.mapError(toOperationError("create")));
+        const template = yield* Option.match(templateOpt, {
+          onNone: () =>
+            Effect.fail<TicketingError>(
+              new TemplateNotFoundError({ templateId: input.templateId! }),
+            ),
+          onSome: Effect.succeed,
+        });
+        description = template.body;
+      }
+
       const ticket: PersistedTicket = {
         id,
         projectId: input.projectId,
@@ -439,7 +473,7 @@ const makeTicketingService = Effect.gen(function* () {
         ticketNumber,
         identifier,
         title: input.title,
-        description: input.description ?? null,
+        description,
         acceptanceCriteria: input.acceptanceCriteria ?? null,
         status: input.status ?? "backlog",
         priority: input.priority ?? "none",
@@ -831,7 +865,7 @@ const makeTicketingService = Effect.gen(function* () {
 
   // Labels
   const listLabels: TicketingServiceShape["listLabels"] = (input) =>
-    repo.listLabels({ projectId: input.projectId }).pipe(
+    repo.listLabels({ projectId: input.projectId ?? null }).pipe(
       Effect.map((rows) => rows as ReadonlyArray<Label>),
       Effect.mapError(toOperationError("listLabels")),
     );
@@ -842,7 +876,7 @@ const makeTicketingService = Effect.gen(function* () {
       const id = LabelId.makeUnsafe(crypto.randomUUID());
       const label = {
         id,
-        projectId: input.projectId,
+        projectId: input.projectId ?? null,
         name: input.name,
         color: input.color,
         createdAt: now,
@@ -862,11 +896,7 @@ const makeTicketingService = Effect.gen(function* () {
         onNone: () => Effect.fail<TicketingError>(new LabelNotFoundError({ labelId: input.id })),
         onSome: Effect.succeed,
       });
-      const affectedTicketIds = yield* listAffectedTicketIdsForLabel(
-        label.id,
-        label.projectId,
-        "updateLabel",
-      );
+      const affectedTicketIds = yield* listAffectedTicketIdsForLabel(label.id, "updateLabel");
       const now = nowIso();
       const updated = {
         ...label,
@@ -889,7 +919,7 @@ const makeTicketingService = Effect.gen(function* () {
         .pipe(Effect.mapError(toOperationError("deleteLabel")));
       const affectedTicketIds = yield* Option.match(existing, {
         onNone: () => Effect.succeed([] as ReadonlyArray<TicketId>),
-        onSome: (label) => listAffectedTicketIdsForLabel(label.id, label.projectId, "deleteLabel"),
+        onSome: (label) => listAffectedTicketIdsForLabel(label.id, "deleteLabel"),
       });
       yield* repo
         .deleteLabel({ id: input.id })
@@ -1113,6 +1143,123 @@ const makeTicketingService = Effect.gen(function* () {
       }
     });
 
+  // Templates
+  const listTemplates: TicketingServiceShape["listTemplates"] = (input) =>
+    repo.listTemplates({ projectId: input.projectId ?? null }).pipe(
+      Effect.map((rows) => rows as ReadonlyArray<Template>),
+      Effect.mapError(toOperationError("listTemplates")),
+    );
+
+  const getTemplate: TicketingServiceShape["getTemplate"] = (input) =>
+    Effect.gen(function* () {
+      const existing = yield* repo
+        .getTemplate({ id: input.id })
+        .pipe(Effect.mapError(toOperationError("getTemplate")));
+      return yield* Option.match(existing, {
+        onNone: () =>
+          Effect.fail<TicketingError>(new TemplateNotFoundError({ templateId: input.id })),
+        onSome: (t) => Effect.succeed(t as Template),
+      });
+    });
+
+  const createTemplate: TicketingServiceShape["createTemplate"] = (input) =>
+    Effect.gen(function* () {
+      const now = nowIso();
+      const id = TemplateId.makeUnsafe(crypto.randomUUID());
+      const template = {
+        id,
+        projectId: input.projectId ?? null,
+        name: input.name,
+        description: input.description ?? null,
+        body: input.body,
+        createdAt: now,
+        updatedAt: now,
+      };
+      yield* repo
+        .createTemplate(template)
+        .pipe(Effect.mapError(toOperationError("createTemplate")));
+      yield* publishEvent({ type: "template_upserted", template: template as Template });
+      return template as Template;
+    });
+
+  const updateTemplate: TicketingServiceShape["updateTemplate"] = (input) =>
+    Effect.gen(function* () {
+      const existing = yield* repo
+        .getTemplate({ id: input.id })
+        .pipe(Effect.mapError(toOperationError("updateTemplate")));
+      const template = yield* Option.match(existing, {
+        onNone: () =>
+          Effect.fail<TicketingError>(new TemplateNotFoundError({ templateId: input.id })),
+        onSome: Effect.succeed,
+      });
+      const now = nowIso();
+      const updated = {
+        ...template,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined ? { description: input.description ?? null } : {}),
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        updatedAt: now,
+      };
+      yield* repo.updateTemplate(updated).pipe(Effect.mapError(toOperationError("updateTemplate")));
+      yield* publishEvent({ type: "template_upserted", template: updated as Template });
+      return updated as Template;
+    });
+
+  const deleteTemplate: TicketingServiceShape["deleteTemplate"] = (input) =>
+    Effect.gen(function* () {
+      yield* repo
+        .deleteTemplate({ id: input.id })
+        .pipe(Effect.mapError(toOperationError("deleteTemplate")));
+      yield* publishEvent({ type: "template_deleted", templateId: input.id });
+    });
+
+  const ensureShippedDefaults: TicketingServiceShape["ensureShippedDefaults"] = () =>
+    Effect.gen(function* () {
+      const existingLabels = yield* repo
+        .listGlobalLabels()
+        .pipe(Effect.mapError(toOperationError("ensureShippedDefaults")));
+      const existingLabelNames = new Set(existingLabels.map((l) => l.name.toLowerCase()));
+      for (const def of SHIPPED_DEFAULT_LABELS) {
+        if (!existingLabelNames.has(def.name.toLowerCase())) {
+          const now = nowIso();
+          yield* repo
+            .createLabel({
+              id: LabelId.makeUnsafe(crypto.randomUUID()),
+              projectId: null,
+              name: def.name,
+              color: def.color,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .pipe(Effect.mapError(toOperationError("ensureShippedDefaults")));
+        }
+      }
+
+      const existingTemplates = yield* repo
+        .listGlobalTemplates()
+        .pipe(Effect.mapError(toOperationError("ensureShippedDefaults")));
+      const existingTemplateNames = new Set(existingTemplates.map((t) => t.name.toLowerCase()));
+      for (const def of SHIPPED_DEFAULT_TEMPLATES) {
+        if (!existingTemplateNames.has(def.name.toLowerCase())) {
+          const now = nowIso();
+          yield* repo
+            .createTemplate({
+              id: TemplateId.makeUnsafe(crypto.randomUUID()),
+              projectId: null,
+              name: def.name,
+              description: def.description,
+              body: def.body,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .pipe(Effect.mapError(toOperationError("ensureShippedDefaults")));
+        }
+      }
+    });
+
+  // Seed shipped defaults on service init (silently ignore errors)
+  yield* ensureShippedDefaults().pipe(Effect.ignore({ log: true }));
+
   return {
     resolveId,
     resolveIdentifiers,
@@ -1137,6 +1284,12 @@ const makeTicketingService = Effect.gen(function* () {
     deleteLabel,
     addTicketLabel,
     removeTicketLabel,
+    listTemplates,
+    getTemplate,
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
+    ensureShippedDefaults,
     listComments,
     createComment,
     updateComment,

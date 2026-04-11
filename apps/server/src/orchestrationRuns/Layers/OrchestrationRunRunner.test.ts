@@ -303,6 +303,12 @@ const makeTicketingService = (
   listArtifacts: () => Effect.succeed([]),
   createArtifact: () => Effect.die(new Error("not mocked")),
   deleteArtifact: () => Effect.void,
+  listTemplates: () => Effect.succeed([]),
+  getTemplate: () => Effect.die(new Error("not mocked")),
+  createTemplate: () => Effect.succeed({} as any),
+  updateTemplate: () => Effect.succeed({} as any),
+  deleteTemplate: () => Effect.void,
+  ensureShippedDefaults: () => Effect.void,
   streamEvents: Stream.empty,
   ...overrides,
 });

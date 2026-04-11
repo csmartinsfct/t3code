@@ -5,7 +5,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { z } from "zod";
 
 import type { TicketingError, ProjectId, ThreadId } from "@t3tools/contracts";
-import { LabelId, CommentId, ArtifactId } from "@t3tools/contracts";
+import { LabelId, CommentId, ArtifactId, TemplateId } from "@t3tools/contracts";
 import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
 import { TicketingService, type TicketingServiceShape } from "./Services/Ticketing";
 
@@ -327,10 +327,18 @@ function createTicketingMcpServer(
     "create_ticket",
     {
       title: "Create Ticket",
-      description: withTicketChatLinkReminder("Create a new ticket in the current project."),
+      description: withTicketChatLinkReminder(
+        "Create a new ticket in the current project. Consider using a description template (list_ticket_templates) to structure the description.",
+      ),
       inputSchema: {
         title: z.string().describe("Ticket title."),
         description: z.string().optional().describe("Ticket description."),
+        templateId: z
+          .string()
+          .optional()
+          .describe(
+            "Template ID to pre-fill description from a description template. Use list_ticket_templates to see available templates.",
+          ),
         parentId: z
           .string()
           .optional()
@@ -386,6 +394,7 @@ function createTicketingMcpServer(
     async ({
       title,
       description,
+      templateId,
       parentId,
       status,
       priority,
@@ -406,6 +415,7 @@ function createTicketingMcpServer(
             projectId: context.projectId,
             title,
             ...(description ? { description } : {}),
+            ...(templateId ? { templateId: TemplateId.makeUnsafe(templateId) } : {}),
             ...(resolvedParentId ? { parentId: resolvedParentId } : {}),
             ...(status ? { status: status as never } : {}),
             ...(priority ? { priority: priority as never } : {}),
@@ -967,6 +977,132 @@ function createTicketingMcpServer(
       } catch (error) {
         return mcpError(
           `Failed to remove label: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  // ---- Templates ----
+
+  server.registerTool(
+    "list_ticket_templates",
+    {
+      title: "List Ticket Templates",
+      description: "List all description templates available for the current project.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const templates = await bridge.run(
+          ticketing.listTemplates({ projectId: context.projectId }),
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify(templates, null, 2) }] };
+      } catch (error) {
+        return mcpError(
+          `Failed to list templates: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_ticket_template",
+    {
+      title: "Get Ticket Template",
+      description: "Get a description template by ID.",
+      inputSchema: {
+        id: z.string().describe("The template ID."),
+      },
+    },
+    async ({ id }) => {
+      try {
+        const template = await bridge.run(ticketing.getTemplate({ id: TemplateId.makeUnsafe(id) }));
+        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
+      } catch (error) {
+        return mcpError(
+          `Failed to get template '${id}': ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_ticket_template",
+    {
+      title: "Create Ticket Template",
+      description: "Create a new description template for tickets.",
+      inputSchema: {
+        name: z.string().describe("Template name."),
+        description: z.string().optional().describe("Template description."),
+        body: z.string().describe("Template body content."),
+      },
+    },
+    async ({ name, description, body }) => {
+      try {
+        const template = await bridge.run(
+          ticketing.createTemplate({
+            projectId: context.projectId,
+            name,
+            ...(description ? { description } : {}),
+            body,
+          }),
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
+      } catch (error) {
+        return mcpError(
+          `Failed to create template: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_ticket_template",
+    {
+      title: "Update Ticket Template",
+      description: "Update an existing description template.",
+      inputSchema: {
+        id: z.string().describe("The template ID."),
+        name: z.string().optional().describe("New template name."),
+        description: z.string().optional().describe("New template description."),
+        body: z.string().optional().describe("New template body content."),
+      },
+    },
+    async ({ id, name, description, body }) => {
+      try {
+        const template = await bridge.run(
+          ticketing.updateTemplate({
+            id: TemplateId.makeUnsafe(id),
+            ...(name ? { name } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(body ? { body } : {}),
+          }),
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
+      } catch (error) {
+        return mcpError(
+          `Failed to update template '${id}': ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_ticket_template",
+    {
+      title: "Delete Ticket Template",
+      description: "Delete a description template.",
+      inputSchema: {
+        id: z.string().describe("The template ID."),
+      },
+    },
+    async ({ id }) => {
+      try {
+        await bridge.run(ticketing.deleteTemplate({ id: TemplateId.makeUnsafe(id) }));
+        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
+      } catch (error) {
+        return mcpError(
+          `Failed to delete template '${id}': ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     },

@@ -5,6 +5,7 @@ import {
   CommentId,
   LabelId,
   ProjectId,
+  TemplateId,
   TicketHistoryAction,
   TicketHistoryId,
   TicketId,
@@ -44,7 +45,7 @@ export type PersistedTicket = typeof PersistedTicket.Type;
 
 export const PersistedLabel = Schema.Struct({
   id: LabelId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   name: Schema.String,
   color: Schema.String,
   createdAt: Schema.String,
@@ -205,7 +206,9 @@ export const SetDependenciesRepoInput = Schema.Struct({
 });
 export type SetDependenciesRepoInput = typeof SetDependenciesRepoInput.Type;
 
-export const LabelsByProjectInput = Schema.Struct({ projectId: ProjectId });
+export const LabelsByProjectInput = Schema.Struct({
+  projectId: Schema.NullOr(ProjectId),
+});
 export type LabelsByProjectInput = typeof LabelsByProjectInput.Type;
 
 export const LabelsByTicketInput = Schema.Struct({ ticketId: TicketId });
@@ -213,6 +216,34 @@ export type LabelsByTicketInput = typeof LabelsByTicketInput.Type;
 
 export const CountByParentInput = Schema.Struct({ parentId: TicketId });
 export type CountByParentInput = typeof CountByParentInput.Type;
+
+// ---------------------------------------------------------------------------
+// Template schemas
+// ---------------------------------------------------------------------------
+
+export const PersistedTemplate = Schema.Struct({
+  id: TemplateId,
+  projectId: Schema.NullOr(ProjectId),
+  name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  body: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type PersistedTemplate = typeof PersistedTemplate.Type;
+
+export const TemplateRow = Schema.Struct({ ...PersistedTemplate.fields });
+
+export const TemplateLookupInput = Schema.Struct({ id: TemplateId });
+export type TemplateLookupInput = typeof TemplateLookupInput.Type;
+
+export const TemplatesByProjectInput = Schema.Struct({
+  projectId: Schema.NullOr(ProjectId),
+});
+export type TemplatesByProjectInput = typeof TemplatesByProjectInput.Type;
+
+export const LabelsByLabelIdInput = Schema.Struct({ labelId: LabelId });
+export type LabelsByLabelIdInput = typeof LabelsByLabelIdInput.Type;
 
 // ---------------------------------------------------------------------------
 // Repository shape
@@ -296,6 +327,34 @@ export interface TicketingRepositoryShape {
   readonly listLabelsForTicket: (
     input: LabelsByTicketInput,
   ) => Effect.Effect<ReadonlyArray<PersistedLabel>, ProjectionRepositoryError>;
+  readonly listGlobalLabels: () => Effect.Effect<
+    ReadonlyArray<PersistedLabel>,
+    ProjectionRepositoryError
+  >;
+  readonly listTicketIdsByLabelId: (
+    input: LabelsByLabelIdInput,
+  ) => Effect.Effect<ReadonlyArray<TicketId>, ProjectionRepositoryError>;
+
+  // Templates
+  readonly createTemplate: (
+    input: PersistedTemplate,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly updateTemplate: (
+    input: PersistedTemplate,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly getTemplate: (
+    input: TemplateLookupInput,
+  ) => Effect.Effect<Option.Option<PersistedTemplate>, ProjectionRepositoryError>;
+  readonly listTemplates: (
+    input: TemplatesByProjectInput,
+  ) => Effect.Effect<ReadonlyArray<PersistedTemplate>, ProjectionRepositoryError>;
+  readonly listGlobalTemplates: () => Effect.Effect<
+    ReadonlyArray<PersistedTemplate>,
+    ProjectionRepositoryError
+  >;
+  readonly deleteTemplate: (
+    input: TemplateLookupInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   // Comments
   readonly createComment: (

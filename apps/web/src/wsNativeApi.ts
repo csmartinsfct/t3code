@@ -105,6 +105,11 @@ export function createWsNativeApi(): NativeApi {
       listArtifacts: rpcClient.ticketing.listArtifacts,
       createArtifact: rpcClient.ticketing.createArtifact,
       deleteArtifact: rpcClient.ticketing.deleteArtifact,
+      listTemplates: rpcClient.ticketing.listTemplates,
+      getTemplate: rpcClient.ticketing.getTemplate,
+      createTemplate: rpcClient.ticketing.createTemplate,
+      updateTemplate: rpcClient.ticketing.updateTemplate,
+      deleteTemplate: rpcClient.ticketing.deleteTemplate,
       onEvent: (callback) => rpcClient.ticketing.onEvent(callback),
     },
     shell: {

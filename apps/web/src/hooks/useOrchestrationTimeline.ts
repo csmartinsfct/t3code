@@ -10,6 +10,14 @@ import {
   type OrchestrationTimelineRow,
 } from "./useOrchestrationTimeline.logic";
 
+const orchestrationTimelineCache = new Map<
+  string,
+  {
+    run: OrchestrationRun | null;
+    childThreadIds: string[];
+  }
+>();
+
 // ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
@@ -36,6 +44,11 @@ export function useOrchestrationTimeline(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fetchIdRef = useRef(0);
+  const parentThreadId =
+    thread?.isOrchestrationThread === true ? thread.id : (thread?.parentThreadId ?? null);
+  const cachedTimeline =
+    parentThreadId !== null ? (orchestrationTimelineCache.get(parentThreadId) ?? null) : null;
+  const hasCachedTimeline = cachedTimeline !== null;
 
   // Read child threads from the Zustand store (they're already there via event processing)
   const threadsById = useStore((s) => s.threadsById);
@@ -46,31 +59,33 @@ export function useOrchestrationTimeline(
 
   // Also read the parent thread from the store to get latest activities
   const parentThread = useStore(
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on thread.id only
-    useCallback((s) => (thread ? s.threadsById[thread.id] : undefined), [thread?.id]),
+    useCallback(
+      (s) => (parentThreadId !== null ? s.threadsById[parentThreadId] : undefined),
+      [parentThreadId],
+    ),
   );
 
   useEffect(() => {
     fetchIdRef.current += 1;
-    setRun(null);
-    setChildThreadIds([]);
+    setRun(cachedTimeline?.run ?? null);
+    setChildThreadIds(cachedTimeline?.childThreadIds ?? []);
     setError(null);
-    setLoading(Boolean(thread?.id && projectId));
-  }, [thread?.id, projectId]);
+    setLoading(Boolean(parentThreadId && projectId && !cachedTimeline));
+  }, [cachedTimeline, parentThreadId, projectId]);
 
   // ── Fetch run + child thread IDs ──────────────────────────────────
   const fetchData = useCallback(async () => {
-    if (!thread || !projectId) return;
+    if (!parentThreadId || !projectId) return;
 
     const currentFetchId = ++fetchIdRef.current;
-    setLoading(true);
+    setLoading((existing) => existing || !hasCachedTimeline);
     setError(null);
 
     try {
       const rpc = getWsRpcClient();
 
       logWebTimeline("orchestration.timeline.fetch.start", {
-        threadId: thread.id,
+        threadId: parentThreadId,
         projectId,
       });
 
@@ -80,9 +95,10 @@ export function useOrchestrationTimeline(
       });
       if (fetchIdRef.current !== currentFetchId) return;
 
-      const matchingRun = runs.find((r) => r.orchestrationThreadId === thread.id);
+      const matchingRun = runs.find((r) => r.orchestrationThreadId === parentThreadId);
       if (!matchingRun) {
-        logWebTimeline("orchestration.timeline.fetch.no-run", { threadId: thread.id });
+        logWebTimeline("orchestration.timeline.fetch.no-run", { threadId: parentThreadId });
+        orchestrationTimelineCache.delete(parentThreadId);
         setRun(null);
         setChildThreadIds([]);
         setLoading(false);
@@ -96,13 +112,17 @@ export function useOrchestrationTimeline(
 
       // Get child threads (ordered by ticket plan)
       const children = await rpc.orchestration.getChildThreads({
-        parentThreadId: thread.id,
+        parentThreadId: parentThreadId as Thread["id"],
       });
       if (fetchIdRef.current !== currentFetchId) return;
       setChildThreadIds(children.map((c) => c.id));
+      orchestrationTimelineCache.set(parentThreadId, {
+        run: fullRun,
+        childThreadIds: children.map((c) => c.id),
+      });
 
       logWebTimeline("orchestration.timeline.fetch.success", {
-        threadId: thread.id,
+        threadId: parentThreadId,
         runId: fullRun.id,
         runStatus: fullRun.status,
         childThreadCount: children.length,
@@ -112,7 +132,7 @@ export function useOrchestrationTimeline(
       if (fetchIdRef.current !== currentFetchId) return;
       const message = err instanceof Error ? err.message : "Failed to load orchestration data";
       warnWebTimeline("orchestration.timeline.fetch.error", {
-        threadId: thread.id,
+        threadId: parentThreadId,
         error: message,
       });
       setError(message);
@@ -121,8 +141,7 @@ export function useOrchestrationTimeline(
         setLoading(false);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on thread.id only
-  }, [thread?.id, projectId]);
+  }, [hasCachedTimeline, parentThreadId, projectId]);
 
   useEffect(() => {
     void fetchData();
@@ -138,8 +157,8 @@ export function useOrchestrationTimeline(
       (event: OrchestrationRunStreamEvent) => {
         if (
           event.type === "run.updated" &&
-          thread &&
-          event.run.orchestrationThreadId === thread.id
+          parentThreadId &&
+          event.run.orchestrationThreadId === parentThreadId
         ) {
           logWebTimeline("orchestration.timeline.run-updated", {
             runId: event.run.id,
@@ -148,16 +167,24 @@ export function useOrchestrationTimeline(
             currentPhase: event.run.currentPhase,
           });
           setRun(event.run);
+          orchestrationTimelineCache.set(parentThreadId, {
+            run: event.run,
+            childThreadIds,
+          });
         } else if (
           event.type === "run.created" &&
-          thread &&
-          event.run.orchestrationThreadId === thread.id
+          parentThreadId &&
+          event.run.orchestrationThreadId === parentThreadId
         ) {
           logWebTimeline("orchestration.timeline.run-created", {
             runId: event.run.id,
             status: event.run.status,
           });
           setRun(event.run);
+          orchestrationTimelineCache.set(parentThreadId, {
+            run: event.run,
+            childThreadIds,
+          });
           // Re-fetch child threads when a new run is created
           void fetchData();
         }
@@ -165,8 +192,7 @@ export function useOrchestrationTimeline(
     );
 
     return unsubscribe;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on thread.id only
-  }, [projectId, thread?.id, fetchData]);
+  }, [childThreadIds, fetchData, parentThreadId, projectId]);
 
   // ── Build timeline rows ───────────────────────────────────────────
   const timelineRows = useMemo((): OrchestrationTimelineRow[] => {
@@ -174,13 +200,13 @@ export function useOrchestrationTimeline(
     if (!run) return [{ kind: "empty", id: "empty" }];
 
     const rows = buildOrchestrationTimelineRows({
-      parentActivities: parentThread?.activities ?? thread?.activities ?? [],
+      parentActivities: parentThread?.activities ?? [],
       childThreads,
       run,
     });
 
     return rows.length > 0 ? rows : [{ kind: "empty", id: "empty" }];
-  }, [loading, run, parentThread?.activities, thread?.activities, childThreads]);
+  }, [loading, run, parentThread?.activities, childThreads]);
 
   return {
     loading,

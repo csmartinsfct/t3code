@@ -191,6 +191,11 @@ export interface WsRpcClient {
     readonly listArtifacts: RpcUnaryMethod<typeof WS_METHODS.ticketingListArtifacts>;
     readonly createArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateArtifact>;
     readonly deleteArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteArtifact>;
+    readonly listTemplates: RpcUnaryMethod<typeof WS_METHODS.ticketingListTemplates>;
+    readonly getTemplate: RpcUnaryMethod<typeof WS_METHODS.ticketingGetTemplate>;
+    readonly createTemplate: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateTemplate>;
+    readonly updateTemplate: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdateTemplate>;
+    readonly deleteTemplate: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteTemplate>;
     readonly onEvent: (listener: (event: TicketingStreamEvent) => void) => () => void;
   };
   readonly shell: {
@@ -401,6 +406,16 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.ticketingCreateArtifact](input)),
       deleteArtifact: (input) =>
         transport.request((client) => client[WS_METHODS.ticketingDeleteArtifact](input)),
+      listTemplates: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingListTemplates](input)),
+      getTemplate: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetTemplate](input)),
+      createTemplate: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingCreateTemplate](input)),
+      updateTemplate: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUpdateTemplate](input)),
+      deleteTemplate: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingDeleteTemplate](input)),
       onEvent: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeTicketingEvents]({}), listener),
     },

@@ -1088,6 +1088,26 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.ticketingDeleteArtifact, ticketing.deleteArtifact(input), {
           "rpc.aggregate": "ticketing",
         }),
+      [WS_METHODS.ticketingListTemplates]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingListTemplates, ticketing.listTemplates(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingGetTemplate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetTemplate, ticketing.getTemplate(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingCreateTemplate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingCreateTemplate, ticketing.createTemplate(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUpdateTemplate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUpdateTemplate, ticketing.updateTemplate(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingDeleteTemplate]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingDeleteTemplate, ticketing.deleteTemplate(input), {
+          "rpc.aggregate": "ticketing",
+        }),
       [WS_METHODS.subscribeTicketingEvents]: () =>
         observeRpcStream(WS_METHODS.subscribeTicketingEvents, ticketing.streamEvents, {
           "rpc.aggregate": "ticketing",

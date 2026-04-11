@@ -934,7 +934,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isOrchestrationThread = activeThread?.isOrchestrationThread ?? false;
   const isOrchestrationChild = (activeThread?.parentThreadId ?? null) !== null;
   const orchestrationTimeline = useOrchestrationTimeline(
-    isOrchestrationThread ? activeThread : null,
+    isOrchestrationThread || isOrchestrationChild ? activeThread : null,
     activeThread?.projectId ?? null,
   );
   const orchestrationSwitcher = useOrchestrationSwitcher(
@@ -3005,11 +3005,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
   }, [phase, scheduleStickToBottom, timelineEntries]);
+  const previousOrchestrationTimelineLoadingRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!isOrchestrationThread) return;
-    if (!shouldAutoScrollRef.current) return;
+    if (!isOrchestrationThread) {
+      previousOrchestrationTimelineLoadingRef.current = orchestrationTimeline.loading;
+      return;
+    }
+
+    if (!shouldAutoScrollRef.current) {
+      previousOrchestrationTimelineLoadingRef.current = orchestrationTimeline.loading;
+      return;
+    }
+
+    const finishedLoadingNow =
+      previousOrchestrationTimelineLoadingRef.current && !orchestrationTimeline.loading;
+    previousOrchestrationTimelineLoadingRef.current = orchestrationTimeline.loading;
+
+    if (finishedLoadingNow) {
+      forceStickToBottom();
+      return;
+    }
+
     scheduleStickToBottom();
-  }, [isOrchestrationThread, orchestrationTimeline.timelineRows, scheduleStickToBottom]);
+  }, [
+    forceStickToBottom,
+    isOrchestrationThread,
+    orchestrationTimeline.loading,
+    orchestrationTimeline.timelineRows,
+    scheduleStickToBottom,
+  ]);
 
   useEffect(() => {
     setExpandedWorkGroups({});
