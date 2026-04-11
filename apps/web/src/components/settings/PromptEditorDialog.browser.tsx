@@ -86,6 +86,51 @@ function dispatchTextareaInput(textarea: HTMLTextAreaElement, value: string) {
   textarea.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function createGlobalImplementDocumentState() {
+  return createPromptDocumentState({
+    promptId: "implement",
+    scope: { scope: "global" },
+    scopeState: "customized",
+    globalBlocks: [
+      { when: null, text: "Work on ticket ${ticketId}." },
+      { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
+    ],
+    effectiveBlocks: [
+      { when: null, text: "Work on ticket ${ticketId}." },
+      { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
+    ],
+  });
+}
+
+async function renderEditor({
+  documentState = createGlobalImplementDocumentState(),
+  scopeInput = { scope: "global" as const },
+  onClose = vi.fn(),
+  onSaved = vi.fn(),
+}: {
+  documentState?: ReturnType<typeof createPromptDocumentState>;
+  scopeInput?: { scope: "global" } | { scope: "project"; projectId: typeof PROMPTS_PROJECT_ID };
+  onClose?: () => void;
+  onSaved?: () => void;
+}) {
+  const screen = await render(
+    <PromptEditorDialog
+      open
+      onClose={onClose}
+      onSaved={onSaved}
+      documentState={documentState}
+      scopeInput={scopeInput}
+    />,
+  );
+
+  await waitForElement(
+    () => queryTextareas()[0] ?? null,
+    "Expected the prompt editor to render the initial block list.",
+  );
+
+  return { screen, onSaved };
+}
+
 describe("PromptEditorDialog browser coverage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -100,23 +145,57 @@ describe("PromptEditorDialog browser coverage", () => {
     document.body.innerHTML = "";
   });
 
-  it("covers block add, remove, reorder, debounced validation, preview, and save", async () => {
+  it("covers block add, remove, and reorder", async () => {
     // Audit traceability: 03a6e3f.
-    const definition = createPromptDefinitions({ scope: "global" }).definitions[0]!;
-    const documentState = createPromptDocumentState({
-      promptId: "implement",
-      scope: { scope: "global" },
-      scopeState: "customized",
-      globalBlocks: [
-        { when: null, text: "Work on ticket ${ticketId}." },
-        { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
-      ],
-      effectiveBlocks: [
-        { when: null, text: "Work on ticket ${ticketId}." },
-        { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
-      ],
-    });
+    window.nativeApi = {
+      prompts: {
+        listDefinitions: vi.fn(),
+        getDocument: vi.fn(),
+        validateDocument: vi.fn(async () => ({
+          scope: { scope: "global" as const },
+          promptId: "implement",
+          ok: true,
+          document: createGlobalImplementDocumentState().effectiveDocument,
+          referencedVariables: [],
+          errors: [],
+        })),
+        previewDocument: vi.fn(),
+        updateDocument: vi.fn(),
+      },
+    } as unknown as NativeApi;
 
+    const { screen } = await renderEditor({});
+
+    try {
+      await page.getByRole("button", { name: "Add block" }).click();
+      await vi.waitFor(() => {
+        expect(queryTextareas()).toHaveLength(3);
+      });
+
+      const removeButtons = Array.from(document.querySelectorAll("button")).filter(
+        (button) => button.getAttribute("aria-label") === "Remove block",
+      ) as HTMLButtonElement[];
+      removeButtons.at(-1)?.click();
+      await vi.waitFor(() => {
+        expect(queryTextareas()).toHaveLength(2);
+      });
+
+      const dragHandles = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-dnd-id]"));
+      expect(dragHandles).toHaveLength(2);
+      dndState.onDragEnd?.({
+        active: { id: dragHandles[0]!.dataset.dndId! },
+        over: { id: dragHandles[1]!.dataset.dndId! },
+      });
+
+      await vi.waitFor(() => {
+        expect(queryTextareas()[0]?.value).toBe("Worktree: ${worktree}.");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("covers the debounced validation cycle", async () => {
     const validateSpy = vi
       .fn<NativeApi["prompts"]["validateDocument"]>()
       .mockImplementation(async (input) => {
@@ -145,6 +224,53 @@ describe("PromptEditorDialog browser coverage", () => {
         };
         return result;
       });
+
+    window.nativeApi = {
+      prompts: {
+        listDefinitions: vi.fn(),
+        getDocument: vi.fn(),
+        validateDocument: validateSpy,
+        previewDocument: vi.fn(),
+        updateDocument: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    const { screen } = await renderEditor({});
+
+    try {
+      await vi.advanceTimersByTimeAsync(401);
+      validateSpy.mockClear();
+
+      dispatchTextareaInput(queryTextareas()[0]!, "INVALID ${ticketId}");
+      await vi.advanceTimersByTimeAsync(401);
+      await vi.waitFor(() => {
+        expect(validateSpy).toHaveBeenLastCalledWith({
+          scope: "global",
+          promptId: "implement",
+          document: {
+            version: 1,
+            blocks: [
+              { when: null, text: "INVALID ${ticketId}" },
+              { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
+            ],
+          },
+        });
+      });
+      await expect.element(page.getByText("Unknown variable in block.")).toBeInTheDocument();
+
+      dispatchTextareaInput(queryTextareas()[0]!, "Updated ${ticketId}");
+      await vi.advanceTimersByTimeAsync(401);
+      await vi.waitFor(() => {
+        expect(page.getByText("Unknown variable in block.").query()).toBeNull();
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("covers preview and save", async () => {
+    const definition = createPromptDefinitions({ scope: "global" }).definitions[0]!;
+    const documentState = createGlobalImplementDocumentState();
     const previewSpy = vi.fn<NativeApi["prompts"]["previewDocument"]>().mockResolvedValue({
       scope: { scope: "global" },
       promptId: "implement",
@@ -172,77 +298,24 @@ describe("PromptEditorDialog browser coverage", () => {
       prompts: {
         listDefinitions: vi.fn(),
         getDocument: vi.fn(),
-        validateDocument: validateSpy,
+        validateDocument: vi.fn(async (input) => ({
+          scope: { scope: "global" as const },
+          promptId: "implement",
+          ok: true,
+          document: asPromptDocument(input.document),
+          referencedVariables: ["ticketId"],
+          errors: [],
+        })),
         previewDocument: previewSpy,
         updateDocument: updateSpy,
       },
     } as unknown as NativeApi;
 
-    const screen = await render(
-      <PromptEditorDialog
-        open
-        onClose={vi.fn()}
-        onSaved={onSaved}
-        documentState={documentState}
-        scopeInput={{ scope: "global" }}
-      />,
-    );
+    const { screen } = await renderEditor({ documentState, onSaved });
 
     try {
-      await waitForElement(
-        () => queryTextareas()[0] ?? null,
-        "Expected the prompt editor to render the initial block list.",
-      );
-
-      await vi.advanceTimersByTimeAsync(401);
-      validateSpy.mockClear();
-
-      await page.getByRole("button", { name: "Add block" }).click();
-      await vi.waitFor(() => {
-        expect(queryTextareas()).toHaveLength(3);
-      });
-
-      const removeButtons = Array.from(document.querySelectorAll("button")).filter(
-        (button) => button.getAttribute("aria-label") === "Remove block",
-      ) as HTMLButtonElement[];
-      removeButtons.at(-1)?.click();
-      await vi.waitFor(() => {
-        expect(queryTextareas()).toHaveLength(2);
-      });
-
-      const dragHandles = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-dnd-id]"));
-      expect(dragHandles).toHaveLength(2);
-      dndState.onDragEnd?.({
-        active: { id: dragHandles[0]!.dataset.dndId! },
-        over: { id: dragHandles[1]!.dataset.dndId! },
-      });
-
-      await vi.waitFor(() => {
-        expect(queryTextareas()[0]?.value).toBe("Worktree: ${worktree}.");
-      });
-
-      dispatchTextareaInput(queryTextareas()[0]!, "INVALID ${ticketId}");
-      await vi.advanceTimersByTimeAsync(401);
-      await vi.waitFor(() => {
-        expect(validateSpy).toHaveBeenLastCalledWith({
-          scope: "global",
-          promptId: "implement",
-          document: {
-            version: 1,
-            blocks: [
-              { when: { type: "exists", variable: "worktree" }, text: "INVALID ${ticketId}" },
-              { when: null, text: "Work on ticket ${ticketId}." },
-            ],
-          },
-        });
-      });
-      await expect.element(page.getByText("Unknown variable in block.")).toBeInTheDocument();
-
       dispatchTextareaInput(queryTextareas()[0]!, "Updated ${ticketId}");
       await vi.advanceTimersByTimeAsync(401);
-      await vi.waitFor(() => {
-        expect(page.getByText("Unknown variable in block.").query()).toBeNull();
-      });
 
       const previewButton = await waitForElement(
         () =>
@@ -259,8 +332,8 @@ describe("PromptEditorDialog browser coverage", () => {
           document: {
             version: 1,
             blocks: [
-              { when: { type: "exists", variable: "worktree" }, text: "Updated ${ticketId}" },
-              { when: null, text: "Work on ticket ${ticketId}." },
+              { when: null, text: "Updated ${ticketId}" },
+              { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
             ],
           },
         });
@@ -284,8 +357,8 @@ describe("PromptEditorDialog browser coverage", () => {
           document: {
             version: 1,
             blocks: [
-              { when: { type: "exists", variable: "worktree" }, text: "Updated ${ticketId}" },
-              { when: null, text: "Work on ticket ${ticketId}." },
+              { when: null, text: "Updated ${ticketId}" },
+              { when: { type: "exists", variable: "worktree" }, text: "Worktree: ${worktree}." },
             ],
           },
         });

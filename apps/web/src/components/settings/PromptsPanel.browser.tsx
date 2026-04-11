@@ -156,13 +156,8 @@ describe("PromptsPanel browser coverage", () => {
       await expect.element(page.getByText("Inherited")).toBeInTheDocument();
       await expect.element(page.getByText("Overridden")).toBeInTheDocument();
 
-      const editButtons = Array.from(document.querySelectorAll("button")).filter((button) =>
-        button.textContent?.includes("Edit"),
-      ) as HTMLButtonElement[];
-      expect(editButtons.length).toBeGreaterThan(0);
-      editButtons[0]!.click();
+      await page.getByRole("button", { name: "Edit", exact: true }).first().click();
 
-      await expect.element(page.getByText("Edit Prompt")).not.toBeInTheDocument();
       await expect.element(page.getByRole("heading", { name: "Implement" })).toBeInTheDocument();
       await expect.element(page.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
