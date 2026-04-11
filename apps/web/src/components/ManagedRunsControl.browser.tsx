@@ -1,0 +1,138 @@
+import "../index.css";
+
+import type {
+  ManagedRunRuntimeService,
+  ManagedRunSummary,
+  ProjectId,
+  ProjectScript,
+} from "@t3tools/contracts";
+import { page } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render } from "vitest-browser-react";
+
+import ManagedRunsControl from "./ManagedRunsControl";
+
+const PROJECT_ID = "project-1" as ProjectId;
+const NOW_ISO = "2026-04-11T12:00:00.000Z";
+
+function createRuntimeService(input?: Partial<ManagedRunRuntimeService>): ManagedRunRuntimeService {
+  return {
+    declaredServiceName: "frontend",
+    resolvedName: "Frontend",
+    role: "frontend",
+    canonicalHealthCheck: {
+      type: "url",
+      url: "http://localhost:3773",
+    },
+    validationStatus: "healthy",
+    inferenceConfidence: "high",
+    inferenceSource: "llm",
+    groundedBy: ["declared"],
+    evidenceLines: [],
+    lastCheckedAt: NOW_ISO,
+    ...input,
+  };
+}
+
+function createRun(input?: Partial<ManagedRunSummary>): ManagedRunSummary {
+  return {
+    runId: "run-1" as ManagedRunSummary["runId"],
+    projectId: PROJECT_ID,
+    scriptId: "dev-server",
+    createdByThreadId: null,
+    lastTouchedByThreadId: null,
+    cwd: "/repo/project",
+    launchMode: "attached",
+    status: "running",
+    detectedUrl: null,
+    detectedPort: null,
+    terminalThreadId: null,
+    terminalId: null,
+    terminalPid: null,
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO,
+    startedAt: NOW_ISO,
+    completedAt: null,
+    lastExitCode: null,
+    lastExitSignal: null,
+    declaredServices: [],
+    runtimeServices: [createRuntimeService()],
+    inferenceStatus: "ready",
+    inferenceUpdatedAt: NOW_ISO,
+    inferenceError: null,
+    ...input,
+  };
+}
+
+describe("ManagedRunsControl browser coverage", () => {
+  const clipboardWriteText = vi.fn<(value: string) => Promise<void>>();
+  const openSpy =
+    vi.fn<(url?: string | URL, target?: string, features?: string) => Window | null>();
+
+  beforeEach(() => {
+    clipboardWriteText.mockReset();
+    clipboardWriteText.mockResolvedValue();
+    openSpy.mockReset();
+    openSpy.mockReturnValue(null);
+
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteText,
+      },
+    });
+    vi.stubGlobal("open", openSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  it("covers service hover details, copy, and open-in-browser actions", async () => {
+    // Audit traceability: eb1fe8e.
+    const scripts: readonly ProjectScript[] = [
+      {
+        id: "dev-server",
+        name: "Dev Server",
+        command: "bun run dev",
+        icon: "play",
+        runOnWorktreeCreate: false,
+        services: [],
+      },
+    ];
+
+    const screen = await render(<ManagedRunsControl runs={[createRun()]} scripts={scripts} />);
+
+    try {
+      await page.getByRole("button", { name: /Runs/ }).click();
+      await expect.element(page.getByText("Dev Server")).toBeInTheDocument();
+      await expect.element(page.getByText("Frontend")).toBeInTheDocument();
+
+      await page.getByText("Frontend").hover();
+
+      await expect.element(page.getByText("http://localhost:3773")).toBeInTheDocument();
+      await expect.element(page.getByText("healthy")).toBeInTheDocument();
+
+      const copyButton = document.querySelector<HTMLButtonElement>('button[title="Copy URL"]');
+      expect(copyButton).toBeTruthy();
+      copyButton!.click();
+      await vi.waitFor(() => {
+        expect(clipboardWriteText).toHaveBeenCalledWith("http://localhost:3773");
+      });
+
+      const openButton = document.querySelector<HTMLButtonElement>(
+        'button[title="Open in browser"]',
+      );
+      expect(openButton).toBeTruthy();
+      openButton!.click();
+      expect(openSpy).toHaveBeenCalledWith(
+        "http://localhost:3773",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } finally {
+      await screen.unmount();
+    }
+  });
+});

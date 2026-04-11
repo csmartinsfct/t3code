@@ -1343,26 +1343,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   // Populate composer from thread initialDraft (e.g. scheduled task created threads)
-  const initialDraftAppliedRef = useRef<string | null>(null);
+  const initialDraftHydrationRef = useRef<
+    Map<string, { promptApplied: boolean; attachedSkillIds: Set<string> }>
+  >(new Map());
   useEffect(() => {
     const draft = activeThread?.initialDraft;
     const tid = activeThread?.id;
     if (!draft || !tid) return;
-    // Only apply once per thread
-    if (initialDraftAppliedRef.current === tid) return;
-    // Only apply if composer is empty (no user edits yet)
-    if (prompt || composerSkills.length > 0) return;
+    const hydrationState =
+      initialDraftHydrationRef.current.get(tid) ??
+      (() => {
+        const initialState = { promptApplied: false, attachedSkillIds: new Set<string>() };
+        initialDraftHydrationRef.current.set(tid, initialState);
+        return initialState;
+      })();
+    const hasAppliedInitialDraft =
+      hydrationState.promptApplied || hydrationState.attachedSkillIds.size > 0;
 
-    initialDraftAppliedRef.current = tid;
+    // Only seed untouched composers. If initial hydration has already started for this thread,
+    // continue attaching any remaining referenced skills as they resolve.
+    if (!hasAppliedInitialDraft && (prompt || composerSkills.length > 0)) return;
 
     // Pre-fill prompt
-    if (draft.prompt) {
+    if (!hydrationState.promptApplied && draft.prompt) {
       setComposerDraftPrompt(tid, draft.prompt);
+      hydrationState.promptApplied = true;
     }
 
     // Pre-attach skills by matching IDs against resolved skills
     if (draft.skillIds && draft.skillIds.length > 0 && availableSkills.length > 0) {
       for (const skillId of draft.skillIds) {
+        if (
+          hydrationState.attachedSkillIds.has(skillId) ||
+          composerSkills.some((skill) => skill.id === skillId)
+        ) {
+          hydrationState.attachedSkillIds.add(skillId);
+          continue;
+        }
         const skill = availableSkills.find((s) => s.id === skillId);
         if (skill) {
           addComposerDraftSkill(tid, {
@@ -1374,6 +1391,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             content: skill.content,
             group: skill.group,
           });
+          hydrationState.attachedSkillIds.add(skillId);
         }
       }
     }
@@ -1381,7 +1399,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeThread?.id,
     activeThread?.initialDraft,
     prompt,
-    composerSkills.length,
+    composerSkills,
     availableSkills,
     setComposerDraftPrompt,
     addComposerDraftSkill,

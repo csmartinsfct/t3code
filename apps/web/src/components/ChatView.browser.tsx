@@ -1609,7 +1609,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("accepts a propose-scheduled-task card and dispatches the confirmation turn", async () => {
-    // Audit traceability: 2b596d9.
+    // Audit traceability: 2b596d9, eb1fe8e.
     const baseSnapshot = createSnapshotForTargetUser({
       targetMessageId: "msg-user-scheduled-task-proposal" as MessageId,
       targetText: "Please help me automate this.",
@@ -1637,6 +1637,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                         description: "Check the backlog each morning.",
                         cronExpression: "0 9 * * 1-5",
                         projectId: PROJECT_ID,
+                        skillIds: ["skill-backlog", "skill-summary"],
                         prompt: "Summarize open work.",
                         autoSend: true,
                       },
@@ -1687,6 +1688,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await expect.element(page.getByText("Proposed Scheduled Task")).toBeInTheDocument();
+      await expect
+        .element(page.getByText("Skills: skill-backlog, skill-summary"))
+        .toBeInTheDocument();
       await page.getByRole("button", { name: "Accept" }).click();
 
       await vi.waitFor(() => {
@@ -1698,6 +1702,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           jobType: "new_thread",
           newThreadConfig: {
             projectId: PROJECT_ID,
+            skillIds: ["skill-backlog", "skill-summary"],
             prompt: "Summarize open work.",
             autoSend: true,
           },
@@ -1730,7 +1735,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("rejects a propose-scheduled-task card without creating a scheduled task", async () => {
-    // Audit traceability: 2b596d9.
+    // Audit traceability: 2b596d9, eb1fe8e.
     const baseSnapshot = createSnapshotForTargetUser({
       targetMessageId: "msg-user-scheduled-task-reject" as MessageId,
       targetText: "No thanks.",
@@ -3226,6 +3231,83 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(turnStartRequest.message.text).toContain('<skill name="Deploy"');
           expect(turnStartRequest.message.text).toContain("Run `bun lint` before every deploy.");
           expect(turnStartRequest.message.text).toContain("Use the attached skill.");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hydrates initial drafts with prompt text and multiple resolved skills", async () => {
+    // Audit traceability: eb1fe8e.
+    const resolveSkills = vi.fn(async () => ({
+      skills: [
+        {
+          id: "skill-plan",
+          name: "Plan",
+          source: "project",
+          absolutePath: "/repo/project/.claude/skills/plan/SKILL.md",
+          relativePath: ".claude/skills/plan/SKILL.md",
+          content: "# Plan skill",
+          group: null,
+        },
+        {
+          id: "skill-ship",
+          name: "Ship",
+          source: "project",
+          absolutePath: "/repo/project/.claude/skills/ship/SKILL.md",
+          relativePath: ".claude/skills/ship/SKILL.md",
+          content: "# Ship skill",
+          group: null,
+        },
+      ] satisfies readonly SkillEntry[],
+    }));
+    installTestNativeApi({ resolveSkills });
+
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-initial-draft-multi-skill" as MessageId,
+      targetText: "hydrate my draft",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              initialDraft: {
+                prompt: "Start with a release checklist.",
+                skillIds: ["skill-plan", "skill-ship"],
+              },
+            }
+          : thread,
+      ),
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(resolveSkills).toHaveBeenCalled();
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toMatchObject({
+            prompt: "Start with a release checklist.",
+            skills: [
+              {
+                id: "skill-plan",
+                name: "Plan",
+                content: "# Plan skill",
+              },
+              {
+                id: "skill-ship",
+                name: "Ship",
+                content: "# Ship skill",
+              },
+            ],
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
