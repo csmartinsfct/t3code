@@ -1,9 +1,8 @@
 import type { ChangelogAssetFile, ChangelogEntryCategory } from "@t3tools/contracts";
-import { ChangelogAssetFile as ChangelogAssetFileSchema } from "@t3tools/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { CalendarDaysIcon, FileClockIcon, LoaderIcon } from "lucide-react";
-import { Schema } from "effect";
-import { useEffect, useState } from "react";
 
+import { changelogQueryOptions } from "../../lib/changelogReactQuery";
 import { Badge } from "../ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
@@ -31,43 +30,9 @@ function formatDateLabel(date: string): string {
 }
 
 export function ChangelogPanel() {
-  const [data, setData] = useState<ChangelogAssetFile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch("/generated/changelog.json", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const decoded = Schema.decodeUnknownSync(ChangelogAssetFileSchema)(await response.json());
-        if (!cancelled) {
-          setData(decoded);
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          setData(null);
-          setError(cause instanceof Error ? cause.message : "Unknown error");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const changelogQuery = useQuery(changelogQueryOptions());
+  const data: ChangelogAssetFile | null = changelogQuery.data ?? null;
+  const error = changelogQuery.error?.message ?? null;
 
   return (
     <SettingsPageContainer>
@@ -85,7 +50,7 @@ export function ChangelogPanel() {
         ) : null}
       </div>
 
-      {loading ? (
+      {changelogQuery.isPending ? (
         <div className="flex items-center justify-center py-16">
           <LoaderIcon className="size-4 animate-spin text-muted-foreground" />
         </div>

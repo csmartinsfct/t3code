@@ -4,7 +4,7 @@ The desktop build pipeline owns a machine-generated changelog that is baked into
 
 ## Files
 
-- Machine cache: `.generated/changelog/cache.json`
+- Machine cache: `.generated/changelog/cache.json` (local machine state, gitignored)
 - Runtime asset consumed by the web UI: `apps/web/public/generated/changelog.json`
 - Settings route: `/settings/changelog`
 - Build hook: `scripts/generate-changelog.ts`, invoked from `scripts/build-desktop-artifact.ts`

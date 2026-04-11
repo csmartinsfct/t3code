@@ -354,12 +354,23 @@ function generateBatch(
   }
 }
 
-function mergeGroups(
-  groups: ReadonlyArray<ReadonlyArray<ChangelogGroup>>,
-): ReadonlyArray<ChangelogGroup> {
+interface GeneratedBatch {
+  readonly provenance: typeof ChangelogBatchProvenance.Type;
+  readonly groups: ReadonlyArray<ChangelogGroup>;
+}
+
+function mergeGroups(batches: ReadonlyArray<GeneratedBatch>): ReadonlyArray<ChangelogGroup> {
   const merged = new Map<string, ChangelogEntry[]>();
-  for (const batchGroups of groups) {
-    for (const group of batchGroups) {
+  const commitOrder = new Map<GitCommitSha, number>();
+
+  batches.forEach((batch, batchIndex) => {
+    batch.provenance.commitShas.forEach((sha, commitIndex) => {
+      commitOrder.set(sha, batchIndex * MAX_COMMITS_PER_BATCH + commitIndex);
+    });
+  });
+
+  for (const batch of batches) {
+    for (const group of batch.groups) {
       const entries = merged.get(group.date) ?? [];
       entries.push(...group.entries);
       merged.set(group.date, entries);
@@ -371,9 +382,9 @@ function mergeGroups(
     .map(([date, entries]) => ({
       date,
       entries: entries.toSorted((left, right) => {
-        const leftCommit = left.commitShas[0] ?? "";
-        const rightCommit = right.commitShas[0] ?? "";
-        return rightCommit.localeCompare(leftCommit);
+        const leftOrder = Math.max(...left.commitShas.map((sha) => commitOrder.get(sha) ?? -1));
+        const rightOrder = Math.max(...right.commitShas.map((sha) => commitOrder.get(sha) ?? -1));
+        return rightOrder - leftOrder;
       }),
     }));
 }
@@ -431,7 +442,7 @@ function main() {
   const commits = rangeCommitShas.map(readCommitRecord);
   const batches = chunkCommits(commits);
   const previousBatches = shouldRebuild ? [] : (existingCache?.batches ?? []);
-  const generatedBatches = batches.map((batch, index) =>
+  const generatedBatches: ReadonlyArray<GeneratedBatch> = batches.map((batch, index) =>
     generateBatch(
       batch,
       index === 0
@@ -450,10 +461,7 @@ function main() {
     rebuildCommitLimit: REBUILD_COMMIT_LIMIT,
     promptVersion: PROMPT_VERSION,
     uiOutputPath: CHANGELOG_ASSET_PATH,
-    groups: mergeGroups([
-      ...previousBatches.map((batch) => batch.groups),
-      ...generatedBatches.map((batch: (typeof generatedBatches)[number]) => batch.groups),
-    ]),
+    groups: mergeGroups([...previousBatches, ...generatedBatches]),
     batches: [
       ...previousBatches,
       ...generatedBatches.map((batch) => ({
