@@ -39,15 +39,24 @@ vi.mock("../ui/badge", () => ({
   Badge: ({
     children,
     render,
+    variant,
+    size,
   }: {
     children: ReactNode;
     render?: React.ReactElement | undefined;
+    variant?: string;
+    size?: string;
   }) => {
+    const content = (
+      <span data-variant={variant} data-size={size}>
+        {children}
+      </span>
+    );
     if (!render) {
-      return <span>{children}</span>;
+      return content;
     }
 
-    return React.cloneElement(render, undefined, children);
+    return React.cloneElement(render, undefined, content);
   },
 }));
 
@@ -133,6 +142,57 @@ function makeThread(): Thread {
 }
 
 describe("OrchestrationTimeline", () => {
+  it("renders resumed and user-takeover markers with the expected badge variants", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "separator",
+          id: "sep:resumed",
+          activityKind: "orchestration.run.resumed",
+          summary: "Run resumed after restart",
+          tone: "info",
+          createdAt: "2026-04-09T10:00:00.000Z",
+        },
+        {
+          kind: "separator",
+          id: "sep:takeover",
+          activityKind: "orchestration.run.user-takeover",
+          summary: "Paused because the user took over ticket T3CO-188",
+          tone: "warning",
+          createdAt: "2026-04-09T10:01:00.000Z",
+          ticketIdentifier: "T3CO-188",
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        nowIso="2026-04-09T10:02:00.000Z"
+        onNavigateToThread={() => {}}
+        onOpenTicketLink={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Run resumed after restart");
+    expect(markup).toContain("Paused because the user took over ticket ");
+    expect(markup).toContain('data-variant="info"');
+    expect(markup).toContain('data-variant="warning"');
+    expect(markup).toContain('href="t3://ticket/T3CO-188"');
+  });
+
   it("renders chronological implementation and review blocks with the old section chrome", async () => {
     const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
     const rows: OrchestrationTimelineRow[] = [
@@ -337,7 +397,7 @@ describe("OrchestrationTimeline", () => {
     );
 
     expect(markup).toContain('href="t3://ticket/T3CO-169"');
-    expect(markup).toContain(">T3CO-169</a>");
+    expect(markup).toContain('data-variant="outline" data-size="sm">T3CO-169</span></a>');
     expect(markup).toContain("Starting work on ticket");
     expect(markup).not.toContain("Starting work on ticket T3CO-169");
   });
@@ -381,7 +441,7 @@ describe("OrchestrationTimeline", () => {
     expect(markup).toContain("Ticket is blocked");
     expect(markup).not.toContain("Ticket TEST-11 is blocked");
     expect(markup).toContain('href="t3://ticket/TEST-11"');
-    expect(markup).toContain(">TEST-11</a>");
+    expect(markup).toContain('data-variant="outline" data-size="sm">TEST-11</span></a>');
   });
 
   it("renders non-prompt review user messages when they are present in timeline blocks", async () => {

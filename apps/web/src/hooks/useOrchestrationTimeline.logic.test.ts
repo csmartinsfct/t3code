@@ -107,6 +107,59 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
 }
 
 describe("buildOrchestrationTimelineRows", () => {
+  it("keeps resumed and user-takeover milestones in the timeline and restarts the working timer from resume", () => {
+    const rows = buildOrchestrationTimelineRows({
+      parentActivities: [
+        makeActivity({
+          id: "run-started",
+          kind: "orchestration.run.started",
+          summary: "Run started",
+          createdAt: "2026-04-09T10:00:00.000Z",
+        }),
+        makeActivity({
+          id: "run-resumed",
+          kind: "orchestration.run.resumed",
+          summary: "Run resumed after restart",
+          createdAt: "2026-04-09T10:03:00.000Z",
+        }),
+        makeActivity({
+          id: "user-takeover",
+          kind: "orchestration.run.user-takeover",
+          summary: "Paused because the user took over ticket T3CO-188",
+          createdAt: "2026-04-09T10:04:00.000Z",
+          tone: "info",
+          ticketId: "ticket-1",
+          ticketIdentifier: "T3CO-188",
+        }),
+      ],
+      childThreads: [],
+      run: makeRun({
+        status: "running",
+        updatedAt: "2026-04-09T10:05:00.000Z",
+      }),
+    });
+
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        kind: "separator",
+        activityKind: "orchestration.run.resumed",
+        summary: "Run resumed after restart",
+      }),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        kind: "separator",
+        activityKind: "orchestration.run.user-takeover",
+        summary: "Paused because the user took over ticket T3CO-188",
+        ticketIdentifier: "T3CO-188",
+      }),
+    );
+    expect(rows.at(-1)).toMatchObject({
+      kind: "working",
+      createdAt: "2026-04-09T10:03:00.000Z",
+    });
+  });
+
   it("interleaves implementation and review blocks chronologically", () => {
     const finalReview: ReviewOutput = {
       changesNeeded: false,
@@ -236,6 +289,7 @@ describe("buildOrchestrationTimelineRows", () => {
       "Reviewing ticket T3CO-24 again",
       JSON.stringify(finalReview),
       "Completed ticket",
+      "working-indicator-row",
     ]);
   });
 
@@ -386,7 +440,7 @@ describe("buildOrchestrationTimelineRows", () => {
       run: makeRun({ currentPhase: "reviewing" }),
     });
 
-    expect(rows.map((row) => row.kind)).toEqual(["separator", "thread-block"]);
+    expect(rows.map((row) => row.kind)).toEqual(["separator", "thread-block", "working"]);
     expect(rows[1]).toMatchObject({
       kind: "thread-block",
       sectionKind: "review",
