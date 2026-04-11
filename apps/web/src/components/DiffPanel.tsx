@@ -157,6 +157,15 @@ function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
 }
 
+export function resolveDiffEditorTarget(input: {
+  activeCwd: string | null | undefined;
+  filePath: string;
+  selectedRepoCwd: string | null;
+}) {
+  const resolvedCwd = input.selectedRepoCwd ?? input.activeCwd ?? null;
+  return resolvedCwd ? resolvePathLinkTarget(input.filePath, resolvedCwd) : input.filePath;
+}
+
 interface DiffPanelProps {
   mode?: DiffPanelMode;
 }
@@ -331,8 +340,11 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     (filePath: string) => {
       const api = readNativeApi();
       if (!api) return;
-      const resolvedCwd = selectedRepoCwd ?? activeCwd;
-      const targetPath = resolvedCwd ? resolvePathLinkTarget(filePath, resolvedCwd) : filePath;
+      const targetPath = resolveDiffEditorTarget({
+        activeCwd,
+        filePath,
+        selectedRepoCwd,
+      });
       void openInPreferredEditor(api, targetPath).catch((error) => {
         console.warn("Failed to open diff file in editor.", error);
       });

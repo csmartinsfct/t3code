@@ -273,13 +273,19 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
-function ChatThreadRouteView() {
+export type ChatThreadRouteSearch = DiffRouteSearch & FileExplorerRouteSearch;
+
+export function ChatThreadRouteView(props: {
+  diffPanelRenderer?: ((mode: DiffPanelMode) => ReactNode) | undefined;
+  fileExplorerRenderer?:
+    | ((input: { cwd: string; mode: FileExplorerPanelMode; onClose: () => void }) => ReactNode)
+    | undefined;
+  navigate: ReturnType<typeof useNavigate>;
+  search: ChatThreadRouteSearch;
+  threadId: ThreadId;
+}) {
   const bootstrapComplete = useStore((store) => store.bootstrapComplete);
-  const navigate = useNavigate();
-  const threadId = Route.useParams({
-    select: (params) => ThreadId.makeUnsafe(params.threadId),
-  });
-  const search = Route.useSearch();
+  const { diffPanelRenderer, fileExplorerRenderer, navigate, search, threadId } = props;
   const threadExists = useStore((store) => threadId in store.threadsById);
   const draftThreadExists = useComposerDraftStore((store) =>
     Object.hasOwn(store.draftThreadsByThreadId, threadId),
@@ -385,17 +391,25 @@ function ChatThreadRouteView() {
       <>
         <ManagementView threadId={threadId} projectId={resolvedProjectId} />
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-          {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+          {shouldRenderDiffContent
+            ? (diffPanelRenderer?.("sheet") ?? <LazyDiffPanel mode="sheet" />)
+            : null}
         </DiffPanelSheet>
         <FileExplorerSheet
           fileExplorerOpen={fileExplorerOpen}
           onCloseFileExplorer={closeFileExplorer}
         >
-          {shouldRenderFileExplorerContent && projectCwd ? (
-            <Suspense fallback={<FileExplorerLoadingFallback mode="sheet" />}>
-              <LazyFileExplorer cwd={projectCwd} mode="sheet" onClose={closeFileExplorer} />
-            </Suspense>
-          ) : null}
+          {shouldRenderFileExplorerContent && projectCwd
+            ? (fileExplorerRenderer?.({
+                cwd: projectCwd,
+                mode: "sheet",
+                onClose: closeFileExplorer,
+              }) ?? (
+                <Suspense fallback={<FileExplorerLoadingFallback mode="sheet" />}>
+                  <LazyFileExplorer cwd={projectCwd} mode="sheet" onClose={closeFileExplorer} />
+                </Suspense>
+              ))
+            : null}
         </FileExplorerSheet>
       </>
     );
@@ -451,7 +465,15 @@ function ChatThreadRouteView() {
   );
 }
 
-type ChatThreadRouteSearch = DiffRouteSearch & FileExplorerRouteSearch;
+function ChatThreadRouteComponent() {
+  const navigate = useNavigate();
+  const threadId = Route.useParams({
+    select: (params) => ThreadId.makeUnsafe(params.threadId),
+  });
+  const search = Route.useSearch();
+
+  return <ChatThreadRouteView navigate={navigate} search={search} threadId={threadId} />;
+}
 
 export const Route = createFileRoute("/_chat/$threadId")({
   validateSearch: (search): ChatThreadRouteSearch => ({
@@ -461,5 +483,5 @@ export const Route = createFileRoute("/_chat/$threadId")({
   search: {
     middlewares: [retainSearchParams<ChatThreadRouteSearch>(["diff", "fileExplorer"])],
   },
-  component: ChatThreadRouteView,
+  component: ChatThreadRouteComponent,
 });

@@ -1,4 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
+import { page } from "vitest/browser";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -60,12 +61,15 @@ vi.mock("@tanstack/react-query", async () => {
       if (options.queryKey?.[0] === "git-status") {
         return {
           data: {
+            isRepo: true,
             branch: BRANCH_NAME,
             hasWorkingTreeChanges: false,
             workingTree: { files: [], insertions: 0, deletions: 0 },
             hasUpstream: true,
             aheadCount: 1,
             behindCount: 0,
+            hasOriginRemote: true,
+            isDefaultBranch: false,
             pr: null,
           },
           error: null,
@@ -141,10 +145,10 @@ vi.mock("~/store", () => ({
   useStore: (selector: (state: unknown) => unknown) =>
     selector({
       setThreadBranch: setThreadBranchSpy,
-      threads: [
-        { id: THREAD_A, branch: BRANCH_NAME, worktreePath: null },
-        { id: THREAD_B, branch: BRANCH_NAME, worktreePath: null },
-      ],
+      threadsById: {
+        [THREAD_A]: { id: THREAD_A, branch: BRANCH_NAME, worktreePath: null },
+        [THREAD_B]: { id: THREAD_B, branch: BRANCH_NAME, worktreePath: null },
+      },
     }),
 }));
 
@@ -172,7 +176,23 @@ function Harness() {
         gitCwd={GIT_CWD}
         multiRepoStatus={{
           repos: [{ cwd: GIT_CWD, relativePath: ".", label: "project" }],
-          statusByRepoCwd: new Map(),
+          statusByRepoCwd: new Map([
+            [
+              GIT_CWD,
+              {
+                isRepo: true,
+                branch: BRANCH_NAME,
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: true,
+                aheadCount: 1,
+                behindCount: 0,
+                hasOriginRemote: true,
+                isDefaultBranch: false,
+                pr: null,
+              },
+            ],
+          ]),
           hasAnyRepo: true,
           hasAnyChanges: false,
           isLoading: false,
@@ -240,6 +260,82 @@ describe("GitActionsControl thread-scoped progress toast", () => {
           type: "loading",
         }),
       );
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("renders bulk and per-repo actions for multi-repo git state", async () => {
+    // Audit traceability: c437af0.
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        multiRepoStatus={{
+          repos: [
+            { cwd: "/repo/app", relativePath: "app", label: "app" },
+            { cwd: "/repo/docs", relativePath: "docs", label: "docs" },
+          ],
+          statusByRepoCwd: new Map([
+            [
+              "/repo/app",
+              {
+                isRepo: true,
+                branch: "feature/app",
+                hasWorkingTreeChanges: true,
+                workingTree: {
+                  files: [{ path: "src/app.ts", insertions: 2, deletions: 1 }],
+                  insertions: 2,
+                  deletions: 1,
+                },
+                hasUpstream: true,
+                aheadCount: 0,
+                behindCount: 0,
+                hasOriginRemote: true,
+                isDefaultBranch: false,
+                pr: null,
+              },
+            ],
+            [
+              "/repo/docs",
+              {
+                isRepo: true,
+                branch: "feature/docs",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+                hasUpstream: true,
+                aheadCount: 2,
+                behindCount: 0,
+                hasOriginRemote: true,
+                isDefaultBranch: false,
+                pr: null,
+              },
+            ],
+          ]),
+          hasAnyRepo: true,
+          hasAnyChanges: true,
+          isLoading: false,
+        }}
+        activeThreadId={THREAD_A}
+      />,
+      { container: host },
+    );
+
+    try {
+      expect(document.body.textContent).toContain("Commit all (1)");
+
+      await page.getByRole("button", { name: "Git action options" }).click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Push all (1)");
+        expect(text).toContain("app");
+        expect(text).toContain("docs");
+        expect(text).toContain("Commit");
+        expect(text).toContain("Push");
+      });
     } finally {
       await screen.unmount();
       host.remove();
