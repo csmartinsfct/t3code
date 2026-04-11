@@ -33,6 +33,8 @@ Review-specific behavior:
 - `reReview` is used for review iteration `2+`
 - `reviewFeedback` is still the implementer-facing prompt that carries structured review findings back to the working thread
 
+Because orchestration prompts are resolved at dispatch time, existing runs pick up prompt changes on later resume/review turns too. That includes startup auto-resume: when enabled, the server reuses the same backend orchestration resume path as the UI Resume action.
+
 ## Native API
 
 The shared `NativeApi` exposes prompt management under `api.prompts`:

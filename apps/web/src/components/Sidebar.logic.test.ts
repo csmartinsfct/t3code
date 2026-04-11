@@ -507,6 +507,28 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
+  it("shows Was working for stale startup markers before live running state", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          startupRecoveryState: "active",
+        },
+      }),
+    ).toMatchObject({ label: "Was working", pulse: false });
+  });
+
+  it("suppresses the stale running pill after the startup marker is dismissed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          startupRecoveryState: "dismissed",
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
     expect(
       resolveThreadStatusPill({

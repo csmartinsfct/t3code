@@ -1979,13 +1979,23 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
         // Load run to check current state
         const currentRun = yield* withRunService((runService) => runService.get(input));
+        const isRecoveringStaleRunningRun =
+          currentRun.status === "running" && activeRunState?.runId !== input.runId;
 
-        // Idempotent: if already running, return as-is
-        if (currentRun.status === "running") {
+        // Idempotent: if the run is already active in-memory, return as-is.
+        if (currentRun.status === "running" && !isRecoveringStaleRunningRun) {
           yield* Effect.logInfo(
             formatTimelineLog(SCOPE, "runner.resume.already-running", { runId: input.runId }),
           );
           return currentRun;
+        }
+
+        if (isRecoveringStaleRunningRun) {
+          yield* Effect.logInfo(
+            formatTimelineLog(SCOPE, "runner.resume.recover-stale-running", {
+              runId: input.runId,
+            }),
+          );
         }
 
         if (
@@ -2041,8 +2051,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           yield* stopWorkingThread(freshAgentTarget.threadId);
         }
 
-        // Transition paused → running
-        const run = yield* withRunService((runService) => runService.resume(input));
+        const run = isRecoveringStaleRunningRun
+          ? currentRun
+          : yield* withRunService((runService) => runService.resume(input));
         const orchestrationThreadId = run.orchestrationThreadId as ThreadId;
 
         // Post resume activity

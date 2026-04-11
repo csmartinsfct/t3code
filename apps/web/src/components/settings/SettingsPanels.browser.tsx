@@ -79,6 +79,7 @@ describe("GeneralSettingsPanel observability", () => {
       )
       .toBeInTheDocument();
     await expect.element(page.getByText("Automated review cycles")).toBeInTheDocument();
+    await expect.element(page.getByText("Resume agents on startup")).toBeInTheDocument();
     await expect
       .element(page.getByLabelText("Maximum automated review iterations"))
       .toHaveAttribute("value", "3");

@@ -300,7 +300,13 @@ interface SidebarThreadRowProps {
 
 function SidebarThreadRow(props: SidebarThreadRowProps) {
   const thread = useSidebarThreadSummaryById(props.threadId);
+  const clearStartupWasWorkingThread = useUiStateStore(
+    (state) => state.clearStartupWasWorkingThread,
+  );
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[props.threadId]);
+  const startupRecoveryState = useUiStateStore(
+    (state) => state.startupRecoveryStateByThreadId[props.threadId] ?? null,
+  );
   const runningTerminalIds = useTerminalStateStore(
     (state) =>
       selectThreadTerminalState(state.terminalStateByThreadId, props.threadId).runningTerminalIds,
@@ -321,14 +327,16 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
   const isOrchestrationRunActive =
     thread.isOrchestrationThread &&
     (orchestrationRunStatus === "running" || orchestrationRunStatus === "pending");
-  const isThreadRunning =
+  const hasLiveRunningStatus =
     (thread.session?.status === "running" && thread.session.activeTurnId != null) ||
     isOrchestrationRunActive;
+  const isThreadRunning = hasLiveRunningStatus && startupRecoveryState === null;
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
       lastVisitedAt,
       isOrchestrationRunActive,
+      ...(startupRecoveryState !== null ? { startupRecoveryState } : {}),
     },
   });
   const prStatus = prStatusIndicator(props.pr);
@@ -367,11 +375,13 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
           isSelected,
         })} relative isolate`}
         onClick={(event) => {
+          clearStartupWasWorkingThread(thread.id);
           props.handleThreadClick(event, thread.id, props.orderedProjectThreadIds);
         }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
+          clearStartupWasWorkingThread(thread.id);
           props.navigateToThread(thread.id);
         }}
         onContextMenu={(event) => {
@@ -702,10 +712,16 @@ export default function Sidebar() {
   const orchestrationRunStatusByThreadId = useStore(
     (store) => store.orchestrationRunStatusByThreadId,
   );
-  const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
+  const {
+    projectExpandedById,
+    projectOrder,
+    startupRecoveryStateByThreadId,
+    threadLastVisitedAtById,
+  } = useUiStateStore(
     useShallow((store) => ({
       projectExpandedById: store.projectExpandedById,
       projectOrder: store.projectOrder,
+      startupRecoveryStateByThreadId: store.startupRecoveryStateByThreadId,
       threadLastVisitedAtById: store.threadLastVisitedAtById,
     })),
   );
@@ -1675,6 +1691,9 @@ export default function Sidebar() {
               ...thread,
               lastVisitedAt: threadLastVisitedAtById[thread.id],
               isOrchestrationRunActive,
+              ...(startupRecoveryStateByThreadId[thread.id] !== undefined
+                ? { startupRecoveryState: startupRecoveryStateByThreadId[thread.id] }
+                : {}),
             },
           });
         };
@@ -1734,6 +1753,7 @@ export default function Sidebar() {
       routeThreadId,
       sortedProjects,
       sidebarThreadsById,
+      startupRecoveryStateByThreadId,
       threadIdsByProjectId,
       threadLastVisitedAtById,
     ],

@@ -21,6 +21,7 @@ import { cn } from "~/lib/utils";
 interface OrchestrationProgressHeaderProps {
   run: OrchestrationRun | null;
   centerLabel: string | null;
+  startupRecoveryState?: "active" | "dismissed" | null;
   onCenterLabelClick?: (() => void) | undefined;
   onPause: () => void;
   onResume: () => void;
@@ -109,6 +110,7 @@ function SegmentedProgressBar({
 export function OrchestrationProgressHeader({
   run,
   centerLabel,
+  startupRecoveryState = null,
   onCenterLabelClick,
   onPause,
   onResume,
@@ -122,6 +124,10 @@ export function OrchestrationProgressHeader({
   const currentIndex = run.currentTicketIndex;
   const isTerminal =
     run.status === "completed" || run.status === "failed" || run.status === "canceled";
+  const hasStartupRecoveryRun = run.status === "running" && startupRecoveryState !== null;
+  const showStartupWasWorking = hasStartupRecoveryRun && startupRecoveryState === "active";
+  const showRunningControls = run.status === "running" && !hasStartupRecoveryRun;
+  const showResumeControls = run.status === "paused" || hasStartupRecoveryRun;
 
   const completedCount = isTerminal
     ? run.status === "completed"
@@ -133,10 +139,16 @@ export function OrchestrationProgressHeader({
     <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 backdrop-blur-sm sm:px-5 py-2">
       <div className="mx-auto grid max-w-3xl grid-cols-[auto_1fr_auto] items-center gap-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <Badge variant={badge.variant} size="sm">
-            {badge.icon}
-            {badge.label}
-          </Badge>
+          {showStartupWasWorking ? (
+            <span className="shrink-0 text-orange-600 text-xs font-medium dark:text-orange-300/90">
+              Was working
+            </span>
+          ) : hasStartupRecoveryRun ? null : (
+            <Badge variant={badge.variant} size="sm">
+              {badge.icon}
+              {badge.label}
+            </Badge>
+          )}
 
           {!isTerminal ? (
             <span className="shrink-0 text-xs text-muted-foreground">
@@ -171,7 +183,7 @@ export function OrchestrationProgressHeader({
             </span>
           ) : null}
 
-          {run.status === "running" && (
+          {showRunningControls && (
             <div className="flex items-center gap-1.5">
               <Button type="button" size="xs" variant="outline" onClick={onPause}>
                 <PauseIcon className="size-3" />
@@ -183,7 +195,7 @@ export function OrchestrationProgressHeader({
               </Button>
             </div>
           )}
-          {run.status === "paused" && (
+          {showResumeControls && (
             <div className="flex items-center gap-1.5">
               <Group aria-label="Orchestration resume actions">
                 <Button type="button" size="xs" variant="outline" onClick={onResume}>

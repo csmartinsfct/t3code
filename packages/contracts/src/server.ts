@@ -222,6 +222,7 @@ export const ServerLifecycleWelcomePayload = Schema.Struct({
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
+  startupWasWorkingThreadIds: Schema.optional(Schema.Array(ThreadId)),
 });
 export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;
 

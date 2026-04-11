@@ -2,6 +2,7 @@ import { ProjectId, ThreadId, TicketId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  clearStartupWasWorkingThread,
   cloneThreadBoardContext,
   clearThreadUi,
   initializeThreadBoardContextFromSource,
@@ -9,9 +10,11 @@ import {
   popThreadBoardTicket,
   pushThreadBoardTicket,
   reorderProjects,
+  removeStartupRecoveryState,
   sanitizeThreadBoardContext,
   setManagementLastProjectId,
   setProjectExpanded,
+  setStartupWasWorkingThreads,
   setThreadBoardRoot,
   setThreadBoardScrollLeft,
   syncProjects,
@@ -24,6 +27,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
+    startupRecoveryStateByThreadId: {},
     boardContextByThreadId: {},
     managementLastProjectId: null,
     viewMode: "chat",
@@ -150,6 +154,10 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "2026-02-25T12:35:00.000Z",
         [thread2]: "2026-02-25T12:36:00.000Z",
       },
+      startupRecoveryStateByThreadId: {
+        [thread1]: "active",
+        [thread2]: "dismissed",
+      },
       boardContextByThreadId: {
         [thread1]: {
           projectId: project1,
@@ -170,6 +178,9 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
+    });
+    expect(next.startupRecoveryStateByThreadId).toEqual({
+      [thread1]: "active",
     });
     expect(next.boardContextByThreadId).toEqual({
       [thread1]: {
@@ -219,6 +230,9 @@ describe("uiStateStore pure functions", () => {
       threadLastVisitedAtById: {
         [thread1]: "2026-02-25T12:35:00.000Z",
       },
+      startupRecoveryStateByThreadId: {
+        [thread1]: "active",
+      },
       boardContextByThreadId: {
         [thread1]: {
           projectId: project1,
@@ -232,7 +246,31 @@ describe("uiStateStore pure functions", () => {
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
+    expect(next.startupRecoveryStateByThreadId).toEqual({});
     expect(next.boardContextByThreadId).toEqual({});
+  });
+
+  it("tracks startup Was working markers separately from persisted thread UI", () => {
+    const thread1 = ThreadId.makeUnsafe("thread-1");
+    const thread2 = ThreadId.makeUnsafe("thread-2");
+    const initialState = makeUiState();
+
+    const seeded = setStartupWasWorkingThreads(initialState, [thread1, thread2]);
+    expect(seeded.startupRecoveryStateByThreadId).toEqual({
+      [thread1]: "active",
+      [thread2]: "active",
+    });
+
+    const cleared = clearStartupWasWorkingThread(seeded, thread1);
+    expect(cleared.startupRecoveryStateByThreadId).toEqual({
+      [thread1]: "dismissed",
+      [thread2]: "active",
+    });
+
+    const removed = removeStartupRecoveryState(cleared, thread1);
+    expect(removed.startupRecoveryStateByThreadId).toEqual({
+      [thread2]: "active",
+    });
   });
 
   it("setThreadBoardRoot initializes board context for a thread", () => {

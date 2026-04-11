@@ -202,6 +202,7 @@ function EventRouter() {
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const syncProjects = useUiStateStore((store) => store.syncProjects);
   const syncThreads = useUiStateStore((store) => store.syncThreads);
+  const setStartupWasWorkingThreads = useUiStateStore((store) => store.setStartupWasWorkingThreads);
   const clearThreadUi = useUiStateStore((store) => store.clearThreadUi);
   const removeTerminalState = useTerminalStateStore((store) => store.removeTerminalState);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -226,6 +227,8 @@ function EventRouter() {
       if (disposedRef.current) {
         return;
       }
+
+      setStartupWasWorkingThreads(payload.startupWasWorkingThreadIds ?? []);
 
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
