@@ -1,6 +1,4 @@
 import {
-  modelSelectionProviderKind,
-  providerDisplayName,
   type ModelSelection,
   type TicketId,
   type TicketSummary,
@@ -21,6 +19,10 @@ import { DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
 import { useSettings } from "../../hooks/useSettings";
 import { buildOrchestrationPlan, type OrchestrationPlan } from "../../lib/orchestrationValidation";
 import { ensureNativeApi } from "../../nativeApi";
+import {
+  formatModelSelectionSummary,
+  resolveReviewerConfigurationSummary,
+} from "./orchestrationModelDisplay";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -107,11 +109,8 @@ export function OrchestrateConfirmDialog({
   const settings = useSettings();
   const implSel = settings.orchestrationImplementerModelSelection;
   const revSel = settings.orchestrationReviewerModelSelection;
-  const implDisplayName = `${providerDisplayName(modelSelectionProviderKind(implSel))} / ${implSel.model}`;
-  const revDisplayName =
-    settings.maxReviewIterations === 0
-      ? "Enable in the settings"
-      : `${providerDisplayName(modelSelectionProviderKind(revSel))} / ${revSel.model}`;
+  const implDisplayName = formatModelSelectionSummary(implSel);
+  const revDisplayName = resolveReviewerConfigurationSummary(settings.maxReviewIterations, revSel);
 
   const handleConfirm = useCallback(async () => {
     if (plan?.kind !== "valid" || isSubmitting) return;

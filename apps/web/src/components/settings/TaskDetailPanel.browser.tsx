@@ -2,6 +2,7 @@ import "../../index.css";
 
 import type {
   Comment,
+  ModelSelection,
   NativeApi,
   ProjectId,
   Ticket,
@@ -42,7 +43,17 @@ vi.mock("@dnd-kit/core", async () => {
 });
 
 vi.mock("~/hooks/useSettings", () => ({
-  useSettings: () => ({ maxReviewIterations: 1 }),
+  useSettings: () => ({
+    maxReviewIterations: 1,
+    orchestrationImplementerModelSelection: {
+      provider: "codex",
+      model: "gpt-5.4",
+    } satisfies ModelSelection,
+    orchestrationReviewerModelSelection: {
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    } satisfies ModelSelection,
+  }),
 }));
 
 vi.mock("~/rpc/serverState", () => ({
@@ -51,8 +62,9 @@ vi.mock("~/rpc/serverState", () => ({
 }));
 
 vi.mock("~/modelSelection", () => ({
-  resolveAppModelSelectionState: () => ({ provider: "codex", model: "gpt-5.4" }),
-  modelSelectionProviderKind: () => "codex",
+  resolveAppModelSelectionState: (settings: { textGenerationModelSelection?: ModelSelection }) =>
+    settings.textGenerationModelSelection ?? { provider: "codex", model: "gpt-5.4" },
+  modelSelectionProviderKind: (selection: ModelSelection) => selection.provider,
   getCustomModelOptionsByProvider: () => ({}),
   makeAppModelSelection: (provider: string, model: string) => ({ provider, model }),
 }));
@@ -87,7 +99,28 @@ vi.mock("~/lib/utils", async () => {
 });
 
 vi.mock("~/components/chat/ProviderModelPicker", () => ({
-  ProviderModelPicker: () => null,
+  ProviderModelPicker: ({
+    provider,
+    model,
+    onProviderModelChange,
+  }: {
+    provider: string;
+    model: string;
+    onProviderModelChange: (provider: string, model: string) => void;
+  }) => (
+    <div>
+      <button type="button" data-model-picker-current="true">
+        {provider}:{model}
+      </button>
+      <button
+        type="button"
+        data-model-picker-change="true"
+        onClick={() => onProviderModelChange("claudeAgent", "claude-sonnet-4-6")}
+      >
+        Switch model
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("~/components/chat/TraitsPicker", () => ({
@@ -205,6 +238,12 @@ describe("TaskDetailPanel browser coverage", () => {
         ...ticket,
         ...(input.status ? { status: input.status } : {}),
         ...(input.priority ? { priority: input.priority } : {}),
+        ...("implementerModelOverride" in input
+          ? { implementerModelOverride: input.implementerModelOverride ?? null }
+          : {}),
+        ...("reviewerModelOverride" in input
+          ? { reviewerModelOverride: input.reviewerModelOverride ?? null }
+          : {}),
       };
       return cloneTicket(ticket);
     });
@@ -349,6 +388,59 @@ describe("TaskDetailPanel browser coverage", () => {
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("Fresh browser coverage comment");
         expect(document.body.textContent ?? "").toContain("Comments (2)");
+      });
+
+      expect(document.body.textContent ?? "").toContain("codex:gpt-5.4");
+      expect(document.body.textContent ?? "").toContain("codex:gpt-5.4-mini");
+
+      const modelSwitchButtons = Array.from(
+        document.querySelectorAll("[data-model-picker-change='true']"),
+      ) as HTMLButtonElement[];
+      if (modelSwitchButtons.length < 2) {
+        throw new Error("Expected implementer and reviewer override controls to be mounted.");
+      }
+
+      modelSwitchButtons[0]?.click();
+      await vi.waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith({
+          id: TICKET_ID,
+          implementerModelOverride: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+        });
+        expect(document.body.textContent ?? "").toContain("claudeAgent:claude-sonnet-4-6");
+      });
+      await expect.element(page.getByLabelText("Reset Implementer to default")).toBeInTheDocument();
+
+      modelSwitchButtons[1]?.click();
+      await vi.waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith({
+          id: TICKET_ID,
+          reviewerModelOverride: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+        });
+      });
+      await expect.element(page.getByLabelText("Reset Reviewer to default")).toBeInTheDocument();
+
+      await page.getByLabelText("Reset Reviewer to default").click();
+      await vi.waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith({
+          id: TICKET_ID,
+          reviewerModelOverride: null,
+        });
+        expect(document.body.textContent ?? "").toContain("codex:gpt-5.4-mini");
+      });
+
+      await page.getByLabelText("Reset Implementer to default").click();
+      await vi.waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledWith({
+          id: TICKET_ID,
+          implementerModelOverride: null,
+        });
+        expect(document.body.textContent ?? "").toContain("codex:gpt-5.4");
       });
 
       await page.getByRole("button", { name: "History" }).click();

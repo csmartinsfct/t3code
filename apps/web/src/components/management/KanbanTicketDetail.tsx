@@ -53,6 +53,7 @@ import {
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 import { TicketOriginThreadSection } from "./TicketOriginThreadSection";
+import { resolveTicketModelOverrideState } from "./orchestrationModelDisplay";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketLabelPicker } from "./TicketLabelPicker";
@@ -1276,7 +1277,14 @@ function ModelOverrideRow({
   settings: import("@t3tools/contracts").UnifiedSettings;
   onChange: (value: ModelSelection | null) => void;
 }) {
-  if (disabledHref && disabledText) {
+  const state = resolveTicketModelOverrideState({
+    override,
+    globalDefault,
+    ...(disabledHref ? { disabledHref } : {}),
+    ...(disabledText ? { disabledText } : {}),
+  });
+
+  if (state.kind === "disabled") {
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-1.5">
@@ -1284,16 +1292,15 @@ function ModelOverrideRow({
         </div>
         <a
           className="text-[11px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
-          href={disabledHref}
+          href={state.disabledHref}
         >
-          {disabledText}
+          {state.disabledText}
         </a>
       </div>
     );
   }
 
-  const hasOverride = override != null;
-  const effective = hasOverride ? override : globalDefault;
+  const { effective, hasOverride } = state;
   const effectiveProvider = modelSelectionProviderKind(effective);
   const optionsByProvider = getCustomModelOptionsByProvider(
     settings,

@@ -24,6 +24,7 @@ import {
   SubTicketRowButton,
   resolveTicketDetailStreamEventAction,
 } from "./KanbanTicketDetail";
+import { resolveTicketModelOverrideState } from "./orchestrationModelDisplay";
 import { TicketOriginThreadSection, TicketThreadRowButton } from "./TicketOriginThreadSection";
 
 // Audit traceability: c709853, a8b01f5, 4603fb8, 4d81550, 96da4f9, 8e30a6c, b6dd6a5.
@@ -158,6 +159,46 @@ describe("KanbanTicketDetail", () => {
     expect(html).toContain("Blocked");
     expect(html).toContain("T3CO-3");
     expect(html).toContain("Child ticket title");
+  });
+
+  it("resolves model override rendering from defaults, overrides, and disabled review settings", () => {
+    const globalDefault = { provider: "codex", model: "gpt-5.4" } as const;
+    const override = { provider: "claudeAgent", model: "claude-sonnet-4-6" } as const;
+
+    expect(
+      resolveTicketModelOverrideState({
+        override: null,
+        globalDefault,
+      }),
+    ).toEqual({
+      kind: "picker",
+      hasOverride: false,
+      effective: globalDefault,
+    });
+
+    expect(
+      resolveTicketModelOverrideState({
+        override,
+        globalDefault,
+      }),
+    ).toEqual({
+      kind: "picker",
+      hasOverride: true,
+      effective: override,
+    });
+
+    expect(
+      resolveTicketModelOverrideState({
+        override,
+        globalDefault,
+        disabledHref: "/settings/general#automated-review-cycles",
+        disabledText: "Enable in the settings",
+      }),
+    ).toEqual({
+      kind: "disabled",
+      disabledHref: "/settings/general#automated-review-cycles",
+      disabledText: "Enable in the settings",
+    });
   });
 
   it("saves inline title edits only when the trimmed title changes", () => {

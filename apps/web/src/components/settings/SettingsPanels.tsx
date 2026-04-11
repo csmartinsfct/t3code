@@ -70,6 +70,7 @@ import {
   useServerObservability,
   useServerProviders,
 } from "../../rpc/serverState";
+import { clampReviewIterations, getMcpDeliveryModeLabel } from "./settingsPanelHelpers";
 
 const THEME_OPTIONS = [
   {
@@ -1101,9 +1102,7 @@ export function GeneralSettingsPanel() {
               }}
             >
               <SelectTrigger className="w-full sm:w-44" aria-label="MCP delivery mode">
-                <SelectValue>
-                  {settings.mcpDeliveryMode === "tools" ? "Native tools" : "HTTP endpoints"}
-                </SelectValue>
+                <SelectValue>{getMcpDeliveryModeLabel(settings.mcpDeliveryMode)}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="tools">
@@ -1487,10 +1486,7 @@ export function GeneralSettingsPanel() {
                   if (!Number.isFinite(rawValue)) {
                     return;
                   }
-                  const nextValue = Math.max(
-                    0,
-                    Math.min(MAX_REVIEW_ITERATIONS_UI_MAX, Math.trunc(rawValue)),
-                  );
+                  const nextValue = clampReviewIterations(rawValue);
                   updateSettings({ maxReviewIterations: nextValue });
                 }}
               />

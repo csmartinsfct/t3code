@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { useSettings } from "../../hooks/useSettings";
 import { waitForElement } from "../../test-utils/browser";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
@@ -22,7 +23,6 @@ import { useStore } from "../../store";
 import { createReadyServerProvider } from "../../test/providerTestUtils";
 import { useTerminalStateStore } from "../../terminalStateStore";
 import type { Project, Thread } from "../../types";
-import { ArchivedThreadsPanel, GeneralSettingsPanel } from "./SettingsPanels";
 
 const { mockNavigate, routeThreadIdState } = vi.hoisted(() => ({
   mockNavigate: vi.fn(async () => undefined),
@@ -42,6 +42,44 @@ vi.mock("@tanstack/react-router", async () => {
     },
   };
 });
+
+vi.mock("../chat/ProviderModelPicker", () => ({
+  ProviderModelPicker: ({
+    provider,
+    model,
+    onProviderModelChange,
+  }: {
+    provider: string;
+    model: string;
+    onProviderModelChange?: (provider: string, model: string) => void;
+  }) => (
+    <button
+      type="button"
+      data-provider-model-picker="true"
+      data-provider={provider}
+      data-model={model}
+      onClick={() => onProviderModelChange?.("claudeAgent", "claude-sonnet-4-6")}
+    >
+      {model}
+    </button>
+  ),
+}));
+
+vi.mock("../chat/TraitsPicker", () => ({
+  TraitsPicker: () => null,
+}));
+
+vi.mock("../../hooks/useTheme", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    useTheme: () => {
+      const [theme, setTheme] = React.useState("system");
+      return { theme, setTheme };
+    },
+  };
+});
+
+const { ArchivedThreadsPanel, GeneralSettingsPanel } = await import("./SettingsPanels");
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -157,6 +195,23 @@ async function renderArchivedThreadsPanel() {
         <ArchivedThreadsPanel />
       </AppAtomRegistryProvider>
     </QueryClientProvider>,
+  );
+}
+
+function ReviewIterationsHarness() {
+  const settings = useSettings();
+
+  return <div data-review-iterations>{settings.maxReviewIterations}</div>;
+}
+
+function SettingsModelDefaultsHarness() {
+  const settings = useSettings();
+
+  return (
+    <div>
+      <div data-implementer-model>{settings.orchestrationImplementerModelSelection.model}</div>
+      <div data-reviewer-model>{settings.orchestrationReviewerModelSelection.model}</div>
+    </div>
   );
 }
 
@@ -332,6 +387,42 @@ describe("GeneralSettingsPanel observability", () => {
     await openLogsButton.click();
 
     expect(openInEditor).toHaveBeenCalledWith("/repo/project/.t3/logs", "cursor");
+  });
+
+  it("shows MCP delivery and orchestration model defaults", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+        <SettingsModelDefaultsHarness />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("heading", { name: "MCP delivery" })).toBeInTheDocument();
+    expect(
+      (document.querySelector('[aria-label="MCP delivery mode"]') as HTMLElement | null)
+        ?.textContent,
+    ).toContain("Native tools");
+
+    const implementerDefault = document.querySelector("[data-implementer-model]");
+    const reviewerDefault = document.querySelector("[data-reviewer-model]");
+    expect(implementerDefault?.textContent).toBe("gpt-5.4-mini");
+    expect(reviewerDefault?.textContent).toBe("gpt-5.4-mini");
+  });
+
+  it("shows automated review cycles with the visible default state", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+        <ReviewIterationsHarness />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Automated review cycles")).toBeInTheDocument();
+    expect(document.querySelector("[data-review-iterations]")?.textContent).toBe("3");
   });
 });
 
