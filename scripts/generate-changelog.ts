@@ -145,6 +145,63 @@ function readChangelogCacheFile(filePath: string): typeof ChangelogCacheFile.Typ
   }
 }
 
+function decodeChangelogAsset(raw: unknown): typeof ChangelogAssetFile.Type | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const provenance =
+    record.provenance && typeof record.provenance === "object"
+      ? ({ ...(record.provenance as Record<string, unknown>) } satisfies Record<string, unknown>)
+      : null;
+
+  if (provenance && !("rebuildCommitLimit" in provenance)) {
+    provenance.rebuildCommitLimit = REBUILD_COMMIT_LIMIT;
+  }
+
+  try {
+    return Schema.decodeUnknownSync(ChangelogAssetFile)(
+      provenance
+        ? {
+            ...record,
+            provenance,
+          }
+        : record,
+    );
+  } catch (error) {
+    log(`Ignoring invalid changelog asset: ${String(error)}`);
+    return null;
+  }
+}
+
+function readChangelogAssetFile(filePath: string): typeof ChangelogAssetFile.Type | null {
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return decodeChangelogAsset(JSON.parse(readFileSync(filePath, "utf8")));
+  } catch (error) {
+    log(`Ignoring invalid JSON file at ${path.relative(repoRoot, filePath)}: ${String(error)}`);
+    return null;
+  }
+}
+
+function readCommittedChangelogAsset(): typeof ChangelogAssetFile.Type | null {
+  const result = runCommand("git", ["show", `HEAD:${CHANGELOG_ASSET_PATH}`]);
+  if (result.status !== 0 || !result.stdout.trim()) {
+    return null;
+  }
+
+  try {
+    return decodeChangelogAsset(JSON.parse(result.stdout));
+  } catch (error) {
+    log(`Ignoring invalid committed changelog asset: ${String(error)}`);
+    return null;
+  }
+}
+
 function writeJsonFile(filePath: string, value: unknown) {
   ensureParentDir(filePath);
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -359,14 +416,95 @@ interface GeneratedBatch {
   readonly groups: ReadonlyArray<ChangelogGroup>;
 }
 
+interface CacheSeedBatch {
+  readonly provenance: typeof ChangelogBatchProvenance.Type;
+  readonly groups: ReadonlyArray<typeof ChangelogGroup.Type>;
+}
+
+function getAssetCommitCoverage(asset: typeof ChangelogAssetFile.Type): number {
+  return new Set(asset.provenance.batches.flatMap((batch) => batch.commitShas)).size;
+}
+
+function seedBatchFromAsset(asset: typeof ChangelogAssetFile.Type): CacheSeedBatch {
+  const flattenedCommitShas = [
+    ...new Set(asset.provenance.batches.flatMap((batch) => batch.commitShas)),
+  ];
+  const firstBatch = asset.provenance.batches[0] ?? null;
+  const lastBatch = asset.provenance.batches.at(-1) ?? null;
+
+  return Schema.decodeUnknownSync(
+    Schema.Struct({
+      provenance: ChangelogBatchProvenance,
+      groups: Schema.Array(ChangelogGroup),
+    }),
+  )({
+    provenance: {
+      generatedAt: asset.generatedAt,
+      promptVersion: asset.provenance.promptVersion,
+      fromExclusiveCommit: firstBatch?.fromExclusiveCommit ?? null,
+      toInclusiveCommit:
+        asset.lastProcessedCommit ?? lastBatch?.toInclusiveCommit ?? firstBatch?.toInclusiveCommit,
+      commitShas: flattenedCommitShas,
+      commitCount: flattenedCommitShas.length,
+      model: lastBatch?.model ?? DEFAULT_CODEX_MODEL,
+      mcpDisabled: asset.provenance.batches.every((batch) => batch.mcpDisabled),
+    },
+    groups: asset.groups,
+  });
+}
+
+function createCacheSeedFromAsset(
+  asset: typeof ChangelogAssetFile.Type,
+): typeof ChangelogCacheFile.Type {
+  return Schema.decodeUnknownSync(ChangelogCacheFile)({
+    version: 1,
+    generatedAt: asset.generatedAt,
+    lastProcessedCommit: asset.lastProcessedCommit,
+    rebuiltFromScratch: asset.provenance.rebuiltFromScratch,
+    rebuildCommitLimit: asset.provenance.rebuildCommitLimit,
+    promptVersion: asset.provenance.promptVersion,
+    uiOutputPath: CHANGELOG_ASSET_PATH,
+    groups: asset.groups,
+    batches: asset.provenance.batches.length > 0 ? [seedBatchFromAsset(asset)] : [],
+  });
+}
+
+function resolveExistingCache(): typeof ChangelogCacheFile.Type | null {
+  const cache = readChangelogCacheFile(changelogCachePath);
+  if (cache) {
+    return cache;
+  }
+
+  const worktreeAsset = readChangelogAssetFile(changelogAssetPath);
+  const committedAsset = readCommittedChangelogAsset();
+  const candidateAssets = [worktreeAsset, committedAsset].filter((asset) => asset !== null);
+
+  if (candidateAssets.length === 0) {
+    return null;
+  }
+
+  const preferredAsset = candidateAssets.toSorted(
+    (left, right) => getAssetCommitCoverage(right) - getAssetCommitCoverage(left),
+  )[0]!;
+
+  log(
+    `Seeding changelog baseline from ${
+      preferredAsset === committedAsset ? "committed" : "worktree"
+    } asset (${getAssetCommitCoverage(preferredAsset)} commits of history).`,
+  );
+  return createCacheSeedFromAsset(preferredAsset);
+}
+
 function mergeGroups(batches: ReadonlyArray<GeneratedBatch>): ReadonlyArray<ChangelogGroup> {
   const merged = new Map<string, ChangelogEntry[]>();
   const commitOrder = new Map<GitCommitSha, number>();
+  let nextOrder = 0;
 
-  batches.forEach((batch, batchIndex) => {
+  batches.forEach((batch) => {
     batch.provenance.commitShas.forEach((sha, commitIndex) => {
-      commitOrder.set(sha, batchIndex * MAX_COMMITS_PER_BATCH + commitIndex);
+      commitOrder.set(sha, nextOrder + commitIndex);
     });
+    nextOrder += batch.provenance.commitShas.length;
   });
 
   for (const batch of batches) {
@@ -418,7 +556,7 @@ function syncDistAsset(distClientDir: string) {
 function main() {
   const args = parseArgs();
   const headSha = resolveHeadSha();
-  const existingCache = readChangelogCacheFile(changelogCachePath);
+  const existingCache = resolveExistingCache();
 
   const shouldRebuild =
     !existingCache?.lastProcessedCommit ||

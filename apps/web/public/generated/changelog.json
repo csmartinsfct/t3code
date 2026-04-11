@@ -1,11 +1,129 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-11T04:27:35.330Z",
-  "lastProcessedCommit": "9d7806f41c21174081c652ad5ce16e059546b813",
+  "generatedAt": "2026-04-11T13:30:26.584Z",
+  "lastProcessedCommit": "0b066c7d471994b399da59a931b51aba623a4d6f",
   "groups": [
     {
       "date": "2026-04-11",
       "entries": [
+        {
+          "id": "d008cdedd5a96b0d",
+          "title": "New default idea label and template",
+          "summary": "New workspaces now include a built-in idea label and Idea template to make capturing early-stage concepts faster.",
+          "category": "feature",
+          "commitShas": ["0b066c7d471994b399da59a931b51aba623a4d6f"]
+        },
+        {
+          "id": "baab801486362dbc",
+          "title": "Move sub-tickets directly to a board",
+          "summary": "Added a move-to-board action for sub-tickets, available from ticket details and context menus, with selection state cleared after the move.",
+          "category": "feature",
+          "commitShas": ["cd59ac570d9719feee9763bcfe2bc8827d8875e2"]
+        },
+        {
+          "id": "0734c753e03f1890",
+          "title": "Improved orchestration thread handling",
+          "summary": "Refined orchestration behavior across chat and thread navigation, including clearer handling for parent, review, waiting-child, and cascade-delete states. Connection fallback behavior was also streamlined to keep recovery states more predictable.",
+          "category": "improvement",
+          "commitShas": [
+            "0a548de02a3f3512e6020d11ad9537b55d7907d7",
+            "1a49181ee85a06b5302edafc0943e6bb0c5b94d2",
+            "3dcfa0d3d776ed781e998f031a331267afad1a15",
+            "8b6325c6f37beb7917ef32cc51a76f2d91445dad",
+            "c09467a81442e05355b010801f8b0c47bf674259",
+            "dbe2cf537ae0d0edf59b2ad398ab11ebdef27201",
+            "e36e0f54c3408592b0d4e26756adb498a1fcc64a"
+          ]
+        },
+        {
+          "id": "43dc478783b7f3ca",
+          "title": "Orchestration launch handoff on startup is more dependable",
+          "summary": "Improved startup handoff behavior when launching orchestration, reducing friction during session transitions.",
+          "category": "fix",
+          "commitShas": [
+            "4633dd0613cb0931224244146a359c26ebea4501",
+            "7af976228dbcf48ea15c5e61b3c50cfcd97c3889"
+          ]
+        },
+        {
+          "id": "506f369f5fb31a7d",
+          "title": "Ticket comments can be deleted more cleanly",
+          "summary": "Improved ticket comment deletion behavior for a smoother comment management experience.",
+          "category": "improvement",
+          "commitShas": [
+            "084ecd00e43eef6fe76bc019c864bd14fa91dbe4",
+            "4326b1745c3b4d0716b53a56120da40000301f02"
+          ]
+        },
+        {
+          "id": "5bedab70a7bc49fb",
+          "title": "Orchestration setup and model display were clarified",
+          "summary": "Refined orchestration-related settings and confirmation flows to present model choices and launch behavior more clearly.",
+          "category": "improvement",
+          "commitShas": [
+            "1140a798c2ce0d68072d365de95a826ea17f7b52",
+            "e682c30a0c58a94d0d0b3c111f6a03e55b424794"
+          ]
+        },
+        {
+          "id": "c791cdcf6178e63f",
+          "title": "Prompt management in Settings was polished",
+          "summary": "Improved the prompts settings experience, including editing flows and panel behavior.",
+          "category": "improvement",
+          "commitShas": [
+            "2bb5e6e42dca5a54f134a647d5c965657fcd107a",
+            "ecbaaedbdf17f38a4a08615f393241e3211cc26b"
+          ]
+        },
+        {
+          "id": "38d3e40de3b3e1ee",
+          "title": "Task and ticket details were improved in Settings",
+          "summary": "Refined task-related settings and ticket detail views for a clearer management workflow.",
+          "category": "improvement",
+          "commitShas": [
+            "9cbe65f04a2abe95d9ec2bc56605007e2aec88a7",
+            "a75f87f0e6bcc2e92ee84400ff59368800345940"
+          ]
+        },
+        {
+          "id": "e85f835c15b3f2ac",
+          "title": "Managed runs controls received usability refinements",
+          "summary": "Updated managed runs controls and settings to make run management clearer and more predictable.",
+          "category": "improvement",
+          "commitShas": [
+            "2d52707c21add6ab6c8b3f405b46274bc98e15b4",
+            "4845cae3021eb32c859bd8610a01e9ea88fd4a64",
+            "d64cbbd7d4ca0c39cfb297d9e5719983899e2267"
+          ]
+        },
+        {
+          "id": "06917d6dc31b3aaf",
+          "title": "Scheduled tasks management was refined across settings and proposal flows",
+          "summary": "Improved the scheduled tasks experience in Settings and related proposal flows, with clearer handling across task details and controls.",
+          "category": "improvement",
+          "commitShas": [
+            "16c3cf53f90c16b47c0baf9f0b38a381f8e0c72d",
+            "229d8492a275c201117e959a659e0b2edd92a2ca",
+            "e6cbd49acc85684874f8d4beac26e07502570868"
+          ]
+        },
+        {
+          "id": "a0eeef937f5bbe8a",
+          "title": "Connection status handling is more reliable in chat",
+          "summary": "Refined connection-state behavior so chat surfaces recover and present connection issues more consistently.",
+          "category": "improvement",
+          "commitShas": ["cd18b0588264c69de165482c80e5f76f51be8d06"]
+        },
+        {
+          "id": "988fa0080a639db9",
+          "title": "Archived threads can be deleted in bulk from Settings",
+          "summary": "Improved archived thread management with bulk deletion support in Settings, making large cleanups faster.",
+          "category": "feature",
+          "commitShas": [
+            "19cb919bb83a11bfc66be6a55f78d18421f458a1",
+            "606202f14b3cd78cc0ca589fca5ce7d11076b50e"
+          ]
+        },
         {
           "id": "71c1d00acbc88c86",
           "title": "Added a built-in changelog in Settings",
@@ -741,15 +859,15 @@
     }
   ],
   "provenance": {
-    "rebuiltFromScratch": true,
-    "rebuildCommitLimit": 189,
+    "rebuiltFromScratch": false,
+    "rebuildCommitLimit": 50,
     "promptVersion": "2026-04-11.v1",
     "batches": [
       {
-        "generatedAt": "2026-04-11T04:24:59.260Z",
+        "generatedAt": "2026-04-11T04:27:35.330Z",
         "promptVersion": "2026-04-11.v1",
         "fromExclusiveCommit": null,
-        "toInclusiveCommit": "e1940f82cd01c98eb3f7d55b7496c060611bda2a",
+        "toInclusiveCommit": "9d7806f41c21174081c652ad5ce16e059546b813",
         "commitShas": [
           "e1077b5f10a040d9a514e9492d7c14305ea2acb2",
           "fc4bde27820360736943b80d75d17cd04bb91a7c",
@@ -774,18 +892,7 @@
           "c130f0de69b5a404eff6d6ef2411b6eeb4841064",
           "69a1cecdce0e5c4f464456b3b4b5d6686cc7e2b1",
           "30443b3ee16871a59654d60741073ee360f4e970",
-          "e1940f82cd01c98eb3f7d55b7496c060611bda2a"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:25:25.164Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "e1940f82cd01c98eb3f7d55b7496c060611bda2a",
-        "toInclusiveCommit": "dc874a483452b0d7a7d5d5e1bac89340ec8cdb75",
-        "commitShas": [
+          "e1940f82cd01c98eb3f7d55b7496c060611bda2a",
           "2b596d908850d306371ccbe847cbd281db8966a1",
           "98b893025cccd39594b5ae40b2d5986d9bb51b08",
           "fb220eea181065ac5a807ce13d94b9e6795d0388",
@@ -809,18 +916,7 @@
           "3be0c6ea77f48ae7bd261a856e3e19889bf7028f",
           "630c183092fd98f41f37d162611e9024cae5b12e",
           "e359ba3b858363a7307fb16ec5d45aea1c847589",
-          "dc874a483452b0d7a7d5d5e1bac89340ec8cdb75"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:25:53.683Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "dc874a483452b0d7a7d5d5e1bac89340ec8cdb75",
-        "toInclusiveCommit": "8e30a6c7c429d6b1ca7499e11c55fd7297e69456",
-        "commitShas": [
+          "dc874a483452b0d7a7d5d5e1bac89340ec8cdb75",
           "caeb52ac2f59b86d0cb565d3d571ad55a648c498",
           "aba36129eb5dd5b55301b7e607160ebeecdbfb15",
           "4973c8333b5c81f85a3d6e1c27e69e475982da59",
@@ -844,18 +940,7 @@
           "7d32356059ee1a1bada0a55d00b4e4090d2d750f",
           "c437af0ae779abdb0807a1dfbc4c188d79cf41cd",
           "4d815507bdf6191483cf4eab0de4a7536b5c54bd",
-          "8e30a6c7c429d6b1ca7499e11c55fd7297e69456"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:26:15.968Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "8e30a6c7c429d6b1ca7499e11c55fd7297e69456",
-        "toInclusiveCommit": "f2b4ce3921d16154147e7a62215f83f2e148a4ab",
-        "commitShas": [
+          "8e30a6c7c429d6b1ca7499e11c55fd7297e69456",
           "a34ad2c88d8586a90d406a2705c5ba0ffdc1224d",
           "b6dd6a54366437d5d60426e984b3af6b47cb94b8",
           "105f574d4249b66899e1b1f867504bc3cdcbd3ac",
@@ -879,18 +964,7 @@
           "06110d3b1545c8562ea4fcc3c0e18c910ae65f72",
           "22cd7ddb83420f50fd19c753d606c863ccd671ff",
           "0e39446bc3286ae01ba499881d5168faf6c0dd3a",
-          "f2b4ce3921d16154147e7a62215f83f2e148a4ab"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:26:39.905Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "f2b4ce3921d16154147e7a62215f83f2e148a4ab",
-        "toInclusiveCommit": "75aeb263e28da40049d1c63d2d1b84bd36976cb4",
-        "commitShas": [
+          "f2b4ce3921d16154147e7a62215f83f2e148a4ab",
           "c6cb176015fa4421446107105eb5d51f94609195",
           "6abc9675eaee17f7bbd3b15527c1dc137d5040a3",
           "432a8b602903531a88a2364ee4e534bab6fce42a",
@@ -914,18 +988,7 @@
           "0a82bd60c65cfcc0fe802ea5b5636ff8a1939920",
           "ff64f83aa17330e2740f90d6f5cb0b678927bedd",
           "10efdd2d774466ead3bef543a992ebde0a78c8f3",
-          "75aeb263e28da40049d1c63d2d1b84bd36976cb4"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:26:59.263Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "75aeb263e28da40049d1c63d2d1b84bd36976cb4",
-        "toInclusiveCommit": "2f4a264b1a6a13e9fbd85d8374e3ee43d81ef40e",
-        "commitShas": [
+          "75aeb263e28da40049d1c63d2d1b84bd36976cb4",
           "bdb0ca7a576af100b77a704e99c3d15b392b0c4e",
           "217c188a1115e35d6240499f075e6241f79be233",
           "301dca764c5a61b5f1bcc07f3e87c6cbcad2a7d0",
@@ -949,18 +1012,7 @@
           "373db3b841dc3081f4b23abe81d21a595441726a",
           "a91255ad329f3413f13ba627ca54cd6ba989090b",
           "a8b5175e31c3b6ccefaf6723f56dc2f3bd176c01",
-          "2f4a264b1a6a13e9fbd85d8374e3ee43d81ef40e"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:27:19.464Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "2f4a264b1a6a13e9fbd85d8374e3ee43d81ef40e",
-        "toInclusiveCommit": "1885ecfc69994679e42da3ad14c58f2966f3110b",
-        "commitShas": [
+          "2f4a264b1a6a13e9fbd85d8374e3ee43d81ef40e",
           "d4dd651c82fbceebb81a39e95864aee45819b973",
           "4bd9b7fab3a172748a20159c4ab68a15f3a1a926",
           "0dd06e3f449eb8e6602bfc684dfeeaca0aa839a0",
@@ -984,18 +1036,7 @@
           "e5a05a518007f1aba18f4f0e09698904324724d2",
           "1f681f990c47e26458e99b3504c09b603e7970cc",
           "d6d04f418541c5c2207cceb5cb126cb8725e8a20",
-          "1885ecfc69994679e42da3ad14c58f2966f3110b"
-        ],
-        "commitCount": 24,
-        "model": "gpt-5.4",
-        "mcpDisabled": true
-      },
-      {
-        "generatedAt": "2026-04-11T04:27:35.213Z",
-        "promptVersion": "2026-04-11.v1",
-        "fromExclusiveCommit": "1885ecfc69994679e42da3ad14c58f2966f3110b",
-        "toInclusiveCommit": "9d7806f41c21174081c652ad5ce16e059546b813",
-        "commitShas": [
+          "1885ecfc69994679e42da3ad14c58f2966f3110b",
           "7c0ddce92edfe845b3eb986afa71651e2f433c28",
           "8e8d0812dcf174e67d1cd50bbafdc1bae108787a",
           "a5a7b3fe582a515e6bc42202acaa4e918dcf323b",
@@ -1018,7 +1059,63 @@
           "025d16919b93dd0ee062f227f5434645b9ab4376",
           "9d7806f41c21174081c652ad5ce16e059546b813"
         ],
-        "commitCount": 21,
+        "commitCount": 189,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T13:30:13.909Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "9d7806f41c21174081c652ad5ce16e059546b813",
+        "toInclusiveCommit": "4633dd0613cb0931224244146a359c26ebea4501",
+        "commitShas": [
+          "08154b5f6e908b7ba93709926f57e465eb9798c8",
+          "19cb919bb83a11bfc66be6a55f78d18421f458a1",
+          "606202f14b3cd78cc0ca589fca5ce7d11076b50e",
+          "cd18b0588264c69de165482c80e5f76f51be8d06",
+          "610ad29656af170c9c0c86791f550d7c60cfc6b6",
+          "e8b148db2f6822282676118e79d6897e48bb5620",
+          "926e0692a83ee1d63d6cb37236aa5822c93180e9",
+          "144c8d32b22528627f5f18549bb45509e3c0c7dc",
+          "e6cbd49acc85684874f8d4beac26e07502570868",
+          "229d8492a275c201117e959a659e0b2edd92a2ca",
+          "16c3cf53f90c16b47c0baf9f0b38a381f8e0c72d",
+          "d64cbbd7d4ca0c39cfb297d9e5719983899e2267",
+          "2d52707c21add6ab6c8b3f405b46274bc98e15b4",
+          "4845cae3021eb32c859bd8610a01e9ea88fd4a64",
+          "a75f87f0e6bcc2e92ee84400ff59368800345940",
+          "9cbe65f04a2abe95d9ec2bc56605007e2aec88a7",
+          "ecbaaedbdf17f38a4a08615f393241e3211cc26b",
+          "2bb5e6e42dca5a54f134a647d5c965657fcd107a",
+          "e682c30a0c58a94d0d0b3c111f6a03e55b424794",
+          "1140a798c2ce0d68072d365de95a826ea17f7b52",
+          "4326b1745c3b4d0716b53a56120da40000301f02",
+          "084ecd00e43eef6fe76bc019c864bd14fa91dbe4",
+          "7af976228dbcf48ea15c5e61b3c50cfcd97c3889",
+          "4633dd0613cb0931224244146a359c26ebea4501"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T13:30:26.471Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "4633dd0613cb0931224244146a359c26ebea4501",
+        "toInclusiveCommit": "0b066c7d471994b399da59a931b51aba623a4d6f",
+        "commitShas": [
+          "c09467a81442e05355b010801f8b0c47bf674259",
+          "1a49181ee85a06b5302edafc0943e6bb0c5b94d2",
+          "8b6325c6f37beb7917ef32cc51a76f2d91445dad",
+          "3dcfa0d3d776ed781e998f031a331267afad1a15",
+          "e36e0f54c3408592b0d4e26756adb498a1fcc64a",
+          "dbe2cf537ae0d0edf59b2ad398ab11ebdef27201",
+          "0a548de02a3f3512e6020d11ad9537b55d7907d7",
+          "6e39ed409f42a460ec81d85eb498ed0a36f02c1d",
+          "cd59ac570d9719feee9763bcfe2bc8827d8875e2",
+          "0b066c7d471994b399da59a931b51aba623a4d6f"
+        ],
+        "commitCount": 10,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

@@ -11,16 +11,17 @@ The desktop build pipeline owns a machine-generated changelog that is baked into
 
 ## Generation Flow
 
-1. `scripts/generate-changelog.ts` resolves `HEAD` and loads the cache if present.
-2. If the cache's `lastProcessedCommit` is not an ancestor of `HEAD` (force-push, rebase, or missing commit), the generator rebuilds from scratch.
-3. Otherwise it only processes the new commit range from `lastProcessedCommit..HEAD`.
-4. Rebuilds are intentionally capped to a recent-history window (`T3CODE_CHANGELOG_REBUILD_MAX_COMMITS`, default `50`) so packaging stays practical even on long-lived repos.
-5. For each batch it gathers committed metadata only:
+1. `scripts/generate-changelog.ts` resolves `HEAD` and loads the local cache if present.
+2. If the local cache is missing, it seeds from the committed `apps/web/public/generated/changelog.json` asset so clean production builds keep the previously shipped history instead of starting over from a shallow window.
+3. If the baseline `lastProcessedCommit` is not an ancestor of `HEAD` (force-push, rebase, or missing commit), the generator rebuilds from scratch.
+4. Otherwise it only processes the new commit range from `lastProcessedCommit..HEAD`.
+5. Rebuilds are intentionally capped to a recent-history window (`T3CODE_CHANGELOG_REBUILD_MAX_COMMITS`, default `50`) so packaging stays practical even on long-lived repos.
+6. For each batch it gathers committed metadata only:
    - commit SHA
    - authored timestamp/date
    - subject/body
    - changed file paths
-6. It runs `codex exec` with an isolated `CODEX_HOME` that copies only `auth.json`.
+7. It runs `codex exec` with an isolated `CODEX_HOME` that copies only `auth.json`.
 
 This intentionally disables MCP/config-driven tools while still allowing authenticated structured-output calls.
 
