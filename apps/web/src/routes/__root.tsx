@@ -57,17 +57,19 @@ export const Route = createRootRouteWithContext<{
   }),
 });
 
-function RootRouteView() {
-  if (!readNativeApi()) {
-    return (
-      <div className="flex h-screen flex-col bg-background text-foreground">
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">
-            Connecting to {APP_DISPLAY_NAME} server...
-          </p>
-        </div>
+export function NativeApiUnavailableFallback() {
+  return (
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-sm text-muted-foreground">Connecting to {APP_DISPLAY_NAME} server...</p>
       </div>
-    );
+    </div>
+  );
+}
+
+export function RootRouteView() {
+  if (!readNativeApi()) {
+    return <NativeApiUnavailableFallback />;
   }
 
   return (

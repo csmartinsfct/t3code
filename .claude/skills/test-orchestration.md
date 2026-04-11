@@ -6,20 +6,20 @@ End-to-end test of the T3 Code orchestration system using real AI models, the de
 
 - Dev server running (`bun run dev` from repo root). Note the server port and web port from the output.
 - Chrome DevTools MCP connected to the browser.
-- The "Test" project exists in T3 Code (project title: "Test", workspace: `/Users/cristianomartins/Desktop/code/experiments/test_orchestration/t3code`).
+- The "Test" project exists in T3 Code (project title: "Test", workspace: `/Users/cristianomartins/Desktop/code/experiments/t3_code_real_test`).
 
 ## Test Repository
 
 The test repo is a clone of the Codex open-source repo at:
 
 ```
-/Users/cristianomartins/Desktop/code/experiments/test_orchestration/t3code
+/Users/cristianomartins/Desktop/code/experiments/t3_code_real_test
 ```
 
 **Always reset to main before testing** so orchestration starts from a clean state:
 
 ```bash
-cd /Users/cristianomartins/Desktop/code/experiments/test_orchestration/t3code
+cd /Users/cristianomartins/Desktop/code/experiments/t3_code_real_test
 git checkout main
 git reset --hard origin/main
 git clean -fd
@@ -88,7 +88,7 @@ All testing is done via the **chrome-devtools MCP** (snapshots, clicks, screensh
 - Check the test repo has the expected changes:
 
 ```bash
-cd /Users/cristianomartins/Desktop/code/experiments/test_orchestration/t3code
+cd /Users/cristianomartins/Desktop/code/experiments/t3_code_real_test
 git diff main -- '**/Sidebar*' | head -30
 ```
 
@@ -128,7 +128,7 @@ Depending on what is being tested, also verify these operations. Each requires s
 - **Orchestration doesn't start**: Check that models are configured in Settings > Orchestration and the selected providers are enabled
 - **Agent errors**: Check the server terminal output for provider session errors
 - **Stale runs**: Clean up with `sqlite3 ~/.t3/dev/state.sqlite "UPDATE orchestration_runs SET status = 'canceled' WHERE status IN ('pending', 'running', 'paused')"`
-- **Test repo dirty**: Reset with `cd /Users/cristianomartins/Desktop/code/experiments/test_orchestration/t3code && git checkout main && git reset --hard origin/main && git clean -fd`
+- **Test repo dirty**: Reset with `cd /Users/cristianomartins/Desktop/code/experiments/t3_code_real_test && git checkout main && git reset --hard origin/main && git clean -fd`
 
 ## Key Files
 

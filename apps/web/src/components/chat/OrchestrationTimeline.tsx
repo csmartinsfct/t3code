@@ -467,7 +467,7 @@ export function OrchestrationTimeline({
               {row.kind === "loading" && <LoadingSkeleton />}
               {row.kind === "empty" && <EmptyState />}
               {row.kind === "working" && (
-                <div className="py-0.5 pl-1.5">
+                <div className="py-0.5 pl-1.5 mb-4">
                   <WorkingIndicator createdAt={row.createdAt} nowIso={nowIso} />
                 </div>
               )}
