@@ -30,6 +30,7 @@ import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { clearPromotedDraftThread } from "../composerDraftStore";
+import { registerClipboardSnippet } from "../clipboardSnippetRegistry";
 import { useUiStateStore } from "../uiStateStore";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
@@ -1079,6 +1080,28 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
     () => document.querySelector<HTMLElement>('[contenteditable="true"]'),
     "Unable to find composer editor.",
   );
+}
+
+function createTextClipboardData(text: string): DataTransfer {
+  return {
+    files: [],
+    items: [],
+    types: ["text/plain"],
+    getData: (type: string) => (type === "text/plain" ? text : ""),
+  } as unknown as DataTransfer;
+}
+
+function dispatchTextPaste(target: HTMLElement, text: string): ClipboardEvent {
+  const event = new ClipboardEvent("paste", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: createTextClipboardData(text),
+  });
+  target.dispatchEvent(event);
+  return event;
 }
 
 async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
@@ -3006,6 +3029,106 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(turnStartRequest.message.text).toContain("const value = 42;");
           expect(turnStartRequest.message.text).toContain("Please use this snippet.");
           expect(turnStartRequest.message.text).not.toContain("`README.md`");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("converts pasted registered editor copies into composer snippet chips", async () => {
+    // Audit traceability: e2bee71, 877d7ca.
+    const copiedSnippet = "const answer = 42;\nconsole.log(answer);\n";
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-editor-snippet-paste" as MessageId,
+        targetText: "editor snippet paste target",
+      }),
+    });
+
+    try {
+      registerClipboardSnippet({
+        text: copiedSnippet,
+        cwd: "/repo/project",
+        relativePath: "src/app.ts",
+        startLine: 1,
+        endLine: 2,
+      });
+
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      dispatchTextPaste(composerEditor, copiedSnippet);
+
+      await vi.waitFor(
+        () => {
+          const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+          expect(draft?.prompt ?? "").toBe("");
+          expect(draft?.codeSnippets).toEqual([
+            {
+              id: expect.any(String),
+              cwd: "/repo/project",
+              relativePath: "src/app.ts",
+              startLine: 1,
+              endLine: 2,
+              code: copiedSnippet,
+            },
+          ]);
+          expect(document.body.textContent ?? "").toContain("app.ts:1–2");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps diff-text paste as plain composer text without creating a snippet chip", async () => {
+    // Audit traceability: e2bee71, 877d7ca.
+    const pastedDiffText = [
+      "diff --git a/src/app.ts b/src/app.ts",
+      "@@ -1,1 +1,1 @@",
+      "-const before = 1;",
+      "+const after = 2;",
+    ].join("\n");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-diff-plain-paste" as MessageId,
+        targetText: "diff plain paste target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      dispatchTextPaste(composerEditor, pastedDiffText);
+
+      await vi.waitFor(
+        () => {
+          const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+          expect(draft?.prompt ?? "").toContain("const after = 2;");
+          expect(draft?.codeSnippets ?? []).toEqual([]);
+          expect(document.body.textContent ?? "").not.toContain("app.ts:1–2");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const request = wsRequests.find(
+            (candidate) =>
+              candidate._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              candidate.type === "thread.turn.start",
+          );
+          expect(request).toBeTruthy();
+          const turnStartRequest = request as unknown as { message: { text: string } };
+          expect(turnStartRequest.message.text).toContain(pastedDiffText);
+          expect(turnStartRequest.message.text).not.toContain("`src/app.ts` (lines 1–2):");
         },
         { timeout: 8_000, interval: 16 },
       );
