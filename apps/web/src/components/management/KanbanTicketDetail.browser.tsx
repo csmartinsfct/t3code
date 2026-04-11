@@ -13,6 +13,13 @@ import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
 // This file covers the browser-only hover preview flow that KanbanTicketDetail wires around
 // SubTicketPreviewContent, without mounting the full ticket detail surface.
 
+const { mockNavigate, mockUseParams } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(async () => undefined),
+  mockUseParams: vi.fn(() => null),
+}));
+
+const mockGetById = vi.fn(async () => null);
+const mockGetThreadLinks = vi.fn(async () => ({ ticketId: "ticket-1", originThread: null }));
 const mockOnEvent = vi.fn(() => () => {});
 const capturedDraggables: Array<{ id: string; data: unknown }> = [];
 
@@ -57,11 +64,20 @@ vi.mock("@dnd-kit/sortable", async () => {
   };
 });
 
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => mockNavigate,
+  useParams: () => mockUseParams(),
+}));
+
 vi.mock("../../nativeApi", () => ({
   ensureNativeApi: () => ({
     ticketing: {
-      getById: vi.fn(async () => null),
+      getById: mockGetById,
+      getThreadLinks: mockGetThreadLinks,
       onEvent: mockOnEvent,
+    },
+    contextMenu: {
+      show: vi.fn(async () => null),
     },
   }),
 }));
@@ -71,12 +87,72 @@ vi.mock("../../ticketSelectionStore", () => ({
     selector(selectionStoreState),
 }));
 
+vi.mock("../../hooks/useSettings", () => ({
+  useSettings: () => ({ maxReviewIterations: 1 }),
+}));
+
+vi.mock("../../rpc/serverState", () => ({
+  useServerProviders: () => [],
+}));
+
+vi.mock("../../modelSelection", () => ({
+  resolveAppModelSelectionState: () => ({ provider: "codex", model: "gpt-5.4" }),
+  modelSelectionProviderKind: () => "codex",
+  getCustomModelOptionsByProvider: () => ({}),
+  makeAppModelSelection: (provider: string, model: string) => ({ provider, model }),
+}));
+
+vi.mock("../../composerDraftStore", () => ({
+  useComposerDraftStore: {
+    getState: () => ({
+      clearProjectDraftThreadId: vi.fn(),
+      setProjectDraftThreadId: vi.fn(),
+      applyStickyState: vi.fn(),
+      setPrompt: vi.fn(),
+      addTicketAttachment: vi.fn(),
+    }),
+  },
+}));
+
+vi.mock("../../uiStateStore", () => ({
+  useUiStateStore: {
+    getState: () => ({
+      initializeThreadBoardContextFromSource: vi.fn(),
+    }),
+  },
+}));
+
 vi.mock("./TicketMarkdown", () => ({
   TicketMarkdown: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+vi.mock("../chat/ProviderModelPicker", () => ({
+  ProviderModelPicker: () => null,
+}));
+
+vi.mock("../chat/TraitsPicker", () => ({
+  TraitsPicker: () => null,
+}));
+
+vi.mock("./TicketOriginThreadSection", () => ({
+  TicketOriginThreadSection: () => null,
+}));
+
+vi.mock("../settings/TicketAcceptanceCriteria", () => ({
+  TicketAcceptanceCriteria: () => null,
+}));
+
+vi.mock("../settings/TicketComments", () => ({
+  TicketComments: () => null,
+}));
+
+vi.mock("../settings/TicketHistory", () => ({
+  TicketHistory: () => null,
+}));
+
 const { KanbanCard } = await import("./KanbanCard");
-const { SubTicketRowButton, SubTicketsList } = await import("./KanbanTicketDetail");
+const { resolveTicketDetailStreamEventAction, SubTicketRowButton, SubTicketsList } =
+  await import("./KanbanTicketDetail");
 const { handleTicketMultiSelectGesture } = await import("./ticketMultiSelect");
 
 function makePreviewTicket(overrides: Partial<Ticket> = {}): Ticket {
@@ -197,6 +273,8 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    mockUseParams.mockReset();
+    mockUseParams.mockReturnValue(null);
     capturedDraggables.length = 0;
     selectionStoreState.selectedTicketIds = new Set();
     selectionStoreState.selectedTickets = new Map();
@@ -364,5 +442,77 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
         },
       ]),
     );
+  });
+});
+
+describe("KanbanTicketDetail ticketing stream coverage", () => {
+  it("refetches when comment events target the current task detail", () => {
+    // Audit traceability: 8b69f70.
+    expect(
+      resolveTicketDetailStreamEventAction(
+        "ticket-live" as Ticket["id"],
+        makePreviewTicket({
+          id: "ticket-live" as Ticket["id"],
+          parentId: null,
+          acceptanceCriteria: [],
+        }),
+        { type: "comment_upserted", ticketId: "ticket-live" } as never,
+      ),
+    ).toBe("refetch");
+  });
+
+  it("refetches when sub-ticket or dependency updates change the rendered task detail", () => {
+    const currentTicket = makePreviewTicket({
+      id: "ticket-live" as Ticket["id"],
+      parentId: null,
+      subTickets: [
+        makeTicketSummary({
+          id: "sub-ticket" as TicketSummary["id"],
+          parentId: "ticket-live" as TicketSummary["id"],
+        }),
+      ],
+      dependencies: [
+        {
+          ticketId: "ticket-live" as Ticket["id"],
+          dependsOnTicketId: "dependency-ticket" as Ticket["id"],
+          identifier: "T3CO-900",
+          title: "Dependency ticket",
+          status: "todo",
+        },
+      ],
+      acceptanceCriteria: [],
+    });
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_upserted",
+        projectId: "project-1",
+        ticket: makeTicketSummary({
+          id: "sub-ticket" as TicketSummary["id"],
+          parentId: "ticket-live" as TicketSummary["id"],
+        }),
+      } as never),
+    ).toBe("refetch");
+
+    expect(
+      resolveTicketDetailStreamEventAction("ticket-live" as Ticket["id"], currentTicket, {
+        type: "ticket_deleted",
+        ticketId: "dependency-ticket",
+      } as never),
+    ).toBe("refetch");
+  });
+
+  it("backs out when the current task is deleted through the stream", () => {
+    expect(
+      resolveTicketDetailStreamEventAction(
+        "ticket-live" as Ticket["id"],
+        makePreviewTicket({
+          id: "ticket-live" as Ticket["id"],
+          parentId: null,
+          acceptanceCriteria: [],
+        }),
+        { type: "ticket_deleted", ticketId: "ticket-live" } as never,
+      ),
+    ).toBe("back");
   });
 });
