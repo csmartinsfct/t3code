@@ -12,6 +12,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
+  type ScheduledTaskId,
   type ServerConfig,
   type ServerProvider,
   type ServerLifecycleWelcomePayload,
@@ -1605,6 +1606,217 @@ describe("ChatView timeline estimator parity (full app)", () => {
     customWsRpcResolver = null;
     delete window.nativeApi;
     document.body.innerHTML = "";
+  });
+
+  it("accepts a propose-scheduled-task card and dispatches the confirmation turn", async () => {
+    // Audit traceability: 2b596d9.
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-scheduled-task-proposal" as MessageId,
+      targetText: "Please help me automate this.",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              messages: [
+                createUserMessage({
+                  id: "msg-user-scheduled-task-proposal" as MessageId,
+                  text: "Please help me automate this.",
+                  offsetSeconds: 0,
+                }),
+                createAssistantMessage({
+                  id: "msg-assistant-scheduled-task-proposal" as MessageId,
+                  offsetSeconds: 1,
+                  text: [
+                    "```t3:propose-scheduled-task",
+                    JSON.stringify(
+                      {
+                        name: "Morning sync",
+                        description: "Check the backlog each morning.",
+                        cronExpression: "0 9 * * 1-5",
+                        projectId: PROJECT_ID,
+                        prompt: "Summarize open work.",
+                        autoSend: true,
+                      },
+                      null,
+                      2,
+                    ),
+                    "```",
+                  ].join("\n"),
+                }),
+              ],
+            }
+          : thread,
+      ),
+    };
+
+    const createSpy = vi.fn(async () => ({
+      jobId: "job-proposed" as ScheduledTaskId,
+      name: "Morning sync",
+      description: "Check the backlog each morning.",
+      cronExpression: "0 9 * * 1-5",
+      enabled: true,
+      jobType: "new_thread" as const,
+      newThreadConfig: {
+        projectId: PROJECT_ID,
+        prompt: "Summarize open work.",
+        autoSend: true,
+      },
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+      lastRunAt: null,
+      nextRunAt: null,
+    }));
+    const dispatchSpy = vi.fn(async () => ({ sequence: 1 }));
+
+    const api = installTestNativeApi({
+      dispatchCommand: dispatchSpy,
+    });
+    api.scheduledTasks = {
+      ...api.scheduledTasks,
+      create: createSpy,
+    };
+    window.nativeApi = api;
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await expect.element(page.getByText("Proposed Scheduled Task")).toBeInTheDocument();
+      await page.getByRole("button", { name: "Accept" }).click();
+
+      await vi.waitFor(() => {
+        expect(createSpy).toHaveBeenCalledWith({
+          name: "Morning sync",
+          description: "Check the backlog each morning.",
+          cronExpression: "0 9 * * 1-5",
+          enabled: true,
+          jobType: "new_thread",
+          newThreadConfig: {
+            projectId: PROJECT_ID,
+            prompt: "Summarize open work.",
+            autoSend: true,
+          },
+        });
+      });
+
+      await vi.waitFor(() => {
+        expect(dispatchSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "thread.turn.start",
+            threadId: THREAD_ID,
+            message: expect.objectContaining({
+              role: "user",
+              text: "Scheduled task added: Morning sync (schedule: 0 9 * * 1-5)",
+            }),
+          }),
+        );
+      });
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="badge"]')).find(
+            (badge) => badge.textContent?.trim() === "Added",
+          ) as HTMLElement | null,
+        'Unable to find the scheduled-task "Added" badge.',
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("rejects a propose-scheduled-task card without creating a scheduled task", async () => {
+    // Audit traceability: 2b596d9.
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-scheduled-task-reject" as MessageId,
+      targetText: "No thanks.",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              messages: [
+                createUserMessage({
+                  id: "msg-user-scheduled-task-reject" as MessageId,
+                  text: "No thanks.",
+                  offsetSeconds: 0,
+                }),
+                createAssistantMessage({
+                  id: "msg-assistant-scheduled-task-reject" as MessageId,
+                  offsetSeconds: 1,
+                  text: [
+                    "```t3:propose-scheduled-task",
+                    JSON.stringify(
+                      {
+                        name: "Lunch reminder",
+                        description: null,
+                        cronExpression: "0 12 * * *",
+                        projectId: PROJECT_ID,
+                        autoSend: false,
+                      },
+                      null,
+                      2,
+                    ),
+                    "```",
+                  ].join("\n"),
+                }),
+              ],
+            }
+          : thread,
+      ),
+    };
+
+    const createSpy = vi.fn();
+    const dispatchSpy = vi.fn(async () => ({ sequence: 1 }));
+
+    const api = installTestNativeApi({
+      dispatchCommand: dispatchSpy,
+    });
+    api.scheduledTasks = {
+      ...api.scheduledTasks,
+      create: createSpy,
+    };
+    window.nativeApi = api;
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await expect.element(page.getByText("Proposed Scheduled Task")).toBeInTheDocument();
+      await page.getByRole("button", { name: "Reject" }).click();
+
+      await vi.waitFor(() => {
+        expect(createSpy).not.toHaveBeenCalled();
+        expect(dispatchSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "thread.turn.start",
+            threadId: THREAD_ID,
+            message: expect.objectContaining({
+              role: "user",
+              text: "User rejected the proposed scheduled task.",
+            }),
+          }),
+        );
+      });
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="badge"]')).find(
+            (badge) => badge.textContent?.trim() === "Rejected",
+          ) as HTMLElement | null,
+        'Unable to find the scheduled-task "Rejected" badge.',
+      );
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it.each(TEXT_VIEWPORT_MATRIX)(
