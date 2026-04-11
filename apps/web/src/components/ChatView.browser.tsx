@@ -3480,11 +3480,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     const confirmCalls: string[] = [];
     const dispatchedCommands: Array<Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]> =
       [];
-    let contextMenuCallCount = 0;
     installTestNativeApi({
-      showContextMenu: async () => {
-        contextMenuCallCount += 1;
-        return contextMenuCallCount === 1 ? "select" : "delete";
+      showContextMenu: async (items) => {
+        if (items.some((item) => item.id === "select")) {
+          return "select";
+        }
+        if (items.some((item) => item.id === "delete")) {
+          return "delete";
+        }
+        throw new Error(
+          `Unexpected context menu items: ${items.map((item) => item.id).join(", ")}`,
+        );
       },
       confirm: async (message) => {
         confirmCalls.push(message);

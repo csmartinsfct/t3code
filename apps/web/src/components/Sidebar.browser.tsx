@@ -7,14 +7,16 @@ import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardConte
 import { buildMoveThreadConfirmationMessage, buildThreadContextMenuItems } from "./Sidebar";
 
 function createProvider(input: {
-  provider: ServerProvider["provider"];
+  provider: string;
   displayName?: string;
   status?: ServerProvider["status"];
   enabled?: boolean;
   models?: ServerProvider["models"];
 }): ServerProvider {
   return {
-    provider: input.provider,
+    // Runtime provider IDs can include profile suffixes like `claudeAgent:metric`,
+    // even though the contracts type currently only models the base providers.
+    provider: input.provider as never,
     ...(input.displayName ? { displayName: input.displayName } : {}),
     enabled: input.enabled ?? true,
     installed: true,
@@ -65,7 +67,7 @@ describe("Sidebar thread context menu helpers", () => {
     const items = buildThreadContextMenuItems({
       serverProviders: [
         createProvider({
-          provider: "claudeAgent:metric" as never,
+          provider: "claudeAgent:metric",
           displayName: "Claude (metric)",
           models: [
             {
