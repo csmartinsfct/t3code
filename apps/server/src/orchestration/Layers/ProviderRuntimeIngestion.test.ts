@@ -398,6 +398,14 @@ describe("ProviderRuntimeIngestion", () => {
         expectedError: "Context is too long. Try starting a new thread or compacting.",
       },
       {
+        reason: "model_error",
+        expectedError: "The model returned an error. Try again.",
+      },
+      {
+        reason: "image_error",
+        expectedError: "Failed to process an image in the conversation.",
+      },
+      {
         reason: "stop_hook_prevented",
         expectedError: "A hook prevented the agent from continuing.",
       },
