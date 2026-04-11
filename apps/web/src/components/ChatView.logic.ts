@@ -16,7 +16,7 @@ import {
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "../lib/terminalContext";
-import type { BoardContext, ViewMode } from "../uiStateStore";
+import type { ViewMode } from "../uiStateStore";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -228,9 +228,8 @@ export function buildTicketLinkCacheKey(projectId: ProjectIdValue, identifier: s
   return `${projectId}:${identifier.trim().toUpperCase()}`;
 }
 
-export async function openTicketLinkInThread(input: {
+export async function openTicketLinkInManagementView(input: {
   identifier: string;
-  threadId: ThreadId;
   projectId: ProjectIdValue | null | undefined;
   resolvedTicketIdCache: Map<string, TicketId>;
   inFlightTicketResolutions: Map<string, Promise<TicketId>>;
@@ -238,13 +237,8 @@ export async function openTicketLinkInThread(input: {
     identifier: string;
     projectId: ProjectIdValue;
   }) => Promise<{ id: TicketId }>;
-  getBoardContext: (threadId: ThreadId) => BoardContext | null | undefined;
   setViewMode: (mode: ViewMode) => void;
-  pushThreadBoardTicket: (
-    threadId: ThreadId,
-    projectId: ProjectIdValue,
-    ticketId: TicketId,
-  ) => void;
+  pushManagementBoardTicket: (projectId: ProjectIdValue, ticketId: TicketId) => void;
   showErrorToast: (input: { title: string; description?: string }) => void;
 }): Promise<void> {
   const identifier = input.identifier.trim();
@@ -291,13 +285,7 @@ export async function openTicketLinkInThread(input: {
   }
 
   input.setViewMode("management");
-  const currentBoardContext = input.getBoardContext(input.threadId);
-  const currentTicketStack =
-    currentBoardContext?.projectId === input.projectId ? currentBoardContext.ticketStack : [];
-  if (currentTicketStack[currentTicketStack.length - 1] === ticketId) {
-    return;
-  }
-  input.pushThreadBoardTicket(input.threadId, input.projectId, ticketId);
+  input.pushManagementBoardTicket(input.projectId, ticketId);
 }
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {

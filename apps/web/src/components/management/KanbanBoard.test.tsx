@@ -94,21 +94,17 @@ const selectionStoreState = {
 };
 
 const uiStateStoreState = {
-  boardContextByThreadId: {} as Record<
-    string,
-    {
-      projectId: TicketSummary["projectId"];
-      ticketStack: TicketSummary["id"][];
-      boardScrollLeft: number;
-      updatedAt: string;
-    }
-  >,
-  setThreadBoardRoot: vi.fn(),
-  pushThreadBoardTicket: vi.fn(),
-  popThreadBoardTicket: vi.fn(),
-  setThreadBoardScrollLeft: vi.fn(),
-  sanitizeThreadBoardContext: vi.fn(),
-  setManagementLastProjectId: vi.fn(),
+  managementBoardContext: null as {
+    projectId: TicketSummary["projectId"];
+    ticketStack: TicketSummary["id"][];
+    boardScrollLeft: number;
+    updatedAt: string;
+  } | null,
+  setManagementBoardRoot: vi.fn(),
+  pushManagementBoardTicket: vi.fn(),
+  popManagementBoardTicket: vi.fn(),
+  setManagementBoardScrollLeft: vi.fn(),
+  sanitizeManagementBoardContext: vi.fn(),
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -285,19 +281,19 @@ async function renderBoard({
   electron = false,
   threadId = null,
   tickets = [],
-  boardContextByThreadId = {},
+  managementBoardContext = null,
 }: {
   electron?: boolean;
   threadId?: ThreadId | null;
   tickets?: ReadonlyArray<TicketSummary>;
-  boardContextByThreadId?: typeof uiStateStoreState.boardContextByThreadId;
+  managementBoardContext?: typeof uiStateStoreState.managementBoardContext;
 } = {}) {
   vi.resetModules();
   vi.clearAllMocks();
 
   selectionStoreState.selectedTicketIds = new Set();
   selectionStoreState.selectedTickets = new Map();
-  uiStateStoreState.boardContextByThreadId = boardContextByThreadId;
+  uiStateStoreState.managementBoardContext = managementBoardContext;
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
   columnMockState.lastProps = null;
@@ -425,13 +421,11 @@ describe("KanbanBoard", () => {
     const boardMarkup = await renderBoard({
       threadId,
       tickets: [makeTicket()],
-      boardContextByThreadId: {
-        [threadId]: {
-          projectId: "project-1" as TicketSummary["projectId"],
-          ticketStack: [],
-          boardScrollLeft: 0,
-          updatedAt,
-        },
+      managementBoardContext: {
+        projectId: "project-1" as TicketSummary["projectId"],
+        ticketStack: [],
+        boardScrollLeft: 0,
+        updatedAt,
       },
     });
 
@@ -441,16 +435,14 @@ describe("KanbanBoard", () => {
     const nestedDetailMarkup = await renderBoard({
       threadId,
       tickets: [makeTicket()],
-      boardContextByThreadId: {
-        [threadId]: {
-          projectId: "project-1" as TicketSummary["projectId"],
-          ticketStack: [
-            "parent-ticket" as TicketSummary["id"],
-            "child-ticket" as TicketSummary["id"],
-          ],
-          boardScrollLeft: 0,
-          updatedAt,
-        },
+      managementBoardContext: {
+        projectId: "project-1" as TicketSummary["projectId"],
+        ticketStack: [
+          "parent-ticket" as TicketSummary["id"],
+          "child-ticket" as TicketSummary["id"],
+        ],
+        boardScrollLeft: 0,
+        updatedAt,
       },
     });
 
@@ -459,18 +451,16 @@ describe("KanbanBoard", () => {
     expect(detailMockState.lastProps?.ticketId).toBe("child-ticket");
 
     detailMockState.lastProps?.onBack();
-    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledWith(threadId);
+    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith();
 
     const parentDetailMarkup = await renderBoard({
       threadId,
       tickets: [makeTicket()],
-      boardContextByThreadId: {
-        [threadId]: {
-          projectId: "project-1" as TicketSummary["projectId"],
-          ticketStack: ["parent-ticket" as TicketSummary["id"]],
-          boardScrollLeft: 0,
-          updatedAt,
-        },
+      managementBoardContext: {
+        projectId: "project-1" as TicketSummary["projectId"],
+        ticketStack: ["parent-ticket" as TicketSummary["id"]],
+        boardScrollLeft: 0,
+        updatedAt,
       },
     });
 
@@ -480,19 +470,17 @@ describe("KanbanBoard", () => {
 
     // renderBoard() clears mocks between renders, so this assertion is scoped to the second back step.
     detailMockState.lastProps?.onBack();
-    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledOnce();
-    expect(uiStateStoreState.popThreadBoardTicket).toHaveBeenCalledWith(threadId);
+    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledOnce();
+    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith();
 
     const restoredBoardMarkup = await renderBoard({
       threadId,
       tickets: [makeTicket()],
-      boardContextByThreadId: {
-        [threadId]: {
-          projectId: "project-1" as TicketSummary["projectId"],
-          ticketStack: [],
-          boardScrollLeft: 0,
-          updatedAt,
-        },
+      managementBoardContext: {
+        projectId: "project-1" as TicketSummary["projectId"],
+        ticketStack: [],
+        boardScrollLeft: 0,
+        updatedAt,
       },
     });
 
@@ -506,13 +494,11 @@ describe("KanbanBoard", () => {
     const markup = await renderBoard({
       threadId,
       tickets: [makeTicket()],
-      boardContextByThreadId: {
-        [threadId]: {
-          projectId: "project-2" as TicketSummary["projectId"],
-          ticketStack: ["stale-ticket" as TicketSummary["id"]],
-          boardScrollLeft: 0,
-          updatedAt: "2026-04-10T11:30:00.000Z",
-        },
+      managementBoardContext: {
+        projectId: "project-2" as TicketSummary["projectId"],
+        ticketStack: ["stale-ticket" as TicketSummary["id"]],
+        boardScrollLeft: 0,
+        updatedAt: "2026-04-10T11:30:00.000Z",
       },
     });
 
@@ -656,7 +642,7 @@ describe("KanbanBoard", () => {
     const result = await launchBoardOrchestration({
       api,
       projectId: "project-1" as TicketSummary["projectId"],
-      ticketIdentifiers: ["T3CO-2", "T3CO-1"] as const,
+      selectedTicketIdentifiers: ["T3CO-2", "T3CO-1"] as const,
       implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
       reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
       orchestrateTickets: new Map([[makeTicket().id, makeTicket()]]),
@@ -668,7 +654,7 @@ describe("KanbanBoard", () => {
     expect(result.kind).toBe("started");
     expect(api.orchestration.createRun).toHaveBeenCalledWith({
       projectId: "project-1",
-      ticketIdentifiers: ["T3CO-2", "T3CO-1"],
+      selectedTicketIdentifiers: ["T3CO-2", "T3CO-1"],
       implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
       reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
     });
@@ -689,7 +675,7 @@ describe("KanbanBoard", () => {
     const result = await launchBoardOrchestration({
       api,
       projectId: "project-1" as TicketSummary["projectId"],
-      ticketIdentifiers: ["T3CO-1"] as const,
+      selectedTicketIdentifiers: ["T3CO-1"] as const,
       implementerModelSelection: { provider: "codex", model: "gpt-5.4" },
       reviewerModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
       orchestrateTickets: new Map([

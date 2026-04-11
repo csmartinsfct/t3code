@@ -48,7 +48,7 @@ interface OrchestrateConfirmDialogProps {
   allTickets: readonly TicketSummary[];
   projectId: string;
   onConfirm: (
-    ticketIdentifiers: string[],
+    selectedTicketIdentifiers: string[],
     implementerModelSelection: ModelSelection,
     reviewerModelSelection: ModelSelection,
   ) => Promise<void> | void;
@@ -120,6 +120,7 @@ export function OrchestrateConfirmDialog({
     setError(null);
     const result = await submitOrchestrationConfirm({
       plan,
+      selectedTicketIdentifiers: [...selectedTickets.values()].map((ticket) => ticket.identifier),
       implementerModelSelection: implSel,
       reviewerModelSelection: revSel,
       onConfirm,
@@ -232,10 +233,11 @@ export function isOrchestrationSubmitDisabled(input: {
 
 export async function submitOrchestrationConfirm(input: {
   plan: OrchestrationPlan | null;
+  selectedTicketIdentifiers: string[];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   onConfirm: (
-    ticketIdentifiers: string[],
+    selectedTicketIdentifiers: string[],
     implementerModelSelection: ModelSelection,
     reviewerModelSelection: ModelSelection,
   ) => Promise<void> | void;
@@ -246,7 +248,7 @@ export async function submitOrchestrationConfirm(input: {
 
   try {
     await input.onConfirm(
-      getRunnableTicketIdentifiers(input.plan),
+      input.selectedTicketIdentifiers,
       input.implementerModelSelection,
       input.reviewerModelSelection,
     );

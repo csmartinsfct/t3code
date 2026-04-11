@@ -34,6 +34,7 @@ export interface UseOrchestrationSwitcherReturn {
   items: OrchestrationSwitcherItem[];
   currentLabel: string;
   loading: boolean;
+  ticketById: ReadonlyMap<string, TicketSummary>;
 }
 
 const EMPTY: UseOrchestrationSwitcherReturn = {
@@ -42,6 +43,7 @@ const EMPTY: UseOrchestrationSwitcherReturn = {
   items: [],
   currentLabel: "",
   loading: false,
+  ticketById: new Map(),
 };
 
 // ---------------------------------------------------------------------------
@@ -214,5 +216,6 @@ export function useOrchestrationSwitcher(
     items,
     currentLabel,
     loading,
+    ticketById,
   };
 }

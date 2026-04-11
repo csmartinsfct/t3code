@@ -42,7 +42,6 @@ import {
   type TerminalContextDraft,
   removeInlineTerminalContextPlaceholder,
 } from "../lib/terminalContext";
-import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
@@ -128,26 +127,6 @@ const ATTACHMENT_VIEWPORT_MATRIX = [
   { name: "mobile", width: 430, height: 932, textTolerancePx: 56, attachmentTolerancePx: 56 },
   { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
-
-describe("ChatView thread board-context helpers", () => {
-  it("only inherits board context for same-project thread creation helpers", () => {
-    expect(
-      resolveThreadBoardContextSourceThreadId({
-        routeThreadId: THREAD_ID,
-        targetProjectId: PROJECT_ID,
-        activeThreadProjectId: PROJECT_ID,
-      }),
-    ).toBe(THREAD_ID);
-
-    expect(
-      resolveThreadBoardContextSourceThreadId({
-        routeThreadId: THREAD_ID,
-        targetProjectId: "project-2" as ProjectId,
-        activeThreadProjectId: PROJECT_ID,
-      }),
-    ).toBeNull();
-  });
-});
 
 interface UserRowMeasurement {
   measuredRowHeightPx: number;
@@ -1640,8 +1619,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       projectExpandedById: {},
       projectOrder: [],
       threadLastVisitedAtById: {},
-      boardContextByThreadId: {},
-      managementLastProjectId: null,
+      startupRecoveryStateByThreadId: {},
+      managementBoardContext: null,
       viewMode: "chat",
     });
   });
@@ -4560,7 +4539,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("navigates Fork with model into the created thread path and preserves board context", async () => {
+  it("navigates Fork with model into the created thread path without changing global board context", async () => {
     // Audit traceability: fbe355c.
     const contextMenus: ReadonlyArray<ContextMenuItem<string>>[] = [];
     const dispatchedCommands: Array<Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]> =
@@ -4583,14 +4562,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     useUiStateStore.setState((state) => ({
       ...state,
-      boardContextByThreadId: {
-        ...state.boardContextByThreadId,
-        [THREAD_ID]: {
-          projectId: PROJECT_ID,
-          ticketStack: [ORCHESTRATION_TICKET_ID],
-          boardScrollLeft: 24,
-          updatedAt: NOW_ISO,
-        },
+      managementBoardContext: {
+        projectId: PROJECT_ID,
+        ticketStack: [ORCHESTRATION_TICKET_ID],
+        boardScrollLeft: 24,
+        updatedAt: NOW_ISO,
       },
     }));
 
@@ -4671,7 +4647,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => path === expectedForkPath,
         "Route should navigate to the forked thread path.",
       );
-      expect(useUiStateStore.getState().boardContextByThreadId[forkThreadId!]).toMatchObject({
+      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [ORCHESTRATION_TICKET_ID],
         boardScrollLeft: 24,
@@ -4730,16 +4706,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("inherits the active thread board context into a brand-new same-project draft thread", async () => {
+  it("keeps the global board context unchanged when creating a same-project draft thread", async () => {
     const ticketId = "ticket-current-context" as TicketId;
     useUiStateStore.setState({
-      boardContextByThreadId: {
-        [THREAD_ID]: {
-          projectId: PROJECT_ID,
-          ticketStack: [ticketId],
-          boardScrollLeft: 144,
-          updatedAt: NOW_ISO,
-        },
+      managementBoardContext: {
+        projectId: PROJECT_ID,
+        ticketStack: [ticketId],
+        boardScrollLeft: 144,
+        updatedAt: NOW_ISO,
       },
     });
 
@@ -4764,7 +4738,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       const newThreadId = newThreadPath.slice(1) as ThreadId;
 
-      expect(useUiStateStore.getState().boardContextByThreadId[newThreadId]).toMatchObject({
+      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [ticketId],
         boardScrollLeft: 144,
@@ -4774,9 +4748,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("preserves existing project draft board context when reusing a draft thread", async () => {
+  it("preserves the existing global board context when reusing a draft thread", async () => {
     const existingDraftThreadId = "11111111-1111-4111-8111-111111111111" as ThreadId;
-    const currentTicketId = "ticket-current-context" as TicketId;
     const draftTicketId = "ticket-existing-draft-context" as TicketId;
 
     useComposerDraftStore.setState({
@@ -4796,19 +4769,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
     useUiStateStore.setState({
-      boardContextByThreadId: {
-        [THREAD_ID]: {
-          projectId: PROJECT_ID,
-          ticketStack: [currentTicketId],
-          boardScrollLeft: 48,
-          updatedAt: NOW_ISO,
-        },
-        [existingDraftThreadId]: {
-          projectId: PROJECT_ID,
-          ticketStack: [draftTicketId],
-          boardScrollLeft: 220,
-          updatedAt: NOW_ISO,
-        },
+      managementBoardContext: {
+        projectId: PROJECT_ID,
+        ticketStack: [draftTicketId],
+        boardScrollLeft: 220,
+        updatedAt: NOW_ISO,
       },
     });
 
@@ -4832,9 +4797,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "New-thread should reuse the existing project draft thread.",
       );
 
-      expect(
-        useUiStateStore.getState().boardContextByThreadId[existingDraftThreadId],
-      ).toMatchObject({
+      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [draftTicketId],
         boardScrollLeft: 220,

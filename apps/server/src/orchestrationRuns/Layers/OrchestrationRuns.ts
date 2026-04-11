@@ -10,6 +10,7 @@ import type {
 } from "@t3tools/contracts";
 import { OrchestrationRunError, TicketId as TicketIdSchema } from "@t3tools/contracts";
 import { Effect, Layer, Option, PubSub, Stream } from "effect";
+import { buildOrchestrationPlan, flattenTicketTree } from "@t3tools/shared/orchestrationPlan";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import {
@@ -181,15 +182,66 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         yield* Effect.logInfo(
           formatTimelineLog(SCOPE, "run.create.start", {
             projectId: input.projectId,
-            ticketCount: input.ticketIdentifiers.length,
-            ticketIdentifiers: input.ticketIdentifiers,
+            selectedTicketCount: input.selectedTicketIdentifiers.length,
+            selectedTicketIdentifiers: input.selectedTicketIdentifiers,
           }),
         );
 
-        // Resolve ticket identifiers to UUIDs
-        const tickets: Ticket[] = [];
-        for (const identifier of input.ticketIdentifiers) {
-          tickets.push(yield* resolveTicketForProject(input.projectId, identifier));
+        const selectedTickets: Ticket[] = [];
+        for (const identifier of input.selectedTicketIdentifiers) {
+          selectedTickets.push(yield* resolveTicketForProject(input.projectId, identifier));
+        }
+
+        const ticketTree = yield* ticketing.getTree({ projectId: input.projectId as never }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: "Failed to load project ticket tree for orchestration run creation",
+                cause,
+              }),
+          ),
+        );
+        const plan = buildOrchestrationPlan(
+          new Set(selectedTickets.map((ticket) => ticket.id)),
+          ticketTree,
+          flattenTicketTree(ticketTree),
+        );
+
+        if (plan.kind === "blocked-external") {
+          const first = plan.externalDeps[0];
+          return yield* new OrchestrationRunError({
+            message: first
+              ? `Cannot orchestrate ${first.ticket.identifier} because it depends on unfinished ticket ${first.dependsOn.identifier}`
+              : "Cannot orchestrate because there are unfinished external dependencies",
+          });
+        }
+
+        if (plan.kind === "blocked-cycle") {
+          return yield* new OrchestrationRunError({
+            message: "Cannot orchestrate because the selected tickets contain a dependency cycle",
+          });
+        }
+
+        const selectedTicketById = new Map(
+          selectedTickets.map((ticket) => [ticket.id, ticket] as const),
+        );
+        const executionTickets: Array<{ ticket: Ticket; selectedTicketId: Ticket["id"] }> = [];
+        for (const entry of plan.orderedTickets) {
+          const ticket =
+            selectedTicketById.get(entry.ticket.id) ??
+            (yield* ticketing.getById({ id: entry.ticket.id }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationRunError({
+                    message: `Failed to load execution ticket ${entry.ticket.identifier}`,
+                    cause,
+                  }),
+              ),
+            ));
+          executionTickets.push({
+            ticket,
+            selectedTicketId: entry.selectedTicketId,
+          });
         }
 
         const settings = yield* serverSettings.getSettings.pipe(
@@ -207,15 +259,27 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         const runtimeMode = input.runtimeMode ?? "full-access";
         const runId = crypto.randomUUID() as import("@t3tools/contracts").OrchestrationRunId;
         const orchestrationThreadId = crypto.randomUUID() as ThreadId;
-        const workingThreadIds = tickets.map(() => crypto.randomUUID() as ThreadId);
+        const workingThreadIds = executionTickets.map(() => crypto.randomUUID() as ThreadId);
         const reviewThreadIds = reviewEnabled
-          ? tickets.map(() => crypto.randomUUID() as ThreadId)
-          : tickets.map(() => undefined);
-        const ticketOrder: OrchestrationTicketEntry[] = tickets.map((ticket, index) => ({
-          ticketId: ticket.id,
-          workingThreadId: workingThreadIds[index]!,
-          ...(reviewThreadIds[index] ? { reviewThreadId: reviewThreadIds[index]! } : {}),
-        }));
+          ? executionTickets.map(() => crypto.randomUUID() as ThreadId)
+          : executionTickets.map(() => undefined);
+        const ticketOrder: OrchestrationTicketEntry[] = executionTickets.map(
+          ({ ticket, selectedTicketId }, index) => ({
+            ticketId: ticket.id,
+            selectedTicketId,
+            workingThreadId: workingThreadIds[index]!,
+            ...(reviewThreadIds[index] ? { reviewThreadId: reviewThreadIds[index]! } : {}),
+          }),
+        );
+        const selectedTicketTitleById = new Map(
+          selectedTickets.map((ticket) => [ticket.id, ticket.title] as const),
+        );
+        const initialSelectedTicketId =
+          ticketOrder[0]?.selectedTicketId ?? ticketOrder[0]?.ticketId ?? null;
+        const orchestrationTitle =
+          (initialSelectedTicketId ? selectedTicketTitleById.get(initialSelectedTicketId) : null) ??
+          selectedTickets[0]?.title ??
+          "Orchestration Run";
         const persisted: PersistedOrchestrationRun = {
           id: runId,
           orchestrationThreadId,
@@ -249,7 +313,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
               commandId: crypto.randomUUID() as CommandId,
               threadId: orchestrationThreadId,
               projectId: input.projectId,
-              title: "Orchestration Run" as any,
+              title: orchestrationTitle as any,
               modelSelection: input.implementerModelSelection,
               runtimeMode,
               interactionMode: "default",
@@ -262,7 +326,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           );
           createdThreadIds.push(orchestrationThreadId);
 
-          for (const [index, ticket] of tickets.entries()) {
+          for (const [index, { ticket }] of executionTickets.entries()) {
             const workingThreadId = workingThreadIds[index]!;
             const reviewThreadId = reviewThreadIds[index];
             yield* dispatchQueuedCommand(
@@ -320,7 +384,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
             runId,
             orchestrationThreadId,
             workingThreadIds,
-            ticketCount: tickets.length,
+            ticketCount: executionTickets.length,
           }),
         );
 
@@ -336,7 +400,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
             runId,
             orchestrationThreadId,
             status: "pending",
-            ticketCount: tickets.length,
+            ticketCount: executionTickets.length,
           }),
         );
 

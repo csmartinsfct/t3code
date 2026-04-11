@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /**
  * Pure validation logic for building an orchestration execution plan from a
  * set of selected tickets.
@@ -313,3 +314,14 @@ export function buildOrchestrationPlan(
 
   return { kind: "valid", orderedTickets };
 }
+=======
+export {
+  buildOrchestrationPlan,
+  type ExternalDep,
+  flattenTicketTree,
+  getSelectedTicketForExecutionEntry,
+  type OrchestrationPlan,
+  type OrchestrationPlanTicket,
+  type TicketAnnotation,
+} from "@t3tools/shared/orchestrationPlan";
+>>>>>>> t3_code_thread_improvements

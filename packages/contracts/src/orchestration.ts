@@ -1293,6 +1293,7 @@ export type OrchestrationRunPhase = typeof OrchestrationRunPhase.Type;
 
 export const OrchestrationTicketEntry = Schema.Struct({
   ticketId: TicketId,
+  selectedTicketId: Schema.optionalKey(TicketId),
   workingThreadId: ThreadId,
   reviewThreadId: Schema.optionalKey(ThreadId),
 });
@@ -1347,7 +1348,7 @@ export type OrchestrationRunStreamEvent = typeof OrchestrationRunStreamEvent.Typ
 
 export const OrchestrationCreateRunInput = Schema.Struct({
   projectId: ProjectId,
-  ticketIdentifiers: Schema.Array(TrimmedNonEmptyString),
+  selectedTicketIdentifiers: Schema.Array(TrimmedNonEmptyString),
   implementerModelSelection: ModelSelection,
   reviewerModelSelection: ModelSelection,
   runtimeMode: Schema.optional(RuntimeMode),

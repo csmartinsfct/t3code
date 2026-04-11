@@ -103,7 +103,6 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { LRUCache } from "../lib/lruCache";
-import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { logWebTimeline } from "../timelineLogger";
 
 import { basenameOfPath } from "../vscode-icons";
@@ -213,7 +212,7 @@ import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
-  openTicketLinkInThread,
+  openTicketLinkInManagementView,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
@@ -995,6 +994,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isOrchestrationChild,
     isOrchestrationThread,
   ]);
+  const activeHeaderTicket = useMemo(() => {
+    if (!orchestrationSwitcher.visible) {
+      return null;
+    }
+
+    if (isOrchestrationChild) {
+      const ticketId = activeThread?.ticketId ?? null;
+      return ticketId ? (orchestrationSwitcher.ticketById.get(ticketId) ?? null) : null;
+    }
+
+    if (!isOrchestrationThread || !activeOrchestrationRun) {
+      return null;
+    }
+
+    const currentTicketEntry = activeOrchestrationRun.ticketOrder.at(
+      activeOrchestrationRun.currentTicketIndex,
+    );
+    if (!currentTicketEntry) {
+      return null;
+    }
+
+    return orchestrationSwitcher.ticketById.get(currentTicketEntry.ticketId) ?? null;
+  }, [
+    activeOrchestrationRun,
+    activeThread?.ticketId,
+    isOrchestrationChild,
+    isOrchestrationThread,
+    orchestrationSwitcher,
+  ]);
   const onSwitchThread = useCallback(
     (threadId: string) => {
       void navigate({ to: "/$threadId", params: { threadId } });
@@ -1133,20 +1161,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, existingOpenTerminalThreadIds, terminalState.terminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
-  const initializeBoardContextForNewThread = useCallback(
-    (targetThreadId: ThreadId, targetProjectId: ProjectId) => {
-      useUiStateStore.getState().initializeThreadBoardContextFromSource({
-        sourceThreadId: resolveThreadBoardContextSourceThreadId({
-          routeThreadId: threadId,
-          targetProjectId,
-          activeThreadProjectId: activeThread?.projectId ?? null,
-        }),
-        targetThreadId,
-        projectId: targetProjectId,
-      });
-    },
-    [activeThread?.projectId, threadId],
-  );
   const handleOpenTicketLink = useCallback(
     async (identifier: string) => {
       const api = readNativeApi();
@@ -1154,19 +1168,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
-      await openTicketLinkInThread({
+      await openTicketLinkInManagementView({
         identifier,
-        threadId,
         projectId: activeProject?.id,
         resolvedTicketIdCache: resolvedTicketLinkCacheRef.current,
         inFlightTicketResolutions: inFlightTicketLinkResolutionsRef.current,
         getTicketByIdentifier: ({ identifier: targetIdentifier, projectId }) =>
           api.ticketing.getByIdentifier({ identifier: targetIdentifier, projectId }),
-        getBoardContext: (targetThreadId) =>
-          useUiStateStore.getState().boardContextByThreadId[targetThreadId] ?? null,
         setViewMode: (mode) => useUiStateStore.getState().setViewMode(mode),
-        pushThreadBoardTicket: (targetThreadId, projectId, ticketId) =>
-          useUiStateStore.getState().pushThreadBoardTicket(targetThreadId, projectId, ticketId),
+        pushManagementBoardTicket: (projectId, ticketId) =>
+          useUiStateStore.getState().pushManagementBoardTicket(projectId, ticketId),
         showErrorToast: ({ title, description }) => {
           toastManager.add({
             type: "error",
@@ -1225,7 +1236,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       clearProjectDraftThreadId(activeProject.id);
       const nextThreadId = newThreadId();
-      initializeBoardContextForNewThread(nextThreadId, activeProject.id);
       setProjectDraftThreadId(activeProject.id, nextThreadId, {
         createdAt: new Date().toISOString(),
         runtimeMode: DEFAULT_RUNTIME_MODE,
@@ -1243,7 +1253,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       clearProjectDraftThreadId,
       getDraftThread,
       getDraftThreadByProjectId,
-      initializeBoardContextForNewThread,
       isServerThread,
       navigate,
       setDraftThreadContext,
@@ -2287,7 +2296,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const { handleRunEvent } = useManagedRunCompletionToasts({
     projectId: activeProject?.id,
     scripts: activeProject?.scripts,
-    sourceThreadId: activeThread?.projectId === activeProject?.id ? threadId : null,
   });
 
   useEffect(() => {
@@ -4562,7 +4570,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const createdAt = new Date().toISOString();
     const nextThreadId = newThreadId();
-    initializeBoardContextForNewThread(nextThreadId, activeProject.id);
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
     const outgoingImplementationPrompt = formatOutgoingPrompt({
@@ -4647,7 +4654,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeProject,
     activeProposedPlan,
     activeThread,
-    initializeBoardContextForNewThread,
     beginLocalDispatch,
     isConnecting,
     isSendBusy,
@@ -5109,6 +5115,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onToggleFileExplorer={onToggleFileExplorer}
           orchestrationSwitcher={orchestrationSwitcher.visible ? orchestrationSwitcher : null}
           onSwitchThread={onSwitchThread}
+          activeTicketBadge={
+            activeHeaderTicket
+              ? {
+                  identifier: activeHeaderTicket.identifier,
+                  title: activeHeaderTicket.title,
+                  onOpen: handleOpenTicketLink,
+                }
+              : null
+          }
         />
       </header>
 

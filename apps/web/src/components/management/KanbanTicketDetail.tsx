@@ -20,13 +20,12 @@ import {
   modelSelectionProviderKind,
   type ProjectId,
 } from "@t3tools/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
-import { useUiStateStore } from "../../uiStateStore";
 import { TicketMarkdown } from "./TicketMarkdown";
 import {
   AlertDialog,
@@ -158,19 +157,9 @@ interface TicketDetailDecomposeComposerDraftStore {
   ) => void;
 }
 
-interface TicketDetailDecomposeUiStateStore {
-  initializeThreadBoardContextFromSource: (input: {
-    sourceThreadId: ThreadId | null;
-    targetThreadId: ThreadId;
-    projectId: ProjectId;
-  }) => void;
-}
-
 export function startTicketDetailDecomposeFlow(input: {
   ticket: Pick<Ticket, "id" | "identifier" | "title" | "projectId">;
-  routeThreadId: ThreadId | null;
   composerDraftStore: TicketDetailDecomposeComposerDraftStore;
-  uiStateStore: TicketDetailDecomposeUiStateStore;
   createThreadId?: () => ThreadId;
   now?: () => string;
   navigateToThread: (threadId: ThreadId) => void;
@@ -179,11 +168,6 @@ export function startTicketDetailDecomposeFlow(input: {
   const createdAt = (input.now ?? (() => new Date().toISOString()))();
 
   input.composerDraftStore.clearProjectDraftThreadId(input.ticket.projectId);
-  input.uiStateStore.initializeThreadBoardContextFromSource({
-    sourceThreadId: input.routeThreadId,
-    targetThreadId: threadId,
-    projectId: input.ticket.projectId,
-  });
   input.composerDraftStore.setProjectDraftThreadId(input.ticket.projectId, threadId, {
     createdAt,
     envMode: "local",
@@ -816,23 +800,16 @@ export function KanbanTicketDetail({
   }, [fetchTicket, moveToBoardTickets, removeFromSelection]);
 
   const navigate = useNavigate();
-  const routeThreadId = useParams({
-    strict: false,
-    select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
-  });
-
   const handleDecompose = useCallback(() => {
     if (!ticket) return;
     startTicketDetailDecomposeFlow({
       ticket,
-      routeThreadId,
       composerDraftStore: useComposerDraftStore.getState(),
-      uiStateStore: useUiStateStore.getState(),
       navigateToThread: (threadId) => {
         void navigate({ to: "/$threadId", params: { threadId } });
       },
     });
-  }, [navigate, routeThreadId, ticket]);
+  }, [navigate, ticket]);
 
   if (loading) {
     return (

@@ -10,7 +10,7 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
-  openTicketLinkInThread,
+  openTicketLinkInManagementView,
   reconcileMountedTerminalThreadIds,
   shouldAdvanceLiveClock,
   waitForStartedServerThread,
@@ -81,22 +81,20 @@ describe("buildExpiredTerminalContextToastCopy", () => {
   });
 });
 
-describe("openTicketLinkInThread", () => {
+describe("openTicketLinkInManagementView", () => {
   it("opens board mode and pushes the resolved ticket", async () => {
     const setViewMode = vi.fn();
-    const pushThreadBoardTicket = vi.fn();
+    const pushManagementBoardTicket = vi.fn();
     const getTicketByIdentifier = vi.fn(async () => ({ id: TicketId.makeUnsafe("ticket-1") }));
 
-    await openTicketLinkInThread({
+    await openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-1"),
       resolvedTicketIdCache: new Map(),
       inFlightTicketResolutions: new Map(),
       getTicketByIdentifier,
-      getBoardContext: () => null,
       setViewMode,
-      pushThreadBoardTicket,
+      pushManagementBoardTicket,
       showErrorToast: vi.fn(),
     });
 
@@ -105,8 +103,7 @@ describe("openTicketLinkInThread", () => {
       projectId: ProjectId.makeUnsafe("project-1"),
     });
     expect(setViewMode).toHaveBeenCalledWith("management");
-    expect(pushThreadBoardTicket).toHaveBeenCalledWith(
-      ThreadId.makeUnsafe("thread-1"),
+    expect(pushManagementBoardTicket).toHaveBeenCalledWith(
       ProjectId.makeUnsafe("project-1"),
       TicketId.makeUnsafe("ticket-1"),
     );
@@ -119,32 +116,28 @@ describe("openTicketLinkInThread", () => {
     });
     const getTicketByIdentifier = vi.fn(() => resolution);
     const setViewMode = vi.fn();
-    const pushThreadBoardTicket = vi.fn();
+    const pushManagementBoardTicket = vi.fn();
     const resolvedTicketIdCache = new Map<string, TicketId>();
     const inFlightTicketResolutions = new Map<string, Promise<TicketId>>();
 
-    const first = openTicketLinkInThread({
+    const first = openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-1"),
       resolvedTicketIdCache,
       inFlightTicketResolutions,
       getTicketByIdentifier,
-      getBoardContext: () => null,
       setViewMode,
-      pushThreadBoardTicket,
+      pushManagementBoardTicket,
       showErrorToast: vi.fn(),
     });
-    const second = openTicketLinkInThread({
+    const second = openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-1"),
       resolvedTicketIdCache,
       inFlightTicketResolutions,
       getTicketByIdentifier,
-      getBoardContext: () => null,
       setViewMode,
-      pushThreadBoardTicket,
+      pushManagementBoardTicket,
       showErrorToast: vi.fn(),
     });
 
@@ -152,7 +145,7 @@ describe("openTicketLinkInThread", () => {
     resolveTicket({ id: TicketId.makeUnsafe("ticket-1") });
     await Promise.all([first, second]);
 
-    expect(pushThreadBoardTicket).toHaveBeenCalledTimes(2);
+    expect(pushManagementBoardTicket).toHaveBeenCalledTimes(2);
     expect(inFlightTicketResolutions.size).toBe(0);
   });
 
@@ -164,70 +157,35 @@ describe("openTicketLinkInThread", () => {
         TicketId.makeUnsafe("ticket-1"),
       ],
     ]);
-    const pushThreadBoardTicket = vi.fn();
+    const pushManagementBoardTicket = vi.fn();
 
-    await openTicketLinkInThread({
+    await openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-1"),
       resolvedTicketIdCache,
       inFlightTicketResolutions: new Map(),
       getTicketByIdentifier,
-      getBoardContext: () => null,
       setViewMode: vi.fn(),
-      pushThreadBoardTicket,
+      pushManagementBoardTicket,
       showErrorToast: vi.fn(),
     });
 
     expect(getTicketByIdentifier).not.toHaveBeenCalled();
-    expect(pushThreadBoardTicket).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not push a duplicate when the ticket is already on top of the board stack", async () => {
-    const pushThreadBoardTicket = vi.fn();
-    const setViewMode = vi.fn();
-
-    await openTicketLinkInThread({
-      identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
-      projectId: ProjectId.makeUnsafe("project-1"),
-      resolvedTicketIdCache: new Map([
-        [
-          buildTicketLinkCacheKey(ProjectId.makeUnsafe("project-1"), "T3CO-191"),
-          TicketId.makeUnsafe("ticket-1"),
-        ],
-      ]),
-      inFlightTicketResolutions: new Map(),
-      getTicketByIdentifier: vi.fn(),
-      getBoardContext: () => ({
-        projectId: ProjectId.makeUnsafe("project-1"),
-        ticketStack: [TicketId.makeUnsafe("ticket-1")],
-        boardScrollLeft: 0,
-        updatedAt: "2026-04-11T12:00:00.000Z",
-      }),
-      setViewMode,
-      pushThreadBoardTicket,
-      showErrorToast: vi.fn(),
-    });
-
-    expect(setViewMode).toHaveBeenCalledWith("management");
-    expect(pushThreadBoardTicket).not.toHaveBeenCalled();
+    expect(pushManagementBoardTicket).toHaveBeenCalledTimes(1);
   });
 
   it("shows a toast and stops when the thread has no project context", async () => {
     const showErrorToast = vi.fn();
     const getTicketByIdentifier = vi.fn();
 
-    await openTicketLinkInThread({
+    await openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: null,
       resolvedTicketIdCache: new Map(),
       inFlightTicketResolutions: new Map(),
       getTicketByIdentifier,
-      getBoardContext: () => null,
       setViewMode: vi.fn(),
-      pushThreadBoardTicket: vi.fn(),
+      pushManagementBoardTicket: vi.fn(),
       showErrorToast,
     });
 
@@ -240,18 +198,16 @@ describe("openTicketLinkInThread", () => {
   it("shows a fallback toast when resolution fails", async () => {
     const showErrorToast = vi.fn();
 
-    await openTicketLinkInThread({
+    await openTicketLinkInManagementView({
       identifier: "T3CO-191",
-      threadId: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-1"),
       resolvedTicketIdCache: new Map(),
       inFlightTicketResolutions: new Map(),
       getTicketByIdentifier: vi.fn(async () => {
         throw new Error("No matching ticket");
       }),
-      getBoardContext: () => null,
       setViewMode: vi.fn(),
-      pushThreadBoardTicket: vi.fn(),
+      pushManagementBoardTicket: vi.fn(),
       showErrorToast,
     });
 

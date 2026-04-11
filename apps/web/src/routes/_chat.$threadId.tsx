@@ -397,6 +397,16 @@ export function ChatThreadRouteView(props: {
   }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
 
   const viewMode = useUiStateStore((store) => store.viewMode);
+  const managementBoardProjectId = useUiStateStore(
+    (store) => store.managementBoardContext?.projectId ?? null,
+  );
+  const setManagementBoardRoot = useUiStateStore((store) => store.setManagementBoardRoot);
+
+  useEffect(() => {
+    if (viewMode !== "management" || !resolvedProjectId) return;
+    if (managementBoardProjectId === resolvedProjectId) return;
+    setManagementBoardRoot(resolvedProjectId);
+  }, [managementBoardProjectId, resolvedProjectId, setManagementBoardRoot, viewMode]);
 
   if (!bootstrapComplete || !routeThreadExists) {
     return null;

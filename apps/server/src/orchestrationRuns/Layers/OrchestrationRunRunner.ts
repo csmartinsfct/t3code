@@ -13,6 +13,7 @@ import type {
   PromptTemplateValidationError,
   ReviewOutput,
   Ticket,
+  TicketId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -26,6 +27,7 @@ import {
   normalizeReviewOutputCandidate,
   parseReviewOutputJsonCandidates,
 } from "@t3tools/shared/review";
+import { getSelectedTicketForExecutionEntry } from "@t3tools/shared/orchestrationPlan";
 import {
   renderPromptTemplate,
   resolveOrchestrationPromptDocuments,
@@ -220,11 +222,17 @@ const renderValidatedPromptDocument = (input: {
   );
 };
 
-const buildOrchestrationTitle = (tickets: ReadonlyArray<Ticket>): string => {
-  const parts = tickets.map((t) => `${t.identifier}: ${t.title}`);
-  const title = `Orchestrate: ${parts.join(", ")}`;
-  return title.length > 120 ? `${title.slice(0, 117)}...` : title;
-};
+function resolveOrchestrationTitle(input: {
+  entry: OrchestrationRun["ticketOrder"][number];
+  ticketsById: ReadonlyMap<TicketId, Ticket>;
+}): string | null {
+  return (
+    getSelectedTicketForExecutionEntry({
+      entry: input.entry,
+      ticketsById: input.ticketsById,
+    })?.title ?? null
+  );
+}
 
 interface OrchestrationRunRunnerDeps {
   readonly runService: OrchestrationRunServiceShape;
@@ -1259,7 +1267,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         );
 
         // 2. Resolve all ticket details upfront
-        const tickets = new Map<string, Ticket>();
+        const tickets = new Map<TicketId, Ticket>();
         for (const entry of ticketOrder) {
           const ticket = yield* ticketing.getById({ id: entry.ticketId }).pipe(
             Effect.mapError(
@@ -1271,6 +1279,18 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             ),
           );
           tickets.set(entry.ticketId, ticket);
+          if (entry.selectedTicketId && !tickets.has(entry.selectedTicketId)) {
+            const selectedTicket = yield* ticketing.getById({ id: entry.selectedTicketId }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationRunError({
+                    message: `Failed to resolve selected ticket ${entry.selectedTicketId}`,
+                    cause,
+                  }),
+              ),
+            );
+            tickets.set(entry.selectedTicketId, selectedTicket);
+          }
         }
 
         yield* Effect.logInfo(
@@ -1282,6 +1302,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           }),
         );
 
+        const activeTitleEntry =
+          startIndex >= 0 && startIndex < ticketOrder.length
+            ? ticketOrder[startIndex]
+            : (ticketOrder[0] ?? null);
+        const currentTitle = activeTitleEntry
+          ? resolveOrchestrationTitle({ entry: activeTitleEntry, ticketsById: tickets })
+          : null;
+
         // 3. Startup preamble — only on fresh start, not resume
         if (!isResume) {
           yield* postActivity({
@@ -1289,22 +1317,27 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             kind: "orchestration.run.started",
             summary: `Orchestration run started with ${ticketOrder.length} ticket${ticketOrder.length === 1 ? "" : "s"}`,
           });
+        }
 
-          // Generate orchestration thread title
-          const orderedTickets = ticketOrder.map((entry) => tickets.get(entry.ticketId)!);
+        if (currentTitle) {
           yield* dispatchCommand(
             {
               type: "thread.meta.update",
-              commandId: runnerCommandId("orchestration-title"),
+              commandId: runnerCommandId(
+                isResume ? "orchestration-title-resume" : "orchestration-title",
+              ),
               threadId: orchestrationThreadId,
-              title: buildOrchestrationTitle(orderedTickets),
+              title: currentTitle,
             },
             "Failed to update orchestration thread title",
           ).pipe(Effect.catch(() => Effect.void));
 
-          const generatedTitle = buildOrchestrationTitle(orderedTickets);
           yield* Effect.logInfo(
-            formatTimelineLog(SCOPE, "runner.execute.title-set", { runId, title: generatedTitle }),
+            formatTimelineLog(SCOPE, "runner.execute.title-set", {
+              runId,
+              title: currentTitle,
+              ...(isResume ? { isResume: true } : {}),
+            }),
           );
         }
 
@@ -1313,6 +1346,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           const entry = ticketOrder[index]!;
           const ticket = tickets.get(entry.ticketId)!;
           const workingThreadId = entry.workingThreadId as ThreadId;
+          const title = resolveOrchestrationTitle({ entry, ticketsById: tickets });
 
           // 4a. Check run status — may have been paused/canceled externally
           const currentRun = yield* withRunService((runService) => runService.get({ runId }));

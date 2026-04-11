@@ -43,8 +43,7 @@ export function seedSidebarTestStores(input?: {
     projectOrder: [SIDEBAR_TEST_PROJECT_ID],
     threadLastVisitedAtById: {},
     startupRecoveryStateByThreadId: {},
-    boardContextByThreadId: {},
-    managementLastProjectId: null,
+    managementBoardContext: null,
     viewMode: "chat",
   });
   useComposerDraftStore.setState({
