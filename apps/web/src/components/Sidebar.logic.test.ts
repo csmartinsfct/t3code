@@ -507,6 +507,18 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
+  it("treats orchestration runs as working even when no live provider session is attached", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: null,
+          isOrchestrationRunActive: true,
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
   it("shows Was working for stale startup markers before live running state", () => {
     expect(
       resolveThreadStatusPill({
@@ -652,6 +664,25 @@ describe("resolveProjectStatusIndicator", () => {
         },
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+  });
+
+  it("surfaces working when orchestration activity is the strongest remaining project signal", () => {
+    expect(
+      resolveProjectStatusIndicator([
+        {
+          label: "Completed",
+          colorClass: "text-emerald-600",
+          dotClass: "bg-emerald-500",
+          pulse: false,
+        },
+        {
+          label: "Working",
+          colorClass: "text-sky-600",
+          dotClass: "bg-sky-500",
+          pulse: true,
+        },
+      ]),
+    ).toMatchObject({ label: "Working", dotClass: "bg-sky-500" });
   });
 });
 

@@ -1,10 +1,148 @@
 import "../index.css";
 
-import type { ProjectId, ServerProvider, ThreadId } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import type { NativeApi, ProjectId, ServerProvider, ThreadId } from "@t3tools/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render } from "vitest-browser-react";
 
+import { useComposerDraftStore } from "~/composerDraftStore";
+import { __resetNativeApiForTests } from "~/nativeApi";
+import { useStore } from "~/store";
+import { useTerminalStateStore } from "~/terminalStateStore";
+import { findButtonByText, waitForElement } from "~/test-utils/browser";
+import { useThreadSelectionStore } from "~/threadSelectionStore";
+import { useUiStateStore } from "~/uiStateStore";
 import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
-import { buildMoveThreadConfirmationMessage, buildThreadContextMenuItems } from "./Sidebar";
+import { SidebarProvider } from "./ui/sidebar";
+
+const { contextMenuShowSpy, toastAddSpy } = vi.hoisted(() => ({
+  contextMenuShowSpy: vi.fn(),
+  toastAddSpy: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
+  return {
+    ...actual,
+    useQueries: vi.fn(() => []),
+  };
+});
+
+vi.mock("@tanstack/react-router", async () => {
+  const actual =
+    await vi.importActual<typeof import("@tanstack/react-router")>("@tanstack/react-router");
+  return {
+    ...actual,
+    Link: ({ children, to: _to, ...props }: { children: ReactNode; to: string }) => (
+      <a href="#" {...props}>
+        {children}
+      </a>
+    ),
+    useNavigate: () => vi.fn(),
+    useLocation: ({ select }: { select?: (value: { pathname: string }) => string } = {}) =>
+      select ? select({ pathname: "/" }) : { pathname: "/" },
+    useParams: ({ select }: { select?: (value: { threadId?: string }) => unknown } = {}) =>
+      select ? select({}) : {},
+  };
+});
+
+vi.mock("../env", () => ({
+  isElectron: false,
+}));
+
+vi.mock("./ProjectFavicon", () => ({
+  ProjectFavicon: () => <div data-testid="project-favicon" />,
+}));
+
+vi.mock("./sidebar/SidebarUpdatePill", () => ({
+  SidebarUpdatePill: () => null,
+}));
+
+vi.mock("../hooks/useHandleNewThread", () => ({
+  useHandleNewThread: () => ({
+    activeDraftThread: null,
+    activeThread: null,
+    handleNewThread: vi.fn(async () => undefined),
+  }),
+}));
+vi.mock("../hooks/useHandleNewThread.ts", () => ({
+  useHandleNewThread: () => ({
+    activeDraftThread: null,
+    activeThread: null,
+    handleNewThread: vi.fn(async () => undefined),
+  }),
+}));
+
+vi.mock("../hooks/useThreadActions", () => ({
+  useThreadActions: () => ({
+    archiveThread: vi.fn(async () => undefined),
+    deleteThread: vi.fn(async () => undefined),
+  }),
+}));
+vi.mock("../hooks/useThreadActions.ts", () => ({
+  useThreadActions: () => ({
+    archiveThread: vi.fn(async () => undefined),
+    deleteThread: vi.fn(async () => undefined),
+  }),
+}));
+
+vi.mock("../hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({
+    copyToClipboard: vi.fn(),
+    isCopied: false,
+  }),
+}));
+
+vi.mock("../hooks/useSettings", () => ({
+  useSettings: () => ({
+    confirmThreadArchive: false,
+    confirmThreadDelete: false,
+    defaultThreadEnvMode: "local",
+    sidebarProjectSortOrder: "updated_at",
+    sidebarThreadSortOrder: "updated_at",
+  }),
+  useUpdateSettings: () => ({
+    updateSettings: vi.fn(),
+  }),
+}));
+vi.mock("../hooks/useSettings.ts", () => ({
+  useSettings: () => ({
+    confirmThreadArchive: false,
+    confirmThreadDelete: false,
+    defaultThreadEnvMode: "local",
+    sidebarProjectSortOrder: "updated_at",
+    sidebarThreadSortOrder: "updated_at",
+  }),
+  useUpdateSettings: () => ({
+    updateSettings: vi.fn(),
+  }),
+}));
+
+vi.mock("../rpc/serverState", () => ({
+  useServerKeybindings: () => [],
+  useServerProviders: () => [],
+}));
+
+vi.mock("../hooks/useOrchestrationRunStatusSync", () => ({
+  useOrchestrationRunStatusSync: () => undefined,
+}));
+vi.mock("../hooks/useOrchestrationRunStatusSync.ts", () => ({
+  useOrchestrationRunStatusSync: () => undefined,
+}));
+
+vi.mock("./ui/toast", () => ({
+  toastManager: {
+    add: toastAddSpy,
+  },
+}));
+
+const {
+  buildMoveThreadConfirmationMessage,
+  buildThreadContextMenuItems,
+  default: Sidebar,
+} = await import("./Sidebar");
 
 function createProvider(input: {
   provider: string;
@@ -28,7 +166,83 @@ function createProvider(input: {
   };
 }
 
-// Audit traceability: be79d4b, 90a6727.
+// Audit traceability: be79d4b, 90a6727, c6cb176, caeb52a, eb37ddb.
+
+const PROJECT_ID = "project-1" as ProjectId;
+const NOW_ISO = "2026-04-11T12:00:00.000Z";
+
+function seedSidebarStores() {
+  useStore.setState({
+    projects: [
+      {
+        id: PROJECT_ID,
+        name: "Alpha",
+        cwd: "/repo/alpha",
+        defaultModelSelection: { provider: "codex", model: "gpt-5.4" },
+        systemPrompt: "Honor the project conventions.",
+        promptOverrides: { orchestration: {} },
+        scripts: [],
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+      },
+    ],
+    threads: [],
+    threadsById: {},
+    sidebarThreadsById: {},
+    threadIdsByProjectId: {},
+    bootstrapComplete: true,
+    orchestrationRunStatusByThreadId: {},
+  });
+  useUiStateStore.setState({
+    projectExpandedById: { [PROJECT_ID]: true },
+    projectOrder: [PROJECT_ID],
+    threadLastVisitedAtById: {},
+    startupRecoveryStateByThreadId: {},
+    boardContextByThreadId: {},
+    managementLastProjectId: null,
+    viewMode: "chat",
+  });
+  useComposerDraftStore.setState({
+    draftsByThreadId: {},
+    draftThreadsByThreadId: {},
+    projectDraftThreadIdByProjectId: {},
+    stickyModelSelectionByProvider: {},
+    stickyActiveProvider: null,
+  });
+  useTerminalStateStore.setState({
+    terminalStateByThreadId: {},
+    terminalEventEntriesByKey: {},
+    nextTerminalEventId: 1,
+  });
+  useThreadSelectionStore.setState({
+    selectedThreadIds: new Set(),
+    anchorThreadId: null,
+  });
+}
+
+function installNativeApi() {
+  contextMenuShowSpy.mockReset();
+  window.nativeApi = {
+    contextMenu: {
+      show: contextMenuShowSpy,
+    },
+    dialogs: {
+      pickFolder: vi.fn(async () => null),
+      confirm: vi.fn(async () => true),
+    },
+    orchestration: {
+      dispatchCommand: vi.fn(async () => undefined),
+    },
+    projects: {
+      enhanceSystemPrompt: vi.fn(async () => ({
+        enhancedPrompt: "Honor the project conventions.",
+      })),
+    },
+    shell: {
+      openExternal: vi.fn(async () => undefined),
+    },
+  } as unknown as NativeApi;
+}
 
 describe("Sidebar fork board-context continuity", () => {
   it("reuses the active route thread when forking within the same project", () => {
@@ -145,5 +359,71 @@ describe("Sidebar thread context menu helpers", () => {
         clearsWorkspaceAssociation: false,
       }),
     ).toBe('Move thread "Main thread" to project "Beta"?');
+  });
+});
+
+describe("Sidebar project system prompt entry", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    __resetNativeApiForTests();
+    delete window.nativeApi;
+    toastAddSpy.mockReset();
+    seedSidebarStores();
+    installNativeApi();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    __resetNativeApiForTests();
+    delete window.nativeApi;
+  });
+
+  it("offers the project system prompt action and opens the hydrated dialog", async () => {
+    contextMenuShowSpy.mockImplementation(async (items: Array<{ id: string; label: string }>) => {
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "system-prompt", label: "Manage system prompt" }),
+        ]),
+      );
+      return "system-prompt";
+    });
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SidebarProvider defaultOpen>
+          <Sidebar />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+
+    try {
+      const projectButton = await waitForElement(
+        () => findButtonByText(document.body, "Alpha"),
+        "Unable to find the Alpha project row.",
+      );
+      projectButton.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 24,
+          clientY: 24,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(contextMenuShowSpy).toHaveBeenCalledTimes(1);
+      });
+
+      const textarea = await waitForElement(
+        () =>
+          document.querySelector<HTMLTextAreaElement>(
+            'textarea[placeholder*="Always use TypeScript strict mode"]',
+          ),
+        "Unable to find the system prompt textarea.",
+      );
+      expect(textarea.value).toBe("Honor the project conventions.");
+    } finally {
+      await screen.unmount();
+    }
   });
 });

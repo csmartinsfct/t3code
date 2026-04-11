@@ -241,6 +241,45 @@ export function buildMoveThreadConfirmationMessage(input: {
   return parts.join("\n\n");
 }
 
+export async function handleProjectDeleteAction(input: {
+  readonly project: { id: ProjectId; name: string };
+  readonly projectThreads: ReadonlyArray<{ archivedAt: string | null }>;
+  readonly confirmRemoval: (message: string) => Promise<boolean>;
+  readonly dispatchDelete: (projectId: ProjectId) => Promise<void>;
+  readonly onDeleteStart?: () => void;
+  readonly toast: (input: { type: "warning"; title: string; description: string }) => void;
+}): Promise<"blocked" | "cancelled" | "deleted"> {
+  const visibleProjectThreads = input.projectThreads.filter((thread) => thread.archivedAt === null);
+  if (visibleProjectThreads.length > 0) {
+    input.toast({
+      type: "warning",
+      title: "Project is not empty",
+      description: "Delete all threads in this project before removing it.",
+    });
+    return "blocked";
+  }
+  if (input.projectThreads.length > 0) {
+    const archivedThreadCount = input.projectThreads.length;
+    input.toast({
+      type: "warning",
+      title: "Project has archived threads",
+      description: `Delete or unarchive the ${archivedThreadCount} archived thread${
+        archivedThreadCount === 1 ? "" : "s"
+      } in Settings > Archived before removing this project.`,
+    });
+    return "blocked";
+  }
+
+  const confirmed = await input.confirmRemoval(`Remove project "${input.project.name}"?`);
+  if (!confirmed) {
+    return "cancelled";
+  }
+
+  input.onDeleteStart?.();
+  await input.dispatchDelete(input.project.id);
+  return "deleted";
+}
+
 function ThreadStatusLabel({
   status,
   compact = false,
@@ -1561,40 +1600,26 @@ export default function Sidebar() {
         threadIdsByProjectId,
         threadsById: sidebarThreadsById,
       });
-      const visibleProjectThreads = projectThreads.filter((thread) => thread.archivedAt === null);
-      if (visibleProjectThreads.length > 0) {
-        toastManager.add({
-          type: "warning",
-          title: "Project is not empty",
-          description: "Delete all threads in this project before removing it.",
-        });
-        return;
-      }
-      if (projectThreads.length > 0) {
-        const archivedThreadCount = projectThreads.length;
-        toastManager.add({
-          type: "warning",
-          title: "Project has archived threads",
-          description: `Delete or unarchive the ${archivedThreadCount} archived thread${
-            archivedThreadCount === 1 ? "" : "s"
-          } in Settings > Archived before removing this project.`,
-        });
-        return;
-      }
-
-      const confirmed = await api.dialogs.confirm(`Remove project "${project.name}"?`);
-      if (!confirmed) return;
-
       try {
-        const projectDraftThread = getDraftThreadByProjectId(projectId);
-        if (projectDraftThread) {
-          clearComposerDraftForThread(projectDraftThread.threadId);
-        }
-        clearProjectDraftThreadId(projectId);
-        await api.orchestration.dispatchCommand({
-          type: "project.delete",
-          commandId: newCommandId(),
-          projectId,
+        await handleProjectDeleteAction({
+          project,
+          projectThreads,
+          confirmRemoval: api.dialogs.confirm,
+          dispatchDelete: async (resolvedProjectId) => {
+            await api.orchestration.dispatchCommand({
+              type: "project.delete",
+              commandId: newCommandId(),
+              projectId: resolvedProjectId,
+            });
+          },
+          onDeleteStart: () => {
+            const projectDraftThread = getDraftThreadByProjectId(projectId);
+            if (projectDraftThread) {
+              clearComposerDraftForThread(projectDraftThread.threadId);
+            }
+            clearProjectDraftThreadId(projectId);
+          },
+          toast: toastManager.add,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error removing project.";

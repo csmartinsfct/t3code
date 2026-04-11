@@ -1,4 +1,5 @@
 import type {
+  ThreadId,
   OrchestrationRunStatus,
   OrchestrationRunStreamEvent,
   ProjectId,
@@ -7,6 +8,50 @@ import { useEffect } from "react";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { getWsRpcClient } from "../wsRpcClient";
+
+export function subscribeOrchestrationRunStatusSync(input: {
+  projects: ReadonlyArray<{ id: ProjectId }>;
+  removeStartupRecoveryState: (threadId: ThreadId) => void;
+  onRunEvent: (
+    projectId: ProjectId,
+    listener: (event: OrchestrationRunStreamEvent) => void,
+  ) => () => void;
+}): () => void {
+  if (input.projects.length === 0) {
+    return () => undefined;
+  }
+
+  const unsubscribers = input.projects.map((project) =>
+    input.onRunEvent(project.id, (event: OrchestrationRunStreamEvent) => {
+      if (event.type === "snapshot") {
+        const updates: Record<string, OrchestrationRunStatus> = {};
+        for (const run of event.runs) {
+          updates[run.orchestrationThreadId] = run.status;
+        }
+        useStore.setState((s) => ({
+          orchestrationRunStatusByThreadId: {
+            ...s.orchestrationRunStatusByThreadId,
+            ...updates,
+          },
+        }));
+      } else if (event.type === "run.created" || event.type === "run.updated") {
+        useStore.setState((s) => ({
+          orchestrationRunStatusByThreadId: {
+            ...s.orchestrationRunStatusByThreadId,
+            [event.run.orchestrationThreadId]: event.run.status,
+          },
+        }));
+        input.removeStartupRecoveryState(event.run.orchestrationThreadId);
+      }
+    }),
+  );
+
+  return () => {
+    for (const unsub of unsubscribers) {
+      unsub();
+    }
+  };
+}
 
 /**
  * Subscribes to orchestration run events for all known projects and syncs
@@ -20,42 +65,11 @@ export function useOrchestrationRunStatusSync(): void {
   const removeStartupRecoveryState = useUiStateStore((state) => state.removeStartupRecoveryState);
 
   useEffect(() => {
-    if (projects.length === 0) return;
-
     const rpc = getWsRpcClient();
-
-    const unsubscribers = projects.map((project) =>
-      rpc.orchestration.onRunEvent(
-        project.id as ProjectId,
-        (event: OrchestrationRunStreamEvent) => {
-          if (event.type === "snapshot") {
-            const updates: Record<string, OrchestrationRunStatus> = {};
-            for (const run of event.runs) {
-              updates[run.orchestrationThreadId] = run.status;
-            }
-            useStore.setState((s) => ({
-              orchestrationRunStatusByThreadId: {
-                ...s.orchestrationRunStatusByThreadId,
-                ...updates,
-              },
-            }));
-          } else if (event.type === "run.created" || event.type === "run.updated") {
-            useStore.setState((s) => ({
-              orchestrationRunStatusByThreadId: {
-                ...s.orchestrationRunStatusByThreadId,
-                [event.run.orchestrationThreadId]: event.run.status,
-              },
-            }));
-            removeStartupRecoveryState(event.run.orchestrationThreadId);
-          }
-        },
-      ),
-    );
-
-    return () => {
-      for (const unsub of unsubscribers) {
-        unsub();
-      }
-    };
+    return subscribeOrchestrationRunStatusSync({
+      projects: projects.map((project) => ({ id: project.id as ProjectId })),
+      removeStartupRecoveryState,
+      onRunEvent: rpc.orchestration.onRunEvent,
+    });
   }, [projects, removeStartupRecoveryState]);
 }
