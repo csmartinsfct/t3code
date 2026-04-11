@@ -6,6 +6,8 @@ import {
   EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
+  type ManagedRunSummary,
+  type ManagedRunStreamEvent,
   type NativeApi,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -256,6 +258,36 @@ function createTerminalContext(input: {
     lineEnd: input.lineEnd,
     text: input.text,
     createdAt: NOW_ISO,
+  };
+}
+
+function createManagedRunSummary(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSummary {
+  return {
+    runId: "run-browser-1" as ManagedRunSummary["runId"],
+    projectId: PROJECT_ID,
+    scriptId: "preview" as ManagedRunSummary["scriptId"],
+    createdByThreadId: THREAD_ID,
+    lastTouchedByThreadId: THREAD_ID,
+    cwd: "/repo/project",
+    launchMode: "attached",
+    status: "running",
+    detectedUrl: null,
+    detectedPort: null,
+    terminalThreadId: THREAD_ID,
+    terminalId: "default",
+    terminalPid: 123,
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO,
+    startedAt: NOW_ISO,
+    completedAt: null,
+    lastExitCode: null,
+    lastExitSignal: null,
+    declaredServices: [],
+    runtimeServices: [],
+    inferenceStatus: "pending",
+    inferenceUpdatedAt: null,
+    inferenceError: null,
+    ...overrides,
   };
 }
 
@@ -537,6 +569,7 @@ function installTestNativeApi(input?: {
   resolveMcpServers?: () => Promise<{ serverNames: readonly string[] }>;
   resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
   confirm?: (message: string) => boolean | Promise<boolean>;
+  managedRunsOnEvent?: NativeApi["managedRuns"]["onEvent"];
   dispatchCommand?: (
     input: Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0],
   ) => { sequence: number } | Promise<{ sequence: number }>;
@@ -560,6 +593,10 @@ function installTestNativeApi(input?: {
               | string
               | null
         : base.contextMenu.show) as NativeApi["contextMenu"]["show"],
+    },
+    managedRuns: {
+      ...base.managedRuns,
+      onEvent: input?.managedRunsOnEvent ?? base.managedRuns.onEvent,
     },
     orchestration: {
       ...base.orchestration,
@@ -588,6 +625,23 @@ async function waitForWsClient(): Promise<void> {
       ).toBe(true);
     },
     { timeout: 8_000, interval: 16 },
+  );
+}
+
+async function openManagedRunsMenu(): Promise<void> {
+  const runsButton = await waitForElement(
+    () =>
+      Array.from(document.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("Runs"),
+      ) as HTMLButtonElement | null,
+    'Unable to find "Runs" button.',
+  );
+  runsButton.click();
+}
+
+function queryToastTitles(): string[] {
+  return Array.from(document.querySelectorAll('[data-slot="toast-title"]')).map(
+    (element) => element.textContent ?? "",
   );
 }
 
@@ -969,7 +1023,7 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
         createdByThreadId: body.threadId,
         lastTouchedByThreadId: body.threadId,
         cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
-        launchMode: "script",
+        launchMode: "attached",
         status: "running",
         detectedUrl: null,
         detectedPort: null,
@@ -984,7 +1038,7 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
         lastExitSignal: null,
         declaredServices: [],
         runtimeServices: [],
-        inferenceStatus: "idle",
+        inferenceStatus: "pending",
         inferenceUpdatedAt: null,
         inferenceError: null,
       },
@@ -2164,6 +2218,217 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/worktrees/pr-1359",
             worktreePath: "/repo/worktrees/pr-1359",
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders managed-run snapshots in the header menu with service details", async () => {
+    // Audit traceability: ea4d857, 0ae911d.
+    const managedRunListeners: Array<(event: ManagedRunStreamEvent) => void> = [];
+    installTestNativeApi({
+      managedRunsOnEvent: (_projectId, listener) => {
+        managedRunListeners.push(listener);
+        return () => {
+          const index = managedRunListeners.indexOf(listener);
+          if (index >= 0) managedRunListeners.splice(index, 1);
+        };
+      },
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-managed-runs-menu" as MessageId,
+          targetText: "managed runs menu",
+        }),
+        [
+          {
+            id: "preview",
+            name: "Preview",
+            command: "bun run dev",
+            icon: "play",
+            runOnWorktreeCreate: false,
+          },
+        ],
+      ),
+    });
+
+    try {
+      const emitManagedRunEvent = (event: ManagedRunStreamEvent) => {
+        for (const listener of managedRunListeners) listener(event);
+      };
+      await vi.waitFor(() => {
+        expect(managedRunListeners.length).toBeGreaterThan(0);
+      });
+
+      emitManagedRunEvent({
+        type: "snapshot",
+        projectId: PROJECT_ID,
+        runs: [
+          createManagedRunSummary({
+            runId: "run-snapshot-menu" as ManagedRunSummary["runId"],
+            runtimeServices: [
+              {
+                declaredServiceName: "preview",
+                resolvedName: "Frontend",
+                role: "frontend",
+                canonicalHealthCheck: {
+                  type: "url",
+                  url: "http://localhost:3773",
+                },
+                validationStatus: "healthy",
+                inferenceConfidence: "high",
+                inferenceSource: "llm",
+                groundedBy: [],
+                evidenceLines: [],
+                lastCheckedAt: NOW_ISO,
+              },
+              {
+                declaredServiceName: "api",
+                resolvedName: "Backend",
+                role: "backend",
+                canonicalHealthCheck: {
+                  type: "port",
+                  port: 4000,
+                  host: "127.0.0.1",
+                },
+                validationStatus: "unhealthy",
+                inferenceConfidence: "medium",
+                inferenceSource: "llm",
+                groundedBy: [],
+                evidenceLines: [],
+                lastCheckedAt: NOW_ISO,
+              },
+            ],
+          }),
+        ],
+      });
+
+      await openManagedRunsMenu();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Preview");
+          expect(document.body.textContent).toContain("1/2");
+          expect(document.body.textContent).toContain("Frontend");
+          expect(document.body.textContent).toContain("Backend");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await page.getByText("Frontend").hover();
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("http://localhost:3773");
+          expect(document.body.textContent).toContain("healthy");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await page.getByText("Backend").hover();
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("http://127.0.0.1:4000");
+          expect(document.body.textContent).toContain("unhealthy");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("updates live managed runs and surfaces failure toasts through ChatView", async () => {
+    const managedRunListeners: Array<(event: ManagedRunStreamEvent) => void> = [];
+    installTestNativeApi({
+      managedRunsOnEvent: (_projectId, listener) => {
+        managedRunListeners.push(listener);
+        return () => {
+          const index = managedRunListeners.indexOf(listener);
+          if (index >= 0) managedRunListeners.splice(index, 1);
+        };
+      },
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withProjectScripts(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-managed-runs-live" as MessageId,
+          targetText: "managed runs live",
+        }),
+        [
+          {
+            id: "preview",
+            name: "Preview",
+            command: "bun run dev",
+            icon: "play",
+            runOnWorktreeCreate: false,
+          },
+        ],
+      ),
+    });
+
+    try {
+      const emitManagedRunEvent = (event: ManagedRunStreamEvent) => {
+        for (const listener of managedRunListeners) listener(event);
+      };
+      await vi.waitFor(() => {
+        expect(managedRunListeners.length).toBeGreaterThan(0);
+      });
+
+      emitManagedRunEvent({
+        type: "upserted",
+        projectId: PROJECT_ID,
+        run: createManagedRunSummary({
+          runId: "run-live-preview" as ManagedRunSummary["runId"],
+          status: "running",
+          runtimeServices: [
+            {
+              declaredServiceName: "preview",
+              resolvedName: "Frontend",
+              role: "frontend",
+              canonicalHealthCheck: {
+                type: "url",
+                url: "http://localhost:3773",
+              },
+              validationStatus: "healthy",
+              inferenceConfidence: "high",
+              inferenceSource: "llm",
+              groundedBy: [],
+              evidenceLines: [],
+              lastCheckedAt: NOW_ISO,
+            },
+          ],
+        }),
+      });
+
+      await openManagedRunsMenu();
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Preview");
+          expect(document.body.textContent).toContain("Frontend");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      emitManagedRunEvent({
+        type: "upserted",
+        projectId: PROJECT_ID,
+        run: createManagedRunSummary({
+          runId: "run-live-preview" as ManagedRunSummary["runId"],
+          status: "failed",
+          lastExitCode: 1,
+          completedAt: NOW_ISO,
+        }),
+      });
+
+      await vi.waitFor(
+        () => {
+          expect(queryToastTitles()).toContain('"Preview" failed (exit code 1)');
         },
         { timeout: 8_000, interval: 16 },
       );

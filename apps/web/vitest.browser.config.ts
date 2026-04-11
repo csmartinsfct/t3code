@@ -17,6 +17,8 @@ export default mergeConfig(
     test: {
       include: [
         "src/components/**/*.browser.tsx",
+        "src/components/ChatMarkdown.test.tsx",
+        "src/hooks/useManagedRunCompletionToasts.test.ts",
         "src/routes/**/*.browser.tsx",
         "src/components/ui/sheet.test.tsx",
       ],

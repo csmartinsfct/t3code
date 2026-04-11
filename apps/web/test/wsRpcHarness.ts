@@ -24,6 +24,7 @@ interface BrowserWsRpcHarnessOptions {
 
 const STREAM_METHODS = new Set<string>([
   WS_METHODS.gitRunStackedAction,
+  WS_METHODS.subscribeManagedRunEvents,
   WS_METHODS.subscribeOrchestrationDomainEvents,
   WS_METHODS.subscribeOrchestrationRunEvents,
   WS_METHODS.subscribeTerminalEvents,
