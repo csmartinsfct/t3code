@@ -2,24 +2,20 @@ import "../index.css";
 
 import type { NativeApi, ProjectId, ServerProvider, ThreadId } from "@t3tools/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import type { ReactNode } from "react";
 
-import { useComposerDraftStore } from "~/composerDraftStore";
 import { __resetNativeApiForTests } from "~/nativeApi";
-import { useStore } from "~/store";
-import { useTerminalStateStore } from "~/terminalStateStore";
 import { findButtonByText, waitForElement } from "~/test-utils/browser";
-import { useThreadSelectionStore } from "~/threadSelectionStore";
-import { useUiStateStore } from "~/uiStateStore";
+import { seedSidebarTestStores } from "~/test-utils/sidebar";
 import { resolveThreadBoardContextSourceThreadId } from "../lib/threadBoardContext";
 import { SidebarProvider } from "./ui/sidebar";
 
-const { contextMenuShowSpy, toastAddSpy } = vi.hoisted(() => ({
+const { contextMenuShowSpy } = vi.hoisted(() => ({
   contextMenuShowSpy: vi.fn(),
-  toastAddSpy: vi.fn(),
 }));
+const toastAddSpy = vi.fn();
 
 vi.mock("@tanstack/react-query", async () => {
   const actual =
@@ -60,33 +56,24 @@ vi.mock("./sidebar/SidebarUpdatePill", () => ({
   SidebarUpdatePill: () => null,
 }));
 
-vi.mock("../hooks/useHandleNewThread", () => ({
+const newThreadHookMock = {
   useHandleNewThread: () => ({
     activeDraftThread: null,
     activeThread: null,
     handleNewThread: vi.fn(async () => undefined),
   }),
-}));
-vi.mock("../hooks/useHandleNewThread.ts", () => ({
-  useHandleNewThread: () => ({
-    activeDraftThread: null,
-    activeThread: null,
-    handleNewThread: vi.fn(async () => undefined),
-  }),
-}));
+};
+vi.mock("../hooks/useHandleNewThread", () => newThreadHookMock);
+vi.mock("../hooks/useHandleNewThread.ts", () => newThreadHookMock);
 
-vi.mock("../hooks/useThreadActions", () => ({
+const threadActionsMock = {
   useThreadActions: () => ({
     archiveThread: vi.fn(async () => undefined),
     deleteThread: vi.fn(async () => undefined),
   }),
-}));
-vi.mock("../hooks/useThreadActions.ts", () => ({
-  useThreadActions: () => ({
-    archiveThread: vi.fn(async () => undefined),
-    deleteThread: vi.fn(async () => undefined),
-  }),
-}));
+};
+vi.mock("../hooks/useThreadActions", () => threadActionsMock);
+vi.mock("../hooks/useThreadActions.ts", () => threadActionsMock);
 
 vi.mock("../hooks/useCopyToClipboard", () => ({
   useCopyToClipboard: () => ({
@@ -95,7 +82,7 @@ vi.mock("../hooks/useCopyToClipboard", () => ({
   }),
 }));
 
-vi.mock("../hooks/useSettings", () => ({
+const settingsHookMock = {
   useSettings: () => ({
     confirmThreadArchive: false,
     confirmThreadDelete: false,
@@ -106,31 +93,20 @@ vi.mock("../hooks/useSettings", () => ({
   useUpdateSettings: () => ({
     updateSettings: vi.fn(),
   }),
-}));
-vi.mock("../hooks/useSettings.ts", () => ({
-  useSettings: () => ({
-    confirmThreadArchive: false,
-    confirmThreadDelete: false,
-    defaultThreadEnvMode: "local",
-    sidebarProjectSortOrder: "updated_at",
-    sidebarThreadSortOrder: "updated_at",
-  }),
-  useUpdateSettings: () => ({
-    updateSettings: vi.fn(),
-  }),
-}));
+};
+vi.mock("../hooks/useSettings", () => settingsHookMock);
+vi.mock("../hooks/useSettings.ts", () => settingsHookMock);
 
 vi.mock("../rpc/serverState", () => ({
   useServerKeybindings: () => [],
   useServerProviders: () => [],
 }));
 
-vi.mock("../hooks/useOrchestrationRunStatusSync", () => ({
+const runStatusSyncHookMock = {
   useOrchestrationRunStatusSync: () => undefined,
-}));
-vi.mock("../hooks/useOrchestrationRunStatusSync.ts", () => ({
-  useOrchestrationRunStatusSync: () => undefined,
-}));
+};
+vi.mock("../hooks/useOrchestrationRunStatusSync", () => runStatusSyncHookMock);
+vi.mock("../hooks/useOrchestrationRunStatusSync.ts", () => runStatusSyncHookMock);
 
 vi.mock("./ui/toast", () => ({
   toastManager: {
@@ -167,58 +143,6 @@ function createProvider(input: {
 }
 
 // Audit traceability: be79d4b, 90a6727, c6cb176, caeb52a, eb37ddb.
-
-const PROJECT_ID = "project-1" as ProjectId;
-const NOW_ISO = "2026-04-11T12:00:00.000Z";
-
-function seedSidebarStores() {
-  useStore.setState({
-    projects: [
-      {
-        id: PROJECT_ID,
-        name: "Alpha",
-        cwd: "/repo/alpha",
-        defaultModelSelection: { provider: "codex", model: "gpt-5.4" },
-        systemPrompt: "Honor the project conventions.",
-        promptOverrides: { orchestration: {} },
-        scripts: [],
-        createdAt: NOW_ISO,
-        updatedAt: NOW_ISO,
-      },
-    ],
-    threads: [],
-    threadsById: {},
-    sidebarThreadsById: {},
-    threadIdsByProjectId: {},
-    bootstrapComplete: true,
-    orchestrationRunStatusByThreadId: {},
-  });
-  useUiStateStore.setState({
-    projectExpandedById: { [PROJECT_ID]: true },
-    projectOrder: [PROJECT_ID],
-    threadLastVisitedAtById: {},
-    startupRecoveryStateByThreadId: {},
-    boardContextByThreadId: {},
-    managementLastProjectId: null,
-    viewMode: "chat",
-  });
-  useComposerDraftStore.setState({
-    draftsByThreadId: {},
-    draftThreadsByThreadId: {},
-    projectDraftThreadIdByProjectId: {},
-    stickyModelSelectionByProvider: {},
-    stickyActiveProvider: null,
-  });
-  useTerminalStateStore.setState({
-    terminalStateByThreadId: {},
-    terminalEventEntriesByKey: {},
-    nextTerminalEventId: 1,
-  });
-  useThreadSelectionStore.setState({
-    selectedThreadIds: new Set(),
-    anchorThreadId: null,
-  });
-}
 
 function installNativeApi() {
   contextMenuShowSpy.mockReset();
@@ -368,7 +292,7 @@ describe("Sidebar project system prompt entry", () => {
     __resetNativeApiForTests();
     delete window.nativeApi;
     toastAddSpy.mockReset();
-    seedSidebarStores();
+    seedSidebarTestStores();
     installNativeApi();
   });
 

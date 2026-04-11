@@ -1,4 +1,5 @@
 import type {
+  OrchestrationRunId,
   OrchestrationRunStatus,
   OrchestrationRunStreamEvent,
   ProjectId,
@@ -18,6 +19,10 @@ const PROJECT_BETA = "project-beta" as ProjectId;
 const THREAD_ALPHA = "thread-alpha" as ThreadId;
 const THREAD_BETA = "thread-beta" as ThreadId;
 const THREAD_LIVE = "thread-live" as ThreadId;
+
+function asRunId(id: string): OrchestrationRunId {
+  return id as unknown as OrchestrationRunId;
+}
 
 describe("subscribeOrchestrationRunStatusSync", () => {
   beforeEach(() => {
@@ -62,7 +67,7 @@ describe("subscribeOrchestrationRunStatusSync", () => {
       projectId: PROJECT_ALPHA,
       runs: [
         {
-          id: "run-alpha-1" as never,
+          id: asRunId("run-alpha-1"),
           orchestrationThreadId: THREAD_ALPHA,
           projectId: PROJECT_ALPHA,
           status: "pending" as OrchestrationRunStatus,
@@ -73,7 +78,7 @@ describe("subscribeOrchestrationRunStatusSync", () => {
           updatedAt: "2026-04-11T12:00:00.000Z",
         },
         {
-          id: "run-alpha-2" as never,
+          id: asRunId("run-alpha-2"),
           orchestrationThreadId: THREAD_BETA,
           projectId: PROJECT_ALPHA,
           status: "running" as OrchestrationRunStatus,
@@ -95,7 +100,7 @@ describe("subscribeOrchestrationRunStatusSync", () => {
       type: "run.updated",
       projectId: PROJECT_BETA,
       run: {
-        id: "run-live" as never,
+        id: asRunId("run-live"),
         orchestrationThreadId: THREAD_LIVE,
         projectId: PROJECT_BETA,
         status: "running" as OrchestrationRunStatus,

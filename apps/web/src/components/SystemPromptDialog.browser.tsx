@@ -94,7 +94,9 @@ describe("SystemPromptDialog", () => {
       });
       await expect.element(textarea).toHaveValue("Always explain tradeoffs.");
 
-      await page.getByRole("button", { name: "Save" }).click();
+      const saveButton = page.getByRole("button", { name: "Save" });
+      await expect.element(saveButton).toBeEnabled();
+      await saveButton.click();
 
       await vi.waitFor(() => {
         expect(dispatchCommandSpy).toHaveBeenCalledWith(
