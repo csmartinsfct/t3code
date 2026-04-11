@@ -21,6 +21,7 @@ import {
 const THREAD_ID = "thread-route-browser-test";
 const ORCHESTRATION_PARENT_THREAD_ID = "thread-route-orchestration-parent";
 const ORCHESTRATION_CHILD_THREAD_ID = "thread-route-orchestration-child";
+const ORCHESTRATION_REVIEW_THREAD_ID = "thread-route-orchestration-review";
 const PROJECT_ID = "project-route-browser-test";
 const PROJECT_CWD = "/repo/project";
 const NOW_ISO = "2026-04-11T10:00:00.000Z";
@@ -179,6 +180,14 @@ const ORCHESTRATION_CHILD_THREAD: Thread = {
   ticketId: "ticket-route-orchestration-child" as never,
 };
 
+const ORCHESTRATION_REVIEW_THREAD: Thread = {
+  ...ROUTE_THREAD,
+  id: ORCHESTRATION_REVIEW_THREAD_ID as never,
+  title: "Route review child",
+  parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
+  ticketId: "ticket-route-orchestration-child" as never,
+};
+
 const ORCHESTRATION_PARENT_SIDEBAR_THREAD: SidebarThreadSummary = {
   ...ROUTE_SIDEBAR_THREAD,
   id: ORCHESTRATION_PARENT_THREAD.id,
@@ -190,6 +199,13 @@ const ORCHESTRATION_CHILD_SIDEBAR_THREAD: SidebarThreadSummary = {
   ...ROUTE_SIDEBAR_THREAD,
   id: ORCHESTRATION_CHILD_THREAD.id,
   title: ORCHESTRATION_CHILD_THREAD.title,
+  parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
+};
+
+const ORCHESTRATION_REVIEW_SIDEBAR_THREAD: SidebarThreadSummary = {
+  ...ROUTE_SIDEBAR_THREAD,
+  id: ORCHESTRATION_REVIEW_THREAD.id,
+  title: ORCHESTRATION_REVIEW_THREAD.title,
   parentThreadId: ORCHESTRATION_PARENT_THREAD.id,
 };
 
@@ -369,19 +385,26 @@ describe("chat route management overlays", () => {
     // Audit traceability: 3b13b26, 5b6a8b2.
     useStore.setState((state) => ({
       ...state,
-      threads: [ORCHESTRATION_PARENT_THREAD, ORCHESTRATION_CHILD_THREAD],
+      threads: [
+        ORCHESTRATION_PARENT_THREAD,
+        ORCHESTRATION_CHILD_THREAD,
+        ORCHESTRATION_REVIEW_THREAD,
+      ],
       threadsById: {
         [ORCHESTRATION_PARENT_THREAD_ID]: ORCHESTRATION_PARENT_THREAD,
         [ORCHESTRATION_CHILD_THREAD_ID]: ORCHESTRATION_CHILD_THREAD,
+        [ORCHESTRATION_REVIEW_THREAD_ID]: ORCHESTRATION_REVIEW_THREAD,
       },
       sidebarThreadsById: {
         [ORCHESTRATION_PARENT_THREAD_ID]: ORCHESTRATION_PARENT_SIDEBAR_THREAD,
         [ORCHESTRATION_CHILD_THREAD_ID]: ORCHESTRATION_CHILD_SIDEBAR_THREAD,
+        [ORCHESTRATION_REVIEW_THREAD_ID]: ORCHESTRATION_REVIEW_SIDEBAR_THREAD,
       },
       threadIdsByProjectId: {
         [PROJECT_ID]: [
           ORCHESTRATION_PARENT_THREAD_ID as never,
           ORCHESTRATION_CHILD_THREAD_ID as never,
+          ORCHESTRATION_REVIEW_THREAD_ID as never,
         ],
       },
     }));
@@ -410,6 +433,19 @@ describe("chat route management overlays", () => {
       });
     } finally {
       await childRoute.unmount();
+    }
+
+    const reviewChildRoute = await mountRoute({
+      initialSearch: { diff: "1" },
+      initialThreadId: ORCHESTRATION_REVIEW_THREAD_ID,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Diff panel body");
+      });
+    } finally {
+      await reviewChildRoute.unmount();
     }
   });
 });

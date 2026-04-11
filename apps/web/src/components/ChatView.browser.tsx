@@ -65,6 +65,7 @@ const PROJECT_ID = "project-1" as ProjectId;
 const ORCHESTRATION_PARENT_THREAD_ID = "thread-orchestration-parent" as ThreadId;
 const ORCHESTRATION_RUN_ID = "run-orchestration-browser-test";
 const ORCHESTRATION_TICKET_ID = "ticket-orchestration-browser-test" as TicketId;
+const ORCHESTRATION_REVIEW_THREAD_ID = "thread-orchestration-review" as ThreadId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
@@ -942,7 +943,18 @@ function createSnapshotWithPlanFollowUpPrompt(): OrchestrationReadModel {
   };
 }
 
-function createOrchestrationRun(status: "pending" | "running") {
+function createOrchestrationRun(
+  status: "pending" | "running",
+  options?: {
+    currentPhase?: "working" | "reviewing";
+    reviewIteration?: number;
+    includeReviewThread?: boolean;
+  },
+) {
+  const currentPhase = options?.currentPhase ?? "working";
+  const reviewIteration = options?.reviewIteration ?? (currentPhase === "reviewing" ? 1 : 0);
+  const includeReviewThread = options?.includeReviewThread ?? currentPhase === "reviewing";
+
   return {
     id: ORCHESTRATION_RUN_ID,
     orchestrationThreadId: ORCHESTRATION_PARENT_THREAD_ID,
@@ -952,18 +964,21 @@ function createOrchestrationRun(status: "pending" | "running") {
       {
         ticketId: ORCHESTRATION_TICKET_ID,
         workingThreadId: THREAD_ID,
+        ...(includeReviewThread ? { reviewThreadId: ORCHESTRATION_REVIEW_THREAD_ID } : {}),
       },
     ],
     currentTicketIndex: status === "pending" ? -1 : 0,
-    currentPhase: "working" as const,
-    reviewIteration: 0,
+    currentPhase,
+    reviewIteration,
     maxReviewIterations: 1,
     createdAt: isoAt(2_000),
     updatedAt: isoAt(status === "pending" ? 2_001 : 2_010),
   };
 }
 
-function createOrchestrationWaitingSnapshot(): OrchestrationReadModel {
+function createOrchestrationWaitingSnapshot(options?: {
+  includeReviewThread?: boolean;
+}): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-orchestration-wait-target" as MessageId,
     targetText: "orchestration wait target",
@@ -1014,6 +1029,22 @@ function createOrchestrationWaitingSnapshot(): OrchestrationReadModel {
         latestTurn: null,
         session: null,
       },
+      ...(options?.includeReviewThread
+        ? [
+            {
+              ...activeThread,
+              id: ORCHESTRATION_REVIEW_THREAD_ID,
+              title: "Review child thread",
+              parentThreadId: ORCHESTRATION_PARENT_THREAD_ID,
+              isOrchestrationThread: false,
+              ticketId: ORCHESTRATION_TICKET_ID,
+              messages: [],
+              activities: [],
+              latestTurn: null,
+              session: null,
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -3118,6 +3149,124 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
 
       expect(timelineItem.textContent ?? "").toContain("Timeline");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surfaces review child threads in the switcher while keeping the parent header focused on the current ticket", async () => {
+    // Audit traceability: 08f8969, 22cd7dd.
+    installTestNativeApi();
+    const run = createOrchestrationRun("running", {
+      currentPhase: "reviewing",
+      reviewIteration: 1,
+      includeReviewThread: true,
+    });
+    const orchestrationTicket = {
+      id: ORCHESTRATION_TICKET_ID,
+      projectId: PROJECT_ID,
+      parentId: null,
+      ticketNumber: 189,
+      identifier: "T3CO-189",
+      title: "Review switcher coverage",
+      status: "in_review" as const,
+      priority: "high" as const,
+      sortOrder: 0,
+      isArchived: false,
+      worktree: null,
+      labels: [],
+      subTicketCount: 0,
+      dependencyCount: 0,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createOrchestrationWaitingSnapshot({ includeReviewThread: true }),
+      resolveRpc: (body) => {
+        const tag = String(body._tag);
+        if (tag === ORCHESTRATION_WS_METHODS.listRuns || tag.endsWith("listRuns")) {
+          return [
+            {
+              id: run.id,
+              orchestrationThreadId: run.orchestrationThreadId,
+              projectId: run.projectId,
+              status: run.status,
+              currentTicketIndex: run.currentTicketIndex,
+              ticketCount: run.ticketOrder.length,
+              currentPhase: run.currentPhase,
+              createdAt: run.createdAt,
+              updatedAt: run.updatedAt,
+            },
+          ];
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getRun || tag.endsWith("getRun")) {
+          return run;
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getChildThreads || tag.endsWith("getChildThreads")) {
+          return fixture.snapshot.threads.filter(
+            (thread) => thread.parentThreadId === ORCHESTRATION_PARENT_THREAD_ID,
+          );
+        }
+        if (tag === WS_METHODS.ticketingList || tag.endsWith("ticketing.list")) {
+          return [orchestrationTicket];
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: ORCHESTRATION_PARENT_THREAD_ID },
+      });
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_PARENT_THREAD_ID}`,
+        "Route should navigate to the orchestration parent thread.",
+      );
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Running");
+        expect(text).toContain("Waiting child thread");
+        expect(text).not.toContain("Current ticket");
+      });
+
+      const switcherButton = await waitForButtonContainingText("Orchestration timeline");
+      switcherButton.click();
+
+      const workingItem = await waitForMenuItemContainingText("T3CO-189");
+      const reviewItem = await waitForMenuItemContainingText("T3CO-189 Review");
+      expect(workingItem.textContent ?? "").toContain("Waiting child thread");
+      expect(reviewItem.textContent ?? "").toContain("Review");
+      expect(reviewItem.textContent ?? "").toContain("Review child thread");
+
+      reviewItem.click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_REVIEW_THREAD_ID}`,
+        "Route should navigate to the orchestration review child thread.",
+      );
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Timeline");
+        expect(text).toContain("Send a message to start the conversation.");
+        expect(text).not.toContain("Current ticket");
+      });
+
+      expect(findButtonContainingText("T3CO-189 Review")).toBeTruthy();
+      const reviewSwitcherButton = await waitForButtonContainingText("T3CO-189 Review");
+      reviewSwitcherButton.click();
+      (await waitForMenuItemContainingText("Timeline")).click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_PARENT_THREAD_ID}`,
+        "Route should navigate back to the orchestration parent thread.",
+      );
     } finally {
       await mounted.cleanup();
     }

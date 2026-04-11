@@ -500,6 +500,101 @@ describe("OrchestrationTimeline", () => {
     expect(markup).not.toContain("Continue.");
   });
 
+  it("renders outcome-derived review labels and review cards instead of raw JSON", async () => {
+    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+    useOrchestrationTimeline.mockReturnValue({
+      loading: false,
+      error: null,
+      run: null,
+      childThreads: [],
+      timelineRows: [
+        {
+          kind: "thread-block",
+          id: "block:review-approved",
+          threadId: "thread-review-approved",
+          sectionKind: "review",
+          isActive: false,
+          reviewIteration: 1,
+          reviewOutcome: "approved",
+          messages: [
+            {
+              id: "review-approved" as Thread["messages"][number]["id"],
+              role: "assistant",
+              text: '{"changesNeeded":false,"summary":"Ship it.","comments":[]}',
+              createdAt: "2026-04-09T10:00:01.000Z",
+              streaming: false,
+            },
+          ],
+        },
+        {
+          kind: "thread-block",
+          id: "block:review-failed",
+          threadId: "thread-review-failed",
+          sectionKind: "review",
+          isActive: false,
+          reviewIteration: 2,
+          reviewOutcome: "requested-changes",
+          messages: [
+            {
+              id: "review-failed" as Thread["messages"][number]["id"],
+              role: "assistant",
+              text: '{"changesNeeded":true,"summary":"Still needs follow-up.","comments":[]}',
+              createdAt: "2026-04-09T10:00:02.000Z",
+              streaming: false,
+            },
+          ],
+        },
+        {
+          kind: "thread-block",
+          id: "block:review-blocked",
+          threadId: "thread-review-blocked",
+          sectionKind: "review",
+          isActive: false,
+          reviewIteration: 3,
+          reviewOutcome: "blocked",
+          messages: [
+            {
+              id: "review-blocked" as Thread["messages"][number]["id"],
+              role: "assistant",
+              text: '{"changesNeeded":true,"summary":"Missing review payload.","comments":[]}',
+              createdAt: "2026-04-09T10:00:03.000Z",
+              streaming: false,
+            },
+          ],
+        },
+      ],
+      refresh: () => {},
+    });
+
+    const markup = renderToStaticMarkup(
+      <OrchestrationTimeline
+        thread={makeThread()}
+        projectId="project-1"
+        scrollContainer={null}
+        resolvedTheme="dark"
+        timestampFormat="locale"
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        nowIso="2026-04-09T10:00:10.000Z"
+        onNavigateToThread={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Review Passed");
+    expect(markup).toContain("Review Failed");
+    expect(markup).toContain("Review Blocked");
+    expect(markup).toContain("Automated review 1 Approved Ship it.");
+    expect(markup).toContain("Automated review 2 Changes needed Still needs follow-up.");
+    expect(markup).toContain("Automated review 3 Changes needed Missing review payload.");
+    expect(markup).not.toContain('{"changesNeeded":false,"summary":"Ship it.","comments":[]}');
+    expect(markup).not.toContain(
+      '{"changesNeeded":true,"summary":"Still needs follow-up.","comments":[]}',
+    );
+    expect(markup).not.toContain(
+      '{"changesNeeded":true,"summary":"Missing review payload.","comments":[]}',
+    );
+  });
+
   it("renders the shared working timer row for active orchestration runs", async () => {
     const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
     useOrchestrationTimeline.mockReturnValue({
