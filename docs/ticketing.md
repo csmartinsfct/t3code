@@ -172,6 +172,11 @@ Fresh-agent prompt behavior is phase-aware:
 - fresh-agent resume of a review turn renders the full `review` prompt again
 - normal `Resume` keeps using the lightweight `resume` prompt
 
+On full server restart, persisted orchestration runs can still read as `running` even though no live runner survives the shutdown. Startup recovery handles that in two ways:
+
+- when `settings.resumeAgentsOnStartup` is enabled, the server automatically re-enters the same orchestration resume path used by the Resume action
+- when startup auto-resume is disabled or fails, the sidebar shows a client-only `Was working` marker until the user opens the affected thread
+
 Fresh review prompt behavior is also phase-aware:
 
 - review iteration `1` renders `review` with the full working-thread diff

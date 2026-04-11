@@ -484,6 +484,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.resumeAgentsOnStartup !== DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup
+        ? ["Startup resume"]
+        : []),
       ...(settings.mcpDeliveryMode !== DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode
         ? ["MCP delivery"]
         : []),
@@ -506,6 +509,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAssistantStreaming,
       settings.maxReviewIterations,
       settings.mcpDeliveryMode,
+      settings.resumeAgentsOnStartup,
       settings.timestampFormat,
       theme,
     ],
@@ -1043,6 +1047,32 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Resume agents on startup"
+          description="Automatically recover previously working threads and orchestration runs after the server restarts."
+          resetAction={
+            settings.resumeAgentsOnStartup !== DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup ? (
+              <SettingResetButton
+                label="startup resume"
+                onClick={() =>
+                  updateSettings({
+                    resumeAgentsOnStartup: DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.resumeAgentsOnStartup}
+              onCheckedChange={(checked) =>
+                updateSettings({ resumeAgentsOnStartup: Boolean(checked) })
+              }
+              aria-label="Resume agents on startup"
+            />
           }
         />
 

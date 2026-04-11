@@ -50,6 +50,7 @@ export interface UiProjectState {
 
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
+  startupRecoveryStateByThreadId: Record<string, "active" | "dismissed">;
 }
 
 export interface UiBoardState {
@@ -75,6 +76,7 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   threadLastVisitedAtById: {},
+  startupRecoveryStateByThreadId: {},
   boardContextByThreadId: {},
   managementLastProjectId: null,
   viewMode: "chat",
@@ -448,9 +450,15 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       retainedThreadIds.has(threadId as ThreadId),
     ),
   ) as Record<string, BoardContext>;
+  const nextStartupRecoveryStateByThreadId = Object.fromEntries(
+    Object.entries(state.startupRecoveryStateByThreadId).filter(([threadId]) =>
+      retainedThreadIds.has(threadId as ThreadId),
+    ),
+  ) as Record<string, "active" | "dismissed">;
 
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
+    recordsEqual(state.startupRecoveryStateByThreadId, nextStartupRecoveryStateByThreadId) &&
     boardContextsEqual(state.boardContextByThreadId, nextBoardContextByThreadId)
   ) {
     return state;
@@ -458,6 +466,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
     boardContextByThreadId: nextBoardContextByThreadId,
   };
 }
@@ -510,18 +519,62 @@ export function markThreadUnread(
 
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
   const hasVisitState = threadId in state.threadLastVisitedAtById;
+  const hasStartupRecoveryState = threadId in state.startupRecoveryStateByThreadId;
   const hasBoardContext = threadId in state.boardContextByThreadId;
-  if (!hasVisitState && !hasBoardContext) {
+  if (!hasVisitState && !hasStartupRecoveryState && !hasBoardContext) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
+  const nextStartupRecoveryStateByThreadId = { ...state.startupRecoveryStateByThreadId };
   const nextBoardContextByThreadId = { ...state.boardContextByThreadId };
   delete nextThreadLastVisitedAtById[threadId];
+  delete nextStartupRecoveryStateByThreadId[threadId];
   delete nextBoardContextByThreadId[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
     boardContextByThreadId: nextBoardContextByThreadId,
+  };
+}
+
+export function setStartupWasWorkingThreads(
+  state: UiState,
+  threadIds: readonly ThreadId[],
+): UiState {
+  const nextStartupRecoveryStateByThreadId = Object.fromEntries(
+    threadIds.map((threadId) => [threadId, "active"] as const),
+  ) as Record<string, "active" | "dismissed">;
+  if (recordsEqual(state.startupRecoveryStateByThreadId, nextStartupRecoveryStateByThreadId)) {
+    return state;
+  }
+  return {
+    ...state,
+    startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
+  };
+}
+
+export function clearStartupWasWorkingThread(state: UiState, threadId: ThreadId): UiState {
+  if (state.startupRecoveryStateByThreadId[threadId] === "dismissed") {
+    return state;
+  }
+  const nextStartupRecoveryStateByThreadId = { ...state.startupRecoveryStateByThreadId };
+  nextStartupRecoveryStateByThreadId[threadId] = "dismissed";
+  return {
+    ...state,
+    startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
+  };
+}
+
+export function removeStartupRecoveryState(state: UiState, threadId: ThreadId): UiState {
+  if (!(threadId in state.startupRecoveryStateByThreadId)) {
+    return state;
+  }
+  const nextStartupRecoveryStateByThreadId = { ...state.startupRecoveryStateByThreadId };
+  delete nextStartupRecoveryStateByThreadId[threadId];
+  return {
+    ...state,
+    startupRecoveryStateByThreadId: nextStartupRecoveryStateByThreadId,
   };
 }
 
@@ -751,6 +804,9 @@ export function reorderProjects(
 interface UiStateStore extends UiState {
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
+  setStartupWasWorkingThreads: (threadIds: readonly ThreadId[]) => void;
+  clearStartupWasWorkingThread: (threadId: ThreadId) => void;
+  removeStartupRecoveryState: (threadId: ThreadId) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId, latestTurnCompletedAt: string | null | undefined) => void;
   clearThreadUi: (threadId: ThreadId) => void;
@@ -790,6 +846,12 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
   syncProjects: (projects) => set((state) => syncProjects(state, projects)),
   syncThreads: (threads) => set((state) => syncThreads(state, threads)),
+  setStartupWasWorkingThreads: (threadIds) =>
+    set((state) => setStartupWasWorkingThreads(state, threadIds)),
+  clearStartupWasWorkingThread: (threadId) =>
+    set((state) => clearStartupWasWorkingThread(state, threadId)),
+  removeStartupRecoveryState: (threadId) =>
+    set((state) => removeStartupRecoveryState(state, threadId)),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>

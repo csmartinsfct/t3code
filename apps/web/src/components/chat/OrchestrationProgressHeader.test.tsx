@@ -33,6 +33,7 @@ describe("OrchestrationProgressHeader", () => {
       <OrchestrationProgressHeader
         run={makeRun()}
         centerLabel="Fix sidebar"
+        startupRecoveryState={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -50,6 +51,7 @@ describe("OrchestrationProgressHeader", () => {
       <OrchestrationProgressHeader
         run={makeRun({ status: "completed", currentTicketIndex: 0 })}
         centerLabel="Timeline"
+        startupRecoveryState={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -77,6 +79,7 @@ describe("OrchestrationProgressHeader", () => {
           ],
         })}
         centerLabel={null}
+        startupRecoveryState={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -93,6 +96,7 @@ describe("OrchestrationProgressHeader", () => {
       <OrchestrationProgressHeader
         run={makeRun({ status: "paused", currentPhase: "working" })}
         centerLabel="Fix sidebar"
+        startupRecoveryState={null}
         onPause={() => {}}
         onResume={() => {}}
         onResumeWithFreshAgent={() => {}}
@@ -109,6 +113,7 @@ describe("OrchestrationProgressHeader", () => {
       <OrchestrationProgressHeader
         run={makeRun()}
         centerLabel="Fix sidebar"
+        startupRecoveryState={null}
         onCenterLabelClick={() => {}}
         onPause={() => {}}
         onResume={() => {}}
@@ -119,5 +124,43 @@ describe("OrchestrationProgressHeader", () => {
 
     expect(markup).toContain("<button");
     expect(markup).toContain('title="Fix sidebar"');
+  });
+
+  it("shows Was working without running controls for stale startup runs", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun()}
+        centerLabel="Fix sidebar"
+        startupRecoveryState="active"
+        onPause={() => {}}
+        onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Was working");
+    expect(markup).toContain("Resume");
+    expect(markup).not.toContain("Pause");
+    expect(markup).not.toContain("Running");
+  });
+
+  it("keeps stale startup runs resumable after the marker is dismissed", () => {
+    const markup = renderToStaticMarkup(
+      <OrchestrationProgressHeader
+        run={makeRun()}
+        centerLabel="Fix sidebar"
+        startupRecoveryState="dismissed"
+        onPause={() => {}}
+        onResume={() => {}}
+        onResumeWithFreshAgent={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Resume");
+    expect(markup).not.toContain("Pause");
+    expect(markup).not.toContain("Running");
+    expect(markup).not.toContain("Was working");
   });
 });

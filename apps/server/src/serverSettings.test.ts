@@ -29,6 +29,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         maxReviewIterations: 0,
       });
 
+      assert.deepEqual(decodePatch({ resumeAgentsOnStartup: true }), {
+        resumeAgentsOnStartup: true,
+      });
+
       assert.deepEqual(
         decodePatch({
           textGenerationModelSelection: {
@@ -222,6 +226,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
         maxReviewIterations: 5,
+        resumeAgentsOnStartup: true,
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -238,6 +243,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
         maxReviewIterations: 5,
+        resumeAgentsOnStartup: true,
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",

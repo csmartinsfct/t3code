@@ -23,6 +23,7 @@ export type ThreadTraversalDirection = "previous" | "next";
 export interface ThreadStatusPill {
   label:
     | "Working"
+    | "Was working"
     | "Connecting"
     | "Completed"
     | "Pending Approval"
@@ -36,6 +37,7 @@ export interface ThreadStatusPill {
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
+  "Was working": 3,
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
@@ -53,6 +55,7 @@ type ThreadStatusInput = Pick<
 > & {
   lastVisitedAt?: string | undefined;
   isOrchestrationRunActive?: boolean;
+  startupRecoveryState?: "active" | "dismissed";
 };
 
 export interface ThreadJumpHintVisibilityController {
@@ -354,6 +357,19 @@ export function resolveThreadStatusPill(input: {
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
       pulse: false,
     };
+  }
+
+  if (thread.startupRecoveryState === "active") {
+    return {
+      label: "Was working",
+      colorClass: "text-orange-600 dark:text-orange-300/90",
+      dotClass: "bg-orange-500 dark:bg-orange-300/90",
+      pulse: false,
+    };
+  }
+
+  if (thread.startupRecoveryState === "dismissed") {
+    return null;
   }
 
   if (thread.session?.status === "running" || thread.isOrchestrationRunActive) {

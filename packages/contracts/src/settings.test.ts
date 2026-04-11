@@ -22,6 +22,11 @@ describe("settings defaults", () => {
     expect(DEFAULT_UNIFIED_SETTINGS.maxReviewIterations).toBe(3);
   });
 
+  it("disables startup resume by default", () => {
+    expect(DEFAULT_SERVER_SETTINGS.resumeAgentsOnStartup).toBe(false);
+    expect(DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup).toBe(false);
+  });
+
   it("resolves orchestration prompts and immutable shipped defaults by default", () => {
     expect(DEFAULT_SERVER_SETTINGS.prompts.orchestration).toEqual(
       ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
@@ -48,6 +53,18 @@ describe("settings defaults", () => {
         profileId: "metric",
         model: "claude-opus-4-6",
       },
+    });
+  });
+
+  it("accepts startup resume patches", () => {
+    const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        resumeAgentsOnStartup: true,
+      }),
+    ).toEqual({
+      resumeAgentsOnStartup: true,
     });
   });
 });

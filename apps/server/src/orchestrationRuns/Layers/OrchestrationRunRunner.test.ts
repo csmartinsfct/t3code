@@ -760,6 +760,83 @@ describe("OrchestrationRunRunner", () => {
     );
   });
 
+  it("recovers a stale persisted running run without calling runService.resume", async () => {
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const staleRunningSingleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      currentTicketIndex: 0,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...staleRunningSingleTicketRun,
+      status: "completed",
+    });
+    const resumeSpy = vi.fn(() => Effect.succeed(staleRunningSingleTicketRun));
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            resume: {
+              version: 1,
+              blocks: [
+                {
+                  when: null,
+                  text: "Resume stale ${ticketId}",
+                },
+              ],
+            },
+          },
+        },
+      },
+      runService: {
+        get: () => Effect.succeed(staleRunningSingleTicketRun),
+        resume: resumeSpy,
+        updateRunProgress: () =>
+          Effect.succeed(
+            makeRun({
+              ...staleRunningSingleTicketRun,
+              currentTicketIndex: 0,
+            }),
+          ),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume-stale" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-resume-stale" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const turnStarts = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === workingThread1,
+    );
+
+    expect(resumeSpy).not.toHaveBeenCalled();
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0]?.message.text).toBe("Resume stale T3CO-1");
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.resumed",
+    );
+    expect(parentActivities.map((command) => command.activity.kind)).toContain(
+      "orchestration.run.completed",
+    );
+  });
+
   it("restarts the working thread session when resuming with a fresh agent", async () => {
     const dispatchedCommands: OrchestrationCommand[] = [];
     const pausedSingleTicketRun = makeRun({

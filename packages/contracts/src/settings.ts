@@ -124,6 +124,7 @@ export type ServerPromptSettings = typeof ServerPromptSettings.Type;
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  resumeAgentsOnStartup: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   maxReviewIterations: NonNegativeInt.pipe(
     Schema.withDecodingDefault(() => DEFAULT_MAX_REVIEW_ITERATIONS),
   ),
@@ -243,6 +244,7 @@ const PromptDocumentPatch = Schema.NullOr(PromptDocumentV1);
 
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
+  resumeAgentsOnStartup: Schema.optionalKey(Schema.Boolean),
   maxReviewIterations: Schema.optionalKey(NonNegativeInt),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   mcpDeliveryMode: Schema.optionalKey(McpDeliveryMode),

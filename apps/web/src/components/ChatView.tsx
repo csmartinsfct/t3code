@@ -995,6 +995,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [navigate],
   );
+  const removeStartupRecoveryState = useUiStateStore((state) => state.removeStartupRecoveryState);
   const isWaitingForAgentStart =
     isOrchestrationChild &&
     orchestrationSwitcher.visible &&
@@ -1009,15 +1010,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeOrchestrationRun]);
   const onOrchestrationResume = useCallback(() => {
     if (!activeOrchestrationRun) return;
+    removeStartupRecoveryState(threadId);
     logWebTimeline("orchestration.ui.resume", {
       runId: activeOrchestrationRun.id,
       currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
       resumeMode: "default",
     });
     void getWsRpcClient().orchestration.resumeRun({ runId: activeOrchestrationRun.id });
-  }, [activeOrchestrationRun]);
+  }, [activeOrchestrationRun, removeStartupRecoveryState, threadId]);
   const onOrchestrationResumeWithFreshAgent = useCallback(() => {
     if (!activeOrchestrationRun) return;
+    removeStartupRecoveryState(threadId);
     logWebTimeline("orchestration.ui.resume", {
       runId: activeOrchestrationRun.id,
       currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
@@ -1027,15 +1030,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       runId: activeOrchestrationRun.id,
       mode: "fresh-agent",
     });
-  }, [activeOrchestrationRun]);
+  }, [activeOrchestrationRun, removeStartupRecoveryState, threadId]);
   const onOrchestrationCancel = useCallback(() => {
     if (!activeOrchestrationRun) return;
+    removeStartupRecoveryState(threadId);
     logWebTimeline("orchestration.ui.cancel", {
       runId: activeOrchestrationRun.id,
       currentTicketIndex: activeOrchestrationRun.currentTicketIndex,
     });
     void getWsRpcClient().orchestration.cancelRun({ runId: activeOrchestrationRun.id });
-  }, [activeOrchestrationRun]);
+  }, [activeOrchestrationRun, removeStartupRecoveryState, threadId]);
   const onNavigateToChildThread = useCallback(
     (childThreadId: string) => {
       void navigate({ to: "/$threadId", params: { threadId: childThreadId } });
@@ -1245,6 +1249,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const sessionProvider = activeThread?.session?.provider ?? null;
+  const startupRecoveryState = useUiStateStore(
+    (state) => state.startupRecoveryStateByThreadId[threadId] ?? null,
+  );
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider: ProviderKind | null =
     (activeThread?.modelSelection
@@ -1375,7 +1382,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     } as ModelSelection;
   }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
   const selectedModelForPicker = selectedModel;
-  const phase = derivePhase(activeThread?.session ?? null);
+  const rawPhase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
@@ -1464,12 +1471,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
   } = useLocalDispatchState({
     activeThread,
     activeLatestTurn,
-    phase,
+    phase: rawPhase,
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
+  const phase =
+    startupRecoveryState !== null &&
+    rawPhase === "running" &&
+    !isSendBusy &&
+    !isConnecting &&
+    !isRevertingCheckpoint
+      ? "ready"
+      : rawPhase;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  useEffect(() => {
+    if (startupRecoveryState === null || !isSendBusy) {
+      return;
+    }
+    removeStartupRecoveryState(threadId);
+  }, [isSendBusy, removeStartupRecoveryState, startupRecoveryState, threadId]);
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -5013,6 +5034,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
             <OrchestrationProgressHeader
               run={activeOrchestrationRun}
               centerLabel={orchestrationCenterLabel}
+              startupRecoveryState={
+                isOrchestrationThread && activeOrchestrationRun.status === "running"
+                  ? startupRecoveryState
+                  : null
+              }
               onCenterLabelClick={
                 orchestrationCenterLabel ? onOrchestrationCenterLabelClick : undefined
               }
