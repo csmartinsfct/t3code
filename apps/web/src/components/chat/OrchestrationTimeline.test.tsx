@@ -1,5 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -47,11 +47,7 @@ vi.mock("../ui/badge", () => ({
       return <span>{children}</span>;
     }
 
-    return render.type === "a" ? (
-      <a {...render.props}>{children}</a>
-    ) : (
-      <render.type {...render.props}>{children}</render.type>
-    );
+    return React.cloneElement(render, undefined, children);
   },
 }));
 

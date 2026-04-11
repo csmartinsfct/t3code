@@ -50,7 +50,7 @@ function buildTicketHref(identifier: string): string {
 function renderSummaryWithTicketLink(input: {
   summary: string;
   ticketIdentifier: string | undefined;
-  onOpenTicketLink?: (identifier: string) => void | Promise<void>;
+  onOpenTicketLink: ((identifier: string) => void | Promise<void>) | undefined;
 }): React.ReactNode {
   const { summary, ticketIdentifier, onOpenTicketLink } = input;
   if (!ticketIdentifier) {
