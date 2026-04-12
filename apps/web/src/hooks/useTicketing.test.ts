@@ -93,11 +93,6 @@ describe("fetchTicketingState", () => {
   it("resolves the requested project and returns its tickets", async () => {
     const tickets = [makeTicket()];
     const api = {
-      orchestration: {
-        getSnapshot: async () => ({
-          projects: [{ id: "project-1", title: "Project One", workspaceRoot: "/repo/project-1" }],
-        }),
-      },
       ticketing: {
         list: async ({ projectId }: { projectId: string }) => {
           expect(projectId).toBe("project-1");
@@ -108,6 +103,7 @@ describe("fetchTicketingState", () => {
 
     const result = await fetchTicketingState({
       api,
+      storeProjects: [{ id: "project-1", name: "Project One", cwd: "/repo/project-1" }],
       requestedProjectId: "project-1",
       selectedProjectId: null,
       currentFetchId: 1,
@@ -119,18 +115,11 @@ describe("fetchTicketingState", () => {
       resolvedProjectId: "project-1",
       tickets,
       shouldSelectResolvedProject: true,
-      snapshotError: null,
     });
   });
 
-  it("returns snapshotError and no tickets when the project snapshot fails before any project is resolved", async () => {
-    const snapshotError = new Error("snapshot failed");
+  it("returns early with no tickets when neither the selection nor store provides a project", async () => {
     const api = {
-      orchestration: {
-        getSnapshot: async () => {
-          throw snapshotError;
-        },
-      },
       ticketing: {
         list: unexpectedListWithoutResolvedProject,
       },
@@ -138,6 +127,7 @@ describe("fetchTicketingState", () => {
 
     const result = await fetchTicketingState({
       api,
+      storeProjects: [],
       requestedProjectId: undefined,
       selectedProjectId: null,
       currentFetchId: 1,
@@ -149,47 +139,13 @@ describe("fetchTicketingState", () => {
       resolvedProjectId: null,
       tickets: [],
       shouldSelectResolvedProject: false,
-      snapshotError,
-    });
-  });
-
-  it("returns early with no tickets when neither the selection nor snapshot provides a project", async () => {
-    const api = {
-      orchestration: {
-        getSnapshot: async () => ({ projects: [] }),
-      },
-      ticketing: {
-        list: unexpectedListWithoutResolvedProject,
-      },
-    } as any;
-
-    const result = await fetchTicketingState({
-      api,
-      requestedProjectId: undefined,
-      selectedProjectId: null,
-      currentFetchId: 1,
-      isCurrentFetch: () => true,
-    });
-
-    expect(result).toEqual({
-      projects: [],
-      resolvedProjectId: null,
-      tickets: [],
-      shouldSelectResolvedProject: false,
-      snapshotError: null,
     });
   });
 
   it("suppresses stale results after the active project changes mid-fetch", async () => {
-    const snapshot = deferred<{
-      projects: Array<{ id: string; title: string; workspaceRoot: string }>;
-    }>();
     const tickets = deferred<ReadonlyArray<TicketSummary>>();
     let activeFetchId = 1;
     const api = {
-      orchestration: {
-        getSnapshot: () => snapshot.promise,
-      },
       ticketing: {
         list: () => tickets.promise,
       },
@@ -197,14 +153,11 @@ describe("fetchTicketingState", () => {
 
     const staleFetch = fetchTicketingState({
       api,
+      storeProjects: [{ id: "project-1", name: "Project One", cwd: "/repo/project-1" }],
       requestedProjectId: "project-1",
       selectedProjectId: "project-1",
       currentFetchId: 1,
       isCurrentFetch: (fetchId) => activeFetchId === fetchId,
-    });
-
-    snapshot.resolve({
-      projects: [{ id: "project-1", title: "Project One", workspaceRoot: "/repo/project-1" }],
     });
 
     activeFetchId = 2;

@@ -1,4 +1,3 @@
-import type { ThreadId } from "@t3tools/contracts";
 import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -21,12 +20,7 @@ vi.mock("@tanstack/react-virtual", () => ({
   }),
 }));
 
-const useOrchestrationTimeline = vi.fn();
 const chatMarkdownMock = vi.fn(({ text }: { text: string }) => text);
-
-vi.mock("../../hooks/useOrchestrationTimeline", () => ({
-  useOrchestrationTimeline: (...args: unknown[]) => useOrchestrationTimeline(...args),
-}));
 
 vi.mock("../ChatMarkdown", () => ({
   default: (props: {
@@ -109,82 +103,55 @@ beforeAll(() => {
 
 afterEach(() => {
   chatMarkdownMock.mockClear();
-  useOrchestrationTimeline.mockReset();
 });
 
-function makeThread(): Thread {
-  return {
-    id: "parent-thread" as ThreadId,
-    codexThreadId: null,
-    projectId: "project-1" as Thread["projectId"],
-    title: "Orchestration",
-    modelSelection: { provider: "codex", model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    error: null,
-    createdAt: "2026-04-09T10:00:00.000Z",
-    archivedAt: null,
-    updatedAt: "2026-04-09T10:00:00.000Z",
-    latestTurn: null,
-    pendingSourceProposedPlan: undefined,
-    branch: null,
-    worktreePath: null,
-    turnDiffSummaries: [],
-    activities: [],
-    initialDraft: undefined,
-    isOrchestrationThread: true,
-    parentThreadId: null,
-    ticketId: null,
-  };
+async function renderTimeline(
+  rows: OrchestrationTimelineRow[],
+  extra?: {
+    nowIso?: string;
+    onOpenTicketLink?: (identifier: string) => void | Promise<void>;
+  },
+) {
+  const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
+
+  return renderToStaticMarkup(
+    <OrchestrationTimeline
+      {...({
+        timelineRows: rows,
+        scrollContainer: null,
+        resolvedTheme: "dark",
+        timestampFormat: "locale",
+        markdownCwd: undefined,
+        workspaceRoot: undefined,
+        nowIso: extra?.nowIso ?? "2026-04-09T10:02:00.000Z",
+        onNavigateToThread: () => {},
+        onOpenTicketLink: extra?.onOpenTicketLink ?? (() => {}),
+      } as any)}
+    />,
+  );
 }
 
 describe("OrchestrationTimeline", () => {
   it("renders resumed and user-takeover markers with the expected badge variants", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
-        {
-          kind: "separator",
-          id: "sep:resumed",
-          activityKind: "orchestration.run.resumed",
-          summary: "Run resumed after restart",
-          tone: "info",
-          createdAt: "2026-04-09T10:00:00.000Z",
-        },
-        {
-          kind: "separator",
-          id: "sep:takeover",
-          activityKind: "orchestration.run.user-takeover",
-          summary: "Paused because the user took over ticket T3CO-188",
-          tone: "warning",
-          createdAt: "2026-04-09T10:01:00.000Z",
-          ticketIdentifier: "T3CO-188",
-        },
-      ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:02:00.000Z"
-        onNavigateToThread={() => {}}
-        onOpenTicketLink={() => {}}
-      />,
-    );
+    const markup = await renderTimeline([
+      {
+        kind: "separator",
+        id: "sep:resumed",
+        activityKind: "orchestration.run.resumed",
+        summary: "Run resumed after restart",
+        tone: "info",
+        createdAt: "2026-04-09T10:00:00.000Z",
+      },
+      {
+        kind: "separator",
+        id: "sep:takeover",
+        activityKind: "orchestration.run.user-takeover",
+        summary: "Paused because the user took over ticket T3CO-188",
+        tone: "info",
+        createdAt: "2026-04-09T10:01:00.000Z",
+        ticketIdentifier: "T3CO-188",
+      },
+    ]);
 
     expect(markup).toContain("Run resumed after restart");
     expect(markup).toContain("Paused because the user took over ticket ");
@@ -194,7 +161,6 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders chronological implementation and review blocks with the old section chrome", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
     const rows: OrchestrationTimelineRow[] = [
       {
         kind: "separator",
@@ -267,29 +233,8 @@ describe("OrchestrationTimeline", () => {
         reviewOutcome: "approved",
       },
     ];
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: rows,
-      refresh: () => {},
-    });
 
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-        onOpenTicketLink={() => {}}
-      />,
-    );
+    const markup = await renderTimeline(rows, { nowIso: "2026-04-09T10:00:10.000Z" });
 
     expect(markup).toContain("Implementation");
     expect(markup).toContain("Review Passed");
@@ -309,13 +254,9 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("passes ticket-link handlers through to markdown inside a thread block", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const onOpenTicketLink = vi.fn();
+    await renderTimeline(
+      [
         {
           kind: "thread-block",
           id: "block:impl",
@@ -333,23 +274,7 @@ describe("OrchestrationTimeline", () => {
           ],
         },
       ],
-      refresh: () => {},
-    });
-
-    const onOpenTicketLink = vi.fn();
-    renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-        onOpenTicketLink={onOpenTicketLink}
-      />,
+      { nowIso: "2026-04-09T10:00:10.000Z", onOpenTicketLink },
     );
 
     expect(chatMarkdownMock).toHaveBeenCalledWith(
@@ -361,13 +286,8 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders timeline ticket mentions as internal ticket anchors when a handler is available", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const markup = await renderTimeline(
+      [
         {
           kind: "separator",
           id: "sep:start",
@@ -378,22 +298,7 @@ describe("OrchestrationTimeline", () => {
           ticketIdentifier: "T3CO-169",
         },
       ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-        onOpenTicketLink={() => {}}
-      />,
+      { nowIso: "2026-04-09T10:00:10.000Z", onOpenTicketLink: () => {} },
     );
 
     expect(markup).toContain('href="t3://ticket/T3CO-169"');
@@ -403,13 +308,8 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders blocked ticket pauses without duplicating the identifier in the label", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const markup = await renderTimeline(
+      [
         {
           kind: "separator",
           id: "sep:blocked",
@@ -420,22 +320,7 @@ describe("OrchestrationTimeline", () => {
           ticketIdentifier: "TEST-11",
         },
       ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-        onOpenTicketLink={() => {}}
-      />,
+      { nowIso: "2026-04-09T10:00:10.000Z", onOpenTicketLink: () => {} },
     );
 
     expect(markup).toContain("Ticket is blocked");
@@ -445,13 +330,8 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders non-prompt review user messages when they are present in timeline blocks", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const markup = await renderTimeline(
+      [
         {
           kind: "thread-block",
           id: "block:review",
@@ -478,21 +358,7 @@ describe("OrchestrationTimeline", () => {
           reviewOutcome: "approved",
         },
       ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-      />,
+      { nowIso: "2026-04-09T10:00:10.000Z" },
     );
 
     expect(markup).toContain("Human review follow-up");
@@ -501,13 +367,8 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders outcome-derived review labels and review cards instead of raw JSON", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const markup = await renderTimeline(
+      [
         {
           kind: "thread-block",
           id: "block:review-approved",
@@ -563,21 +424,7 @@ describe("OrchestrationTimeline", () => {
           ],
         },
       ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:00:10.000Z"
-        onNavigateToThread={() => {}}
-      />,
+      { nowIso: "2026-04-09T10:00:10.000Z" },
     );
 
     expect(markup).toContain("Review Passed");
@@ -596,34 +443,15 @@ describe("OrchestrationTimeline", () => {
   });
 
   it("renders the shared working timer row for active orchestration runs", async () => {
-    const { OrchestrationTimeline } = await import("./OrchestrationTimeline");
-    useOrchestrationTimeline.mockReturnValue({
-      loading: false,
-      error: null,
-      run: null,
-      childThreads: [],
-      timelineRows: [
+    const markup = await renderTimeline(
+      [
         {
           kind: "working",
           id: "working-indicator-row",
           createdAt: "2026-04-09T10:00:00.000Z",
         },
       ],
-      refresh: () => {},
-    });
-
-    const markup = renderToStaticMarkup(
-      <OrchestrationTimeline
-        thread={makeThread()}
-        projectId="project-1"
-        scrollContainer={null}
-        resolvedTheme="dark"
-        timestampFormat="locale"
-        markdownCwd={undefined}
-        workspaceRoot={undefined}
-        nowIso="2026-04-09T10:02:21.000Z"
-        onNavigateToThread={() => {}}
-      />,
+      { nowIso: "2026-04-09T10:02:21.000Z" },
     );
 
     expect(markup).toContain("Working for 2m 21s");

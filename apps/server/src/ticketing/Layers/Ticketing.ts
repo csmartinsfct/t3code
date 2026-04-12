@@ -28,6 +28,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, PubSub, Stream } from "effect";
 
+import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { TicketingRepository } from "../../persistence/Services/Ticketing.ts";
 import type { PersistedTicket } from "../../persistence/Services/Ticketing.ts";
@@ -154,6 +155,27 @@ const makeTicketingService = Effect.gen(function* () {
     updatedAt: ticket.updatedAt,
   });
 
+  const batchBuildSummaries = (
+    tickets: ReadonlyArray<PersistedTicket>,
+  ): Effect.Effect<TicketSummary[], ProjectionRepositoryError> =>
+    Effect.gen(function* () {
+      if (tickets.length === 0) return [];
+      const ids = tickets.map((t) => t.id);
+      const [labelsMap, countsMap, depsMap] = yield* Effect.all([
+        repo.batchListLabelsForTickets({ ticketIds: ids }),
+        repo.batchCountByParents({ parentIds: ids }),
+        repo.batchListDependencies({ ticketIds: ids }),
+      ]);
+      return tickets.map((t) =>
+        buildTicketSummary(
+          t,
+          (labelsMap.get(t.id) ?? []) as Label[],
+          countsMap.get(t.id) ?? 0,
+          (depsMap.get(t.id) ?? []).length,
+        ),
+      );
+    });
+
   const buildFullTicket = (ticket: PersistedTicket): Effect.Effect<Ticket, TicketingError> =>
     Effect.gen(function* () {
       const labels = yield* repo.listLabelsForTicket({ ticketId: ticket.id });
@@ -162,13 +184,7 @@ const makeTicketingService = Effect.gen(function* () {
       const comments = yield* repo.listCommentsByTicket({ ticketId: ticket.id });
       const artifacts = yield* repo.listArtifactsByTicket({ ticketId: ticket.id });
 
-      const subSummaries: TicketSummary[] = [];
-      for (const sub of subTickets) {
-        const subLabels = yield* repo.listLabelsForTicket({ ticketId: sub.id });
-        const subSubCount = yield* repo.countByParent({ parentId: sub.id });
-        const subDepCount = (yield* repo.listDependencies({ ticketId: sub.id })).length;
-        subSummaries.push(buildTicketSummary(sub, subLabels as Label[], subSubCount, subDepCount));
-      }
+      const subSummaries = yield* batchBuildSummaries(subTickets);
 
       return {
         id: ticket.id,
@@ -336,14 +352,7 @@ const makeTicketingService = Effect.gen(function* () {
   const list: TicketingServiceShape["list"] = (input) =>
     Effect.gen(function* () {
       const tickets = yield* repo.listByProject(input);
-      const summaries: TicketSummary[] = [];
-      for (const t of tickets) {
-        const labels = yield* repo.listLabelsForTicket({ ticketId: t.id });
-        const subCount = yield* repo.countByParent({ parentId: t.id });
-        const depCount = (yield* repo.listDependencies({ ticketId: t.id })).length;
-        summaries.push(buildTicketSummary(t, labels as Label[], subCount, depCount));
-      }
-      return summaries;
+      return yield* batchBuildSummaries(tickets);
     }).pipe(Effect.mapError(toOperationError("list")));
 
   const getById: TicketingServiceShape["getById"] = (input) =>
@@ -682,27 +691,14 @@ const makeTicketingService = Effect.gen(function* () {
         })
         .pipe(Effect.mapError(toOperationError("getTree")));
 
-      // Build label map
-      const ticketLabelsMap = new Map<string, Label[]>();
-      const ticketSubCountMap = new Map<string, number>();
-      const ticketDepCountMap = new Map<string, number>();
-      const ticketDepsMap = new Map<string, TicketDependency[]>();
+      if (allTickets.length === 0) return [];
 
-      for (const t of allTickets) {
-        const labels = yield* repo
-          .listLabelsForTicket({ ticketId: t.id })
-          .pipe(Effect.mapError(toOperationError("getTree")));
-        ticketLabelsMap.set(t.id, labels as Label[]);
-        const subCount = yield* repo
-          .countByParent({ parentId: t.id })
-          .pipe(Effect.mapError(toOperationError("getTree")));
-        ticketSubCountMap.set(t.id, subCount);
-        const deps = yield* repo
-          .listDependencies({ ticketId: t.id })
-          .pipe(Effect.mapError(toOperationError("getTree")));
-        ticketDepsMap.set(t.id, deps as TicketDependency[]);
-        ticketDepCountMap.set(t.id, deps.length);
-      }
+      const ids = allTickets.map((t) => t.id);
+      const [labelsMap, countsMap, depsMap] = yield* Effect.all([
+        repo.batchListLabelsForTickets({ ticketIds: ids }),
+        repo.batchCountByParents({ parentIds: ids }),
+        repo.batchListDependencies({ ticketIds: ids }),
+      ]).pipe(Effect.mapError(toOperationError("getTree")));
 
       // Build tree from flat list
       const summaryMap = new Map<string, TicketSummary>();
@@ -711,9 +707,9 @@ const makeTicketingService = Effect.gen(function* () {
       for (const t of allTickets) {
         const summary = buildTicketSummary(
           t,
-          ticketLabelsMap.get(t.id) ?? [],
-          ticketSubCountMap.get(t.id) ?? 0,
-          ticketDepCountMap.get(t.id) ?? 0,
+          (labelsMap.get(t.id) ?? []) as Label[],
+          countsMap.get(t.id) ?? 0,
+          (depsMap.get(t.id) ?? []).length,
         );
         summaryMap.set(t.id, summary);
         if (t.parentId) {
@@ -721,6 +717,11 @@ const makeTicketingService = Effect.gen(function* () {
           siblings.push(summary);
           childrenMap.set(t.parentId, siblings);
         }
+      }
+
+      const ticketDepsMap = new Map<string, TicketDependency[]>();
+      for (const t of allTickets) {
+        ticketDepsMap.set(t.id, (depsMap.get(t.id) ?? []) as TicketDependency[]);
       }
 
       const buildNode = (summary: TicketSummary): TicketTreeNode => ({

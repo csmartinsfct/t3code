@@ -2,6 +2,7 @@ import type { NativeApi, TicketSummary, TicketingStreamEvent } from "@t3tools/co
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
+import { useStore } from "../store";
 import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 
 function summarizeTicketSet(tickets: ReadonlyArray<TicketSummary>): Record<string, number> {
@@ -65,7 +66,6 @@ export interface TicketingFetchState {
   resolvedProjectId: string | null;
   tickets: ReadonlyArray<TicketSummary>;
   shouldSelectResolvedProject: boolean;
-  snapshotError: unknown;
 }
 
 export function resolveTicketingProjectResyncState(input: {
@@ -81,30 +81,20 @@ export function resolveTicketingProjectResyncState(input: {
 }
 
 export async function fetchTicketingState(input: {
-  api: Pick<NativeApi, "orchestration" | "ticketing">;
+  api: Pick<NativeApi, "ticketing">;
+  storeProjects: ReadonlyArray<{ id: string; name: string; cwd: string }>;
   requestedProjectId?: string | undefined;
   selectedProjectId: string | null;
   currentFetchId: number;
   isCurrentFetch: (fetchId: number) => boolean;
 }): Promise<TicketingFetchState | null> {
-  let projects: ReadonlyArray<TicketingProjectSnapshot> = [];
+  const projects: ReadonlyArray<TicketingProjectSnapshot> = input.storeProjects.map((p) => ({
+    id: p.id,
+    title: p.name,
+    workspaceRoot: p.cwd,
+  }));
   let resolvedProjectId = input.selectedProjectId ?? input.requestedProjectId ?? null;
-  let snapshotError: unknown = null;
-
-  try {
-    const snapshot = await input.api.orchestration.getSnapshot();
-    if (!input.isCurrentFetch(input.currentFetchId)) return null;
-
-    projects = snapshot.projects.map((project) => ({
-      id: project.id,
-      title: project.title,
-      workspaceRoot: project.workspaceRoot,
-    }));
-    resolvedProjectId ??= projects[0]?.id ?? null;
-  } catch (error) {
-    if (!input.isCurrentFetch(input.currentFetchId)) return null;
-    snapshotError = error;
-  }
+  resolvedProjectId ??= projects[0]?.id ?? null;
 
   if (!resolvedProjectId) {
     return {
@@ -112,7 +102,6 @@ export async function fetchTicketingState(input: {
       resolvedProjectId,
       tickets: [],
       shouldSelectResolvedProject: false,
-      snapshotError,
     };
   }
 
@@ -124,15 +113,12 @@ export async function fetchTicketingState(input: {
     resolvedProjectId,
     tickets,
     shouldSelectResolvedProject: input.selectedProjectId === null,
-    snapshotError,
   };
 }
 
 export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn {
   const [tickets, setTickets] = useState<ReadonlyArray<TicketSummary>>([]);
-  const [projects, setProjects] = useState<
-    ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>
-  >([]);
+  const storeProjects = useStore((s) => s.projects);
   const [loading, setLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     options?.projectId ?? null,
@@ -156,48 +142,35 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   }, [options?.projectId]);
 
   const fetchIdRef = useRef(0);
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  selectedProjectIdRef.current = selectedProjectId;
 
   const fetchData = useCallback(async () => {
     const currentFetchId = ++fetchIdRef.current;
     try {
       const api = ensureNativeApi();
       const requestedProjectId = options?.projectId ?? undefined;
+      // Use the prop-supplied projectId directly to avoid a stale fetch when
+      // the resync effect hasn't updated selectedProjectId yet.
+      // Read from ref to always get the latest value without adding it as a dep.
+      const effectiveProjectId = options?.projectId ?? selectedProjectIdRef.current;
 
       logWebTimeline("ticketing.fetch.start", {
         fetchId: currentFetchId,
-        selectedProjectId,
+        selectedProjectId: effectiveProjectId,
         requestedProjectId: requestedProjectId ?? null,
-        resolvedProjectId: selectedProjectId ?? requestedProjectId ?? null,
+        resolvedProjectId: effectiveProjectId ?? requestedProjectId ?? null,
       });
 
       const result = await fetchTicketingState({
         api,
+        storeProjects,
         requestedProjectId,
-        selectedProjectId,
+        selectedProjectId: effectiveProjectId,
         currentFetchId,
         isCurrentFetch: (fetchId) => fetchIdRef.current === fetchId,
       });
       if (!result) return;
-
-      setProjects(result.projects);
-
-      if (result.snapshotError !== null) {
-        const message =
-          result.snapshotError instanceof Error
-            ? result.snapshotError.message
-            : String(result.snapshotError);
-        warnWebTimeline("ticketing.snapshot.failed", {
-          fetchId: currentFetchId,
-          error: message,
-        });
-        console.warn("Failed to fetch ticketing project snapshot:", result.snapshotError);
-      } else {
-        logWebTimeline("ticketing.snapshot.success", {
-          fetchId: currentFetchId,
-          projectCount: result.projects.length,
-          resolvedProjectId: result.resolvedProjectId,
-        });
-      }
 
       // If no project selected yet and there are projects, select the first one.
       if (result.shouldSelectResolvedProject && result.resolvedProjectId) {
@@ -206,10 +179,7 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
 
       if (!result.resolvedProjectId) {
         setTickets([]);
-        logWebTimeline("ticketing.fetch.empty", {
-          fetchId: currentFetchId,
-          projectCount: result.projects.length,
-        });
+        logWebTimeline("ticketing.fetch.empty", { fetchId: currentFetchId });
         return;
       }
 
@@ -232,7 +202,9 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
         setLoading(false);
       }
     }
-  }, [options?.projectId, selectedProjectId]);
+    // selectedProjectId intentionally omitted — effectiveProjectId reads it
+    // synchronously via ref to avoid stale double-fetches.
+  }, [options?.projectId, storeProjects]);
 
   useEffect(() => {
     void fetchData();
@@ -282,6 +254,12 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
     },
     [],
   );
+
+  const projects: ReadonlyArray<TicketingProjectSnapshot> = storeProjects.map((p) => ({
+    id: p.id,
+    title: p.name,
+    workspaceRoot: p.cwd,
+  }));
 
   return {
     tickets,

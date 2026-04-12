@@ -282,6 +282,23 @@ export interface TicketingRepositoryShape {
     input: CountByParentInput,
   ) => Effect.Effect<number, ProjectionRepositoryError>;
 
+  // Batch queries (for eliminating N+1 in list/getTree)
+  readonly batchListLabelsForTickets: (input: {
+    ticketIds: ReadonlyArray<string>;
+  }) => Effect.Effect<
+    ReadonlyMap<string, ReadonlyArray<PersistedLabel>>,
+    ProjectionRepositoryError
+  >;
+  readonly batchCountByParents: (input: {
+    parentIds: ReadonlyArray<string>;
+  }) => Effect.Effect<ReadonlyMap<string, number>, ProjectionRepositoryError>;
+  readonly batchListDependencies: (input: {
+    ticketIds: ReadonlyArray<string>;
+  }) => Effect.Effect<
+    ReadonlyMap<string, ReadonlyArray<{ ticketId: string; dependsOnTicketId: string }>>,
+    ProjectionRepositoryError
+  >;
+
   // Dependencies
   readonly addDependency: (
     input: DependencyAssocInput,

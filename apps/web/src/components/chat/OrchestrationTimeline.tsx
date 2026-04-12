@@ -15,11 +15,10 @@ import {
 import { memo, useEffect } from "react";
 
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
-import { useOrchestrationTimeline } from "../../hooks/useOrchestrationTimeline";
+import type { OrchestrationTimelineRow } from "../../hooks/useOrchestrationTimeline.logic";
 import type { SeparatorRow, ThreadBlockRow } from "../../hooks/useOrchestrationTimeline.logic";
 import { estimateOrchestrationTimelineRowHeight } from "../../hooks/useOrchestrationTimeline.logic";
 import { parseReviewOutputText } from "../../lib/reviewOutput";
-import type { Thread } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { buildTicketHref, TicketIdentifierBadge } from "../TicketIdentifierBadge";
 import { Badge } from "../ui/badge";
@@ -27,8 +26,7 @@ import ReviewOutputCard from "./ReviewOutputCard";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 interface OrchestrationTimelineProps {
-  thread: Thread;
-  projectId: string;
+  timelineRows: OrchestrationTimelineRow[];
   scrollContainer: HTMLDivElement | null;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
@@ -362,8 +360,7 @@ function EmptyState() {
 }
 
 export function OrchestrationTimeline({
-  thread,
-  projectId,
+  timelineRows,
   scrollContainer,
   resolvedTheme: _resolvedTheme,
   timestampFormat: _timestampFormat,
@@ -373,13 +370,6 @@ export function OrchestrationTimeline({
   onNavigateToThread,
   onOpenTicketLink,
 }: OrchestrationTimelineProps) {
-  const timeline = useOrchestrationTimeline(
-    thread.isOrchestrationThread ? thread : null,
-    projectId,
-  );
-
-  const { timelineRows } = timeline;
-
   const rowVirtualizer = useVirtualizer({
     count: timelineRows.length,
     getScrollElement: () => scrollContainer,

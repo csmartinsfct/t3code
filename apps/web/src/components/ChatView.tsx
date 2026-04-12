@@ -113,8 +113,9 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import PlanSidebar from "./PlanSidebar";
 import { OrchestrationTimeline } from "./chat/OrchestrationTimeline";
 import { OrchestrationProgressHeader } from "./chat/OrchestrationProgressHeader";
-import { useOrchestrationTimeline } from "../hooks/useOrchestrationTimeline";
-import { useOrchestrationSwitcher } from "../hooks/useOrchestrationSwitcher";
+import { useOrchestrationData } from "../hooks/useOrchestrationData";
+import { useOrchestrationTimelineRows } from "../hooks/useOrchestrationTimeline";
+import { useOrchestrationSwitcherDerived } from "../hooks/useOrchestrationSwitcher";
 import { getWsRpcClient } from "../wsRpcClient";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -932,18 +933,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const isOrchestrationThread = activeThread?.isOrchestrationThread ?? false;
   const isOrchestrationChild = (activeThread?.parentThreadId ?? null) !== null;
-  const orchestrationTimeline = useOrchestrationTimeline(
+  const orchestrationData = useOrchestrationData(
     isOrchestrationThread || isOrchestrationChild ? activeThread : null,
     activeThread?.projectId ?? null,
   );
-  const orchestrationSwitcher = useOrchestrationSwitcher(
+  const orchestrationTimeline = useOrchestrationTimelineRows(orchestrationData);
+  const orchestrationSwitcher = useOrchestrationSwitcherDerived(
+    orchestrationData,
     isOrchestrationThread || isOrchestrationChild ? activeThread : null,
-    activeThread?.projectId ?? null,
   );
   const activeOrchestrationItem = orchestrationSwitcher.visible
     ? (orchestrationSwitcher.items.find((item) => item.isActive) ?? null)
     : null;
-  const activeOrchestrationRun = orchestrationSwitcher.run ?? orchestrationTimeline.run;
+  const activeOrchestrationRun = orchestrationData.run;
   const isReviewOrchestrationChild = activeOrchestrationItem?.kind === "review-thread";
   const currentOrchestrationWorkingItem = useMemo(() => {
     if (!orchestrationSwitcher.visible || !activeOrchestrationRun) {
@@ -5164,8 +5166,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   onScroll={onMessagesScroll}
                 >
                   <OrchestrationTimeline
-                    thread={activeThread}
-                    projectId={activeThread.projectId}
+                    timelineRows={orchestrationTimeline.timelineRows}
                     scrollContainer={messagesScrollElement}
                     resolvedTheme={resolvedTheme}
                     timestampFormat={timestampFormat}

@@ -544,6 +544,91 @@ const makeTicketingRepository = Effect.gen(function* () {
         Effect.mapError(toPersistenceSqlError("TicketingRepository.countByParent:query")),
       ),
 
+    // Batch queries
+    batchListLabelsForTickets: ({ ticketIds }) =>
+      Effect.gen(function* () {
+        if (ticketIds.length === 0)
+          return new Map<string, ReadonlyArray<typeof LabelRow.Type>>() as ReadonlyMap<
+            string,
+            ReadonlyArray<typeof LabelRow.Type>
+          >;
+        const placeholders = ticketIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
+        const rawRows = yield* sql`
+          SELECT
+            tl.ticket_id AS "ticketId",
+            l.id,
+            l.project_id AS "projectId",
+            l.name,
+            l.color,
+            l.created_at AS "createdAt",
+            l.updated_at AS "updatedAt"
+          FROM labels l
+          INNER JOIN ticket_labels tl ON tl.label_id = l.id
+          WHERE tl.ticket_id IN (${sql.literal(placeholders)})
+          ORDER BY l.name ASC
+        `;
+        const typed = rawRows as unknown as ReadonlyArray<
+          typeof LabelRow.Type & { ticketId: string }
+        >;
+        const map = new Map<string, Array<typeof LabelRow.Type>>();
+        for (const id of ticketIds) map.set(id, []);
+        for (const row of typed) {
+          const { ticketId, ...label } = row;
+          map.get(ticketId)?.push(label);
+        }
+        return map as ReadonlyMap<string, ReadonlyArray<typeof LabelRow.Type>>;
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("TicketingRepository.batchListLabelsForTickets:query"),
+        ),
+      ),
+    batchCountByParents: ({ parentIds }) =>
+      Effect.gen(function* () {
+        if (parentIds.length === 0) return new Map<string, number>() as ReadonlyMap<string, number>;
+        const placeholders = parentIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
+        const rawRows = yield* sql`
+          SELECT parent_id AS "parentId", COUNT(*) AS cnt
+          FROM tickets
+          WHERE parent_id IN (${sql.literal(placeholders)})
+          GROUP BY parent_id
+        `;
+        const typed = rawRows as unknown as ReadonlyArray<{ parentId: string; cnt: number }>;
+        const map = new Map<string, number>();
+        for (const id of parentIds) map.set(id, 0);
+        for (const row of typed) map.set(row.parentId, row.cnt);
+        return map as ReadonlyMap<string, number>;
+      }).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.batchCountByParents:query")),
+      ),
+    batchListDependencies: ({ ticketIds }) =>
+      Effect.gen(function* () {
+        if (ticketIds.length === 0)
+          return new Map<
+            string,
+            ReadonlyArray<{ ticketId: string; dependsOnTicketId: string }>
+          >() as ReadonlyMap<
+            string,
+            ReadonlyArray<{ ticketId: string; dependsOnTicketId: string }>
+          >;
+        const placeholders = ticketIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(",");
+        const rawRows = yield* sql`
+          SELECT ${sql.literal(DEP_SELECT)}
+          FROM ticket_dependencies d
+          JOIN tickets t ON t.id = d.depends_on_ticket_id
+          WHERE d.ticket_id IN (${sql.literal(placeholders)})
+        `;
+        const typed = rawRows as unknown as ReadonlyArray<typeof DepRow.Type>;
+        const map = new Map<string, Array<typeof DepRow.Type>>();
+        for (const id of ticketIds) map.set(id, []);
+        for (const row of typed) map.get(row.ticketId)?.push(row);
+        return map as ReadonlyMap<
+          string,
+          ReadonlyArray<{ ticketId: string; dependsOnTicketId: string }>
+        >;
+      }).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.batchListDependencies:query")),
+      ),
+
     // Dependencies
     addDependency: ({ ticketId, dependsOnTicketId }) =>
       sql`INSERT OR IGNORE INTO ticket_dependencies (ticket_id, depends_on_ticket_id) VALUES (${ticketId}, ${dependsOnTicketId})`.pipe(
