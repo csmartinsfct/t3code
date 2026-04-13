@@ -3102,4 +3102,86 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  describe("probeRateLimits", () => {
+    function makeProbeHarness() {
+      const probeQuery = new FakeClaudeQuery();
+
+      const adapterOptions: ClaudeAdapterLiveOptions = {
+        createQuery: () => probeQuery,
+      };
+
+      return {
+        layer: makeClaudeAdapterLive(adapterOptions).pipe(
+          Layer.provideMerge(
+            ServerConfig.layerTest("/tmp/claude-probe-test", "/tmp"),
+          ),
+          Layer.provideMerge(ServerSettingsService.layerTest()),
+          Layer.provideMerge(managedRunServiceTestLayer),
+          Layer.provideMerge(projectionSnapshotQueryTestLayer),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+        probeQuery,
+      };
+    }
+
+    it.effect("closes the query runtime after a successful probe", () => {
+      const harness = makeProbeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        // Pre-populate the fake query with a rate_limit_event.
+        // FakeClaudeQuery queues messages so the probe will find it immediately.
+        harness.probeQuery.emit({
+          type: "rate_limit_event",
+          rate_limit_info: { status: "allowed" },
+        } as unknown as SDKMessage);
+
+        const result = yield* Effect.tryPromise(() => {
+          const probe = adapter.probeRateLimits;
+          if (!probe) throw new Error("probeRateLimits not available");
+          return Effect.runPromise(probe());
+        });
+        assert.isNotNull(result);
+        assert.equal(result!.status, "allowed");
+        assert.isAbove(harness.probeQuery.closeCalls, 0);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("closes the query runtime on probe error", () => {
+      const harness = makeProbeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        // Pre-fail the query before the probe starts iterating.
+        harness.probeQuery.fail(new Error("boom"));
+
+        const result = yield* Effect.tryPromise(() => {
+          const probe = adapter.probeRateLimits;
+          if (!probe) throw new Error("probeRateLimits not available");
+          return Effect.runPromise(probe());
+        });
+        assert.isNull(result);
+        assert.isAbove(harness.probeQuery.closeCalls, 0);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("closes the query runtime when no rate_limit_event received", () => {
+      const harness = makeProbeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        // Finish the stream without any rate_limit_event.
+        harness.probeQuery.finish();
+
+        const result = yield* Effect.tryPromise(() => {
+          const probe = adapter.probeRateLimits;
+          if (!probe) throw new Error("probeRateLimits not available");
+          return Effect.runPromise(probe());
+        });
+        assert.isNull(result);
+        assert.isAbove(harness.probeQuery.closeCalls, 0);
+      }).pipe(Effect.provide(harness.layer));
+    });
+  });
 });
