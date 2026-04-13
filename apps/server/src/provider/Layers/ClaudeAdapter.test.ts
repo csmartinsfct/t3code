@@ -3113,9 +3113,7 @@ describe("ClaudeAdapterLive", () => {
 
       return {
         layer: makeClaudeAdapterLive(adapterOptions).pipe(
-          Layer.provideMerge(
-            ServerConfig.layerTest("/tmp/claude-probe-test", "/tmp"),
-          ),
+          Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-probe-test", "/tmp")),
           Layer.provideMerge(ServerSettingsService.layerTest()),
           Layer.provideMerge(managedRunServiceTestLayer),
           Layer.provideMerge(projectionSnapshotQueryTestLayer),

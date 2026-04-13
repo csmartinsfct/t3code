@@ -799,40 +799,41 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   // changes take effect immediately without restart.
   const IDLE_REAPER_INTERVAL_MS = 60_000; // sweep every 60s
 
-  const runIdleReaperSweep = () =>
-    Effect.gen(function* () {
-      const settings = yield* serverSettings.getSettings;
-      const timeoutMinutes = settings.idleSessionTimeoutMinutes;
-      if (timeoutMinutes <= 0) return; // disabled
+  const runIdleReaperSweep = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
+    const timeoutMinutes = settings.idleSessionTimeoutMinutes;
+    if (timeoutMinutes <= 0) return; // disabled
 
-      const thresholdMs = timeoutMinutes * 60 * 1000;
-      const now = Date.now();
+    const thresholdMs = timeoutMinutes * 60 * 1000;
+    const now = Date.now();
 
-      for (const adapter of adapters) {
+    yield* Effect.forEach(adapters, (adapter) =>
+      Effect.gen(function* () {
         const sessions = yield* adapter.listSessions();
-        for (const session of sessions) {
-          if (session.status === "closed") continue;
-          if (session.activeTurnId) continue; // actively running a turn
+        yield* Effect.forEach(
+          sessions.filter((s) => s.status !== "closed" && !s.activeTurnId),
+          (session) =>
+            Effect.gen(function* () {
+              const idleMs = now - Date.parse(session.updatedAt);
+              if (idleMs <= thresholdMs) return;
 
-          const idleMs = now - Date.parse(session.updatedAt);
-          if (idleMs > thresholdMs) {
-            yield* Effect.logInfo(
-              `Idle reaper: stopping session ${session.threadId} ` +
-                `(idle ${Math.round(idleMs / 60_000)}m, threshold ${timeoutMinutes}m)`,
-            );
-            yield* adapter.stopSession(session.threadId).pipe(
-              Effect.tap(() => directory.remove(session.threadId)),
-              Effect.catchAll((err) =>
-                Effect.logWarning("Idle reaper: failed to stop session", { cause: err }),
-              ),
-            );
-          }
-        }
-      }
-    });
+              yield* Effect.logInfo(
+                `Idle reaper: stopping session ${session.threadId} ` +
+                  `(idle ${Math.round(idleMs / 60_000)}m, threshold ${timeoutMinutes}m)`,
+              );
+              yield* adapter.stopSession(session.threadId).pipe(
+                Effect.tap(() => directory.remove(session.threadId)),
+                Effect.catch(() => Effect.void),
+              );
+            }),
+          { discard: true },
+        );
+      }),
+    );
+  }).pipe(Effect.catch(() => Effect.void));
 
   const idleReaperInterval = setInterval(() => {
-    Effect.runPromise(runIdleReaperSweep()).catch(() => {});
+    Effect.runPromise(runIdleReaperSweep).catch(() => {});
   }, IDLE_REAPER_INTERVAL_MS);
 
   if (typeof idleReaperInterval === "object" && "unref" in idleReaperInterval) {

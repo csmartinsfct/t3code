@@ -1319,15 +1319,11 @@ describe("idle session reaper", () => {
 
       // The fake adapter's stopSession should have been called.
       assert.isTrue(codex.stopSession.mock.calls.length > 0);
-    })
-      .pipe(Effect.scoped, Effect.provide(layer))
-      .pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            vi.useRealTimers();
-          }),
-        ),
-      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
   });
 
   it.effect("skips sessions with an active turn", () => {
@@ -1355,15 +1351,11 @@ describe("idle session reaper", () => {
 
       // stopSession should NOT have been called (turn is active).
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    })
-      .pipe(Effect.scoped, Effect.provide(layer))
-      .pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            vi.useRealTimers();
-          }),
-        ),
-      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
   });
 
   it.effect("does not reap when idleSessionTimeoutMinutes is 0", () => {
@@ -1391,15 +1383,11 @@ describe("idle session reaper", () => {
 
       // Reaper is disabled — stopSession should not be called.
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    })
-      .pipe(Effect.scoped, Effect.provide(layer))
-      .pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            vi.useRealTimers();
-          }),
-        ),
-      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
   });
 
   it.effect("does not stop recently active sessions", () => {
@@ -1427,14 +1415,10 @@ describe("idle session reaper", () => {
       yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
 
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    })
-      .pipe(Effect.scoped, Effect.provide(layer))
-      .pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            vi.useRealTimers();
-          }),
-        ),
-      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
   });
 });

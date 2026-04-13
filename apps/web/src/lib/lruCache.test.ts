@@ -40,4 +40,32 @@ describe("LRUCache", () => {
     expect(cache.get("b")).toBe("B");
     expect(cache.get("c")).toBe("C");
   });
+
+  it("delete removes an entry and adjusts size", () => {
+    const cache = new LRUCache<string>(10, 1_000);
+    cache.set("a", "A", 100);
+    cache.set("b", "B", 200);
+
+    expect(cache.size).toBe(2);
+    expect(cache.delete("a")).toBe(true);
+    expect(cache.size).toBe(1);
+    expect(cache.get("a")).toBeNull();
+    expect(cache.get("b")).toBe("B");
+  });
+
+  it("delete returns false for non-existent key", () => {
+    const cache = new LRUCache<string>(10, 1_000);
+    expect(cache.delete("missing")).toBe(false);
+  });
+
+  it("size returns current entry count", () => {
+    const cache = new LRUCache<string>(10, 1_000);
+    expect(cache.size).toBe(0);
+    cache.set("a", "A", 10);
+    expect(cache.size).toBe(1);
+    cache.set("b", "B", 10);
+    expect(cache.size).toBe(2);
+    cache.clear();
+    expect(cache.size).toBe(0);
+  });
 });

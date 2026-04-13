@@ -1087,8 +1087,7 @@ export function GeneralSettingsPanel() {
                 label="idle session timeout"
                 onClick={() =>
                   updateSettings({
-                    idleSessionTimeoutMinutes:
-                      DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes,
+                    idleSessionTimeoutMinutes: DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes,
                   })
                 }
               />

@@ -126,9 +126,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_MAX_REVIEW_ITERATIONS),
   ),
   /** Minutes of inactivity before a provider session is automatically stopped. 0 = disabled. */
-  idleSessionTimeoutMinutes: NonNegativeInt.pipe(
-    Schema.withDecodingDefault(() => 60),
-  ),
+  idleSessionTimeoutMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 60)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
