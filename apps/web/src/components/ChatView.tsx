@@ -1326,21 +1326,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
 
-  // Rate limits: prefer the thread-level provider when available, fall back to
-  // the composer's selected provider so the meter is visible even on draft
-  // threads that have no session or model selection yet.
-  // The composer stores only the base provider kind (e.g. "claudeAgent"); the
-  // profile is tracked in the model selection's profileId.  Reconstruct the
-  // full profiled kind so the rate-limit lookup finds the correct entry.
-  const rateLimitProvider = useMemo(() => {
-    if (rateLimitProviderEarly) return rateLimitProviderEarly;
-    const base = baseProviderKind(selectedProvider);
-    const sel = composerDraft.modelSelectionByProvider?.[base];
-    if (sel) return modelSelectionProviderKind(sel);
-    return selectedProvider;
-  }, [rateLimitProviderEarly, selectedProvider, composerDraft.modelSelectionByProvider]);
+  // Rate limits: always derive from the currently-selected provider so that
+  // switching profiles in the dropdown immediately reflects the selected
+  // profile's rate limits.  `selectedProvider` already carries the profile
+  // suffix (e.g. "claudeAgent:metric") when a profiled provider is active.
+  const rateLimitProvider = useMemo(() => selectedProvider, [selectedProvider]);
   const rateLimitEntryFull = useProviderRateLimit(rateLimitProvider);
-  const rateLimitEntry = rateLimitEntryEarly ?? rateLimitEntryFull;
+  // Prefer the entry matching the current selection; fall back to the
+  // thread-level early entry only when the selection-based lookup is empty
+  // (e.g. rate-limit data hasn't been fetched yet).
+  const rateLimitEntry = rateLimitEntryFull ?? rateLimitEntryEarly;
   const activeRateLimit = useMemo(
     () => (rateLimitEntry ? deriveRateLimitSnapshot(rateLimitEntry) : null),
     [rateLimitEntry],
