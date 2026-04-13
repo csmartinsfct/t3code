@@ -793,6 +793,54 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  // ── Idle session reaper ────────────────────────────────────────
+  // Periodically sweeps active sessions and stops any that have been idle
+  // beyond the configured threshold. Reads the setting on every sweep so
+  // changes take effect immediately without restart.
+  const IDLE_REAPER_INTERVAL_MS = 60_000; // sweep every 60s
+
+  const runIdleReaperSweep = () =>
+    Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      const timeoutMinutes = settings.idleSessionTimeoutMinutes;
+      if (timeoutMinutes <= 0) return; // disabled
+
+      const thresholdMs = timeoutMinutes * 60 * 1000;
+      const now = Date.now();
+
+      for (const adapter of adapters) {
+        const sessions = yield* adapter.listSessions();
+        for (const session of sessions) {
+          if (session.status === "closed") continue;
+          if (session.activeTurnId) continue; // actively running a turn
+
+          const idleMs = now - Date.parse(session.updatedAt);
+          if (idleMs > thresholdMs) {
+            yield* Effect.logInfo(
+              `Idle reaper: stopping session ${session.threadId} ` +
+                `(idle ${Math.round(idleMs / 60_000)}m, threshold ${timeoutMinutes}m)`,
+            );
+            yield* adapter.stopSession(session.threadId).pipe(
+              Effect.tap(() => directory.remove(session.threadId)),
+              Effect.catchAll((err) =>
+                Effect.logWarning("Idle reaper: failed to stop session", { cause: err }),
+              ),
+            );
+          }
+        }
+      }
+    });
+
+  const idleReaperInterval = setInterval(() => {
+    Effect.runPromise(runIdleReaperSweep()).catch(() => {});
+  }, IDLE_REAPER_INTERVAL_MS);
+
+  if (typeof idleReaperInterval === "object" && "unref" in idleReaperInterval) {
+    idleReaperInterval.unref();
+  }
+
+  yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(idleReaperInterval)));
+
   const probeAllRateLimits: ProviderServiceShape["probeAllRateLimits"] = Effect.fn(
     "probeAllRateLimits",
   )(function* () {
