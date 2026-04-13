@@ -126,9 +126,7 @@ describe("deriveOrchestrationBatchEffects", () => {
       }),
     ]);
 
-    expect(effects.syncInteractionModes).toEqual([
-      { threadId, interactionMode: "default" },
-    ]);
+    expect(effects.syncInteractionModes).toEqual([{ threadId, interactionMode: "default" }]);
   });
 
   it("does not retain archive cleanup when a thread is unarchived later in the same batch", () => {

@@ -1,11 +1,54 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-11T23:52:10.227Z",
-  "lastProcessedCommit": "ea503e948953e7d3f06aef498af511b72f5ebbe5",
+  "generatedAt": "2026-04-13T11:28:37.798Z",
+  "lastProcessedCommit": "796c567d1b2f18ca78c3b2f746924968ddd62c05",
   "groups": [
+    {
+      "date": "2026-04-13",
+      "entries": [
+        {
+          "id": "5b1558573b0365fc",
+          "title": "Ticket editing now includes rich text formatting and inline acceptance criteria",
+          "summary": "Ticket descriptions now use a rich text editor with formatting controls, and acceptance criteria can be added, edited, and removed directly in the ticket view.",
+          "category": "feature",
+          "commitShas": [
+            "07429ec8e9c4efc62ede56c865831a601f751eb9",
+            "796c567d1b2f18ca78c3b2f746924968ddd62c05"
+          ]
+        },
+        {
+          "id": "e28cffe989a7a555",
+          "title": "Plan accept mode now switches back to chat correctly after auto-accept",
+          "summary": "Fixed an issue where threads could stay stuck in plan accept mode after the server automatically accepted a plan.",
+          "category": "fix",
+          "commitShas": ["f927ada6d875024a74abc792043841a29b3ae2cc"]
+        },
+        {
+          "id": "e53d1dc773041f59",
+          "title": "Internal tools now use a more reliable REST connection",
+          "summary": "T3 Code now uses a plain REST API for built-in tools, reducing agent connection failures and making tool access more consistent across sessions.",
+          "category": "improvement",
+          "commitShas": ["ab77ce2c89deacab5a490e6c26a5ff42906fa25d"]
+        },
+        {
+          "id": "75b9b01b7f9860e1",
+          "title": "Faster board loading when switching threads",
+          "summary": "Improved board responsiveness when moving between threads and projects by reducing redundant loading work and eliminating stalls that could delay the view by several seconds.",
+          "category": "performance",
+          "commitShas": ["0e4ff040b42b453d44205b4312053c5ac2d2283f"]
+        }
+      ]
+    },
     {
       "date": "2026-04-12",
       "entries": [
+        {
+          "id": "1620ffb3b056ba28",
+          "title": "Nested ticket dependency trees are now supported",
+          "summary": "Tickets can now model multi-level dependency trees, with dependent work ordered correctly to preserve execution flow.",
+          "category": "feature",
+          "commitShas": ["c0ba22003417762fd736e81cbf14b49a14e657fa"]
+        },
         {
           "id": "8c954deece5f68d7",
           "title": "Nested ticket dependencies now run in order",
@@ -1187,6 +1230,41 @@
           "ea503e948953e7d3f06aef498af511b72f5ebbe5"
         ],
         "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-11T23:57:40.132Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ea503e948953e7d3f06aef498af511b72f5ebbe5",
+        "toInclusiveCommit": "c0ba22003417762fd736e81cbf14b49a14e657fa",
+        "commitShas": ["c0ba22003417762fd736e81cbf14b49a14e657fa"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-12T23:19:55.802Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "c0ba22003417762fd736e81cbf14b49a14e657fa",
+        "toInclusiveCommit": "0e4ff040b42b453d44205b4312053c5ac2d2283f",
+        "commitShas": ["0e4ff040b42b453d44205b4312053c5ac2d2283f"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-13T11:28:37.706Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "0e4ff040b42b453d44205b4312053c5ac2d2283f",
+        "toInclusiveCommit": "796c567d1b2f18ca78c3b2f746924968ddd62c05",
+        "commitShas": [
+          "ab77ce2c89deacab5a490e6c26a5ff42906fa25d",
+          "07429ec8e9c4efc62ede56c865831a601f751eb9",
+          "f927ada6d875024a74abc792043841a29b3ae2cc",
+          "796c567d1b2f18ca78c3b2f746924968ddd62c05"
+        ],
+        "commitCount": 4,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }
