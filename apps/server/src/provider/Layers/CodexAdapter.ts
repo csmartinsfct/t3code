@@ -41,12 +41,10 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { trustCodexProject } from "../../mcpConfigReader.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
-import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
-import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
-import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
 import {
   buildEnvironmentHeader,
   buildRestEndpointSystemPrompt,
+  renderAdminPromptDocument,
 } from "../restEndpointSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -1449,6 +1447,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           projectTitle: checkpointContext.value.projectTitle,
         });
 
+        const adminPrompts = allCodexSettings.prompts.admin;
         appendDeveloperInstructions =
           envHeader +
           "\n\n" +
@@ -1457,11 +1456,11 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             token: access.token,
           }) +
           "\n\n" +
-          MANAGED_RUNS_SYSTEM_PROMPT +
+          renderAdminPromptDocument(adminPrompts.managedRuns) +
           "\n\n" +
-          SCHEDULED_TASKS_SYSTEM_PROMPT +
+          renderAdminPromptDocument(adminPrompts.scheduledTasks) +
           "\n\n" +
-          TICKETING_SYSTEM_PROMPT;
+          renderAdminPromptDocument(adminPrompts.ticketing);
       }
       // Inject project-specific system prompt (independent of services / port)
       if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {

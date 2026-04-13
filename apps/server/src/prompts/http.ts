@@ -1,8 +1,12 @@
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import type { OrchestrationPromptId, ProjectId } from "@t3tools/contracts";
-import { PromptManagementError } from "@t3tools/contracts";
+import type { PromptId, ProjectId } from "@t3tools/contracts";
+import {
+  ADMIN_PROMPT_IDS,
+  ORCHESTRATION_PROMPT_IDS,
+  PromptManagementError,
+} from "@t3tools/contracts";
 import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
 import {
   extractBearerToken,
@@ -15,14 +19,7 @@ import { PromptManagementService, type PromptManagementShape } from "./Services/
 
 const API_ROUTE = "/api/prompts";
 
-const ORCHESTRATION_PROMPT_ID_VALUES = [
-  "implement",
-  "resume",
-  "resumeFreshAgent",
-  "review",
-  "reReview",
-  "reviewFeedback",
-] as const;
+const ALL_PROMPT_ID_VALUES = [...ADMIN_PROMPT_IDS, ...ORCHESTRATION_PROMPT_IDS] as const;
 
 const DEV_BYPASS_TOKEN = process.env.NODE_ENV === "production" ? null : "t3-dev-bypass";
 
@@ -120,7 +117,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       promptId: {
         type: "string",
-        enum: [...ORCHESTRATION_PROMPT_ID_VALUES],
+        enum: [...ALL_PROMPT_ID_VALUES],
         description: "Prompt id.",
       },
     },
@@ -143,7 +140,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       promptId: {
         type: "string",
-        enum: [...ORCHESTRATION_PROMPT_ID_VALUES],
+        enum: [...ALL_PROMPT_ID_VALUES],
         description: "Prompt id.",
       },
       document: {
@@ -170,7 +167,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       promptId: {
         type: "string",
-        enum: [...ORCHESTRATION_PROMPT_ID_VALUES],
+        enum: [...ALL_PROMPT_ID_VALUES],
         description: "Prompt id.",
       },
       document: {
@@ -198,7 +195,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       promptId: {
         type: "string",
-        enum: [...ORCHESTRATION_PROMPT_ID_VALUES],
+        enum: [...ALL_PROMPT_ID_VALUES],
         description: "Prompt id.",
       },
       document: {
@@ -232,7 +229,7 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
       Effect.gen(function* () {
         const scope = input.scope as "global" | "project";
         const projectId = input.projectId as string | undefined;
-        const promptId = input.promptId as OrchestrationPromptId;
+        const promptId = input.promptId as PromptId;
         const result = yield* promptManagement.getPromptDocument({
           ...authorizeScope(scopeInput(scope, projectId), auth),
           promptId,
@@ -244,7 +241,7 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
       Effect.gen(function* () {
         const scope = input.scope as "global" | "project";
         const projectId = input.projectId as string | undefined;
-        const promptId = input.promptId as OrchestrationPromptId;
+        const promptId = input.promptId as PromptId;
         const document = input.document;
         const result = yield* promptManagement.validatePromptDocument({
           ...authorizeScope(scopeInput(scope, projectId), auth),
@@ -258,7 +255,7 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
       Effect.gen(function* () {
         const scope = input.scope as "global" | "project";
         const projectId = input.projectId as string | undefined;
-        const promptId = input.promptId as OrchestrationPromptId;
+        const promptId = input.promptId as PromptId;
         const document = input.document;
         const result = yield* promptManagement.previewPromptDocument({
           ...authorizeScope(scopeInput(scope, projectId), auth),
@@ -272,7 +269,7 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
       Effect.gen(function* () {
         const scope = input.scope as "global" | "project";
         const projectId = input.projectId as string | undefined;
-        const promptId = input.promptId as OrchestrationPromptId;
+        const promptId = input.promptId as PromptId;
         const document = input.document;
         const result = yield* promptManagement.updatePromptDocument({
           ...authorizeScope(scopeInput(scope, projectId), auth),

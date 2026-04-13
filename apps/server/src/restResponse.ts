@@ -52,30 +52,31 @@ export function extractBearerToken(request: Request): string | null {
 /**
  * Resolve auth context from a Bearer token.
  * Tries the dev bypass token first, then the managed run token store.
+ * Accepts an already-converted Web Request so callers can reuse it for body
+ * parsing without consuming the stream twice.
  * Returns the context or null.
  */
-export const resolveAuth = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const managedRuns = yield* ManagedRunService;
-  const webRequest = yield* HttpServerRequest.toWeb(request);
+export const resolveAuth = (webRequest: Request) =>
+  Effect.gen(function* () {
+    const managedRuns = yield* ManagedRunService;
 
-  const token = extractBearerToken(webRequest);
-  if (!token) return null;
+    const token = extractBearerToken(webRequest);
+    if (!token) return null;
 
-  // Dev bypass
-  if (DEV_BYPASS_TOKEN && token === DEV_BYPASS_TOKEN) {
-    const url = new URL(webRequest.url, "http://localhost");
-    const projectId = url.searchParams.get("projectId");
-    const threadId = url.searchParams.get("threadId") ?? "dev-test-thread";
-    if (projectId) {
-      return { projectId: projectId as ProjectId, threadId: threadId as ThreadId };
+    // Dev bypass
+    if (DEV_BYPASS_TOKEN && token === DEV_BYPASS_TOKEN) {
+      const url = new URL(webRequest.url, "http://localhost");
+      const projectId = url.searchParams.get("projectId");
+      const threadId = url.searchParams.get("threadId") ?? "dev-test-thread";
+      if (projectId) {
+        return { projectId: projectId as ProjectId, threadId: threadId as ThreadId };
+      }
     }
-  }
 
-  // Token-based resolution
-  const context = yield* managedRuns.resolveContextForToken(token);
-  return context;
-});
+    // Token-based resolution
+    const context = yield* managedRuns.resolveContextForToken(token);
+    return context;
+  });
 
 // ---------------------------------------------------------------------------
 // Request body parsing

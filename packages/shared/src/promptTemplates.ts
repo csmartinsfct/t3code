@@ -3,11 +3,14 @@ import type {
   OrchestrationPromptId,
   OrchestrationPromptOverrides,
   OrchestrationPromptOverridesPatch,
+  PromptGroupId,
+  PromptId,
   PromptTemplateDocument,
   PromptTemplateValidationError,
   PromptTemplateVariableDefinition,
 } from "@t3tools/contracts";
 import {
+  ADMIN_PROMPT_GROUP_ID,
   ORCHESTRATION_PROMPT_IDS,
   ORCHESTRATION_PROMPT_GROUP_ID,
   ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
@@ -172,13 +175,13 @@ export function hasOrchestrationPromptOverrides(
 }
 
 export function listPromptTemplateVariables(
-  promptId?: OrchestrationPromptId,
+  promptId?: PromptId,
 ): ReadonlyArray<PromptTemplateVariableDefinition> {
   if (!promptId) {
     return ORCHESTRATION_PROMPT_VARIABLE_REGISTRY;
   }
   return ORCHESTRATION_PROMPT_VARIABLE_REGISTRY.filter((definition) =>
-    (definition.promptIds as ReadonlyArray<OrchestrationPromptId>).includes(promptId),
+    (definition.promptIds as ReadonlyArray<PromptId>).includes(promptId),
   );
 }
 
@@ -189,16 +192,19 @@ export function normalizePromptTemplateVariableReference(
 }
 
 export function validatePromptTemplateDocument(input: {
-  readonly promptId: OrchestrationPromptId;
+  readonly groupId?: PromptGroupId;
+  readonly promptId: PromptId;
   readonly document: unknown;
 }): ValidationResult {
   const errors: PromptTemplateValidationError[] = [];
   const normalizedBlocks: Array<PromptTemplateDocument["blocks"][number]> = [];
   const referencedVariables = new Set<CanonicalPromptVariableKey>();
+  const groupId = input.groupId ?? ORCHESTRATION_PROMPT_GROUP_ID;
+  const isAdmin = groupId === ADMIN_PROMPT_GROUP_ID;
 
   const pushError = (error: Omit<PromptTemplateValidationError, "promptGroupId" | "promptId">) => {
     errors.push({
-      promptGroupId: ORCHESTRATION_PROMPT_GROUP_ID,
+      promptGroupId: groupId,
       promptId: input.promptId,
       ...error,
     });
@@ -274,27 +280,35 @@ export function validatePromptTemplateDocument(input: {
         return;
       }
 
-      const normalizedText = normalizeBlockText({
-        promptId: input.promptId,
-        text: block.text,
-        blockIndex,
-        pushError,
-        referencedVariables,
-      });
-
-      const normalizedWhen = normalizeCondition({
-        promptId: input.promptId,
-        when: block.when,
-        blockIndex,
-        pushError,
-        referencedVariables,
-      });
-
-      if (normalizedText && normalizedWhen !== undefined) {
+      if (isAdmin) {
+        // Admin prompts: no variable interpolation or conditions — accept text as-is
         normalizedBlocks.push({
-          when: normalizedWhen,
-          text: normalizedText,
+          when: (block.when as PromptTemplateDocument["blocks"][number]["when"]) ?? null,
+          text: block.text,
         });
+      } else {
+        const normalizedText = normalizeBlockText({
+          promptId: input.promptId as OrchestrationPromptId,
+          text: block.text,
+          blockIndex,
+          pushError,
+          referencedVariables,
+        });
+
+        const normalizedWhen = normalizeCondition({
+          promptId: input.promptId as OrchestrationPromptId,
+          when: block.when,
+          blockIndex,
+          pushError,
+          referencedVariables,
+        });
+
+        if (normalizedText && normalizedWhen !== undefined) {
+          normalizedBlocks.push({
+            when: normalizedWhen,
+            text: normalizedText,
+          });
+        }
       }
     });
   }

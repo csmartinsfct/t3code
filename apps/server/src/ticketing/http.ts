@@ -200,7 +200,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
     ),
     inputSchema: {
-      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
     },
   },
   {
@@ -312,7 +312,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     title: "Update Ticket",
     description: withTicketChatLinkReminder("Update an existing ticket."),
     inputSchema: {
-      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to update." },
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to update." },
       title: { type: "string", optional: true, description: "New title." },
       description: {
         type: "string",
@@ -408,7 +408,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     title: "Delete Ticket",
     description: "Delete a ticket and all its data.",
     inputSchema: {
-      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to delete." },
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to delete." },
     },
   },
   {
@@ -441,11 +441,11 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       items: {
         type: "array",
-        description: "Array of {id or identifier, sortOrder} pairs.",
+        description: "Array of {ticketId, sortOrder} pairs.",
         items: {
           type: "object",
           properties: {
-            id: { type: "string" },
+            ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
             sortOrder: { type: "number" },
           },
         },
@@ -772,7 +772,7 @@ function toolHandlers(ctx: ToolContext) {
 
     get_ticket: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const id = input.id as string;
+        const id = input.ticketId as string;
         const resolved = yield* resolveId(id);
         const ticket = yield* ticketing.getById({ id: resolved, projectId });
         return respondOk(yield* resolveJson(ticket));
@@ -830,7 +830,7 @@ function toolHandlers(ctx: ToolContext) {
 
     update_ticket: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const id = input.id as string;
+        const id = input.ticketId as string;
         const title = input.title as string | undefined;
         const description = input.description as string | null | undefined;
         const status = input.status as string | undefined;
@@ -887,7 +887,7 @@ function toolHandlers(ctx: ToolContext) {
 
     delete_ticket: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const id = input.id as string;
+        const id = input.ticketId as string;
         const resolvedId = yield* resolveId(id);
         yield* ticketing.delete({ id: resolvedId });
         return respondOk({ deleted: true });
@@ -918,11 +918,11 @@ function toolHandlers(ctx: ToolContext) {
 
     reorder_tickets: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const items = input.items as Array<{ id: string; sortOrder: number }>;
+        const items = input.items as Array<{ ticketId: string; sortOrder: number }>;
         const resolved = yield* Effect.all(
           items.map((i) =>
             Effect.gen(function* () {
-              return { id: yield* resolveId(i.id), sortOrder: i.sortOrder };
+              return { id: yield* resolveId(i.ticketId), sortOrder: i.sortOrder };
             }),
           ),
         );
@@ -1210,17 +1210,19 @@ function toolHandlers(ctx: ToolContext) {
 // ---------------------------------------------------------------------------
 
 const handleGet = Effect.gen(function* () {
-  const auth = yield* resolveAuth;
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const webRequest = yield* HttpServerRequest.toWeb(request);
+  const auth = yield* resolveAuth(webRequest);
   if (!auth) return respondError("Unauthorized", 401);
   return respondOk(TOOL_DEFINITIONS, "Available tools");
 });
 
 const handlePost = Effect.gen(function* () {
-  const auth = yield* resolveAuth;
-  if (!auth) return respondError("Unauthorized", 401);
-
   const request = yield* HttpServerRequest.HttpServerRequest;
   const webRequest = yield* HttpServerRequest.toWeb(request);
+  const auth = yield* resolveAuth(webRequest);
+  if (!auth) return respondError("Unauthorized", 401);
+
   const body = yield* Effect.promise(() => parseToolCallBody(webRequest));
   if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
 

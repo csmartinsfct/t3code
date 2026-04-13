@@ -14,6 +14,7 @@ import {
   type BaseProviderKind,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
+  ADMIN_PROMPT_IDS,
   ORCHESTRATION_PROMPT_IDS,
   type ModelSelection,
   ServerSettings,
@@ -171,6 +172,10 @@ function resolvePromptSettings(settings: ServerSettings): ServerSettings {
       ...promptDefaults.orchestration,
       ...settings.prompts.orchestration,
     },
+    admin: {
+      ...promptDefaults.admin,
+      ...settings.prompts.admin,
+    },
   } satisfies ServerSettings["prompts"];
 
   if (
@@ -191,32 +196,43 @@ function applyPromptResetPatch(
   current: ServerSettings,
   patch: ServerSettingsPatch,
 ): ServerSettingsPatch {
+  let nextPatch = patch;
+
+  // Handle orchestration null-resets
   const orchestrationPatch = patch.prompts?.orchestration;
-  if (!orchestrationPatch) {
-    return patch;
+  if (orchestrationPatch && Object.values(orchestrationPatch).some((d) => d === null)) {
+    const nextOrchestrationPatch = Object.fromEntries(
+      ORCHESTRATION_PROMPT_IDS.flatMap((promptId) => {
+        const document = orchestrationPatch[promptId];
+        if (document === undefined) return [];
+        return [[promptId, document ?? current.promptDefaults.orchestration[promptId]]];
+      }),
+    ) as NonNullable<NonNullable<ServerSettingsPatch["prompts"]>["orchestration"]>;
+
+    nextPatch = {
+      ...nextPatch,
+      prompts: { ...nextPatch.prompts, orchestration: nextOrchestrationPatch },
+    };
   }
 
-  if (!Object.values(orchestrationPatch).some((document) => document === null)) {
-    return patch;
+  // Handle admin null-resets
+  const adminPatch = patch.prompts?.admin;
+  if (adminPatch && Object.values(adminPatch).some((d) => d === null)) {
+    const nextAdminPatch = Object.fromEntries(
+      ADMIN_PROMPT_IDS.flatMap((promptId) => {
+        const document = adminPatch[promptId];
+        if (document === undefined) return [];
+        return [[promptId, document ?? current.promptDefaults.admin[promptId]]];
+      }),
+    ) as NonNullable<NonNullable<ServerSettingsPatch["prompts"]>["admin"]>;
+
+    nextPatch = {
+      ...nextPatch,
+      prompts: { ...nextPatch.prompts, admin: nextAdminPatch },
+    };
   }
 
-  const nextOrchestrationPatch = Object.fromEntries(
-    ORCHESTRATION_PROMPT_IDS.flatMap((promptId) => {
-      const document = orchestrationPatch[promptId];
-      if (document === undefined) {
-        return [];
-      }
-      return [[promptId, document ?? current.promptDefaults.orchestration[promptId]]];
-    }),
-  ) as NonNullable<NonNullable<ServerSettingsPatch["prompts"]>["orchestration"]>;
-
-  return {
-    ...patch,
-    prompts: {
-      ...patch.prompts,
-      orchestration: nextOrchestrationPatch,
-    },
-  };
+  return nextPatch;
 }
 
 function isAtomicServerSettingsPath(path: ReadonlyArray<string>): boolean {
@@ -229,12 +245,13 @@ function isAtomicServerSettingsPath(path: ReadonlyArray<string>): boolean {
     );
   }
 
-  if (
-    path.length === 3 &&
-    (path[0] === "prompts" || path[0] === "promptDefaults") &&
-    path[1] === "orchestration"
-  ) {
-    return (ORCHESTRATION_PROMPT_IDS as ReadonlyArray<string>).includes(path[2]!);
+  if (path.length === 3 && (path[0] === "prompts" || path[0] === "promptDefaults")) {
+    if (path[1] === "orchestration") {
+      return (ORCHESTRATION_PROMPT_IDS as ReadonlyArray<string>).includes(path[2]!);
+    }
+    if (path[1] === "admin") {
+      return (ADMIN_PROMPT_IDS as ReadonlyArray<string>).includes(path[2]!);
+    }
   }
 
   return false;

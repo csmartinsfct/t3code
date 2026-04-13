@@ -19,7 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type {
   CanonicalPromptVariableKey,
-  OrchestrationPromptId,
+  PromptId,
   PreviewPromptDocumentResult,
   PromptDocumentState,
   PromptDocumentValidationResult,
@@ -230,7 +230,7 @@ export function PromptEditorDialog({
   const validateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const definition = documentState?.definition ?? null;
-  const promptId = definition?.promptId as OrchestrationPromptId | undefined;
+  const promptId = definition?.promptId as PromptId | undefined;
   const supportedVariables = definition?.supportedVariables ?? [];
 
   // Initialize blocks when dialog opens or document changes

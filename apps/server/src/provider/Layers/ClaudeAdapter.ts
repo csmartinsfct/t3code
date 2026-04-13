@@ -74,11 +74,9 @@ import * as path from "node:path";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
-import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
-import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
-import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
 import {
   buildEnvironmentHeader,
+  renderAdminPromptDocument,
   buildRestEndpointSystemPrompt,
 } from "../restEndpointSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -2904,6 +2902,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           projectTitle: checkpointContext.value.projectTitle,
         });
 
+        const adminPrompts = allSettings.prompts.admin;
         serviceSystemPrompt =
           envHeader +
           "\n\n" +
@@ -2912,11 +2911,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             token: access.token,
           }) +
           "\n\n" +
-          MANAGED_RUNS_SYSTEM_PROMPT +
+          renderAdminPromptDocument(adminPrompts.managedRuns) +
           "\n\n" +
-          SCHEDULED_TASKS_SYSTEM_PROMPT +
+          renderAdminPromptDocument(adminPrompts.scheduledTasks) +
           "\n\n" +
-          TICKETING_SYSTEM_PROMPT;
+          renderAdminPromptDocument(adminPrompts.ticketing);
       }
       // Inject project-specific system prompt (independent of services / port)
       if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {

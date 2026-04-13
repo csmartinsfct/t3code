@@ -8,7 +8,11 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
 import { ModelSelection } from "./orchestration";
-import { ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS, PromptDocumentV1 } from "./promptTemplates";
+import {
+  ADMIN_PROMPT_SHIPPED_DEFAULTS,
+  ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
+  PromptDocumentV1,
+} from "./promptTemplates";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -114,8 +118,22 @@ export const OrchestrationPromptSettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type OrchestrationPromptSettings = typeof OrchestrationPromptSettings.Type;
 
+export const AdminPromptSettings = Schema.Struct({
+  managedRuns: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.managedRuns),
+  ),
+  scheduledTasks: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.scheduledTasks),
+  ),
+  ticketing: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.ticketing),
+  ),
+}).pipe(Schema.withDecodingDefault(() => ({})));
+export type AdminPromptSettings = typeof AdminPromptSettings.Type;
+
 export const ServerPromptSettings = Schema.Struct({
   orchestration: OrchestrationPromptSettings,
+  admin: AdminPromptSettings,
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type ServerPromptSettings = typeof ServerPromptSettings.Type;
 
@@ -164,6 +182,7 @@ export const ServerSettings = Schema.Struct({
   promptDefaults: ServerPromptSettings.pipe(
     Schema.withDecodingDefault(() => ({
       orchestration: ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
+      admin: ADMIN_PROMPT_SHIPPED_DEFAULTS,
     })),
   ),
 });
@@ -268,6 +287,13 @@ export const ServerSettingsPatch = Schema.Struct({
           review: Schema.optionalKey(PromptDocumentPatch),
           reReview: Schema.optionalKey(PromptDocumentPatch),
           reviewFeedback: Schema.optionalKey(PromptDocumentPatch),
+        }),
+      ),
+      admin: Schema.optionalKey(
+        Schema.Struct({
+          managedRuns: Schema.optionalKey(PromptDocumentPatch),
+          scheduledTasks: Schema.optionalKey(PromptDocumentPatch),
+          ticketing: Schema.optionalKey(PromptDocumentPatch),
         }),
       ),
     }),

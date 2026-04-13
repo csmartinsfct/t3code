@@ -1,8 +1,12 @@
 import {
   CommandId,
+  type AdminPromptId,
   type CanonicalPromptVariableKey,
   type ListPromptDefinitionsInput,
   type ListPromptDefinitionsResult,
+  type PromptId,
+  ADMIN_PROMPT_GROUP_ID,
+  ADMIN_PROMPT_IDS,
   ORCHESTRATION_PROMPT_GROUP_ID,
   ORCHESTRATION_PROMPT_IDS,
   type OrchestrationPromptId,
@@ -34,13 +38,27 @@ import {
   type PromptManagementShape,
 } from "../Services/PromptManagement.ts";
 
+// ---------------------------------------------------------------------------
+// Group definitions
+// ---------------------------------------------------------------------------
+
+const ADMIN_GROUP_DEFINITION = {
+  groupId: ADMIN_PROMPT_GROUP_ID,
+  label: "Admin Prompts",
+  description: "System prompts injected into AI chat sessions for T3 service integration.",
+} as const satisfies ListPromptDefinitionsResult["groups"][number];
+
 const ORCHESTRATION_GROUP_DEFINITION = {
   groupId: ORCHESTRATION_PROMPT_GROUP_ID,
   label: "Orchestration",
   description: "Templates used when the orchestration runner dispatches automated ticket work.",
 } as const satisfies ListPromptDefinitionsResult["groups"][number];
 
-const PROMPT_DEFINITION_CONSTRAINTS = {
+// ---------------------------------------------------------------------------
+// Constraints
+// ---------------------------------------------------------------------------
+
+const ORCHESTRATION_PROMPT_DEFINITION_CONSTRAINTS = {
   documentVersion: 1,
   supportedConditionTypes: ["exists"],
   interpolationSyntax: "${variable}",
@@ -48,6 +66,19 @@ const PROMPT_DEFINITION_CONSTRAINTS = {
   supportsGlobalScope: true,
   supportsProjectScope: true,
 } as const satisfies PromptDefinition["constraints"];
+
+const ADMIN_PROMPT_DEFINITION_CONSTRAINTS = {
+  documentVersion: 1,
+  supportedConditionTypes: [],
+  interpolationSyntax: "${variable}",
+  orderedBlocksMatter: false,
+  supportsGlobalScope: true,
+  supportsProjectScope: false,
+} as const satisfies PromptDefinition["constraints"];
+
+// ---------------------------------------------------------------------------
+// Prompt metadata
+// ---------------------------------------------------------------------------
 
 const ORCHESTRATION_PROMPT_METADATA = {
   implement: {
@@ -77,6 +108,25 @@ const ORCHESTRATION_PROMPT_METADATA = {
   },
 } as const satisfies Record<OrchestrationPromptId, Pick<PromptDefinition, "label" | "description">>;
 
+const ADMIN_PROMPT_METADATA = {
+  managedRuns: {
+    label: "Managed Runs",
+    description: "Instructions for using the T3 managed runs API to start and monitor services.",
+  },
+  scheduledTasks: {
+    label: "Scheduled Tasks",
+    description: "Instructions for using the T3 scheduled tasks API for recurring automation.",
+  },
+  ticketing: {
+    label: "Ticketing",
+    description: "Instructions for using the T3 ticketing API for project issue tracking.",
+  },
+} as const satisfies Record<AdminPromptId, Pick<PromptDefinition, "label" | "description">>;
+
+// ---------------------------------------------------------------------------
+// Preview
+// ---------------------------------------------------------------------------
+
 const PREVIEW_DATA_LABEL = "representative-sample-v1";
 
 const REPRESENTATIVE_PREVIEW_VALUES = {
@@ -102,16 +152,48 @@ const REPRESENTATIVE_PREVIEW_VALUES = {
   ].join("\n"),
 } as const satisfies Record<CanonicalPromptVariableKey, string>;
 
-function promptDefinition(promptId: OrchestrationPromptId): PromptDefinition {
+// ---------------------------------------------------------------------------
+// Definition factories
+// ---------------------------------------------------------------------------
+
+function isAdminPromptId(promptId: PromptId): promptId is AdminPromptId {
+  return (ADMIN_PROMPT_IDS as readonly string[]).includes(promptId);
+}
+
+function isOrchestrationPromptId(promptId: PromptId): promptId is OrchestrationPromptId {
+  return (ORCHESTRATION_PROMPT_IDS as readonly string[]).includes(promptId);
+}
+
+function orchestrationPromptDefinition(promptId: OrchestrationPromptId): PromptDefinition {
   return {
     groupId: ORCHESTRATION_PROMPT_GROUP_ID,
     promptId,
     label: ORCHESTRATION_PROMPT_METADATA[promptId].label,
     description: ORCHESTRATION_PROMPT_METADATA[promptId].description,
     supportedVariables: [...listPromptTemplateVariables(promptId)],
-    constraints: PROMPT_DEFINITION_CONSTRAINTS,
+    constraints: ORCHESTRATION_PROMPT_DEFINITION_CONSTRAINTS,
   };
 }
+
+function adminPromptDefinition(promptId: AdminPromptId): PromptDefinition {
+  return {
+    groupId: ADMIN_PROMPT_GROUP_ID,
+    promptId,
+    label: ADMIN_PROMPT_METADATA[promptId].label,
+    description: ADMIN_PROMPT_METADATA[promptId].description,
+    supportedVariables: [],
+    constraints: ADMIN_PROMPT_DEFINITION_CONSTRAINTS,
+  };
+}
+
+function promptDefinitionFor(promptId: PromptId): PromptDefinition {
+  if (isAdminPromptId(promptId)) return adminPromptDefinition(promptId);
+  return orchestrationPromptDefinition(promptId as OrchestrationPromptId);
+}
+
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
 
 function invalidScopeError(message: string) {
   return Effect.fail(
@@ -171,6 +253,10 @@ type ProjectPromptManagementScope = {
   readonly scope: "project";
   readonly projectId: NonNullable<PromptManagementScope["projectId"]>;
 };
+
+// ---------------------------------------------------------------------------
+// Layer
+// ---------------------------------------------------------------------------
 
 export const PromptManagementLive = Layer.effect(
   PromptManagementService,
@@ -232,18 +318,40 @@ export const PromptManagementLive = Layer.effect(
         return project;
       });
 
-    const getDocumentState = (scope: PromptManagementScope, promptId: OrchestrationPromptId) =>
+    const getDocumentState = (scope: PromptManagementScope, promptId: PromptId) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings.pipe(
           Effect.mapError((cause) =>
             settingsReadError(`Failed to read prompt settings: ${cause.message}`, cause),
           ),
         );
-        const project = yield* getProjectForScope(scope);
 
-        const shippedDefaultDocument = settings.promptDefaults.orchestration[promptId];
-        const globalDocument = settings.prompts.orchestration[promptId];
-        const projectOverrideDocument = project?.promptOverrides.orchestration[promptId] ?? null;
+        if (isAdminPromptId(promptId)) {
+          // Admin prompts: global-only, no project overrides
+          const shippedDefaultDocument = settings.promptDefaults.admin[promptId];
+          const globalDocument = settings.prompts.admin[promptId];
+          const scopeState = Equal.equals(globalDocument, shippedDefaultDocument)
+            ? "default"
+            : "customized";
+
+          return {
+            scope: { scope: "global" },
+            definition: adminPromptDefinition(promptId),
+            shippedDefaultDocument,
+            globalDocument,
+            projectOverrideDocument: null,
+            effectiveDocument: globalDocument,
+            effectiveSource: scopeState === "default" ? "shipped_default" : "global",
+            scopeState,
+          } as const satisfies PromptDocumentState;
+        }
+
+        // Orchestration prompts
+        const orchId = promptId as OrchestrationPromptId;
+        const project = yield* getProjectForScope(scope);
+        const shippedDefaultDocument = settings.promptDefaults.orchestration[orchId];
+        const globalDocument = settings.prompts.orchestration[orchId];
+        const projectOverrideDocument = project?.promptOverrides.orchestration[orchId] ?? null;
         const effectiveDocument = projectOverrideDocument ?? globalDocument;
         const effectiveSource =
           projectOverrideDocument !== null
@@ -262,7 +370,7 @@ export const PromptManagementLive = Layer.effect(
 
         return {
           scope,
-          definition: promptDefinition(promptId),
+          definition: orchestrationPromptDefinition(orchId),
           shippedDefaultDocument,
           globalDocument,
           projectOverrideDocument,
@@ -274,10 +382,13 @@ export const PromptManagementLive = Layer.effect(
 
     const validateDocument = (
       scope: PromptManagementScope,
-      promptId: OrchestrationPromptId,
+      promptId: PromptId,
       document: unknown,
     ) => {
-      const validation = validatePromptTemplateDocument({ promptId, document });
+      const groupId = isAdminPromptId(promptId)
+        ? ADMIN_PROMPT_GROUP_ID
+        : ORCHESTRATION_PROMPT_GROUP_ID;
+      const validation = validatePromptTemplateDocument({ groupId, promptId, document });
       if (!validation.ok) {
         return {
           scope,
@@ -300,10 +411,26 @@ export const PromptManagementLive = Layer.effect(
     };
 
     const updateGlobalPromptDocument = (
-      promptId: OrchestrationPromptId,
+      promptId: PromptId,
       document: PromptDocumentState["effectiveDocument"] | null,
-    ) =>
-      serverSettings
+    ) => {
+      if (isAdminPromptId(promptId)) {
+        return serverSettings
+          .updateSettings({
+            prompts: {
+              admin: {
+                [promptId]: document,
+              },
+            },
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              operationFailedError("Failed to update global prompt settings.", cause),
+            ),
+          );
+      }
+
+      return serverSettings
         .updateSettings({
           prompts: {
             orchestration: {
@@ -316,6 +443,7 @@ export const PromptManagementLive = Layer.effect(
             operationFailedError("Failed to update global prompt settings.", cause),
           ),
         );
+    };
 
     const updateProjectPromptDocument = (
       scope: ProjectPromptManagementScope,
@@ -351,8 +479,11 @@ export const PromptManagementLive = Layer.effect(
 
           return {
             scope,
-            groups: [ORCHESTRATION_GROUP_DEFINITION],
-            definitions: ORCHESTRATION_PROMPT_IDS.map((promptId) => promptDefinition(promptId)),
+            groups: [ADMIN_GROUP_DEFINITION, ORCHESTRATION_GROUP_DEFINITION],
+            definitions: [
+              ...ADMIN_PROMPT_IDS.map((id) => adminPromptDefinition(id)),
+              ...ORCHESTRATION_PROMPT_IDS.map((id) => orchestrationPromptDefinition(id)),
+            ],
           } satisfies ListPromptDefinitionsResult;
         }),
 
@@ -382,12 +513,17 @@ export const PromptManagementLive = Layer.effect(
             return yield* validationFailedError(validation.errors);
           }
 
+          // Admin prompts: preview is just the block text joined (no variable interpolation)
+          const previewText = isAdminPromptId(input.promptId)
+            ? validation.document.blocks.map((b) => b.text).join("")
+            : renderPromptTemplate(validation.document, REPRESENTATIVE_PREVIEW_VALUES);
+
           return {
             scope,
             promptId: input.promptId,
             definition: state.definition,
             document: validation.document,
-            previewText: renderPromptTemplate(validation.document, REPRESENTATIVE_PREVIEW_VALUES),
+            previewText,
             previewDataLabel: PREVIEW_DATA_LABEL,
             previewVariables: toPreviewVariables(validation.referencedVariables),
           } satisfies PreviewPromptDocumentResult;
@@ -396,6 +532,12 @@ export const PromptManagementLive = Layer.effect(
       updatePromptDocument: (input) =>
         Effect.gen(function* () {
           const scope = yield* normalizeScope(input);
+
+          // Admin prompts reject project scope
+          if (isAdminPromptId(input.promptId) && scope.scope === "project") {
+            return yield* invalidScopeError("Admin prompts do not support project scope.");
+          }
+
           yield* getProjectForScope(scope);
 
           if (input.document !== null) {
@@ -406,7 +548,7 @@ export const PromptManagementLive = Layer.effect(
 
             if (scope.scope === "global") {
               yield* updateGlobalPromptDocument(input.promptId, validation.document);
-            } else {
+            } else if (isOrchestrationPromptId(input.promptId)) {
               yield* updateProjectPromptDocument(
                 { scope: "project", projectId: scope.projectId },
                 input.promptId,
@@ -419,7 +561,7 @@ export const PromptManagementLive = Layer.effect(
 
           if (scope.scope === "global") {
             yield* updateGlobalPromptDocument(input.promptId, null);
-          } else {
+          } else if (isOrchestrationPromptId(input.promptId)) {
             yield* updateProjectPromptDocument(
               { scope: "project", projectId: scope.projectId },
               input.promptId,

@@ -317,17 +317,19 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
 // ---------------------------------------------------------------------------
 
 const handleGet = Effect.gen(function* () {
-  const auth = yield* resolveAuth;
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const webRequest = yield* HttpServerRequest.toWeb(request);
+  const auth = yield* resolveAuth(webRequest);
   if (!auth) return respondError("Unauthorized", 401);
   return respondOk(TOOL_DEFINITIONS, "Available tools");
 });
 
 const handlePost = Effect.gen(function* () {
-  const auth = yield* resolveAuth;
-  if (!auth) return respondError("Unauthorized", 401);
-
   const request = yield* HttpServerRequest.HttpServerRequest;
   const webRequest = yield* HttpServerRequest.toWeb(request);
+  const auth = yield* resolveAuth(webRequest);
+  if (!auth) return respondError("Unauthorized", 401);
+
   const body = yield* Effect.promise(() => parseToolCallBody(webRequest));
   if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
 

@@ -1,3 +1,10 @@
+import type { PromptDocumentV1 } from "@t3tools/contracts";
+
+/** Render an admin prompt document by joining all block texts. */
+export function renderAdminPromptDocument(document: PromptDocumentV1): string {
+  return document.blocks.map((b) => b.text).join("");
+}
+
 /**
  * Builds a short environment header injected at the top of the service system prompt.
  * Tells the agent which T3 server instance it is connected to (port, dev vs prod,

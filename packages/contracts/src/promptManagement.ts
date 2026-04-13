@@ -2,8 +2,8 @@ import { Schema } from "effect";
 import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   CanonicalPromptVariableKey as CanonicalPromptVariableKeySchema,
-  OrchestrationPromptGroupId,
-  OrchestrationPromptId as OrchestrationPromptIdSchema,
+  PromptGroupId,
+  PromptId as PromptIdSchema,
   PromptDocumentV1,
   PromptTemplateValidationError,
   PromptTemplateVariableDefinition,
@@ -20,7 +20,7 @@ export const PromptManagementScope = Schema.Struct({
 export type PromptManagementScope = typeof PromptManagementScope.Type;
 
 export const PromptGroupDefinition = Schema.Struct({
-  groupId: OrchestrationPromptGroupId,
+  groupId: PromptGroupId,
   label: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
 });
@@ -37,8 +37,8 @@ export const PromptDefinitionConstraints = Schema.Struct({
 export type PromptDefinitionConstraints = typeof PromptDefinitionConstraints.Type;
 
 export const PromptDefinition = Schema.Struct({
-  groupId: OrchestrationPromptGroupId,
-  promptId: OrchestrationPromptIdSchema,
+  groupId: PromptGroupId,
+  promptId: PromptIdSchema,
   label: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   supportedVariables: Schema.Array(PromptTemplateVariableDefinition),
@@ -86,13 +86,13 @@ export type ListPromptDefinitionsResult = typeof ListPromptDefinitionsResult.Typ
 export const PromptDocumentQueryInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
 });
 export type PromptDocumentQueryInput = typeof PromptDocumentQueryInput.Type;
 
 export const PromptDocumentValidationResult = Schema.Struct({
   scope: PromptManagementScope,
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
   ok: Schema.Boolean,
   document: Schema.NullOr(PromptDocumentV1),
   referencedVariables: Schema.Array(CanonicalPromptVariableKeySchema),
@@ -103,7 +103,7 @@ export type PromptDocumentValidationResult = typeof PromptDocumentValidationResu
 export const ValidatePromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
   document: Schema.Unknown,
 });
 export type ValidatePromptDocumentInput = typeof ValidatePromptDocumentInput.Type;
@@ -117,14 +117,14 @@ export type PromptPreviewVariable = typeof PromptPreviewVariable.Type;
 export const PreviewPromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
   document: Schema.optionalKey(Schema.Unknown),
 });
 export type PreviewPromptDocumentInput = typeof PreviewPromptDocumentInput.Type;
 
 export const PreviewPromptDocumentResult = Schema.Struct({
   scope: PromptManagementScope,
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
   definition: PromptDefinition,
   document: PromptDocumentV1,
   previewText: Schema.String,
@@ -136,7 +136,7 @@ export type PreviewPromptDocumentResult = typeof PreviewPromptDocumentResult.Typ
 export const UpdatePromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
-  promptId: OrchestrationPromptIdSchema,
+  promptId: PromptIdSchema,
   document: Schema.NullOr(Schema.Unknown),
 });
 export type UpdatePromptDocumentInput = typeof UpdatePromptDocumentInput.Type;

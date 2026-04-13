@@ -1,6 +1,6 @@
 import type {
   ListPromptDefinitionsResult,
-  OrchestrationPromptId,
+  PromptId,
   PromptDocumentScopeState,
   PromptDocumentSource,
   PromptDocumentState,
@@ -98,7 +98,7 @@ export function createPromptDefinitions(
 }
 
 export function createPromptDocumentState(input: {
-  promptId: OrchestrationPromptId;
+  promptId: PromptId;
   scope: PromptManagementScope;
   scopeState: PromptDocumentScopeState;
   effectiveSource?: PromptDocumentSource;
