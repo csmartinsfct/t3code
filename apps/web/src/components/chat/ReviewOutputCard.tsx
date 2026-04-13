@@ -2,6 +2,7 @@ import type { ReviewCommentSeverity, ReviewOutput } from "@t3tools/contracts";
 import { SparklesIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge, type badgeVariants } from "../ui/badge";
+import { TicketMarkdown } from "../management/TicketMarkdown";
 import type { VariantProps } from "class-variance-authority";
 
 interface ReviewOutputCardProps {
@@ -46,7 +47,9 @@ export function ReviewOutputCard({ output, heading, className }: ReviewOutputCar
             <SparklesIcon className="size-3" />
             <span>{heading ?? "Automated review"}</span>
           </div>
-          <p className="mt-1.5 text-sm leading-6 text-foreground/90">{output.summary}</p>
+          <div className="mt-1.5 text-sm leading-6 text-foreground/90">
+            <TicketMarkdown>{output.summary}</TicketMarkdown>
+          </div>
         </div>
         <Badge variant={output.changesNeeded ? "warning" : "success"} size="sm">
           {output.changesNeeded ? "Changes needed" : "Approved"}
@@ -70,7 +73,9 @@ export function ReviewOutputCard({ output, heading, className }: ReviewOutputCar
                     {commentLocation(comment)}
                   </span>
                 </div>
-                <p className="mt-2 text-sm leading-6 text-foreground/85">{comment.body}</p>
+                <div className="mt-2 text-sm leading-6 text-foreground/85">
+                  <TicketMarkdown>{comment.body}</TicketMarkdown>
+                </div>
               </div>
             );
           })}
