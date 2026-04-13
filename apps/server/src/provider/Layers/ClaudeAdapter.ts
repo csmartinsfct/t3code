@@ -3382,6 +3382,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         };
 
         void runtime.interrupt().catch(() => {});
+        try {
+          runtime.close();
+        } catch {
+          /* already dead */
+        }
         return {
           status: status as ProviderRateLimitInfo["status"],
           rateLimitType: pickStr("rateLimitType", "rate_limit_type"),
@@ -3400,7 +3405,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return null;
     } finally {
       if (runtime) {
-        void runtime.interrupt().catch(() => {});
+        try {
+          runtime.close();
+        } catch {
+          /* already dead */
+        }
       }
     }
   }

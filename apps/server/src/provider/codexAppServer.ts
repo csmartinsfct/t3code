@@ -27,7 +27,10 @@ export function buildCodexInitializeParams() {
   } as const;
 }
 
-export function killCodexChildProcess(child: ChildProcessWithoutNullStreams): void {
+export function killCodexChildProcess(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals = "SIGTERM",
+): void {
   if (process.platform === "win32" && child.pid !== undefined) {
     try {
       spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
@@ -37,7 +40,7 @@ export function killCodexChildProcess(child: ChildProcessWithoutNullStreams): vo
     }
   }
 
-  child.kill();
+  child.kill(signal);
 }
 
 export async function probeCodexAccount(input: {

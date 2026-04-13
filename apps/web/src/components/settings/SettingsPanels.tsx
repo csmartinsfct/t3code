@@ -488,6 +488,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.resumeAgentsOnStartup !== DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup
         ? ["Startup resume"]
         : []),
+      ...(settings.idleSessionTimeoutMinutes !== DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes
+        ? ["Idle session timeout"]
+        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -505,6 +508,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.idleSessionTimeoutMinutes,
       settings.maxReviewIterations,
       settings.resumeAgentsOnStartup,
       settings.timestampFormat,
@@ -1070,6 +1074,59 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Resume agents on startup"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Idle session timeout"
+          description="Automatically stop provider sessions that have been idle for the specified duration to free memory and processes."
+          resetAction={
+            settings.idleSessionTimeoutMinutes !==
+            DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes ? (
+              <SettingResetButton
+                label="idle session timeout"
+                onClick={() =>
+                  updateSettings({
+                    idleSessionTimeoutMinutes: DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.idleSessionTimeoutMinutes)}
+              onValueChange={(value) =>
+                updateSettings({ idleSessionTimeoutMinutes: Number(value) })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="Idle session timeout">
+                <SelectValue>
+                  {settings.idleSessionTimeoutMinutes === 0
+                    ? "Never"
+                    : settings.idleSessionTimeoutMinutes < 60
+                      ? `${settings.idleSessionTimeoutMinutes} min`
+                      : `${settings.idleSessionTimeoutMinutes / 60} hr`}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="0">
+                  Never
+                </SelectItem>
+                <SelectItem hideIndicator value="30">
+                  30 minutes
+                </SelectItem>
+                <SelectItem hideIndicator value="60">
+                  1 hour
+                </SelectItem>
+                <SelectItem hideIndicator value="120">
+                  2 hours
+                </SelectItem>
+                <SelectItem hideIndicator value="240">
+                  4 hours
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 

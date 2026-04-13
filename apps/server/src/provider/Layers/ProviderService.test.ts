@@ -18,7 +18,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { it, assert, vi } from "@effect/vitest";
+import { it, assert, vi, describe } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
 
 import { Effect, Fiber, Layer, Metric, Option, PubSub, Ref, Stream } from "effect";
@@ -1253,4 +1253,172 @@ validation.layer("ProviderServiceLive validation", (it) => {
       }
     }),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Idle session reaper
+// ---------------------------------------------------------------------------
+
+describe("idle session reaper", () => {
+  function makeReaperTestLayer(settingsOverride?: Record<string, unknown>) {
+    const codex = makeFakeCodexAdapter();
+    const registry: typeof ProviderAdapterRegistry.Service = {
+      getByProvider: (provider) =>
+        provider === "codex"
+          ? Effect.succeed(codex.adapter)
+          : Effect.fail(new ProviderUnsupportedError({ provider })),
+      listProviders: () => Effect.succeed(["codex"]),
+    };
+
+    const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const settingsLayer = ServerSettingsService.layerTest(settingsOverride);
+
+    const layer = Layer.mergeAll(
+      makeProviderServiceLive().pipe(
+        Layer.provide(providerAdapterLayer),
+        Layer.provide(directoryLayer),
+        Layer.provide(settingsLayer),
+        Layer.provideMerge(AnalyticsService.layerTest),
+      ),
+      directoryLayer,
+      runtimeRepositoryLayer,
+      NodeServices.layer,
+    );
+
+    return { codex, layer };
+  }
+
+  it.effect("stops sessions idle beyond the configured threshold", () => {
+    vi.useFakeTimers();
+    const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 1 });
+
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+
+      // Start a session, then backdate its updatedAt to 2 minutes ago.
+      yield* service.startSession(asThreadId("idle-thread"), {
+        threadId: asThreadId("idle-thread"),
+        provider: "codex",
+        cwd: "/tmp/test",
+        runtimeMode: "full-access",
+      });
+
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      codex.updateSession(asThreadId("idle-thread"), (s) => ({
+        ...s,
+        updatedAt: twoMinutesAgo,
+        activeTurnId: undefined,
+      }));
+
+      // Advance the clock to trigger the reaper sweep (60s interval).
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+
+      // The fake adapter's stopSession should have been called.
+      assert.isTrue(codex.stopSession.mock.calls.length > 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
+  });
+
+  it.effect("skips sessions with an active turn", () => {
+    vi.useFakeTimers();
+    const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 1 });
+
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+
+      yield* service.startSession(asThreadId("active-thread"), {
+        threadId: asThreadId("active-thread"),
+        provider: "codex",
+        cwd: "/tmp/test",
+        runtimeMode: "full-access",
+      });
+
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      codex.updateSession(asThreadId("active-thread"), (s) => ({
+        ...s,
+        updatedAt: twoMinutesAgo,
+        activeTurnId: asTurnId("running-turn"),
+      }));
+
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+
+      // stopSession should NOT have been called (turn is active).
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
+  });
+
+  it.effect("does not reap when idleSessionTimeoutMinutes is 0", () => {
+    vi.useFakeTimers();
+    const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 0 });
+
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+
+      yield* service.startSession(asThreadId("persistent-thread"), {
+        threadId: asThreadId("persistent-thread"),
+        provider: "codex",
+        cwd: "/tmp/test",
+        runtimeMode: "full-access",
+      });
+
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      codex.updateSession(asThreadId("persistent-thread"), (s) => ({
+        ...s,
+        updatedAt: twoHoursAgo,
+        activeTurnId: undefined,
+      }));
+
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+
+      // Reaper is disabled — stopSession should not be called.
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
+  });
+
+  it.effect("does not stop recently active sessions", () => {
+    vi.useFakeTimers();
+    const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 60 });
+
+    return Effect.gen(function* () {
+      const service = yield* ProviderService;
+
+      yield* service.startSession(asThreadId("recent-thread"), {
+        threadId: asThreadId("recent-thread"),
+        provider: "codex",
+        cwd: "/tmp/test",
+        runtimeMode: "full-access",
+      });
+
+      // Session was active 5 minutes ago — well within the 60-minute threshold.
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      codex.updateSession(asThreadId("recent-thread"), (s) => ({
+        ...s,
+        updatedAt: fiveMinutesAgo,
+        activeTurnId: undefined,
+      }));
+
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
+    );
+  });
 });

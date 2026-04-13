@@ -793,6 +793,55 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  // ── Idle session reaper ────────────────────────────────────────
+  // Periodically sweeps active sessions and stops any that have been idle
+  // beyond the configured threshold. Reads the setting on every sweep so
+  // changes take effect immediately without restart.
+  const IDLE_REAPER_INTERVAL_MS = 60_000; // sweep every 60s
+
+  const runIdleReaperSweep = Effect.gen(function* () {
+    const settings = yield* serverSettings.getSettings;
+    const timeoutMinutes = settings.idleSessionTimeoutMinutes;
+    if (timeoutMinutes <= 0) return; // disabled
+
+    const thresholdMs = timeoutMinutes * 60 * 1000;
+    const now = Date.now();
+
+    yield* Effect.forEach(adapters, (adapter) =>
+      Effect.gen(function* () {
+        const sessions = yield* adapter.listSessions();
+        yield* Effect.forEach(
+          sessions.filter((s) => s.status !== "closed" && !s.activeTurnId),
+          (session) =>
+            Effect.gen(function* () {
+              const idleMs = now - Date.parse(session.updatedAt);
+              if (idleMs <= thresholdMs) return;
+
+              yield* Effect.logInfo(
+                `Idle reaper: stopping session ${session.threadId} ` +
+                  `(idle ${Math.round(idleMs / 60_000)}m, threshold ${timeoutMinutes}m)`,
+              );
+              yield* adapter.stopSession(session.threadId).pipe(
+                Effect.tap(() => directory.remove(session.threadId)),
+                Effect.catch(() => Effect.void),
+              );
+            }),
+          { discard: true },
+        );
+      }),
+    );
+  }).pipe(Effect.catch(() => Effect.void));
+
+  const idleReaperInterval = setInterval(() => {
+    Effect.runPromise(runIdleReaperSweep).catch(() => {});
+  }, IDLE_REAPER_INTERVAL_MS);
+
+  if (typeof idleReaperInterval === "object" && "unref" in idleReaperInterval) {
+    idleReaperInterval.unref();
+  }
+
+  yield* Effect.addFinalizer(() => Effect.sync(() => clearInterval(idleReaperInterval)));
+
   const probeAllRateLimits: ProviderServiceShape["probeAllRateLimits"] = Effect.fn(
     "probeAllRateLimits",
   )(function* () {

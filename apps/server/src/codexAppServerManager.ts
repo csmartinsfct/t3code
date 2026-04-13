@@ -315,7 +315,15 @@ function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
  * entire process tree instead.
  */
 function killChildTree(child: ChildProcessWithoutNullStreams): void {
-  killCodexChildProcess(child);
+  killCodexChildProcess(child, "SIGTERM");
+  const forceKillTimer = setTimeout(() => {
+    if (!child.killed) {
+      killCodexChildProcess(child, "SIGKILL");
+    }
+  }, 1_000);
+  if (typeof forceKillTimer === "object" && "unref" in forceKillTimer) {
+    forceKillTimer.unref();
+  }
 }
 
 export function normalizeCodexModelSlug(
@@ -924,6 +932,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context.pendingUserInputs.clear();
 
     context.output.close();
+    context.output.removeAllListeners();
+    context.child.stderr.removeAllListeners();
+    context.child.removeAllListeners();
 
     if (!context.child.killed) {
       killChildTree(context.child);

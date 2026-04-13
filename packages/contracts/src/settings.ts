@@ -143,6 +143,8 @@ export const ServerSettings = Schema.Struct({
   maxReviewIterations: NonNegativeInt.pipe(
     Schema.withDecodingDefault(() => DEFAULT_MAX_REVIEW_ITERATIONS),
   ),
+  /** Minutes of inactivity before a provider session is automatically stopped. 0 = disabled. */
+  idleSessionTimeoutMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 60)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
@@ -259,6 +261,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   resumeAgentsOnStartup: Schema.optionalKey(Schema.Boolean),
   maxReviewIterations: Schema.optionalKey(NonNegativeInt),
+  idleSessionTimeoutMinutes: Schema.optionalKey(NonNegativeInt),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   managedRunInferenceModelSelection: Schema.optionalKey(ModelSelectionPatch),

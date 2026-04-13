@@ -7,6 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { LRUCache } from "../lib/lruCache";
 import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
 import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
@@ -17,14 +18,21 @@ import { getWsRpcClient } from "../wsRpcClient";
 // Module-level cache (shared across component instances & remounts)
 // ---------------------------------------------------------------------------
 
-const orchestrationDataCache = new Map<
-  string,
-  {
-    run: OrchestrationRun | null;
-    childThreadIds: string[];
-    tickets: ReadonlyArray<TicketSummary>;
-  }
->();
+type OrchestrationCacheEntry = {
+  run: OrchestrationRun | null;
+  childThreadIds: string[];
+  tickets: ReadonlyArray<TicketSummary>;
+};
+
+/** Rough byte estimate for a cache entry (avoids JSON.stringify on hot path). */
+function estimateEntrySize(entry: OrchestrationCacheEntry): number {
+  return 512 + entry.childThreadIds.length * 64 + entry.tickets.length * 256;
+}
+
+const orchestrationDataCache = new LRUCache<OrchestrationCacheEntry>(
+  100, // max 100 orchestration threads
+  10 * 1024 * 1024, // ~10 MB memory budget
+);
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -131,11 +139,12 @@ export function useOrchestrationData(
       const newChildThreadIds = children.map((c) => c.id);
       setChildThreadIds(newChildThreadIds);
       setTickets(ticketList);
-      orchestrationDataCache.set(parentThreadId, {
+      const cacheEntry: OrchestrationCacheEntry = {
         run: fullRun,
         childThreadIds: newChildThreadIds,
         tickets: ticketList,
-      });
+      };
+      orchestrationDataCache.set(parentThreadId, cacheEntry, estimateEntrySize(cacheEntry));
 
       logWebTimeline("orchestration.data.fetch.success", {
         threadId: parentThreadId,
@@ -192,11 +201,12 @@ export function useOrchestrationData(
             currentPhase: event.run.currentPhase,
           });
           setRun(event.run);
-          orchestrationDataCache.set(parentThreadId, {
+          const updatedEntry: OrchestrationCacheEntry = {
             run: event.run,
             childThreadIds: childThreadIdsRef.current,
             tickets: [],
-          });
+          };
+          orchestrationDataCache.set(parentThreadId, updatedEntry, estimateEntrySize(updatedEntry));
         } else if (
           event.type === "run.created" &&
           event.run.orchestrationThreadId === parentThreadId
@@ -206,11 +216,12 @@ export function useOrchestrationData(
             status: event.run.status,
           });
           setRun(event.run);
-          orchestrationDataCache.set(parentThreadId, {
+          const createdEntry: OrchestrationCacheEntry = {
             run: event.run,
             childThreadIds: childThreadIdsRef.current,
             tickets: [],
-          });
+          };
+          orchestrationDataCache.set(parentThreadId, createdEntry, estimateEntrySize(createdEntry));
           // Re-fetch child threads + tickets when a new run is created
           void fetchDataRef.current();
         }

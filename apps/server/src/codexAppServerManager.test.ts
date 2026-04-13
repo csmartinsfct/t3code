@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -1067,4 +1068,160 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
       rmSync(workspaceDir, { recursive: true, force: true });
     }
   }, 180_000);
+});
+
+describe("stopSession cleanup", () => {
+  function createStopSessionHarness() {
+    const manager = new CodexAppServerManager();
+    const threadId = asThreadId("stop-test-thread");
+
+    // Create mock child process with EventEmitter behavior
+    const mockStderr = new EventEmitter();
+    const mockChild = Object.assign(new EventEmitter(), {
+      stdin: { write: vi.fn(), end: vi.fn() },
+      stdout: new EventEmitter(),
+      stderr: mockStderr,
+      pid: 12345,
+      killed: false,
+      kill: vi.fn(),
+      connected: true,
+      exitCode: null,
+      signalCode: null,
+      spawnargs: [],
+      spawnfile: "",
+      disconnect: vi.fn(),
+      ref: vi.fn(),
+      unref: vi.fn(),
+      send: vi.fn(),
+      [Symbol.dispose]: vi.fn(),
+    });
+
+    // Create mock readline interface
+    const mockOutput = Object.assign(new EventEmitter(), {
+      close: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      prompt: vi.fn(),
+      setPrompt: vi.fn(),
+      getPrompt: vi.fn(),
+      write: vi.fn(),
+      question: vi.fn(),
+      [Symbol.asyncIterator]: vi.fn(),
+      [Symbol.dispose]: vi.fn(),
+      line: "",
+      cursor: 0,
+      terminal: false,
+    });
+
+    const context = {
+      session: {
+        provider: "codex" as const,
+        status: "ready" as const,
+        threadId: String(threadId),
+        runtimeMode: "full-access" as const,
+        model: "gpt-5.3-codex",
+        resumeCursor: { threadId: "thread_1" },
+        createdAt: "2026-02-10T00:00:00.000Z",
+        updatedAt: "2026-02-10T00:00:00.000Z",
+      },
+      account: { type: "unknown" as const, planType: null, sparkEnabled: true },
+      child: mockChild,
+      output: mockOutput,
+      pending: new Map(),
+      pendingApprovals: new Map(),
+      pendingUserInputs: new Map(),
+      collabReceiverTurns: new Map(),
+      nextRequestId: 1,
+      stopping: false,
+    };
+
+    // Inject the context into the private sessions map
+    const sessions = (manager as unknown as { sessions: Map<ThreadId, unknown> }).sessions;
+    sessions.set(threadId, context);
+
+    // Mock updateSession and emitLifecycleEvent to avoid side effects
+    vi.spyOn(
+      manager as unknown as { updateSession: (...args: unknown[]) => void },
+      "updateSession",
+    ).mockImplementation(() => {});
+    vi.spyOn(
+      manager as unknown as { emitLifecycleEvent: (...args: unknown[]) => void },
+      "emitLifecycleEvent",
+    ).mockImplementation(() => {});
+
+    return { manager, threadId, mockChild, mockOutput, context };
+  }
+
+  it("removes all event listeners on child and output when stopping", () => {
+    const { manager, threadId, mockChild, mockOutput } = createStopSessionHarness();
+
+    // Add listeners to simulate what attachProcessListeners does
+    mockOutput.on("line", () => {});
+    mockChild.stderr.on("data", () => {});
+    mockChild.on("error", () => {});
+    mockChild.on("exit", () => {});
+
+    const childRemoveSpy = vi.spyOn(mockChild, "removeAllListeners");
+    const stderrRemoveSpy = vi.spyOn(mockChild.stderr, "removeAllListeners");
+    const outputRemoveSpy = vi.spyOn(mockOutput, "removeAllListeners");
+
+    manager.stopSession(threadId);
+
+    expect(outputRemoveSpy).toHaveBeenCalled();
+    expect(stderrRemoveSpy).toHaveBeenCalled();
+    expect(childRemoveSpy).toHaveBeenCalled();
+  });
+
+  it("sends SIGKILL after timeout when process ignores SIGTERM", () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, threadId, mockChild } = createStopSessionHarness();
+
+      // Process stays alive after SIGTERM (killed remains false)
+      mockChild.kill.mockImplementation(() => {
+        // Don't set killed = true — simulate a stubborn process
+        return true;
+      });
+
+      manager.stopSession(threadId);
+
+      // SIGTERM should have been sent
+      expect(mockChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      // Process is still not killed
+      expect(mockChild.killed).toBe(false);
+
+      // Advance timer by 1 second — the SIGKILL timeout
+      vi.advanceTimersByTime(1_000);
+
+      // SIGKILL should now have been sent
+      expect(mockChild.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not send SIGKILL if process exits after SIGTERM", () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, threadId, mockChild } = createStopSessionHarness();
+
+      // Process dies on SIGTERM (killed becomes true)
+      mockChild.kill.mockImplementation(() => {
+        mockChild.killed = true;
+        return true;
+      });
+
+      manager.stopSession(threadId);
+
+      expect(mockChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      // Advance timer — SIGKILL should NOT be sent because killed is true
+      vi.advanceTimersByTime(1_000);
+
+      expect(mockChild.kill).not.toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
