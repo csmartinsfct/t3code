@@ -115,6 +115,22 @@ describe("deriveOrchestrationBatchEffects", () => {
     expect(effects.needsProviderInvalidation).toBe(true);
   });
 
+  it("collects interaction mode syncs from thread.interaction-mode-set events", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+
+    const effects = deriveOrchestrationBatchEffects([
+      makeEvent("thread.interaction-mode-set", {
+        threadId,
+        interactionMode: "default",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    ]);
+
+    expect(effects.syncInteractionModes).toEqual([
+      { threadId, interactionMode: "default" },
+    ]);
+  });
+
   it("does not retain archive cleanup when a thread is unarchived later in the same batch", () => {
     const threadId = ThreadId.makeUnsafe("thread-1");
 

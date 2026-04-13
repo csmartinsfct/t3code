@@ -431,6 +431,9 @@ function EventRouter() {
       for (const threadId of batchEffects.removeTerminalStateThreadIds) {
         removeTerminalState(threadId);
       }
+      for (const { threadId, interactionMode } of batchEffects.syncInteractionModes) {
+        draftStore.setInteractionMode(threadId, interactionMode);
+      }
     };
     const flushPendingDomainEvents = () => {
       flushPendingDomainEventsScheduled = false;

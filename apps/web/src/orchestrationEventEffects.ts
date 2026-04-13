@@ -1,9 +1,10 @@
-import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationEvent, ProviderInteractionMode, ThreadId } from "@t3tools/contracts";
 
 export interface OrchestrationBatchEffects {
   clearPromotedDraftThreadIds: ThreadId[];
   clearDeletedThreadIds: ThreadId[];
   removeTerminalStateThreadIds: ThreadId[];
+  syncInteractionModes: Array<{ threadId: ThreadId; interactionMode: ProviderInteractionMode }>;
   needsProviderInvalidation: boolean;
 }
 
@@ -19,6 +20,7 @@ export function deriveOrchestrationBatchEffects(
     }
   >();
   let needsProviderInvalidation = false;
+  const syncInteractionModes: OrchestrationBatchEffects["syncInteractionModes"] = [];
 
   for (const event of events) {
     switch (event.type) {
@@ -64,6 +66,14 @@ export function deriveOrchestrationBatchEffects(
         break;
       }
 
+      case "thread.interaction-mode-set": {
+        syncInteractionModes.push({
+          threadId: event.payload.threadId,
+          interactionMode: event.payload.interactionMode,
+        });
+        break;
+      }
+
       default: {
         break;
       }
@@ -89,6 +99,7 @@ export function deriveOrchestrationBatchEffects(
     clearPromotedDraftThreadIds,
     clearDeletedThreadIds,
     removeTerminalStateThreadIds,
+    syncInteractionModes,
     needsProviderInvalidation,
   };
 }
