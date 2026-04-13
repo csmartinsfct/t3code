@@ -116,6 +116,12 @@ vi.mock("~/components/management/TicketMarkdown", () => ({
   TicketMarkdown: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+vi.mock("~/components/management/TicketDescriptionEditor", () => ({
+  TicketDescriptionEditor: ({ initialContent }: { initialContent: string | null }) => (
+    <div>{initialContent}</div>
+  ),
+}));
+
 vi.mock("~/components/management/TicketOriginThreadSection", () => ({
   TicketOriginThreadSection: () => null,
 }));

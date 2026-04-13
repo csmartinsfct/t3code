@@ -15,7 +15,6 @@ import {
   buildTicketDetailActionItems,
   DECOMPOSE_PROMPT,
   DependencyTicketRow,
-  KanbanTicketDetailDescription,
   resolveInlineEditBlurAction,
   resolveNullableInlineTextSave,
   resolveRequiredInlineTextSave,
@@ -119,21 +118,6 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 describe("KanbanTicketDetail", () => {
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("renders the read-only ticket description with Markdown/GFM structure", () => {
-    const html = renderToStaticMarkup(
-      <div className="rounded-md px-3 py-2">
-        <p className="text-[11px] font-medium text-muted-foreground">Description</p>
-        <KanbanTicketDetailDescription description={DETAIL_DESCRIPTION} />
-      </div>,
-    );
-
-    expect(html).toContain("<ul>");
-    expect(html).toContain('<a href="https://example.com/spec">spec</a>');
-    expect(html).toContain("<code>inline detail code</code>");
-    expect(html).toContain("<blockquote>");
-    expect(html).toContain('class="language-tsx"');
   });
 
   it("renders dependency rows with hydrated title, status badge, and identifier", () => {
