@@ -1,5 +1,5 @@
 /**
- * Builds a short environment header injected at the top of the MCP system prompt.
+ * Builds a short environment header injected at the top of the service system prompt.
  * Tells the agent which T3 server instance it is connected to (port, dev vs prod,
  * data directory) so it can fall back to direct DB/API access when needed.
  *
@@ -7,7 +7,7 @@
  * the "T3 Code" project to prevent regular consumer threads from accessing
  * internal state directly.
  */
-export function buildMcpEnvironmentHeader(params: {
+export function buildEnvironmentHeader(params: {
   port: number;
   isDev: boolean;
   projectTitle?: string;
@@ -26,32 +26,31 @@ export function buildMcpEnvironmentHeader(params: {
     lines.push(`- **Database:** ${dataDir}state.sqlite`);
   }
   if (isDev) {
-    lines.push(`- **Dev bypass token:** \`t3-dev-bypass\` (for direct MCP HTTP calls)`);
+    lines.push(`- **Dev bypass token:** \`t3-dev-bypass\` (for direct REST API calls)`);
   }
   return lines.join("\n");
 }
 
 /**
- * Builds the system prompt for MCP "prompt" delivery mode.
- * Instead of registering MCP tools natively, the model is given endpoint URLs
- * and uses code execution (curl) to call them via the MCP JSON-RPC protocol.
+ * Builds the system prompt that describes the T3 REST API endpoints.
+ * Injected into AI sessions so agents can discover and call project services.
  */
-export function buildMcpPromptModeSystemPrompt(params: { port: number; token: string }): string {
+export function buildRestEndpointSystemPrompt(params: { port: number; token: string }): string {
   const { port, token } = params;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  return `## T3 Project Services (HTTP Endpoint Mode)
+  return `## T3 Project Services (REST API)
 
-You have access to four T3 project services via HTTP MCP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.
+You have access to four T3 project services via REST HTTP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.
 
 ### Available Services
 
 | Service | Endpoint | Purpose |
 |---------|----------|---------|
-| Managed Runs | ${baseUrl}/mcp/managed-runs | Start, stop, and monitor long-running services (dev servers, build watchers, docker compose) |
-| Scheduled Tasks | ${baseUrl}/mcp/scheduled-tasks | Create, manage, and monitor recurring scheduled tasks and cron jobs |
-| Ticketing | ${baseUrl}/mcp/ticketing | Project issue tracking: tickets, labels, comments, dependencies, artifacts |
-| Prompts | ${baseUrl}/mcp/prompts | Prompt definitions, validation, preview rendering, and explicit prompt updates |
+| Managed Runs | ${baseUrl}/api/managed-runs | Start, stop, and monitor long-running services (dev servers, build watchers, docker compose) |
+| Scheduled Tasks | ${baseUrl}/api/scheduled-tasks | Create, manage, and monitor recurring scheduled tasks and cron jobs |
+| Ticketing | ${baseUrl}/api/ticketing | Project issue tracking: tickets, labels, comments, dependencies, artifacts |
+| Prompts | ${baseUrl}/api/prompts | Prompt definitions, validation, preview rendering, and explicit prompt updates |
 
 ### Authentication
 
@@ -60,14 +59,10 @@ All requests require this Bearer token in the Authorization header:
 
 ### Protocol
 
-These endpoints speak the Model Context Protocol (MCP) over HTTP using JSON-RPC 2.0.
-
 **Discover available tools** for a service:
 \`\`\`bash
-curl -s -X POST <ENDPOINT_URL> \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer ${token}" \\
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+curl -s <ENDPOINT_URL> \\
+  -H "Authorization: Bearer ${token}"
 \`\`\`
 
 **Call a tool** on a service:
@@ -75,14 +70,20 @@ curl -s -X POST <ENDPOINT_URL> \\
 curl -s -X POST <ENDPOINT_URL> \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer ${token}" \\
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"<tool_name>","arguments":{...}}}'
+  -d '{"tool":"<tool_name>","input":{...}}'
 \`\`\`
+
+### Response Format
+
+All responses use this envelope:
+- **Success:** \`{"data": {"message": "OK", "data": <result>}, "error": null}\`
+- **Error:** \`{"data": null, "error": "<error message>"}\`
 
 ### Usage Guidelines
 
-- Start by calling \`tools/list\` on a service to discover its tools and their input schemas.
-- Use \`tools/call\` with the exact tool name and arguments matching the discovered schema.
-- Parse the JSON response — results are in the \`content\` array of the response body.
+- Start by calling \`GET <ENDPOINT_URL>\` on a service to discover its tools and their input schemas.
+- Use \`POST\` with \`{"tool":"<tool_name>","input":{...}}\` to call a tool.
+- Parse the JSON response — results are in \`response.data.data\`.
 - For managed runs: check what's already running before starting new services.
 - For ticketing: use list_tickets or search_tickets before creating duplicates.
 - When mentioning a ticket identifier in your chat reply, use markdown like \`[ZBD-7](t3://ticket/ZBD-7)\` with the exact identifier returned by the ticketing tool.

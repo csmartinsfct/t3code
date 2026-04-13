@@ -18,7 +18,7 @@ Lets the model propose a new project action/script for the user to review.
 **Data flow:**
 
 ````
-MCP tool: propose_project_script (managedRuns/http.ts)
+REST API tool: propose_project_script (managedRuns/http.ts)
   → model outputs ```t3:propose-action ... ``` code block
   → ChatMarkdown.tsx detects via isProposeActionBlock() (lib/proposeActionParser.ts)
   → renders ProposeActionCard (components/chat/ProposeActionCard.tsx)
@@ -34,7 +34,7 @@ MCP tool: propose_project_script (managedRuns/http.ts)
 
 - Parser: `apps/web/src/lib/proposeActionParser.ts`
 - Card: `apps/web/src/components/chat/ProposeActionCard.tsx`
-- MCP tool: `apps/server/src/managedRuns/http.ts` → `propose_project_script`
+- REST API tool: `apps/server/src/managedRuns/http.ts` → `propose_project_script`
 - Handler: `apps/web/src/components/ChatView.tsx` → `handleProposeAction`
 
 ### Propose Scheduled Task (`t3:propose-scheduled-task`)
@@ -44,7 +44,7 @@ Lets the model propose a scheduled task for the user to review.
 **Data flow:**
 
 ````
-MCP tool: propose_scheduled_task (scheduledTasks/http.ts)
+REST API tool: propose_scheduled_task (scheduledTasks/http.ts)
   → model outputs ```t3:propose-scheduled-task ... ``` code block
   → ChatMarkdown.tsx detects via isProposeScheduledTaskBlock() (lib/proposeScheduledTaskParser.ts)
   → renders ProposeScheduledTaskCard (components/chat/ProposeScheduledTaskCard.tsx)
@@ -60,7 +60,7 @@ MCP tool: propose_scheduled_task (scheduledTasks/http.ts)
 
 - Parser: `apps/web/src/lib/proposeScheduledTaskParser.ts`
 - Card: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx`
-- MCP tool: `apps/server/src/scheduledTasks/http.ts` → `propose_scheduled_task`
+- REST API tool: `apps/server/src/scheduledTasks/http.ts` → `propose_scheduled_task`
 - Handler: `apps/web/src/components/ChatView.tsx` → `handleProposeScheduledTask`
 
 ### Adding a new code block card
@@ -71,7 +71,7 @@ MCP tool: propose_scheduled_task (scheduledTasks/http.ts)
 4. Wire detection in `ChatMarkdown.tsx` (in the `pre` component override, after existing checks)
 5. Add callback prop to `ChatMarkdownProps`, thread through `MessagesTimeline.tsx`
 6. Add handler in `ChatView.tsx`
-7. Create the MCP tool that instructs the model to output the code block
+7. Create the REST API tool that instructs the model to output the code block
 
 ## Activity-Based Prompts
 

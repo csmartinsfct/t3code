@@ -1,6 +1,6 @@
 # test-managed-runs-mcp
 
-Test the T3 Managed Runs MCP endpoint end-to-end using the dev bypass token.
+Test the T3 Managed Runs REST endpoint end-to-end using the dev bypass token.
 
 ## Prerequisites
 
@@ -9,18 +9,18 @@ Test the T3 Managed Runs MCP endpoint end-to-end using the dev bypass token.
 
 ## Dev Bypass Token
 
-The MCP endpoint accepts a dev-only bypass token `t3-dev-bypass` (disabled in production via `NODE_ENV`). Pass project/thread context via query params:
+The REST endpoint accepts a dev-only bypass token `t3-dev-bypass` (disabled in production via `NODE_ENV`). Pass project/thread context via query params:
 
 ```
 Authorization: Bearer t3-dev-bypass
-URL: http://127.0.0.1:<PORT>/mcp/managed-runs?projectId=<PROJECT_ID>&threadId=<THREAD_ID>
+URL: http://127.0.0.1:<PORT>/api/managed-runs?projectId=<PROJECT_ID>&threadId=<THREAD_ID>
 ```
 
-All requests require headers:
+POST requests require headers:
 
 ```
 Content-Type: application/json
-Accept: application/json, text/event-stream
+Authorization: Bearer <token>
 ```
 
 ## Find Project IDs
@@ -47,101 +47,89 @@ Replace `PORT`, `PROJECT_ID`, and `THREAD_ID` with actual values.
 ### List tools
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' | python3 -m json.tool
+curl -s "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
+  -H "Authorization: Bearer t3-dev-bypass" | python3 -m json.tool
 ```
 
 ### List active managed runs
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_managed_runs","arguments":{}},"id":2}'
+  -d '{"tool":"list_managed_runs","input":{}}'
 ```
 
 ### Launch a project script
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"launch_project_script","arguments":{"scriptId":"<SCRIPT_ID>"}},"id":3}'
+  -d '{"tool":"launch_project_script","input":{"scriptId":"<SCRIPT_ID>"}}'
 ```
 
 With optional `cwd` override:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"launch_project_script","arguments":{"scriptId":"<SCRIPT_ID>","cwd":"/path/to/dir"}},"id":3}'
+  -d '{"tool":"launch_project_script","input":{"scriptId":"<SCRIPT_ID>","cwd":"/path/to/dir"}}'
 ```
 
 ### Get run details
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_managed_run","arguments":{"runId":"<RUN_ID>"}},"id":4}'
+  -d '{"tool":"get_managed_run","input":{"runId":"<RUN_ID>"}}'
 ```
 
 ### Get run logs
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_managed_run_logs","arguments":{"runId":"<RUN_ID>","tailLines":10}},"id":5}'
+  -d '{"tool":"get_managed_run_logs","input":{"runId":"<RUN_ID>","tailLines":10}}'
 ```
 
 With optional `stream` filter (`pty`, `stdout`, or `stderr`):
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_managed_run_logs","arguments":{"runId":"<RUN_ID>","stream":"stderr","tailLines":20}},"id":5}'
+  -d '{"tool":"get_managed_run_logs","input":{"runId":"<RUN_ID>","stream":"stderr","tailLines":20}}'
 ```
 
 ### Stop a run
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"stop_managed_run","arguments":{"runId":"<RUN_ID>"}},"id":6}'
+  -d '{"tool":"stop_managed_run","input":{"runId":"<RUN_ID>"}}'
 ```
 
 ### Propose a new action (simple)
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"propose_project_script","arguments":{"name":"Dev Server","command":"npm run dev","icon":"play"}},"id":7}'
+  -d '{"tool":"propose_project_script","input":{"name":"Dev Server","command":"npm run dev","icon":"play"}}'
 ```
 
 ### Propose a new action (with services)
 
 ```bash
-curl -s -X POST "http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID" \
+curl -s -X POST "http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID" \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer t3-dev-bypass" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"propose_project_script","arguments":{"name":"Supabase","command":"npx supabase start","icon":"play","services":[{"name":"Supabase API","healthCheck":{"type":"url","url":"http://127.0.0.1:54321"}},{"name":"Supabase DB","healthCheck":{"type":"docker","container":"supabase_db"}}]}},"id":8}'
+  -d '{"tool":"propose_project_script","input":{"name":"Supabase","command":"npx supabase start","icon":"play","services":[{"name":"Supabase API","healthCheck":{"type":"url","url":"http://127.0.0.1:54321"}},{"name":"Supabase DB","healthCheck":{"type":"docker","container":"supabase_db"}}]}}'
 ```
 
 Health check types for services:
@@ -160,35 +148,35 @@ PORT=<PORT>
 PROJECT_ID=<PROJECT_ID>
 THREAD_ID=<THREAD_ID>
 SCRIPT_ID=<SCRIPT_ID>
-URL="http://127.0.0.1:$PORT/mcp/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID"
-H=(-H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer t3-dev-bypass")
+URL="http://127.0.0.1:$PORT/api/managed-runs?projectId=$PROJECT_ID&threadId=$THREAD_ID"
+H=(-H "Content-Type: application/json" -H "Authorization: Bearer t3-dev-bypass")
 
 # 1. List (should be empty or show existing)
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"list_managed_runs\",\"arguments\":{}},\"id\":1}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"list_managed_runs\",\"input\":{}}"
 
 # 2. Launch
-LAUNCH=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"launch_project_script\",\"arguments\":{\"scriptId\":\"$SCRIPT_ID\"}},\"id\":2}")
-RUN_ID=$(echo "$LAUNCH" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['runId'])")
+LAUNCH=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"launch_project_script\",\"input\":{\"scriptId\":\"$SCRIPT_ID\"}}")
+RUN_ID=$(echo "$LAUNCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['runId'])")
 echo "RUN_ID=$RUN_ID"
 
 # 3. Wait for startup
 sleep 5
 
 # 4. Get details (check URL detection)
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"get_managed_run\",\"arguments\":{\"runId\":\"$RUN_ID\"}},\"id\":3}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"get_managed_run\",\"input\":{\"runId\":\"$RUN_ID\"}}"
 
 # 5. Get logs
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"get_managed_run_logs\",\"arguments\":{\"runId\":\"$RUN_ID\",\"tailLines\":5}},\"id\":4}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"get_managed_run_logs\",\"input\":{\"runId\":\"$RUN_ID\",\"tailLines\":5}}"
 
 # 6. Dedup (should error)
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"launch_project_script\",\"arguments\":{\"scriptId\":\"$SCRIPT_ID\"}},\"id\":5}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"launch_project_script\",\"input\":{\"scriptId\":\"$SCRIPT_ID\"}}"
 
 # 7. Stop
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"stop_managed_run\",\"arguments\":{\"runId\":\"$RUN_ID\"}},\"id\":6}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"stop_managed_run\",\"input\":{\"runId\":\"$RUN_ID\"}}"
 
 # 8. Verify stopped
 sleep 1
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"list_managed_runs\",\"arguments\":{}},\"id\":7}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"list_managed_runs\",\"input\":{}}"
 ```
 
 ## Troubleshooting
@@ -200,7 +188,7 @@ curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"method\":\"tools/cal
 
 ## Key Files
 
-- `apps/server/src/managedRuns/http.ts` — MCP endpoint (JSON-RPC dispatch)
+- `apps/server/src/managedRuns/http.ts` — REST endpoint (tool dispatch)
 - `apps/server/src/managedRuns/Services/ManagedRuns.ts` — Service interface
 - `apps/server/src/managedRuns/Layers/ManagedRuns.ts` — Service implementation
 - `apps/server/src/persistence/Layers/ManagedRuns.ts` — SQL repository

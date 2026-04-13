@@ -56,7 +56,6 @@
         "@effect/platform-bun": "catalog:",
         "@effect/platform-node": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
-        "@modelcontextprotocol/sdk": "^1.29.0",
         "@pierre/diffs": "^1.1.0-beta.16",
         "cron-parser": "^5.5.0",
         "effect": "catalog:",

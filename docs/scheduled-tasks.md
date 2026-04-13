@@ -8,19 +8,19 @@ The system has five main moving parts:
 
 1. **Task definitions** — persisted in SQLite with a cron expression, task type, and type-specific config.
 2. **Scheduler** — a background fiber that ticks every 30s, checks for due tasks, and fires them.
-3. **MCP server** — an HTTP endpoint that AI providers call to list, create, propose, toggle, and run tasks.
-4. **Injected system prompt** — tells the AI model about scheduled tasks so it uses the MCP tools.
+3. **REST API** — an HTTP endpoint that AI providers call to list, create, propose, toggle, and run tasks.
+4. **Injected system prompt** — tells the AI model about scheduled tasks so it uses the available tools.
 5. **Web UI** — Settings > Scheduled Tasks tab for CRUD, detail page with run history, and interactive proposal cards in chat.
 
 ```
 ┌───────────────────────────────────────────────┐
 │  AI Provider (Claude Code / Codex)            │
-│  System prompt tells it to use MCP tools      │
+│  System prompt tells it to use REST API tools │
 └──────────────┬────────────────────────────────┘
-               │ HTTP POST /mcp/scheduled-tasks
+               │ POST /api/scheduled-tasks
                ▼
 ┌───────────────────────────────────────────────┐
-│  MCP Server (JSON-RPC)                        │
+│  REST API ({data, error} envelope)            │
 │  Tools: list, get, create, update, delete,    │
 │  toggle, run_now, list_runs, propose          │
 └──────────────┬────────────────────────────────┘
@@ -168,9 +168,9 @@ Uses the `cron-parser` npm package (`CronExpressionParser.parse()`). The `comput
 
 ---
 
-## MCP Server
+## REST API
 
-HTTP endpoint at `POST /mcp/scheduled-tasks`.
+HTTP endpoint at `POST /api/scheduled-tasks`.
 
 ### Implementation
 
@@ -196,7 +196,7 @@ Reuses managed runs token resolution — `ManagedRunService.resolveContextForTok
 | `list_scheduled_task_runs` | List run history for a task.                                                                            |
 | `propose_scheduled_task`   | Propose a task. Returns JSON that the AI must include as a ` ```t3:propose-scheduled-task ` code block. |
 
-### MCP config injection into providers
+### Service config injection into providers
 
 When a provider session starts and the thread belongs to a project:
 

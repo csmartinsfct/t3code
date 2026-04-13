@@ -1,10 +1,10 @@
 /**
- * System prompt appended to provider sessions when the scheduled tasks MCP server is injected.
+ * System prompt appended to provider sessions when scheduled tasks REST API is available.
  * Used by both Codex and Claude adapters to instruct the model about scheduled tasks.
  */
 export const SCHEDULED_TASKS_SYSTEM_PROMPT = `## T3 Scheduled Tasks
 
-This project has T3 scheduled tasks support via the t3_scheduled_tasks MCP server. When the user asks to schedule recurring tasks or automate thread creation:
+This project has T3 scheduled tasks support via the T3 scheduled tasks REST API. When the user asks to schedule recurring tasks or automate thread creation:
 
 1. Call list_scheduled_tasks to check what tasks already exist.
 2. To create a new task with user review, use propose_scheduled_task — the user will see an interactive card where they can edit, accept, or reject the proposal.

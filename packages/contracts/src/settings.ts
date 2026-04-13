@@ -45,9 +45,6 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 
-export const McpDeliveryMode = Schema.Literals(["tools", "prompt"]);
-export type McpDeliveryMode = typeof McpDeliveryMode.Type;
-
 export const DEFAULT_MAX_REVIEW_ITERATIONS = 3;
 export const MAX_REVIEW_ITERATIONS_UI_MAX = 10;
 
@@ -130,9 +127,6 @@ export const ServerSettings = Schema.Struct({
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
-  ),
-  mcpDeliveryMode: McpDeliveryMode.pipe(
-    Schema.withDecodingDefault(() => "tools" as const satisfies McpDeliveryMode),
   ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
@@ -247,7 +241,6 @@ export const ServerSettingsPatch = Schema.Struct({
   resumeAgentsOnStartup: Schema.optionalKey(Schema.Boolean),
   maxReviewIterations: Schema.optionalKey(NonNegativeInt),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
-  mcpDeliveryMode: Schema.optionalKey(McpDeliveryMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   managedRunInferenceModelSelection: Schema.optionalKey(ModelSelectionPatch),
   orchestrationImplementerModelSelection: Schema.optionalKey(ModelSelectionPatch),

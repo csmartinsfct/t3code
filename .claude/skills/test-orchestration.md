@@ -28,7 +28,7 @@ git clean -fd
 
 ## Setup: Resolve The Live Project And Thread
 
-With the dev bypass token, ticketing MCP requests must include both `projectId` and a valid `threadId`. The old default `threadId=dev-test-thread` no longer works reliably.
+With the dev bypass token, ticketing REST API requests must include both `projectId` and a valid `threadId`. The old default `threadId=dev-test-thread` no longer works reliably.
 
 Find the live project by workspace root, not by project title:
 
@@ -61,24 +61,24 @@ Use a ticket set that matches the current contents of the test repo. At the mome
 Create a parent ticket plus two ordered sub-tickets (replace `$PORT`, `$PROJECT_ID`, and `$THREAD_ID`):
 
 ```bash
-URL="http://127.0.0.1:$PORT/mcp/ticketing?projectId=$PROJECT_ID&threadId=$THREAD_ID"
-H=(-H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Authorization: Bearer t3-dev-bypass")
+URL="http://127.0.0.1:$PORT/api/ticketing?projectId=$PROJECT_ID&threadId=$THREAD_ID"
+H=(-H "Content-Type: application/json" -H "Authorization: Bearer t3-dev-bypass")
 
 # 1. Create parent ticket
-PARENT=$(curl -s -X POST "$URL" "${H[@]}" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_ticket","arguments":{"title":"Update starter heading in two steps","description":"Change the starter hero heading sequentially in two short steps.","status":"todo"}}}')
-PARENT_ID=$(echo "$PARENT" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['identifier'])")
+PARENT=$(curl -s -X POST "$URL" "${H[@]}" -d '{"tool":"create_ticket","input":{"title":"Update starter heading in two steps","description":"Change the starter hero heading sequentially in two short steps.","status":"todo"}}')
+PARENT_ID=$(echo "$PARENT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['identifier'])")
 echo "Parent: $PARENT_ID"
 
 # 2. Sub-ticket 1: Get started -> Start here
-CHILD1=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"create_ticket\",\"arguments\":{\"title\":\"Rename hero heading from 'Get started' to 'Start here'\",\"description\":\"Update the hero heading in src/App.tsx from 'Get started' to 'Start here'. Run pnpm lint and pnpm build after the change.\",\"status\":\"todo\",\"parentId\":\"$PARENT_ID\",\"acceptanceCriteria\":[{\"text\":\"The hero heading reads 'Start here'\"},{\"text\":\"pnpm lint passes\"},{\"text\":\"pnpm build passes\"}]}}}")
-CHILD1_ID=$(echo "$CHILD1" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['identifier'])")
+CHILD1=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"create_ticket\",\"input\":{\"title\":\"Rename hero heading from 'Get started' to 'Start here'\",\"description\":\"Update the hero heading in src/App.tsx from 'Get started' to 'Start here'. Run pnpm lint and pnpm build after the change.\",\"status\":\"todo\",\"parentId\":\"$PARENT_ID\",\"acceptanceCriteria\":[{\"text\":\"The hero heading reads 'Start here'\"},{\"text\":\"pnpm lint passes\"},{\"text\":\"pnpm build passes\"}]}}")
+CHILD1_ID=$(echo "$CHILD1" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['identifier'])")
 
 # 3. Sub-ticket 2: Start here -> Get going
-CHILD2=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"create_ticket\",\"arguments\":{\"title\":\"Rename hero heading from 'Start here' to 'Get going'\",\"description\":\"Change the same hero heading in src/App.tsx from 'Start here' to 'Get going'. Run pnpm lint and pnpm build after the change.\",\"status\":\"todo\",\"parentId\":\"$PARENT_ID\",\"acceptanceCriteria\":[{\"text\":\"The hero heading reads 'Get going'\"},{\"text\":\"pnpm lint passes\"},{\"text\":\"pnpm build passes\"}]}}}")
-CHILD2_ID=$(echo "$CHILD2" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['identifier'])")
+CHILD2=$(curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"create_ticket\",\"input\":{\"title\":\"Rename hero heading from 'Start here' to 'Get going'\",\"description\":\"Change the same hero heading in src/App.tsx from 'Start here' to 'Get going'. Run pnpm lint and pnpm build after the change.\",\"status\":\"todo\",\"parentId\":\"$PARENT_ID\",\"acceptanceCriteria\":[{\"text\":\"The hero heading reads 'Get going'\"},{\"text\":\"pnpm lint passes\"},{\"text\":\"pnpm build passes\"}]}}")
+CHILD2_ID=$(echo "$CHILD2" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['identifier'])")
 
 # 4. Add an explicit dependency so ticket 2 cannot run before ticket 1
-curl -s -X POST "$URL" "${H[@]}" -d "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"add_ticket_dependency\",\"arguments\":{\"ticketId\":\"$CHILD2_ID\",\"dependsOnTicketId\":\"$CHILD1_ID\"}}}"
+curl -s -X POST "$URL" "${H[@]}" -d "{\"tool\":\"add_ticket_dependency\",\"input\":{\"ticketId\":\"$CHILD2_ID\",\"dependsOnTicketId\":\"$CHILD1_ID\"}}"
 ```
 
 ## Test Execution
@@ -165,7 +165,7 @@ Depending on what is being tested, also verify these operations. Each requires s
 ## Troubleshooting
 
 - **Orchestration doesn't start**: Check that models are configured in Settings > Orchestration and the selected providers are enabled
-- **Ticket creation fails with `Unknown origin thread`**: Add a real `threadId` query param to the ticketing MCP URL. The dev bypass path no longer works reliably with the old implicit `dev-test-thread` default.
+- **Ticket creation fails with `Unknown origin thread`**: Add a real `threadId` query param to the ticketing REST API URL. The dev bypass path no longer works reliably with the old implicit `dev-test-thread` default.
 - **The old `Test` project id shows up in SQLite**: Ignore soft-deleted or stale project rows and resolve the live project by `workspace_root`.
 - **The test task doesn't match the repo anymore**: Inspect `src/App.tsx`, `package.json`, and the current workspace before creating tickets. Always make the orchestration task match the actual test repo contents.
 - **Agent errors**: Check the server terminal output for provider session errors

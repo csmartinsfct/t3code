@@ -1,10 +1,10 @@
 /**
- * System prompt appended to provider sessions when the managed runs MCP server is injected.
+ * System prompt appended to provider sessions when managed runs REST API is available.
  * Used by both Codex and Claude adapters to instruct the model about managed runs.
  */
 export const MANAGED_RUNS_SYSTEM_PROMPT = `## T3 Managed Runs
 
-This project has T3 managed runs support via the t3_managed_runs MCP server. When you need to start a long-running service (dev server, build watcher, docker compose, etc.):
+This project has T3 managed runs support via the T3 managed runs REST API. When you need to start a long-running service (dev server, build watcher, docker compose, etc.):
 
 1. Call list_managed_runs to check what's already running AND what actions are available.
 2. If a matching action exists in the availableActions list, use launch_project_script with its scriptId to start it. Match by command/purpose, not just by name — an action named "Magneto" running "yarn dev" is the right match for "start the magneto dev server".

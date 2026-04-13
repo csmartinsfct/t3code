@@ -70,7 +70,7 @@ import {
   useServerObservability,
   useServerProviders,
 } from "../../rpc/serverState";
-import { clampReviewIterations, getMcpDeliveryModeLabel } from "./settingsPanelHelpers";
+import { clampReviewIterations } from "./settingsPanelHelpers";
 
 const THEME_OPTIONS = [
   {
@@ -488,9 +488,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.resumeAgentsOnStartup !== DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup
         ? ["Startup resume"]
         : []),
-      ...(settings.mcpDeliveryMode !== DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode
-        ? ["MCP delivery"]
-        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -509,7 +506,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.maxReviewIterations,
-      settings.mcpDeliveryMode,
       settings.resumeAgentsOnStartup,
       settings.timestampFormat,
       theme,
@@ -1074,45 +1070,6 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Resume agents on startup"
             />
-          }
-        />
-
-        <SettingsRow
-          title="MCP delivery"
-          description="How AI sessions discover T3 project services (runs, tasks, tickets). Native tools registers each tool directly. HTTP endpoints provides URLs for on-demand discovery."
-          resetAction={
-            settings.mcpDeliveryMode !== DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode ? (
-              <SettingResetButton
-                label="MCP delivery"
-                onClick={() =>
-                  updateSettings({
-                    mcpDeliveryMode: DEFAULT_UNIFIED_SETTINGS.mcpDeliveryMode,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.mcpDeliveryMode}
-              onValueChange={(value) => {
-                if (value === "tools" || value === "prompt") {
-                  updateSettings({ mcpDeliveryMode: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-44" aria-label="MCP delivery mode">
-                <SelectValue>{getMcpDeliveryModeLabel(settings.mcpDeliveryMode)}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="tools">
-                  Native tools
-                </SelectItem>
-                <SelectItem hideIndicator value="prompt">
-                  HTTP endpoints
-                </SelectItem>
-              </SelectPopup>
-            </Select>
           }
         />
 

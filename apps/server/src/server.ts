@@ -3,7 +3,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, projectFaviconRouteLayer, staticAndDevRouteLayer } from "./http";
-import { managedRunsMcpRouteLayer } from "./managedRuns/http";
+import { managedRunsRouteLayer } from "./managedRuns/http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
@@ -50,13 +50,13 @@ import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
 import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
 import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
 import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
-import { scheduledTasksMcpRouteLayer } from "./scheduledTasks/http";
+import { scheduledTasksRouteLayer } from "./scheduledTasks/http";
 import { TicketingRepositoryLive } from "./persistence/Layers/Ticketing";
 import { TicketThreadLinkRepositoryLive } from "./persistence/Layers/TicketThreadLinks";
 import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
-import { ticketingMcpRouteLayer } from "./ticketing/http";
+import { ticketingRouteLayer } from "./ticketing/http";
 import { PromptManagementLive } from "./prompts/Layers/PromptManagement";
-import { promptsMcpRouteLayer } from "./prompts/http";
+import { promptsRouteLayer } from "./prompts/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 
@@ -277,10 +277,10 @@ const RuntimeServicesLive = Layer.mergeAll(
 export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   projectFaviconRouteLayer,
-  managedRunsMcpRouteLayer,
-  scheduledTasksMcpRouteLayer,
-  ticketingMcpRouteLayer,
-  promptsMcpRouteLayer,
+  managedRunsRouteLayer,
+  scheduledTasksRouteLayer,
+  ticketingRouteLayer,
+  promptsRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );

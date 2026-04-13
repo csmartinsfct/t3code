@@ -7,19 +7,19 @@ Managed Runs let T3 Code track long-running services (dev servers, docker compos
 The system has four main moving parts:
 
 1. **Actions** — saved project scripts (name + command + icon + declared services).
-2. **MCP server** — an HTTP endpoint that AI providers call to list, launch, inspect, and propose runs.
-3. **Injected system prompt** — tells the AI model about managed runs so it uses the MCP tools instead of raw `bash`.
+2. **REST API** — an HTTP endpoint that AI providers call to list, launch, inspect, and propose runs.
+3. **Injected system prompt** — tells the AI model about managed runs so it uses the available tools instead of raw `bash`.
 4. **Web UI** — shows active runs, service health, completion toasts, and interactive proposal cards.
 
 ```
 ┌───────────────────────────────────────────────┐
 │  AI Provider (Claude Code / Codex)            │
-│  System prompt tells it to use MCP tools      │
+│  System prompt tells it to use REST API tools │
 └──────────────┬────────────────────────────────┘
-               │ HTTP POST /mcp/managed-runs
+               │ POST /api/managed-runs
                ▼
 ┌───────────────────────────────────────────────┐
-│  MCP Server (JSON-RPC)                        │
+│  REST API ({data, error} envelope)            │
 │  Tools: list, launch, get, logs, stop, propose│
 └──────────────┬────────────────────────────────┘
                │
@@ -78,19 +78,19 @@ There are two paths:
 
 ---
 
-## MCP Server
+## REST API
 
-The managed runs MCP server is a stateless JSON-RPC endpoint at `POST /mcp/managed-runs`.
+The managed runs REST API is a stateless endpoint at `POST /api/managed-runs`.
 
 ### Implementation
 
 `apps/server/src/managedRuns/http.ts`
 
-The server uses the `@modelcontextprotocol/sdk` and bridges async MCP tool callbacks into the Effect runtime via a work queue pattern (`createEffectBridge()`). This is necessary because MCP tool handlers run in async-land but managed run operations need the Effect fiber's SQLite connection scope.
+The server bridges async tool callbacks into the Effect runtime via a work queue pattern (`createEffectBridge()`). This is necessary because tool handlers run in async-land but managed run operations need the Effect fiber's SQLite connection scope.
 
 ### Authentication
 
-Each provider session gets a short-lived bearer token via `managedRunService.issueMcpAccess(projectId, threadId)`. The token maps back to `{projectId, threadId}` when the MCP server receives a request.
+Each provider session gets a short-lived bearer token via `managedRunService.issueMcpAccess(projectId, threadId)`. The token maps back to `{projectId, threadId}` when the REST endpoint receives a request.
 
 ### Tools
 
@@ -103,7 +103,7 @@ Each provider session gets a short-lived bearer token via `managedRunService.iss
 | `stop_managed_run`       | Stop an active run.                                                                                                             |
 | `propose_project_script` | Propose a new action. Returns a JSON payload that the AI must include as a ` ```t3:propose-action ` code block in its response. |
 
-### MCP config injection into providers
+### Service config injection into providers
 
 When a provider session starts and the thread belongs to a project:
 
@@ -116,7 +116,7 @@ When a provider session starts and the thread belongs to a project:
 
 `apps/server/src/managedRuns/systemPrompt.ts`
 
-When MCP is configured, a system prompt section is appended to the AI's instructions:
+When tool injection is configured, a system prompt section is appended to the AI's instructions:
 
 1. Call `list_managed_runs` first to check what's already running.
 2. Use `launch_project_script` for existing actions.
@@ -270,7 +270,7 @@ The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 | ------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Contracts**             | `packages/contracts/src/orchestration.ts`                           | `ProjectScript`, `DeclaredService`, `ServiceHealthCheck` schemas       |
 | **Contracts**             | `packages/contracts/src/managedRuns.ts`                             | `ManagedRunSummary`, `ManagedRunDetail`, `ManagedRunStreamEvent`, etc. |
-| **MCP server**            | `apps/server/src/managedRuns/http.ts`                               | JSON-RPC endpoint with tool registrations                              |
+| **REST API**              | `apps/server/src/managedRuns/http.ts`                               | REST endpoint with tool registrations                                  |
 | **System prompt**         | `apps/server/src/managedRuns/systemPrompt.ts`                       | Prompt injected into AI sessions                                       |
 | **Health checks**         | `apps/server/src/managedRuns/healthCheck.ts`                        | URL/docker/port/command health check implementations                   |
 | **Run inference**         | `apps/server/src/managedRuns/Layers/Inference.ts`                   | LLM-backed runtime-service inference + grounding                       |
@@ -278,8 +278,8 @@ The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 | **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                 | Core run lifecycle: launch, track, poll, stop                          |
 | **Run service interface** | `apps/server/src/managedRuns/Services/ManagedRuns.ts`               | Effect service interface                                               |
 | **SQL layer**             | `apps/server/src/persistence/Layers/ManagedRuns.ts`                 | SQLite persistence for runs, evidence, and inference audit records     |
-| **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                  | MCP config + prompt injection for Claude                               |
-| **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                   | MCP config + prompt injection for Codex                                |
+| **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                  | Service config + prompt injection for Claude                           |
+| **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                   | Service config + prompt injection for Codex                            |
 | **Runs UI**               | `apps/web/src/components/ManagedRunsControl.tsx`                    | Runs dropdown with service health                                      |
 | **Runs settings UI**      | `apps/web/src/components/settings/RunsSettingsPanel.tsx`            | Read-only inference audit surface                                      |
 | **Propose card**          | `apps/web/src/components/chat/ProposeActionCard.tsx`                | Interactive action proposal card                                       |

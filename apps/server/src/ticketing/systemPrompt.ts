@@ -1,10 +1,10 @@
 /**
- * System prompt appended to provider sessions when the ticketing MCP server is injected.
+ * System prompt appended to provider sessions when ticketing REST API is available.
  * Used by both Codex and Claude adapters to instruct the model about ticketing.
  */
 export const TICKETING_SYSTEM_PROMPT = `## T3 Ticketing
 
-This project has T3 ticketing support via the t3_ticketing MCP server.
+This project has T3 ticketing support via the T3 ticketing REST API.
 
 **All ticket ID parameters use human-readable identifiers (e.g. "ZBD-7").** The server resolves identifiers automatically.
 When you mention a ticket in chat text, format it as markdown using the exact identifier, for example \`[ZBD-7](t3://ticket/ZBD-7)\`. This lets the UI open the ticket directly.

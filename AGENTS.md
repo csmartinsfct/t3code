@@ -54,31 +54,31 @@ Use these as implementation references when designing protocol handling, UX flow
 
 ## Internal Docs
 
-- [Managed Runs](docs/managed-runs.md) — Actions, MCP server, service health checks, injected prompts, UI components, and run lifecycle.
+- [Managed Runs](docs/managed-runs.md) — Actions, REST API, service health checks, injected prompts, UI components, and run lifecycle.
 - [Startup Recovery](docs/startup-recovery.md) — Restart-time stale work detection, startup auto-resume, and the client-only `Was working` marker.
-- [Prompts](docs/prompts.md) — Prompt definitions, scope-aware overrides, validation, deterministic preview rendering, and prompt-management MCP APIs.
+- [Prompts](docs/prompts.md) — Prompt definitions, scope-aware overrides, validation, deterministic preview rendering, and prompt-management REST APIs.
 - [Changelog](docs/changelog.md) — Build-time AI changelog generation, cache/runtime asset formats, Codex structured-output flow, incremental commit processing, and Settings UI integration. `docs/chage-log.md` is a convenience entrypoint that redirects back to this canonical doc.
-- [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, MCP server, cron expressions, UI settings, and propose card flow.
-- [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, MCP tools, and Settings UI.
-- [Agent Tools](docs/t3-agent-tools.md) — How MCP services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
+- [Scheduled Tasks](docs/scheduled-tasks.md) — Recurring task scheduler, REST API, cron expressions, UI settings, and propose card flow.
+- [Ticketing](docs/ticketing.md) — Tickets with hierarchy, dependencies, labels, comments, artifacts, acceptance criteria, audit history, REST API tools, and Settings UI.
+- [Agent Tools](docs/t3-agent-tools.md) — How internal services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
 - [Multi-Layout](docs/multi-layout.md) — Board view with Kanban ticket management, drag-and-drop reordering/status changes, nested sidebar layout, and ticket composer attachments.
 - [Design Language](docs/design-language.md) — Prescriptive design system reference: color tokens, typography, spacing, component patterns, animations, layout recipes, and anti-patterns. Used as context for LLM-generated UIs.
-- [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via MCP.
+- [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via REST API.
 
 These docs must be kept up to date as related code changes.
 
 ## Dev Server
 
-The dev server listens on `http://localhost:3773` by default (configurable via `T3CODE_PORT` env var or `--port` CLI flag). MCP endpoints are available at:
+The dev server listens on `http://localhost:3773` by default (configurable via `T3CODE_PORT` env var or `--port` CLI flag). REST API endpoints are available at:
 
-- `http://localhost:3773/mcp/ticketing`
-- `http://localhost:3773/mcp/prompts`
-- `http://localhost:3773/mcp/managed-runs`
-- `http://localhost:3773/mcp/scheduled-tasks`
+- `http://localhost:3773/api/ticketing`
+- `http://localhost:3773/api/prompts`
+- `http://localhost:3773/api/managed-runs`
+- `http://localhost:3773/api/scheduled-tasks`
 
 Auth: `Authorization: Bearer t3-dev-bypass` (dev-only bypass token). Ticketing and managed-runs endpoints require a `?projectId=<uuid>` query param.
 
-If the MCP tools in this session are connected to the wrong instance (e.g. production), use these endpoints directly or write to the dev database at `~/.t3/dev/state.sqlite`.
+If the tools in this session are connected to the wrong instance (e.g. production), use these endpoints directly or write to the dev database at `~/.t3/dev/state.sqlite`.
 
 ## Data Directories
 
@@ -102,7 +102,7 @@ Electron also stores Chromium profile data (localStorage, cookies) under `~/Libr
 
 - `start-electron-dev` — Start the Electron dev stack (`bun run dev:desktop`).
 - `production-build` — Build a production macOS DMG via `scripts/build-desktop-artifact.ts`.
-- `test-managed-runs-mcp` — Test the managed runs MCP endpoint end-to-end using the dev bypass token.
+- `test-managed-runs-mcp` — Test the managed runs REST endpoint end-to-end using the dev bypass token.
 - `test-orchestration` — End-to-end orchestration test: reset test repo, create tickets, run orchestration with real models, verify via chrome-devtools MCP.
 
 Skills must be kept up to date as related code changes. When modifying behavior covered by a skill or doc, review and update the corresponding file.

@@ -45,9 +45,9 @@ import { MANAGED_RUNS_SYSTEM_PROMPT } from "../../managedRuns/systemPrompt.ts";
 import { SCHEDULED_TASKS_SYSTEM_PROMPT } from "../../scheduledTasks/systemPrompt.ts";
 import { TICKETING_SYSTEM_PROMPT } from "../../ticketing/systemPrompt.ts";
 import {
-  buildMcpEnvironmentHeader,
-  buildMcpPromptModeSystemPrompt,
-} from "../mcpPromptModeSystemPrompt.ts";
+  buildEnvironmentHeader,
+  buildRestEndpointSystemPrompt,
+} from "../restEndpointSystemPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1415,7 +1415,6 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ),
       );
       const codexSettings = allCodexSettings.providers.codex;
-      const mcpDeliveryMode = allCodexSettings.mcpDeliveryMode;
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
       const codexHomePath = homePath || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
@@ -1444,51 +1443,27 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.threadId,
         );
 
-        const envHeader = buildMcpEnvironmentHeader({
+        const envHeader = buildEnvironmentHeader({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
           projectTitle: checkpointContext.value.projectTitle,
         });
 
-        if (mcpDeliveryMode === "tools") {
-          // Native MCP tool registration — all three services
-          const managedRunsUrl = `http://127.0.0.1:${serverConfig.port}/mcp/managed-runs`;
-          configOverrides.push(`mcp_servers.t3_managed_runs.url="${managedRunsUrl}"`);
-          configOverrides.push(
-            `mcp_servers.t3_managed_runs.http_headers.Authorization="Bearer ${access.token}"`,
-          );
-          const scheduledTasksUrl = `http://127.0.0.1:${serverConfig.port}/mcp/scheduled-tasks`;
-          configOverrides.push(`mcp_servers.t3_scheduled_tasks.url="${scheduledTasksUrl}"`);
-          configOverrides.push(
-            `mcp_servers.t3_scheduled_tasks.http_headers.Authorization="Bearer ${access.token}"`,
-          );
-          const ticketingUrl = `http://127.0.0.1:${serverConfig.port}/mcp/ticketing?projectId=${encodeURIComponent(
-            checkpointContext.value.projectId,
-          )}&threadId=${encodeURIComponent(input.threadId)}`;
-          configOverrides.push(`mcp_servers.t3_ticketing.url="${ticketingUrl}"`);
-          configOverrides.push(
-            `mcp_servers.t3_ticketing.http_headers.Authorization="Bearer ${access.token}"`,
-          );
-          appendDeveloperInstructions =
-            envHeader +
-            "\n\n" +
-            MANAGED_RUNS_SYSTEM_PROMPT +
-            "\n\n" +
-            SCHEDULED_TASKS_SYSTEM_PROMPT +
-            "\n\n" +
-            TICKETING_SYSTEM_PROMPT;
-        } else {
-          // Prompt mode — no MCP server config, just system prompt with endpoints
-          appendDeveloperInstructions =
-            envHeader +
-            "\n\n" +
-            buildMcpPromptModeSystemPrompt({
-              port: serverConfig.port,
-              token: access.token,
-            });
-        }
+        appendDeveloperInstructions =
+          envHeader +
+          "\n\n" +
+          buildRestEndpointSystemPrompt({
+            port: serverConfig.port,
+            token: access.token,
+          }) +
+          "\n\n" +
+          MANAGED_RUNS_SYSTEM_PROMPT +
+          "\n\n" +
+          SCHEDULED_TASKS_SYSTEM_PROMPT +
+          "\n\n" +
+          TICKETING_SYSTEM_PROMPT;
       }
-      // Inject project-specific system prompt (independent of MCP services / port)
+      // Inject project-specific system prompt (independent of services / port)
       if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {
         appendDeveloperInstructions =
           (appendDeveloperInstructions ?? "") +

@@ -1,16 +1,16 @@
 # Features
 
-T3 Code is a web GUI for AI coding agents. It wraps providers like Codex and Claude behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via MCP tools and WebSocket RPC).
+T3 Code is a web GUI for AI coding agents. It wraps providers like Codex and Claude behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via REST API tools and WebSocket RPC).
 
 ## Architecture
 
-| Package              | Role                                                                                                                                                       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK), serves the React app, manages sessions, and hosts MCP endpoints.  |
-| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.               |
-| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling. |
-| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                     |
-| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                         |
+| Package              | Role                                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK), serves the React app, manages sessions, and hosts REST API endpoints. |
+| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.                   |
+| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling.     |
+| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                         |
+| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                             |
 
 ---
 
@@ -202,7 +202,7 @@ A full-featured issue tracker built into T3 Code. See [ticketing.md](ticketing.m
 - Multi-select tickets for bulk actions (archive, orchestrate).
 - Configure labels and templates in Settings → Tickets.
 
-**Agent interaction (MCP — `/mcp/ticketing`):**
+**Agent interaction (REST API — `/api/ticketing`):**
 
 26+ tools including:
 
@@ -281,7 +281,7 @@ An LLM analyzes script output logs to infer what services are running, their rol
 - Stop scripts manually.
 - View inference records in Settings → Managed Runs with detailed JSON payloads.
 
-**Agent interaction (MCP — `/mcp/managed-runs`):**
+**Agent interaction (REST API — `/api/managed-runs`):**
 
 - `list_managed_runs` — List all runs with status and services.
 - `launch_project_script` — Start a script by ID.
@@ -330,7 +330,7 @@ ScheduledTask {
 - View task detail with cron expression, project selector, prompt configuration.
 - Browse execution history with success/failure status.
 
-**Agent interaction (MCP — `/mcp/scheduled-tasks`):**
+**Agent interaction (REST API — `/api/scheduled-tasks`):**
 
 - `list` / `get` — Query tasks.
 - `create` / `update` / `delete` — Manage tasks.
@@ -383,7 +383,7 @@ Prompts are block-based documents (version 1). Each block has:
 - Preview rendered prompts with sample variable data before saving.
 - Reset to shipped defaults.
 
-**Agent interaction (MCP — `/mcp/prompts`):**
+**Agent interaction (REST API — `/api/prompts`):**
 
 - `list_definitions` — Get available prompts and groups.
 - `get_document` — Get the effective (merged) prompt document.
@@ -592,7 +592,7 @@ Git-ref based snapshots that track file state before and after each agent turn.
 | `resumeAgentsOnStartup`    | Auto-resume stale work on server restart   | `false`          |
 | `maxReviewIterations`      | Max review passes for tickets              | `3` (max 10)     |
 | `defaultThreadEnvMode`     | Thread workspace isolation                 | `"local"`        |
-| `mcpDeliveryMode`          | How MCP tools reach models                 | `"tools"`        |
+| `mcpDeliveryMode`          | How service tools reach models             | `"tools"`        |
 | Provider settings          | Codex, Claude Agent, profiles              | Per-provider     |
 | Model selections           | Text gen, inference, implementer, reviewer | Per-use-case     |
 | Observability              | OTLP traces/metrics URLs                   | Disabled         |
@@ -641,32 +641,32 @@ Limits: 256 rules max, 64-char key values, 256-char when expressions.
 
 ---
 
-## 16. MCP Delivery Modes
+## 16. Service Delivery Modes
 
-Controls how MCP service tools are made available to AI providers. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
+Controls how internal service tools are made available to AI providers. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
 
 ### "tools" mode (default)
 
-- MCP servers are registered as native tool sets in the provider's tool list.
+- Internal services are registered as native tool sets in the provider's tool list.
 - Each tool is directly callable by the model.
 - Per-service system prompts are injected alongside the tools.
 - Trade-off: 43+ tools injected upfront, consuming context window.
 
 ### "prompt" mode
 
-- No MCP tool registration in the provider.
-- HTTP endpoint URLs and bearer tokens are injected into the system prompt.
+- No native tool registration in the provider.
+- REST endpoint URLs and bearer tokens are injected into the system prompt.
 - The model uses code execution (e.g. `curl`) to discover and call tools on demand.
 - Trade-off: Extra round-trip per tool call; depends on the model's code execution capability.
 
-### Services exposed via MCP
+### Services exposed via REST API
 
 | Service         | Endpoint               | Tool count |
 | --------------- | ---------------------- | ---------- |
-| Ticketing       | `/mcp/ticketing`       | 26+        |
-| Managed Runs    | `/mcp/managed-runs`    | 6          |
-| Scheduled Tasks | `/mcp/scheduled-tasks` | 9          |
-| Prompts         | `/mcp/prompts`         | 5          |
+| Ticketing       | `/api/ticketing`       | 26+        |
+| Managed Runs    | `/api/managed-runs`    | 6          |
+| Scheduled Tasks | `/api/scheduled-tasks` | 9          |
+| Prompts         | `/api/prompts`         | 5          |
 
 Configurable via `mcpDeliveryMode` in server settings.
 

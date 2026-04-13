@@ -1,6 +1,6 @@
 # Prompts
 
-T3 Code exposes orchestration prompt management through one backend-owned service that powers both the UI and an explicit MCP management endpoint.
+T3 Code exposes orchestration prompt management through one backend-owned service that powers both the UI and an explicit REST management endpoint.
 
 ## Overview
 
@@ -25,7 +25,7 @@ Effective prompt resolution order is:
 2. current global document
 3. shipped default
 
-Validation and preview rendering are always backend-owned. The server never trusts raw UI or MCP input without validating it first.
+Validation and preview rendering are always backend-owned. The server never trusts raw UI or REST API input without validating it first.
 
 Review-specific behavior:
 
@@ -47,18 +47,18 @@ The shared `NativeApi` exposes prompt management under `api.prompts`:
 
 These methods are backed by websocket RPCs implemented in `apps/server/src/ws.ts` and consumed by the web client through `apps/web/src/wsRpcClient.ts`.
 
-## MCP Endpoint
+## REST Endpoint
 
-Prompt management is also available over MCP at:
+Prompt management is also available over REST at:
 
-- `http://localhost:3773/mcp/prompts` in dev
+- `http://localhost:3773/api/prompts` in dev
 
 Auth:
 
 - Dev: `Authorization: Bearer t3-dev-bypass`
-- Provider-managed MCP sessions: the managed-runs issued bearer token
+- Provider-managed sessions: the managed-runs issued bearer token
 
-Exact MCP tools:
+Available tools:
 
 - `list_prompt_definitions`
 - `get_prompt_document`
@@ -88,14 +88,14 @@ Preview rendering is deterministic:
 - previews use a fixed representative sample dataset labeled `representative-sample-v1`
 - the response includes both the rendered preview text and the variables that were used
 
-This keeps UI preview output and MCP preview output aligned.
+This keeps UI preview output and REST API preview output aligned.
 
 ## File Map
 
 ```
 packages/contracts/src/promptManagement.ts            # Prompt-management schemas and errors
 apps/server/src/prompts/Layers/PromptManagement.ts    # Backend prompt-management service
-apps/server/src/prompts/http.ts                       # MCP route at /mcp/prompts
+apps/server/src/prompts/http.ts                       # REST route at /api/prompts
 apps/server/src/ws.ts                                 # WebSocket RPC handlers
 apps/web/src/wsRpcClient.ts                           # Web client prompt RPC adapter
 apps/web/src/wsNativeApi.ts                           # Native API prompt facade

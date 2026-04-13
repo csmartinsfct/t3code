@@ -11,18 +11,18 @@ The system has five main moving parts:
 1. **Contracts** — Effect/Schema definitions for all ticket types, inputs, errors, and stream events (`packages/contracts/src/ticketing.ts`).
 2. **Persistence** — SQLite tables (7 tables + 2 ALTER columns on `projection_projects`) with repository layer.
 3. **Business logic** — Service layer with epic status derivation, dependency cycle detection, comment threading enforcement, and history recording.
-4. **MCP server** — an HTTP endpoint at `/mcp/ticketing` that AI providers call to manage tickets.
+4. **REST API** — an HTTP endpoint at `/api/ticketing` that AI providers call to manage tickets.
 5. **Web UI** — Settings > Tickets page with list view, detail panel, comments, and history.
 
 ```
 ┌───────────────────────────────────────────────┐
 │  AI Provider (Claude Code / Codex)            │
-│  Uses MCP tools to create/manage tickets      │
+│  Uses REST API tools to create/manage tickets │
 └──────────────┬────────────────────────────────┘
-               │ HTTP POST /mcp/ticketing
+               │ POST /api/ticketing
                ▼
 ┌───────────────────────────────────────────────┐
-│  MCP Server (JSON-RPC)                        │
+│  REST API ({data, error} envelope)            │
 │  26 tools: tickets, labels, comments,         │
 │  artifacts, dependencies, criteria, history   │
 └──────────────┬────────────────────────────────┘
@@ -76,7 +76,7 @@ Each ticket gets a human-readable identifier like `T3CO-42` composed of `{prefix
 Tickets can be linked to threads in three ways:
 
 - `origin`
-  The ticket was created from inside that thread via the ticketing MCP server.
+  The ticket was created from inside that thread via the ticketing REST API.
 - `bound`
   The thread was explicitly associated to the ticket through `thread.ticketId`.
 - `mention`
@@ -262,7 +262,7 @@ Every mutation records a `TicketHistoryEntry` with:
 
 ---
 
-## MCP Tools (26)
+## REST API Tools (26)
 
 **Tickets**: `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket`, `delete_ticket`, `reorder_tickets`, `search_tickets`, `get_ticket_tree`
 
@@ -282,16 +282,16 @@ Both `create_ticket` and `update_ticket` accept optional `implementerModel` and 
 
 All tools are authenticated via the managed run token system (same as scheduled tasks). Dev bypass token `t3-dev-bypass` works with `?projectId=` query param.
 
-When the ticketing MCP server is injected into a live thread session, the request context also carries `threadId`. `create_ticket` uses that server-side context to persist an `origin` link automatically; `originThreadId` is not exposed as a public MCP tool argument.
+When the ticketing REST API is injected into a live thread session, the request context also carries `threadId`. `create_ticket` uses that server-side context to persist an `origin` link automatically; `originThreadId` is not exposed as a public tool argument.
 
 The ticketing service also seeds a small set of global labels and description templates on startup when they do not already exist. The shipped defaults now include the `idea` label plus an `Idea` template for early-stage exploration work alongside the existing `bug`, `feature`, and `research` defaults.
 
-### MCP Delivery Modes
+### Delivery Modes
 
 The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) controls how these tools reach the AI model:
 
-- **`"tools"` (Native tools)**: All three MCP servers (managed-runs, scheduled-tasks, ticketing) are registered as native tool sets. Each tool appears individually in the model's tool list. System prompts explain usage.
-- **`"prompt"` (HTTP endpoints)**: No MCP tools are registered. Instead, the system prompt provides the HTTP endpoint URLs, a Bearer auth token, and MCP JSON-RPC protocol examples. The model uses `curl` / code execution to discover tools via `tools/list` and call them via `tools/call` on demand.
+- **`"tools"` (Native tools)**: All three internal services (managed-runs, scheduled-tasks, ticketing) are registered as native tool sets. Each tool appears individually in the model's tool list. System prompts explain usage.
+- **`"prompt"` (HTTP endpoints)**: No native tools are registered. Instead, the system prompt provides the REST endpoint URLs, a Bearer auth token, and request format examples. The model uses `curl` / code execution to discover tools via `GET /api/<service>` and call them via `POST` with `{"tool":"...", "input":{...}}` on demand.
 
 ---
 
@@ -374,7 +374,7 @@ apps/server/src/persistence/Services/Ticketing.ts        # Repository interface
 apps/server/src/persistence/Layers/Ticketing.ts          # Repository implementation
 apps/server/src/ticketing/Services/Ticketing.ts          # Business logic interface
 apps/server/src/ticketing/Layers/Ticketing.ts            # Business logic implementation
-apps/server/src/ticketing/http.ts                        # MCP server + HTTP routes
+apps/server/src/ticketing/http.ts                        # REST API + HTTP routes
 apps/web/src/components/settings/Ticket*.tsx              # UI components
 apps/web/src/components/settings/ticketUtils.ts          # Status/priority maps
 apps/web/src/hooks/useTicketing.ts                       # Data hook

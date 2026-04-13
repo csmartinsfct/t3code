@@ -1020,33 +1020,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("serves the prompts MCP tool list with the dev bypass token", () =>
+  it.effect("serves the prompts REST tool discovery with the dev bypass token", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/mcp/prompts");
+      const url = yield* getHttpServerUrl("/api/prompts");
       const response = yield* Effect.promise(() =>
         fetch(url, {
-          method: "POST",
+          method: "GET",
           headers: {
-            accept: "application/json, text/event-stream",
-            "content-type": "application/json",
             authorization: "Bearer t3-dev-bypass",
           },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "tools/list",
-            params: {},
-          }),
         }),
       );
 
       assert.equal(response.status, 200);
       const payload = yield* Effect.promise(
-        () => response.json() as Promise<{ result?: { tools?: Array<{ name: string }> } }>,
+        () =>
+          response.json() as Promise<{
+            data?: { message: string; data: Array<{ name: string }> };
+            error: string | null;
+          }>,
       );
-      const toolNames = (payload.result?.tools ?? []).map((tool) => tool.name).toSorted();
+      assert.equal(payload.error, null);
+      const toolNames = (payload.data?.data ?? []).map((tool) => tool.name).toSorted();
 
       assert.deepEqual(toolNames, [
         "get_prompt_document",

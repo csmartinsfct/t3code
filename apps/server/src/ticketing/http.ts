@@ -1,73 +1,22 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { z } from "zod";
 
-import type { TicketingError, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { ProjectId, TicketingError, ThreadId } from "@t3tools/contracts";
 import { LabelId, CommentId, ArtifactId, TemplateId } from "@t3tools/contracts";
-import { ManagedRunService } from "../managedRuns/Services/ManagedRuns";
+import {
+  parseToolCallBody,
+  resolveAuth,
+  respondError,
+  respondOk,
+  type ToolDefinition,
+} from "../restResponse";
 import { TicketingService, type TicketingServiceShape } from "./Services/Ticketing";
 
-const MCP_ROUTE = "/mcp/ticketing";
+const API_ROUTE = "/api/ticketing";
 
-const DEV_BYPASS_TOKEN = process.env.NODE_ENV === "production" ? null : "t3-dev-bypass";
-
-function responseHeaders(response: Response): Record<string, string> {
-  return Object.fromEntries(response.headers.entries());
-}
-
-type WorkItem = {
-  effect: Effect.Effect<unknown, TicketingError, never>;
-  resolve: (value: unknown) => void;
-  reject: (error: unknown) => void;
-};
-
-function createEffectBridge() {
-  const queue: WorkItem[] = [];
-  let waitResolve: (() => void) | null = null;
-
-  return {
-    run: <A>(effect: Effect.Effect<A, TicketingError, never>): Promise<A> =>
-      new Promise<A>((resolve, reject) => {
-        queue.push({ effect, resolve: resolve as (v: unknown) => void, reject });
-        waitResolve?.();
-      }),
-
-    processAll: Effect.gen(function* () {
-      while (queue.length > 0) {
-        const item = queue.shift()!;
-        const exit = yield* Effect.exit(item.effect);
-        Exit.match(exit, {
-          onFailure: (cause) => item.reject(Cause.squash(cause)),
-          onSuccess: (result) => item.resolve(result),
-        });
-      }
-    }),
-
-    waitForWork: () =>
-      new Promise<void>((resolve) => {
-        if (queue.length > 0) {
-          resolve();
-          return;
-        }
-        waitResolve = resolve;
-        setTimeout(() => {
-          waitResolve = null;
-          resolve();
-        }, 50);
-      }),
-
-    pending: () => queue.length,
-  };
-}
-
-function mcpError(message: string) {
-  return {
-    content: [{ type: "text" as const, text: message }],
-    isError: true as const,
-  };
-}
+// ---------------------------------------------------------------------------
+// Business-logic helpers
+// ---------------------------------------------------------------------------
 
 export const TICKET_CHAT_LINK_REMINDER =
   "When referencing a ticket in chat, use markdown like `[ZBD-7](t3://ticket/ZBD-7)`.";
@@ -86,7 +35,7 @@ export function withTicketChatLinkReminder(description: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// MCP response transformation — strip ticket UUIDs, use identifiers
+// Response transformation — strip ticket UUIDs, use identifiers
 // ---------------------------------------------------------------------------
 
 type IdMap = ReadonlyMap<string, string>;
@@ -131,19 +80,19 @@ function collectTicketUuids(obj: unknown): string[] {
   return uuids;
 }
 
-/** Transform a response to replace ticket UUIDs with identifiers for MCP output. */
-function transformForMcp(obj: unknown, idMap: IdMap): unknown {
+/** Transform a response to replace ticket UUIDs with identifiers for output. */
+function transformForResponse(obj: unknown, idMap: IdMap): unknown {
   if (!obj || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map((item) => transformForMcp(item, idMap));
+  if (Array.isArray(obj)) return obj.map((item) => transformForResponse(item, idMap));
 
   const o = obj as Record<string, unknown>;
 
   // TicketTreeNode — has { ticket, children, dependencies }
   if ("ticket" in o && "children" in o && "dependencies" in o) {
     return {
-      ticket: transformForMcp(o.ticket, idMap),
-      children: transformForMcp(o.children, idMap),
-      dependencies: transformForMcp(o.dependencies, idMap),
+      ticket: transformForResponse(o.ticket, idMap),
+      children: transformForResponse(o.children, idMap),
+      dependencies: transformForResponse(o.dependencies, idMap),
     };
   }
 
@@ -156,7 +105,7 @@ function transformForMcp(obj: unknown, idMap: IdMap): unknown {
     };
     // Recurse into nested fields
     for (const key of ["subTickets", "dependencies", "comments", "artifacts"]) {
-      if (key in result) result[key] = transformForMcp(result[key], idMap);
+      if (key in result) result[key] = transformForResponse(result[key], idMap);
     }
     return result;
   }
@@ -195,339 +144,715 @@ function transformForMcp(obj: unknown, idMap: IdMap): unknown {
   return obj;
 }
 
-function createTicketingMcpServer(
-  ticketing: TicketingServiceShape,
-  bridge: ReturnType<typeof createEffectBridge>,
-  context: { projectId: ProjectId; threadId?: ThreadId | undefined },
-) {
-  const server = new McpServer(
-    { name: "t3-ticketing", version: "0.0.1" },
-    { capabilities: { tools: {} } },
-  );
+// ---------------------------------------------------------------------------
+// Tool definitions (for GET discovery)
+// ---------------------------------------------------------------------------
+
+const TOOL_DEFINITIONS: ToolDefinition[] = [
+  // ---- Tickets ----
+  {
+    name: "list_tickets",
+    title: "List Tickets",
+    description: withTicketChatLinkReminder(
+      "List tickets for the current project with optional filters.",
+    ),
+    inputSchema: {
+      status: {
+        type: "array",
+        optional: true,
+        items: {
+          type: "string",
+          enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"],
+        },
+        description: "Filter by status(es).",
+      },
+      priority: {
+        type: "array",
+        optional: true,
+        items: { type: "string", enum: ["none", "low", "medium", "high", "urgent"] },
+        description: "Filter by priority(ies).",
+      },
+      parentId: {
+        type: "string",
+        optional: true,
+        nullable: true,
+        description: "Filter by parent ticket identifier (e.g. 'ZBD-7').",
+      },
+      labelId: { type: "string", optional: true, description: "Filter by label ID." },
+      search: {
+        type: "string",
+        optional: true,
+        description: "Search in title/description/identifier.",
+      },
+      includeArchived: {
+        type: "boolean",
+        optional: true,
+        description: "Include archived tickets.",
+      },
+      limit: { type: "number", optional: true, description: "Max results." },
+      offset: { type: "number", optional: true, description: "Offset for pagination." },
+    },
+  },
+  {
+    name: "get_ticket",
+    title: "Get Ticket",
+    description: withTicketChatLinkReminder(
+      "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
+    ),
+    inputSchema: {
+      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+    },
+  },
+  {
+    name: "create_ticket",
+    title: "Create Ticket",
+    description: withTicketChatLinkReminder(
+      "Create a new ticket in the current project. Consider using a description template (list_ticket_templates) to structure the description.",
+    ),
+    inputSchema: {
+      title: { type: "string", description: "Ticket title." },
+      description: { type: "string", optional: true, description: "Ticket description." },
+      templateId: {
+        type: "string",
+        optional: true,
+        description:
+          "Template ID to pre-fill description from a description template. Use list_ticket_templates to see available templates.",
+      },
+      parentId: {
+        type: "string",
+        optional: true,
+        description: "Parent ticket identifier (e.g. 'ZBD-7') for sub-tickets.",
+      },
+      status: {
+        type: "string",
+        optional: true,
+        enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"],
+        description: "Initial status (default: backlog).",
+      },
+      priority: {
+        type: "string",
+        optional: true,
+        enum: ["none", "low", "medium", "high", "urgent"],
+        description: "Priority (default: none).",
+      },
+      labelIds: {
+        type: "array",
+        optional: true,
+        items: { type: "string" },
+        description: "Label IDs to attach.",
+      },
+      dependencyIds: {
+        type: "array",
+        optional: true,
+        items: { type: "string" },
+        description: "Ticket IDs or identifiers this depends on.",
+      },
+      worktree: {
+        type: "string",
+        optional: true,
+        description: "Git worktree/branch name for isolated development.",
+      },
+      acceptanceCriteria: {
+        type: "array",
+        optional: true,
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Criterion text." },
+            status: {
+              type: "string",
+              optional: true,
+              enum: ["pending", "met", "not_met"],
+              description: "Initial status (default: pending).",
+            },
+          },
+        },
+        description: "Acceptance criteria for the ticket.",
+      },
+      implementerModel: {
+        type: "object",
+        optional: true,
+        properties: {
+          provider: {
+            type: "string",
+            enum: ["codex", "claudeAgent"],
+            description: "Provider kind.",
+          },
+          model: { type: "string", description: "Model slug." },
+          profileId: {
+            type: "string",
+            optional: true,
+            description: "Claude profile ID (if applicable).",
+          },
+        },
+        description: "Optional model override for the implementer agent during orchestration.",
+      },
+      reviewerModel: {
+        type: "object",
+        optional: true,
+        properties: {
+          provider: {
+            type: "string",
+            enum: ["codex", "claudeAgent"],
+            description: "Provider kind.",
+          },
+          model: { type: "string", description: "Model slug." },
+          profileId: {
+            type: "string",
+            optional: true,
+            description: "Claude profile ID (if applicable).",
+          },
+        },
+        description: "Optional model override for the reviewer agent during orchestration.",
+      },
+    },
+  },
+  {
+    name: "update_ticket",
+    title: "Update Ticket",
+    description: withTicketChatLinkReminder("Update an existing ticket."),
+    inputSchema: {
+      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to update." },
+      title: { type: "string", optional: true, description: "New title." },
+      description: {
+        type: "string",
+        optional: true,
+        nullable: true,
+        description: "New description.",
+      },
+      status: {
+        type: "string",
+        optional: true,
+        enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"],
+        description: "New status.",
+      },
+      priority: {
+        type: "string",
+        optional: true,
+        enum: ["none", "low", "medium", "high", "urgent"],
+        description: "New priority.",
+      },
+      parentId: {
+        type: "string",
+        optional: true,
+        nullable: true,
+        description: "New parent ticket identifier (e.g. 'ZBD-7').",
+      },
+      sortOrder: { type: "number", optional: true, description: "New sort order." },
+      worktree: {
+        type: "string",
+        optional: true,
+        nullable: true,
+        description: "Git worktree/branch name. Set to null to clear.",
+      },
+      acceptanceCriteria: {
+        type: "array",
+        optional: true,
+        nullable: true,
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Criterion text." },
+            status: {
+              type: "string",
+              optional: true,
+              enum: ["pending", "met", "not_met"],
+              description: "Status (default: pending).",
+            },
+          },
+        },
+        description: "Replace acceptance criteria. Pass null to clear.",
+      },
+      implementerModel: {
+        type: "object",
+        optional: true,
+        nullable: true,
+        properties: {
+          provider: {
+            type: "string",
+            enum: ["codex", "claudeAgent"],
+            description: "Provider kind.",
+          },
+          model: { type: "string", description: "Model slug." },
+          profileId: {
+            type: "string",
+            optional: true,
+            description: "Claude profile ID (if applicable).",
+          },
+        },
+        description: "Model override for the implementer agent. Pass null to clear.",
+      },
+      reviewerModel: {
+        type: "object",
+        optional: true,
+        nullable: true,
+        properties: {
+          provider: {
+            type: "string",
+            enum: ["codex", "claudeAgent"],
+            description: "Provider kind.",
+          },
+          model: { type: "string", description: "Model slug." },
+          profileId: {
+            type: "string",
+            optional: true,
+            description: "Claude profile ID (if applicable).",
+          },
+        },
+        description: "Model override for the reviewer agent. Pass null to clear.",
+      },
+    },
+  },
+  {
+    name: "delete_ticket",
+    title: "Delete Ticket",
+    description: "Delete a ticket and all its data.",
+    inputSchema: {
+      id: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7') to delete." },
+    },
+  },
+  {
+    name: "search_tickets",
+    title: "Search Tickets",
+    description: withTicketChatLinkReminder("Search tickets by text query."),
+    inputSchema: {
+      query: { type: "string", description: "Search query." },
+      limit: { type: "number", optional: true, description: "Max results." },
+    },
+  },
+  {
+    name: "get_ticket_tree",
+    title: "Get Ticket Tree",
+    description: withTicketChatLinkReminder(
+      "Get hierarchical tree of tickets for the current project.",
+    ),
+    inputSchema: {
+      rootTicketId: {
+        type: "string",
+        optional: true,
+        description: "Optional root ticket identifier (e.g. 'ZBD-7').",
+      },
+    },
+  },
+  {
+    name: "reorder_tickets",
+    title: "Reorder Tickets",
+    description: "Reorder tickets by setting sort order values.",
+    inputSchema: {
+      items: {
+        type: "array",
+        description: "Array of {id or identifier, sortOrder} pairs.",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            sortOrder: { type: "number" },
+          },
+        },
+      },
+    },
+  },
+  // ---- Dependencies ----
+  {
+    name: "set_ticket_dependencies",
+    title: "Set Ticket Dependencies",
+    description: "Replace all dependencies for a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      dependsOnTicketIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Ticket identifiers this depends on (e.g. 'ZBD-7').",
+      },
+    },
+  },
+  {
+    name: "add_ticket_dependency",
+    title: "Add Ticket Dependency",
+    description: "Add a dependency between two tickets.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      dependsOnTicketId: {
+        type: "string",
+        description: "The dependency identifier (e.g. 'ZBD-7').",
+      },
+    },
+  },
+  {
+    name: "remove_ticket_dependency",
+    title: "Remove Ticket Dependency",
+    description: "Remove a dependency between two tickets.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      dependsOnTicketId: {
+        type: "string",
+        description: "The dependency identifier (e.g. 'ZBD-7').",
+      },
+    },
+  },
+  // ---- Criteria ----
+  {
+    name: "update_criterion_status",
+    title: "Update Acceptance Criterion Status",
+    description: "Update the status of an acceptance criterion on a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      index: { type: "number", description: "Criterion index (0-based)." },
+      status: { type: "string", enum: ["pending", "met", "not_met"], description: "New status." },
+      reason: {
+        type: "string",
+        optional: true,
+        description: "Optional reason for the status change.",
+      },
+    },
+  },
+  // ---- History ----
+  {
+    name: "get_ticket_history",
+    title: "Get Ticket History",
+    description: "Get audit history for a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      limit: { type: "number", optional: true, description: "Max entries." },
+    },
+  },
+  // ---- Labels ----
+  {
+    name: "list_labels",
+    title: "List Labels",
+    description: "List all labels for the current project.",
+    inputSchema: {},
+  },
+  {
+    name: "create_label",
+    title: "Create Label",
+    description: "Create a new label for the current project.",
+    inputSchema: {
+      name: { type: "string", description: "Label name." },
+      color: { type: "string", description: "Label color (hex, e.g. #ff0000)." },
+    },
+  },
+  {
+    name: "update_label",
+    title: "Update Label",
+    description: "Update an existing label.",
+    inputSchema: {
+      id: { type: "string", description: "The label ID." },
+      name: { type: "string", optional: true, description: "New name." },
+      color: { type: "string", optional: true, description: "New color." },
+    },
+  },
+  {
+    name: "delete_label",
+    title: "Delete Label",
+    description: "Delete a label.",
+    inputSchema: { id: { type: "string", description: "The label ID." } },
+  },
+  {
+    name: "add_ticket_label",
+    title: "Add Label to Ticket",
+    description: "Add a label to a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      labelId: { type: "string", description: "The label ID." },
+    },
+  },
+  {
+    name: "remove_ticket_label",
+    title: "Remove Label from Ticket",
+    description: "Remove a label from a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      labelId: { type: "string", description: "The label ID." },
+    },
+  },
+  // ---- Templates ----
+  {
+    name: "list_ticket_templates",
+    title: "List Ticket Templates",
+    description: "List all description templates available for the current project.",
+    inputSchema: {},
+  },
+  {
+    name: "get_ticket_template",
+    title: "Get Ticket Template",
+    description: "Get a description template by ID.",
+    inputSchema: {
+      id: { type: "string", description: "The template ID." },
+    },
+  },
+  {
+    name: "create_ticket_template",
+    title: "Create Ticket Template",
+    description: "Create a new description template for tickets.",
+    inputSchema: {
+      name: { type: "string", description: "Template name." },
+      description: { type: "string", optional: true, description: "Template description." },
+      body: { type: "string", description: "Template body content." },
+    },
+  },
+  {
+    name: "update_ticket_template",
+    title: "Update Ticket Template",
+    description: "Update an existing description template.",
+    inputSchema: {
+      id: { type: "string", description: "The template ID." },
+      name: { type: "string", optional: true, description: "New template name." },
+      description: { type: "string", optional: true, description: "New template description." },
+      body: { type: "string", optional: true, description: "New template body content." },
+    },
+  },
+  {
+    name: "delete_ticket_template",
+    title: "Delete Ticket Template",
+    description: "Delete a description template.",
+    inputSchema: {
+      id: { type: "string", description: "The template ID." },
+    },
+  },
+  // ---- Comments ----
+  {
+    name: "list_ticket_comments",
+    title: "List Ticket Comments",
+    description: "List comments on a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      limit: { type: "number", optional: true, description: "Max comments." },
+    },
+  },
+  {
+    name: "create_comment",
+    title: "Create Comment",
+    description: withTicketChatLinkReminder("Add a comment to a ticket."),
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      parentId: {
+        type: "string",
+        optional: true,
+        description: "Parent comment ID for threaded replies.",
+      },
+      authorType: { type: "string", enum: ["human", "llm"], description: "Author type." },
+      authorName: { type: "string", description: "Author display name." },
+      authorModel: {
+        type: "string",
+        optional: true,
+        description: "Model name if authorType is 'llm'.",
+      },
+      body: { type: "string", description: "Comment body text." },
+    },
+  },
+  {
+    name: "update_comment",
+    title: "Update Comment",
+    description: "Update a comment's body.",
+    inputSchema: {
+      id: { type: "string", description: "The comment ID." },
+      body: { type: "string", description: "New body text." },
+    },
+  },
+  {
+    name: "delete_comment",
+    title: "Delete Comment",
+    description: "Delete a comment.",
+    inputSchema: { id: { type: "string", description: "The comment ID." } },
+  },
+  // ---- Artifacts ----
+  {
+    name: "list_ticket_artifacts",
+    title: "List Ticket Artifacts",
+    description: "List artifacts attached to a ticket.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+    },
+  },
+  {
+    name: "create_artifact",
+    title: "Create Artifact",
+    description: "Attach an artifact to a ticket or comment.",
+    inputSchema: {
+      ticketId: {
+        type: "string",
+        optional: true,
+        description: "The ticket identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId.",
+      },
+      commentId: {
+        type: "string",
+        optional: true,
+        description: "The comment ID (mutually exclusive with ticketId).",
+      },
+      type: {
+        type: "string",
+        enum: ["figma_url", "mermaid", "image"],
+        description: "Artifact type.",
+      },
+      title: { type: "string", optional: true, description: "Display title." },
+      payload: {
+        type: "object",
+        description:
+          "Type-specific payload (e.g. {url} for figma_url, {source} for mermaid, {url, alt} for image).",
+      },
+    },
+  },
+  {
+    name: "delete_artifact",
+    title: "Delete Artifact",
+    description: "Delete an artifact.",
+    inputSchema: { id: { type: "string", description: "The artifact ID." } },
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Tool handlers
+// ---------------------------------------------------------------------------
+
+type ToolContext = {
+  ticketing: TicketingServiceShape;
+  projectId: ProjectId;
+  threadId: ThreadId;
+};
+
+function toolHandlers(ctx: ToolContext) {
+  const { ticketing, projectId, threadId } = ctx;
 
   /** Resolve a ticket UUID or human-readable identifier within the current project. */
-  const resolve = async (idOrIdentifier: string) => {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      idOrIdentifier,
-    );
-    const ticket = isUuid
-      ? await bridge.run(
-          ticketing.getById({ id: idOrIdentifier as never, projectId: context.projectId }),
-        )
-      : await bridge.run(
-          ticketing.getByIdentifier({
-            identifier: idOrIdentifier,
-            projectId: context.projectId,
-          }),
-        );
-    return ticket.id;
-  };
+  const resolveId = (idOrIdentifier: string) =>
+    Effect.gen(function* () {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        idOrIdentifier,
+      );
+      const ticket = isUuid
+        ? yield* ticketing.getById({ id: idOrIdentifier as never, projectId })
+        : yield* ticketing.getByIdentifier({ identifier: idOrIdentifier, projectId });
+      return ticket.id;
+    });
 
-  /** Resolve identifiers and transform a response object for MCP output. */
-  async function mcpJson(response: unknown): Promise<string> {
-    const uuids = collectTicketUuids(response);
-    // Batch-resolve any ticket UUIDs we haven't seen
-    const unique = [...new Set(uuids)].filter(Boolean);
-    const idMap: IdMap =
-      unique.length > 0
-        ? await bridge.run(ticketing.resolveIdentifiers(unique))
-        : new Map<string, string>();
-    return JSON.stringify(transformForMcp(response, idMap), null, 2);
-  }
+  /** Resolve identifiers and transform a response object for output. */
+  const resolveJson = (response: unknown) =>
+    Effect.gen(function* () {
+      const uuids = collectTicketUuids(response);
+      const unique = [...new Set(uuids)].filter(Boolean);
+      const idMap: IdMap =
+        unique.length > 0 ? yield* ticketing.resolveIdentifiers(unique) : new Map<string, string>();
+      return transformForResponse(response, idMap);
+    });
 
-  // ---- Tickets ----
+  return {
+    // ---- Tickets ----
 
-  server.registerTool(
-    "list_tickets",
-    {
-      title: "List Tickets",
-      description: withTicketChatLinkReminder(
-        "List tickets for the current project with optional filters.",
-      ),
-      inputSchema: {
-        status: z
-          .array(
-            z.enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"]),
-          )
-          .optional()
-          .describe("Filter by status(es)."),
-        priority: z
-          .array(z.enum(["none", "low", "medium", "high", "urgent"]))
-          .optional()
-          .describe("Filter by priority(ies)."),
-        parentId: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("Filter by parent ticket identifier (e.g. 'ZBD-7')."),
-        labelId: z.string().optional().describe("Filter by label ID."),
-        search: z.string().optional().describe("Search in title/description/identifier."),
-        includeArchived: z.boolean().optional().describe("Include archived tickets."),
-        limit: z.number().int().positive().optional().describe("Max results."),
-        offset: z.number().int().nonnegative().optional().describe("Offset for pagination."),
-      },
-    },
-    async ({ status, priority, parentId, labelId, search, includeArchived, limit, offset }) => {
-      try {
+    list_tickets: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const status = input.status as string[] | undefined;
+        const priority = input.priority as string[] | undefined;
+        const parentId = input.parentId as string | null | undefined;
+        const labelId = input.labelId as string | undefined;
+        const search = input.search as string | undefined;
+        const includeArchived = input.includeArchived as boolean | undefined;
+        const limit = input.limit as number | undefined;
+        const offset = input.offset as number | undefined;
+
         const resolvedParentId =
           parentId !== undefined
             ? parentId
-              ? ((await resolve(parentId)) as never)
+              ? ((yield* resolveId(parentId)) as never)
               : (null as never)
             : undefined;
-        const tickets = await bridge.run(
-          ticketing.list({
-            projectId: context.projectId,
-            ...(status ? { status: status as never } : {}),
-            ...(priority ? { priority: priority as never } : {}),
-            ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
-            ...(labelId ? { labelId: LabelId.makeUnsafe(labelId) } : {}),
-            ...(search ? { search } : {}),
-            ...(includeArchived !== undefined ? { includeArchived } : {}),
-            ...(limit ? { limit } : {}),
-            ...(offset ? { offset } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(tickets) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to list tickets: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+        const tickets = yield* ticketing.list({
+          projectId,
+          ...(status ? { status: status as never } : {}),
+          ...(priority ? { priority: priority as never } : {}),
+          ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
+          ...(labelId ? { labelId: LabelId.makeUnsafe(labelId) } : {}),
+          ...(search ? { search } : {}),
+          ...(includeArchived !== undefined ? { includeArchived } : {}),
+          ...(limit ? { limit } : {}),
+          ...(offset ? { offset } : {}),
+        });
+        return respondOk(yield* resolveJson(tickets));
+      }),
 
-  server.registerTool(
-    "get_ticket",
-    {
-      title: "Get Ticket",
-      description: withTicketChatLinkReminder(
-        "Get full details of a ticket by ID or identifier (e.g. 'ZBD-7').",
-      ),
-      inputSchema: {
-        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ id }) => {
-      try {
-        const resolved = await resolve(id);
-        const ticket = await bridge.run(
-          ticketing.getById({ id: resolved, projectId: context.projectId }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to get ticket '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+    get_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const resolved = yield* resolveId(id);
+        const ticket = yield* ticketing.getById({ id: resolved, projectId });
+        return respondOk(yield* resolveJson(ticket));
+      }),
 
-  server.registerTool(
-    "create_ticket",
-    {
-      title: "Create Ticket",
-      description: withTicketChatLinkReminder(
-        "Create a new ticket in the current project. Consider using a description template (list_ticket_templates) to structure the description.",
-      ),
-      inputSchema: {
-        title: z.string().describe("Ticket title."),
-        description: z.string().optional().describe("Ticket description."),
-        templateId: z
-          .string()
-          .optional()
-          .describe(
-            "Template ID to pre-fill description from a description template. Use list_ticket_templates to see available templates.",
-          ),
-        parentId: z
-          .string()
-          .optional()
-          .describe("Parent ticket identifier (e.g. 'ZBD-7') for sub-tickets."),
-        status: z
-          .enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"])
-          .optional()
-          .describe("Initial status (default: backlog)."),
-        priority: z
-          .enum(["none", "low", "medium", "high", "urgent"])
-          .optional()
-          .describe("Priority (default: none)."),
-        labelIds: z.array(z.string()).optional().describe("Label IDs to attach."),
-        dependencyIds: z
-          .array(z.string())
-          .optional()
-          .describe("Ticket IDs or identifiers this depends on."),
-        worktree: z
-          .string()
-          .optional()
-          .describe("Git worktree/branch name for isolated development."),
-        acceptanceCriteria: z
-          .array(
-            z.object({
-              text: z.string().describe("Criterion text."),
-              status: z
-                .enum(["pending", "met", "not_met"])
-                .optional()
-                .default("pending")
-                .describe("Initial status (default: pending)."),
-            }),
-          )
-          .optional()
-          .describe("Acceptance criteria for the ticket."),
-        implementerModel: z
-          .object({
-            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
-            model: z.string().describe("Model slug."),
-            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
-          })
-          .optional()
-          .describe("Optional model override for the implementer agent during orchestration."),
-        reviewerModel: z
-          .object({
-            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
-            model: z.string().describe("Model slug."),
-            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
-          })
-          .optional()
-          .describe("Optional model override for the reviewer agent during orchestration."),
-      },
-    },
-    async ({
-      title,
-      description,
-      templateId,
-      parentId,
-      status,
-      priority,
-      labelIds,
-      dependencyIds,
-      worktree,
-      acceptanceCriteria,
-      implementerModel,
-      reviewerModel,
-    }) => {
-      try {
-        const resolvedParentId = parentId ? await resolve(parentId) : undefined;
+    create_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const title = input.title as string;
+        const description = input.description as string | undefined;
+        const templateId = input.templateId as string | undefined;
+        const parentId = input.parentId as string | undefined;
+        const status = input.status as string | undefined;
+        const priority = input.priority as string | undefined;
+        const labelIds = input.labelIds as string[] | undefined;
+        const dependencyIds = input.dependencyIds as string[] | undefined;
+        const worktree = input.worktree as string | undefined;
+        const acceptanceCriteria = input.acceptanceCriteria as
+          | Array<{ text: string; status?: string }>
+          | undefined;
+        const implementerModel = input.implementerModel as Record<string, unknown> | undefined;
+        const reviewerModel = input.reviewerModel as Record<string, unknown> | undefined;
+
+        const resolvedParentId = parentId ? yield* resolveId(parentId) : undefined;
         const resolvedDepIds = dependencyIds
-          ? await Promise.all(dependencyIds.map(resolve))
+          ? yield* Effect.all(dependencyIds.map(resolveId))
           : undefined;
-        const ticket = await bridge.run(
-          ticketing.create({
-            projectId: context.projectId,
-            title,
-            ...(description ? { description } : {}),
-            ...(templateId ? { templateId: TemplateId.makeUnsafe(templateId) } : {}),
-            ...(resolvedParentId ? { parentId: resolvedParentId } : {}),
-            ...(status ? { status: status as never } : {}),
-            ...(priority ? { priority: priority as never } : {}),
-            ...(labelIds ? { labelIds: labelIds.map((id) => LabelId.makeUnsafe(id)) } : {}),
-            ...(resolvedDepIds ? { dependencyIds: resolvedDepIds } : {}),
-            ...(worktree ? { worktree } : {}),
-            ...(acceptanceCriteria
-              ? {
-                  acceptanceCriteria: acceptanceCriteria.map((c) => ({
-                    text: c.text,
-                    status: c.status ?? ("pending" as const),
-                    reason: null,
-                    verifiedBy: null,
-                    verifiedAt: null,
-                  })),
-                }
-              : {}),
-            ...(implementerModel ? { implementerModelOverride: implementerModel as never } : {}),
-            ...(reviewerModel ? { reviewerModelOverride: reviewerModel as never } : {}),
-            ...(context.threadId ? { originThreadId: context.threadId } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to create ticket: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+        const ticket = yield* ticketing.create({
+          projectId,
+          title,
+          ...(description ? { description } : {}),
+          ...(templateId ? { templateId: TemplateId.makeUnsafe(templateId) } : {}),
+          ...(resolvedParentId ? { parentId: resolvedParentId } : {}),
+          ...(status ? { status: status as never } : {}),
+          ...(priority ? { priority: priority as never } : {}),
+          ...(labelIds ? { labelIds: labelIds.map((id) => LabelId.makeUnsafe(id)) } : {}),
+          ...(resolvedDepIds ? { dependencyIds: resolvedDepIds } : {}),
+          ...(worktree ? { worktree } : {}),
+          ...(acceptanceCriteria
+            ? {
+                acceptanceCriteria: acceptanceCriteria.map((c) => ({
+                  text: c.text,
+                  status: (c.status as "pending" | "met" | "not_met") ?? ("pending" as const),
+                  reason: null,
+                  verifiedBy: null,
+                  verifiedAt: null,
+                })),
+              }
+            : {}),
+          ...(implementerModel ? { implementerModelOverride: implementerModel as never } : {}),
+          ...(reviewerModel ? { reviewerModelOverride: reviewerModel as never } : {}),
+          ...(threadId ? { originThreadId: threadId } : {}),
+        });
+        return respondOk(yield* resolveJson(ticket));
+      }),
 
-  server.registerTool(
-    "update_ticket",
-    {
-      title: "Update Ticket",
-      description: withTicketChatLinkReminder("Update an existing ticket."),
-      inputSchema: {
-        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7') to update."),
-        title: z.string().optional().describe("New title."),
-        description: z.string().optional().nullable().describe("New description."),
-        status: z
-          .enum(["backlog", "todo", "in_progress", "blocked", "in_review", "done", "canceled"])
-          .optional()
-          .describe("New status."),
-        priority: z
-          .enum(["none", "low", "medium", "high", "urgent"])
-          .optional()
-          .describe("New priority."),
-        parentId: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("New parent ticket identifier (e.g. 'ZBD-7')."),
-        sortOrder: z.number().optional().describe("New sort order."),
-        worktree: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("Git worktree/branch name. Set to null to clear."),
-        acceptanceCriteria: z
-          .array(
-            z.object({
-              text: z.string().describe("Criterion text."),
-              status: z
-                .enum(["pending", "met", "not_met"])
-                .optional()
-                .default("pending")
-                .describe("Status (default: pending)."),
-            }),
-          )
-          .optional()
-          .nullable()
-          .describe("Replace acceptance criteria. Pass null to clear."),
-        implementerModel: z
-          .object({
-            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
-            model: z.string().describe("Model slug."),
-            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
-          })
-          .optional()
-          .nullable()
-          .describe("Model override for the implementer agent. Pass null to clear."),
-        reviewerModel: z
-          .object({
-            provider: z.enum(["codex", "claudeAgent"]).describe("Provider kind."),
-            model: z.string().describe("Model slug."),
-            profileId: z.string().optional().describe("Claude profile ID (if applicable)."),
-          })
-          .optional()
-          .nullable()
-          .describe("Model override for the reviewer agent. Pass null to clear."),
-      },
-    },
-    async ({
-      id,
-      title,
-      description,
-      status,
-      priority,
-      parentId,
-      sortOrder,
-      worktree,
-      acceptanceCriteria,
-      implementerModel,
-      reviewerModel,
-    }) => {
-      try {
-        const resolvedId = await resolve(id);
+    update_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const title = input.title as string | undefined;
+        const description = input.description as string | null | undefined;
+        const status = input.status as string | undefined;
+        const priority = input.priority as string | undefined;
+        const parentId = input.parentId as string | null | undefined;
+        const sortOrder = input.sortOrder as number | undefined;
+        const worktree = input.worktree as string | null | undefined;
+        const acceptanceCriteria = input.acceptanceCriteria as
+          | Array<{ text: string; status?: string }>
+          | null
+          | undefined;
+        const implementerModel = input.implementerModel as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        const reviewerModel = input.reviewerModel as Record<string, unknown> | null | undefined;
+
+        const resolvedId = yield* resolveId(id);
         const resolvedParentId =
           parentId !== undefined
             ? parentId
-              ? ((await resolve(parentId)) as never)
+              ? ((yield* resolveId(parentId)) as never)
               : null
             : undefined;
         const mappedCriteria =
@@ -535,861 +860,392 @@ function createTicketingMcpServer(
             ? acceptanceCriteria
               ? acceptanceCriteria.map((c) => ({
                   text: c.text,
-                  status: c.status ?? ("pending" as const),
+                  status: (c.status as "pending" | "met" | "not_met") ?? ("pending" as const),
                   reason: null,
                   verifiedBy: null,
                   verifiedAt: null,
                 }))
               : null
             : undefined;
-        const ticket = await bridge.run(
-          ticketing.update({
-            id: resolvedId,
-            ...(title ? { title } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(status ? { status: status as never } : {}),
-            ...(priority ? { priority: priority as never } : {}),
-            ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
-            ...(sortOrder !== undefined ? { sortOrder } : {}),
-            ...(worktree !== undefined ? { worktree } : {}),
-            ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
-            ...(implementerModel !== undefined
-              ? { implementerModelOverride: implementerModel as never }
-              : {}),
-            ...(reviewerModel !== undefined
-              ? { reviewerModelOverride: reviewerModel as never }
-              : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to update ticket '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+        const ticket = yield* ticketing.update({
+          id: resolvedId,
+          ...(title ? { title } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(status ? { status: status as never } : {}),
+          ...(priority ? { priority: priority as never } : {}),
+          ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
+          ...(sortOrder !== undefined ? { sortOrder } : {}),
+          ...(worktree !== undefined ? { worktree } : {}),
+          ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
+          ...(implementerModel !== undefined
+            ? { implementerModelOverride: implementerModel as never }
+            : {}),
+          ...(reviewerModel !== undefined ? { reviewerModelOverride: reviewerModel as never } : {}),
+        });
+        return respondOk(yield* resolveJson(ticket));
+      }),
 
-  server.registerTool(
-    "delete_ticket",
-    {
-      title: "Delete Ticket",
-      description: "Delete a ticket and all its data.",
-      inputSchema: {
-        id: z.string().describe("The ticket identifier (e.g. 'ZBD-7') to delete."),
-      },
-    },
-    async ({ id }) => {
-      try {
-        const resolvedId = await resolve(id);
-        await bridge.run(ticketing.delete({ id: resolvedId }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to delete ticket '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+    delete_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const resolvedId = yield* resolveId(id);
+        yield* ticketing.delete({ id: resolvedId });
+        return respondOk({ deleted: true });
+      }),
 
-  server.registerTool(
-    "search_tickets",
-    {
-      title: "Search Tickets",
-      description: withTicketChatLinkReminder("Search tickets by text query."),
-      inputSchema: {
-        query: z.string().describe("Search query."),
-        limit: z.number().int().positive().optional().describe("Max results."),
-      },
-    },
-    async ({ query, limit }) => {
-      try {
-        const tickets = await bridge.run(
-          ticketing.search({
-            projectId: context.projectId,
-            query,
-            ...(limit ? { limit } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(tickets) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to search tickets: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+    search_tickets: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const query = input.query as string;
+        const limit = input.limit as number | undefined;
+        const tickets = yield* ticketing.search({
+          projectId,
+          query,
+          ...(limit ? { limit } : {}),
+        });
+        return respondOk(yield* resolveJson(tickets));
+      }),
 
-  server.registerTool(
-    "get_ticket_tree",
-    {
-      title: "Get Ticket Tree",
-      description: withTicketChatLinkReminder(
-        "Get hierarchical tree of tickets for the current project.",
-      ),
-      inputSchema: {
-        rootTicketId: z
-          .string()
-          .optional()
-          .describe("Optional root ticket identifier (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ rootTicketId }) => {
-      try {
-        const resolvedRoot = rootTicketId ? await resolve(rootTicketId) : undefined;
-        const tree = await bridge.run(
-          ticketing.getTree({
-            projectId: context.projectId,
-            ...(resolvedRoot ? { rootTicketId: resolvedRoot } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(tree) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to get ticket tree: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+    get_ticket_tree: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const rootTicketId = input.rootTicketId as string | undefined;
+        const resolvedRoot = rootTicketId ? yield* resolveId(rootTicketId) : undefined;
+        const tree = yield* ticketing.getTree({
+          projectId,
+          ...(resolvedRoot ? { rootTicketId: resolvedRoot } : {}),
+        });
+        return respondOk(yield* resolveJson(tree));
+      }),
 
-  server.registerTool(
-    "reorder_tickets",
-    {
-      title: "Reorder Tickets",
-      description: "Reorder tickets by setting sort order values.",
-      inputSchema: {
-        items: z
-          .array(z.object({ id: z.string(), sortOrder: z.number() }))
-          .describe("Array of {id or identifier, sortOrder} pairs."),
-      },
-    },
-    async ({ items }) => {
-      try {
-        const resolved = await Promise.all(
-          items.map(async (i) => ({ id: await resolve(i.id), sortOrder: i.sortOrder })),
-        );
-        await bridge.run(ticketing.reorder({ items: resolved }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ reordered: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to reorder tickets: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Dependencies ----
-
-  server.registerTool(
-    "set_ticket_dependencies",
-    {
-      title: "Set Ticket Dependencies",
-      description: "Replace all dependencies for a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        dependsOnTicketIds: z
-          .array(z.string())
-          .describe("Ticket identifiers this depends on (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ ticketId, dependsOnTicketIds }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const resolvedDepIds = await Promise.all(dependsOnTicketIds.map(resolve));
-        await bridge.run(
-          ticketing.setDependencies({
-            ticketId: resolvedTicketId,
-            dependsOnTicketIds: resolvedDepIds,
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ updated: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to set dependencies: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "add_ticket_dependency",
-    {
-      title: "Add Ticket Dependency",
-      description: "Add a dependency between two tickets.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        dependsOnTicketId: z.string().describe("The dependency identifier (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ ticketId, dependsOnTicketId }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const resolvedDepId = await resolve(dependsOnTicketId);
-        await bridge.run(
-          ticketing.addDependency({
-            ticketId: resolvedTicketId,
-            dependsOnTicketId: resolvedDepId,
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ added: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to add dependency: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "remove_ticket_dependency",
-    {
-      title: "Remove Ticket Dependency",
-      description: "Remove a dependency between two tickets.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        dependsOnTicketId: z.string().describe("The dependency identifier (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ ticketId, dependsOnTicketId }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const resolvedDepId = await resolve(dependsOnTicketId);
-        await bridge.run(
-          ticketing.removeDependency({
-            ticketId: resolvedTicketId,
-            dependsOnTicketId: resolvedDepId,
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ removed: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to remove dependency: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Criteria ----
-
-  server.registerTool(
-    "update_criterion_status",
-    {
-      title: "Update Acceptance Criterion Status",
-      description: "Update the status of an acceptance criterion on a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        index: z.number().int().nonnegative().describe("Criterion index (0-based)."),
-        status: z.enum(["pending", "met", "not_met"]).describe("New status."),
-        reason: z.string().optional().describe("Optional reason for the status change."),
-      },
-    },
-    async ({ ticketId, index, status, reason }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const ticket = await bridge.run(
-          ticketing.updateCriterionStatus({
-            ticketId: resolvedTicketId,
-            index,
-            status,
-            ...(reason ? { reason } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(ticket) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to update criterion: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- History ----
-
-  server.registerTool(
-    "get_ticket_history",
-    {
-      title: "Get Ticket History",
-      description: "Get audit history for a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        limit: z.number().int().positive().optional().describe("Max entries."),
-      },
-    },
-    async ({ ticketId, limit }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const history = await bridge.run(
-          ticketing.getHistory({
-            ticketId: resolvedTicketId,
-            ...(limit ? { limit } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(history) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to get history: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Labels ----
-
-  server.registerTool(
-    "list_labels",
-    {
-      title: "List Labels",
-      description: "List all labels for the current project.",
-      inputSchema: {},
-    },
-    async () => {
-      try {
-        const labels = await bridge.run(ticketing.listLabels({ projectId: context.projectId }));
-        return { content: [{ type: "text" as const, text: JSON.stringify(labels, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to list labels: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "create_label",
-    {
-      title: "Create Label",
-      description: "Create a new label for the current project.",
-      inputSchema: {
-        name: z.string().describe("Label name."),
-        color: z.string().describe("Label color (hex, e.g. #ff0000)."),
-      },
-    },
-    async ({ name, color }) => {
-      try {
-        const label = await bridge.run(
-          ticketing.createLabel({ projectId: context.projectId, name, color }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(label, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to create label: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "update_label",
-    {
-      title: "Update Label",
-      description: "Update an existing label.",
-      inputSchema: {
-        id: z.string().describe("The label ID."),
-        name: z.string().optional().describe("New name."),
-        color: z.string().optional().describe("New color."),
-      },
-    },
-    async ({ id, name, color }) => {
-      try {
-        const label = await bridge.run(
-          ticketing.updateLabel({
-            id: LabelId.makeUnsafe(id),
-            ...(name ? { name } : {}),
-            ...(color ? { color } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(label, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to update label '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "delete_label",
-    {
-      title: "Delete Label",
-      description: "Delete a label.",
-      inputSchema: { id: z.string().describe("The label ID.") },
-    },
-    async ({ id }) => {
-      try {
-        await bridge.run(ticketing.deleteLabel({ id: LabelId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to delete label '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "add_ticket_label",
-    {
-      title: "Add Label to Ticket",
-      description: "Add a label to a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        labelId: z.string().describe("The label ID."),
-      },
-    },
-    async ({ ticketId, labelId }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        await bridge.run(
-          ticketing.addTicketLabel({
-            ticketId: resolvedTicketId,
-            labelId: LabelId.makeUnsafe(labelId),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ added: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to add label: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "remove_ticket_label",
-    {
-      title: "Remove Label from Ticket",
-      description: "Remove a label from a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        labelId: z.string().describe("The label ID."),
-      },
-    },
-    async ({ ticketId, labelId }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        await bridge.run(
-          ticketing.removeTicketLabel({
-            ticketId: resolvedTicketId,
-            labelId: LabelId.makeUnsafe(labelId),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ removed: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to remove label: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Templates ----
-
-  server.registerTool(
-    "list_ticket_templates",
-    {
-      title: "List Ticket Templates",
-      description: "List all description templates available for the current project.",
-      inputSchema: {},
-    },
-    async () => {
-      try {
-        const templates = await bridge.run(
-          ticketing.listTemplates({ projectId: context.projectId }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(templates, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to list templates: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "get_ticket_template",
-    {
-      title: "Get Ticket Template",
-      description: "Get a description template by ID.",
-      inputSchema: {
-        id: z.string().describe("The template ID."),
-      },
-    },
-    async ({ id }) => {
-      try {
-        const template = await bridge.run(ticketing.getTemplate({ id: TemplateId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to get template '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "create_ticket_template",
-    {
-      title: "Create Ticket Template",
-      description: "Create a new description template for tickets.",
-      inputSchema: {
-        name: z.string().describe("Template name."),
-        description: z.string().optional().describe("Template description."),
-        body: z.string().describe("Template body content."),
-      },
-    },
-    async ({ name, description, body }) => {
-      try {
-        const template = await bridge.run(
-          ticketing.createTemplate({
-            projectId: context.projectId,
-            name,
-            ...(description ? { description } : {}),
-            body,
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to create template: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "update_ticket_template",
-    {
-      title: "Update Ticket Template",
-      description: "Update an existing description template.",
-      inputSchema: {
-        id: z.string().describe("The template ID."),
-        name: z.string().optional().describe("New template name."),
-        description: z.string().optional().describe("New template description."),
-        body: z.string().optional().describe("New template body content."),
-      },
-    },
-    async ({ id, name, description, body }) => {
-      try {
-        const template = await bridge.run(
-          ticketing.updateTemplate({
-            id: TemplateId.makeUnsafe(id),
-            ...(name ? { name } : {}),
-            ...(description !== undefined ? { description } : {}),
-            ...(body ? { body } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: JSON.stringify(template, null, 2) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to update template '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "delete_ticket_template",
-    {
-      title: "Delete Ticket Template",
-      description: "Delete a description template.",
-      inputSchema: {
-        id: z.string().describe("The template ID."),
-      },
-    },
-    async ({ id }) => {
-      try {
-        await bridge.run(ticketing.deleteTemplate({ id: TemplateId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to delete template '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Comments ----
-
-  server.registerTool(
-    "list_ticket_comments",
-    {
-      title: "List Ticket Comments",
-      description: "List comments on a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        limit: z.number().int().positive().optional().describe("Max comments."),
-      },
-    },
-    async ({ ticketId, limit }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const comments = await bridge.run(
-          ticketing.listComments({
-            ticketId: resolvedTicketId,
-            ...(limit ? { limit } : {}),
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(comments) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to list comments: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "create_comment",
-    {
-      title: "Create Comment",
-      description: withTicketChatLinkReminder("Add a comment to a ticket."),
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-        parentId: z.string().optional().describe("Parent comment ID for threaded replies."),
-        authorType: z.enum(["human", "llm"]).describe("Author type."),
-        authorName: z.string().describe("Author display name."),
-        authorModel: z.string().optional().describe("Model name if authorType is 'llm'."),
-        body: z.string().describe("Comment body text."),
-      },
-    },
-    async ({ ticketId, parentId, authorType, authorName, authorModel, body }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const comment = await bridge.run(
-          ticketing.createComment({
-            ticketId: resolvedTicketId,
-            ...(parentId ? { parentId: CommentId.makeUnsafe(parentId) } : {}),
-            authorType,
-            authorName,
-            ...(authorModel ? { authorModel } : {}),
-            body,
-          }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(comment) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to create comment: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "update_comment",
-    {
-      title: "Update Comment",
-      description: "Update a comment's body.",
-      inputSchema: {
-        id: z.string().describe("The comment ID."),
-        body: z.string().describe("New body text."),
-      },
-    },
-    async ({ id, body }) => {
-      try {
-        const comment = await bridge.run(
-          ticketing.updateComment({ id: CommentId.makeUnsafe(id), body }),
-        );
-        return { content: [{ type: "text" as const, text: await mcpJson(comment) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to update comment '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "delete_comment",
-    {
-      title: "Delete Comment",
-      description: "Delete a comment.",
-      inputSchema: { id: z.string().describe("The comment ID.") },
-    },
-    async ({ id }) => {
-      try {
-        await bridge.run(ticketing.deleteComment({ id: CommentId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to delete comment '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  // ---- Artifacts ----
-
-  server.registerTool(
-    "list_ticket_artifacts",
-    {
-      title: "List Ticket Artifacts",
-      description: "List artifacts attached to a ticket.",
-      inputSchema: {
-        ticketId: z.string().describe("The ticket identifier (e.g. 'ZBD-7')."),
-      },
-    },
-    async ({ ticketId }) => {
-      try {
-        const resolvedTicketId = await resolve(ticketId);
-        const artifacts = await bridge.run(ticketing.listArtifacts({ ticketId: resolvedTicketId }));
-        return { content: [{ type: "text" as const, text: await mcpJson(artifacts) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to list artifacts: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
-
-  server.registerTool(
-    "create_artifact",
-    {
-      title: "Create Artifact",
-      description: "Attach an artifact to a ticket or comment.",
-      inputSchema: {
-        ticketId: z
-          .string()
-          .optional()
-          .describe("The ticket identifier (e.g. 'ZBD-7'). Mutually exclusive with commentId."),
-        commentId: z
-          .string()
-          .optional()
-          .describe("The comment ID (mutually exclusive with ticketId)."),
-        type: z.enum(["figma_url", "mermaid", "image"]).describe("Artifact type."),
-        title: z.string().optional().describe("Display title."),
-        payload: z
-          .any()
-          .describe(
-            "Type-specific payload (e.g. {url} for figma_url, {source} for mermaid, {url, alt} for image).",
+    reorder_tickets: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const items = input.items as Array<{ id: string; sortOrder: number }>;
+        const resolved = yield* Effect.all(
+          items.map((i) =>
+            Effect.gen(function* () {
+              return { id: yield* resolveId(i.id), sortOrder: i.sortOrder };
+            }),
           ),
-      },
-    },
-    async ({ ticketId, commentId, type, title, payload }) => {
-      try {
-        const resolvedTicketId = ticketId ? await resolve(ticketId) : undefined;
-        const artifact = await bridge.run(
-          ticketing.createArtifact({
-            ...(resolvedTicketId ? { ticketId: resolvedTicketId } : {}),
-            ...(commentId ? { commentId: CommentId.makeUnsafe(commentId) } : {}),
-            type,
-            ...(title ? { title } : {}),
-            payload,
-          }),
         );
-        return { content: [{ type: "text" as const, text: await mcpJson(artifact) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to create artifact: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+        yield* ticketing.reorder({ items: resolved });
+        return respondOk({ reordered: true });
+      }),
 
-  server.registerTool(
-    "delete_artifact",
-    {
-      title: "Delete Artifact",
-      description: "Delete an artifact.",
-      inputSchema: { id: z.string().describe("The artifact ID.") },
-    },
-    async ({ id }) => {
-      try {
-        await bridge.run(ticketing.deleteArtifact({ id: ArtifactId.makeUnsafe(id) }));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
-      } catch (error) {
-        return mcpError(
-          `Failed to delete artifact '${id}': ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    },
-  );
+    // ---- Dependencies ----
 
-  return server;
+    set_ticket_dependencies: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const dependsOnTicketIds = input.dependsOnTicketIds as string[];
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const resolvedDepIds = yield* Effect.all(dependsOnTicketIds.map(resolveId));
+        yield* ticketing.setDependencies({
+          ticketId: resolvedTicketId,
+          dependsOnTicketIds: resolvedDepIds,
+        });
+        return respondOk({ updated: true });
+      }),
+
+    add_ticket_dependency: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const dependsOnTicketId = input.dependsOnTicketId as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const resolvedDepId = yield* resolveId(dependsOnTicketId);
+        yield* ticketing.addDependency({
+          ticketId: resolvedTicketId,
+          dependsOnTicketId: resolvedDepId,
+        });
+        return respondOk({ added: true });
+      }),
+
+    remove_ticket_dependency: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const dependsOnTicketId = input.dependsOnTicketId as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const resolvedDepId = yield* resolveId(dependsOnTicketId);
+        yield* ticketing.removeDependency({
+          ticketId: resolvedTicketId,
+          dependsOnTicketId: resolvedDepId,
+        });
+        return respondOk({ removed: true });
+      }),
+
+    // ---- Criteria ----
+
+    update_criterion_status: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const index = input.index as number;
+        const status = input.status as "pending" | "met" | "not_met";
+        const reason = input.reason as string | undefined;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const ticket = yield* ticketing.updateCriterionStatus({
+          ticketId: resolvedTicketId,
+          index,
+          status,
+          ...(reason ? { reason } : {}),
+        });
+        return respondOk(yield* resolveJson(ticket));
+      }),
+
+    // ---- History ----
+
+    get_ticket_history: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const limit = input.limit as number | undefined;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const history = yield* ticketing.getHistory({
+          ticketId: resolvedTicketId,
+          ...(limit ? { limit } : {}),
+        });
+        return respondOk(yield* resolveJson(history));
+      }),
+
+    // ---- Labels ----
+
+    list_labels: (_input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const labels = yield* ticketing.listLabels({ projectId });
+        return respondOk(labels);
+      }),
+
+    create_label: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const name = input.name as string;
+        const color = input.color as string;
+        const label = yield* ticketing.createLabel({ projectId, name, color });
+        return respondOk(label);
+      }),
+
+    update_label: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const name = input.name as string | undefined;
+        const color = input.color as string | undefined;
+        const label = yield* ticketing.updateLabel({
+          id: LabelId.makeUnsafe(id),
+          ...(name ? { name } : {}),
+          ...(color ? { color } : {}),
+        });
+        return respondOk(label);
+      }),
+
+    delete_label: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        yield* ticketing.deleteLabel({ id: LabelId.makeUnsafe(id) });
+        return respondOk({ deleted: true });
+      }),
+
+    add_ticket_label: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const labelId = input.labelId as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        yield* ticketing.addTicketLabel({
+          ticketId: resolvedTicketId,
+          labelId: LabelId.makeUnsafe(labelId),
+        });
+        return respondOk({ added: true });
+      }),
+
+    remove_ticket_label: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const labelId = input.labelId as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        yield* ticketing.removeTicketLabel({
+          ticketId: resolvedTicketId,
+          labelId: LabelId.makeUnsafe(labelId),
+        });
+        return respondOk({ removed: true });
+      }),
+
+    // ---- Templates ----
+
+    list_ticket_templates: (_input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const templates = yield* ticketing.listTemplates({ projectId });
+        return respondOk(templates);
+      }),
+
+    get_ticket_template: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const template = yield* ticketing.getTemplate({ id: TemplateId.makeUnsafe(id) });
+        return respondOk(template);
+      }),
+
+    create_ticket_template: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const name = input.name as string;
+        const description = input.description as string | undefined;
+        const body = input.body as string;
+        const template = yield* ticketing.createTemplate({
+          projectId,
+          name,
+          ...(description ? { description } : {}),
+          body,
+        });
+        return respondOk(template);
+      }),
+
+    update_ticket_template: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const name = input.name as string | undefined;
+        const description = input.description as string | undefined;
+        const body = input.body as string | undefined;
+        const template = yield* ticketing.updateTemplate({
+          id: TemplateId.makeUnsafe(id),
+          ...(name ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(body ? { body } : {}),
+        });
+        return respondOk(template);
+      }),
+
+    delete_ticket_template: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        yield* ticketing.deleteTemplate({ id: TemplateId.makeUnsafe(id) });
+        return respondOk({ deleted: true });
+      }),
+
+    // ---- Comments ----
+
+    list_ticket_comments: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const limit = input.limit as number | undefined;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const comments = yield* ticketing.listComments({
+          ticketId: resolvedTicketId,
+          ...(limit ? { limit } : {}),
+        });
+        return respondOk(yield* resolveJson(comments));
+      }),
+
+    create_comment: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const parentId = input.parentId as string | undefined;
+        const authorType = input.authorType as "human" | "llm";
+        const authorName = input.authorName as string;
+        const authorModel = input.authorModel as string | undefined;
+        const body = input.body as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const comment = yield* ticketing.createComment({
+          ticketId: resolvedTicketId,
+          ...(parentId ? { parentId: CommentId.makeUnsafe(parentId) } : {}),
+          authorType,
+          authorName,
+          ...(authorModel ? { authorModel } : {}),
+          body,
+        });
+        return respondOk(yield* resolveJson(comment));
+      }),
+
+    update_comment: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const body = input.body as string;
+        const comment = yield* ticketing.updateComment({ id: CommentId.makeUnsafe(id), body });
+        return respondOk(yield* resolveJson(comment));
+      }),
+
+    delete_comment: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        yield* ticketing.deleteComment({ id: CommentId.makeUnsafe(id) });
+        return respondOk({ deleted: true });
+      }),
+
+    // ---- Artifacts ----
+
+    list_ticket_artifacts: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string;
+        const resolvedTicketId = yield* resolveId(ticketId);
+        const artifacts = yield* ticketing.listArtifacts({ ticketId: resolvedTicketId });
+        return respondOk(yield* resolveJson(artifacts));
+      }),
+
+    create_artifact: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const ticketId = input.ticketId as string | undefined;
+        const commentId = input.commentId as string | undefined;
+        const type = input.type as "figma_url" | "mermaid" | "image";
+        const title = input.title as string | undefined;
+        const payload = input.payload;
+        const resolvedTicketId = ticketId ? yield* resolveId(ticketId) : undefined;
+        const artifact = yield* ticketing.createArtifact({
+          ...(resolvedTicketId ? { ticketId: resolvedTicketId } : {}),
+          ...(commentId ? { commentId: CommentId.makeUnsafe(commentId) } : {}),
+          type,
+          ...(title ? { title } : {}),
+          payload,
+        });
+        return respondOk(yield* resolveJson(artifact));
+      }),
+
+    delete_artifact: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        yield* ticketing.deleteArtifact({ id: ArtifactId.makeUnsafe(id) });
+        return respondOk({ deleted: true });
+      }),
+  } as Record<
+    string,
+    (
+      input: Record<string, unknown>,
+    ) => Effect.Effect<HttpServerResponse.HttpServerResponse, TicketingError, never>
+  >;
 }
 
-const handleTicketingMcpRequest = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const managedRuns = yield* ManagedRunService;
-  const ticketing = yield* TicketingService;
-  const webRequest = yield* HttpServerRequest.toWeb(request);
-  const authorization = webRequest.headers.get("authorization");
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
 
-  const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
-  if (!token) {
-    return HttpServerResponse.text("Unauthorized", { status: 401 });
-  }
-
-  let mcpContext: { projectId: ProjectId; threadId: ThreadId } | null = null;
-  if (DEV_BYPASS_TOKEN && token === DEV_BYPASS_TOKEN) {
-    const url = new URL(webRequest.url, "http://localhost");
-    const projectId = url.searchParams.get("projectId");
-    const threadId = url.searchParams.get("threadId") ?? "dev-test-thread";
-    if (projectId) {
-      mcpContext = { projectId: projectId as ProjectId, threadId: threadId as ThreadId };
-    }
-  }
-  if (!mcpContext) {
-    mcpContext = yield* managedRuns.resolveContextForToken(token);
-  }
-  if (mcpContext === null) {
-    return HttpServerResponse.text("Unauthorized", { status: 401 });
-  }
-
-  const bridge = createEffectBridge();
-  const server = createTicketingMcpServer(ticketing, bridge, {
-    projectId: mcpContext.projectId,
-    threadId: mcpContext.threadId,
-  });
-  const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-
-  const mcp: { done: boolean; response: Response | null; error: unknown } = {
-    done: false,
-    response: null,
-    error: null,
-  };
-
-  const mcpPromise = (async () => {
-    try {
-      await server.connect(transport);
-      mcp.response = await transport.handleRequest(webRequest);
-    } catch (error) {
-      mcp.error = error;
-    } finally {
-      mcp.done = true;
-      await server.close().catch(() => undefined);
-    }
-  })();
-
-  while (!mcp.done) {
-    yield* bridge.processAll;
-    if (!mcp.done) {
-      yield* Effect.promise(() => bridge.waitForWork());
-    }
-  }
-  yield* bridge.processAll;
-  yield* Effect.promise(() => mcpPromise);
-
-  if (mcp.error || !mcp.response) {
-    return HttpServerResponse.text(
-      mcp.error instanceof Error ? mcp.error.message : "Failed to serve ticketing MCP request.",
-      { status: 500 },
-    );
-  }
-
-  return yield* Effect.tryPromise({
-    try: async () => {
-      const bytes = new Uint8Array(await mcp.response!.arrayBuffer());
-      return HttpServerResponse.uint8Array(bytes, {
-        status: mcp.response!.status,
-        headers: responseHeaders(mcp.response!),
-      });
-    },
-    catch: () => HttpServerResponse.text("Failed to read MCP response.", { status: 500 }),
-  }).pipe(Effect.catch((errorResp) => Effect.succeed(errorResp)));
+const handleGet = Effect.gen(function* () {
+  const auth = yield* resolveAuth;
+  if (!auth) return respondError("Unauthorized", 401);
+  return respondOk(TOOL_DEFINITIONS, "Available tools");
 });
 
-export const ticketingMcpRouteLayer = Layer.mergeAll(
-  HttpRouter.add("POST", MCP_ROUTE, handleTicketingMcpRequest),
-  HttpRouter.add("GET", MCP_ROUTE, handleTicketingMcpRequest),
-  HttpRouter.add("DELETE", MCP_ROUTE, handleTicketingMcpRequest),
+const handlePost = Effect.gen(function* () {
+  const auth = yield* resolveAuth;
+  if (!auth) return respondError("Unauthorized", 401);
+
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const webRequest = yield* HttpServerRequest.toWeb(request);
+  const body = yield* Effect.promise(() => parseToolCallBody(webRequest));
+  if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
+
+  const ticketing = yield* TicketingService;
+  const handlers = toolHandlers({
+    ticketing,
+    projectId: auth.projectId,
+    threadId: auth.threadId,
+  });
+
+  const handler = handlers[body.tool];
+  if (!handler) return respondError(`Unknown tool: ${body.tool}`);
+
+  return yield* handler(body.input).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(respondError(error instanceof Error ? error.message : String(error), 500)),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Route layer
+// ---------------------------------------------------------------------------
+
+export const ticketingRouteLayer = Layer.mergeAll(
+  HttpRouter.add("GET", API_ROUTE, handleGet),
+  HttpRouter.add("POST", API_ROUTE, handlePost),
 );
