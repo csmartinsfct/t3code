@@ -1,4 +1,5 @@
 import type {
+  AcceptanceCriterion,
   Ticket,
   TicketDependency,
   TicketId,
@@ -26,7 +27,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
-import { TicketMarkdown } from "./TicketMarkdown";
+import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -314,22 +315,6 @@ interface KanbanTicketDetailProps {
   onOrchestrate?: (ticket: Ticket) => void;
 }
 
-export function KanbanTicketDetailDescription({
-  description,
-  descriptionRef,
-  onClick,
-}: {
-  description: string;
-  descriptionRef?: React.RefObject<HTMLDivElement | null>;
-  onClick?: () => void;
-}) {
-  return (
-    <div ref={descriptionRef} className="mt-0.5 cursor-text text-foreground" onClick={onClick}>
-      <TicketMarkdown>{description}</TicketMarkdown>
-    </div>
-  );
-}
-
 function TicketRelationRowButton({
   identifier,
   title,
@@ -490,11 +475,8 @@ export function KanbanTicketDetail({
   const ticketRef = useRef<Ticket | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
-  const [editingDescription, setEditingDescription] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState("");
   const [editingWorktree, setEditingWorktree] = useState(false);
   const [worktreeDraft, setWorktreeDraft] = useState("");
-  const descriptionRef = useRef<HTMLDivElement>(null);
   /** Set to true when Escape is pressed so the blur handler skips saving. */
   const cancelEditRef = useRef(false);
   const removeFromSelection = useTicketSelectionStore((s) => s.removeFromSelection);
@@ -658,38 +640,61 @@ export function KanbanTicketDetail({
     }
   }, [ticketId, titleDraft]);
 
-  const handleDescriptionSave = useCallback(async () => {
-    const result = resolveNullableInlineTextSave({
-      currentValue: ticketRef.current?.description ?? null,
-      draft: descriptionDraft,
-    });
-    if (result.action === "skip") {
-      setEditingDescription(false);
-      return;
-    }
-    const previous = ticketRef.current;
-    if (previous) {
-      const optimistic = { ...previous, description: result.nextValue };
-      ticketRef.current = optimistic;
-      setTicket(optimistic);
-    }
-    setEditingDescription(false);
-    try {
-      const api = ensureNativeApi();
-      const updated = await api.ticketing.update({
-        id: ticketId,
-        description: result.nextValue,
-      });
-      ticketRef.current = updated;
-      setTicket(updated);
-    } catch (error) {
-      console.error("Failed to update description:", error);
+  const saveDescription = useCallback(
+    async (nextMarkdown: string | null) => {
+      const currentValue = ticketRef.current?.description ?? null;
+      if (nextMarkdown === currentValue) return;
+      const previous = ticketRef.current;
       if (previous) {
-        ticketRef.current = previous;
-        setTicket(previous);
+        const optimistic = { ...previous, description: nextMarkdown };
+        ticketRef.current = optimistic;
+        setTicket(optimistic);
       }
-    }
-  }, [ticketId, descriptionDraft]);
+      try {
+        const api = ensureNativeApi();
+        const updated = await api.ticketing.update({
+          id: ticketId,
+          description: nextMarkdown,
+        });
+        ticketRef.current = updated;
+        setTicket(updated);
+      } catch (error) {
+        console.error("Failed to update description:", error);
+        if (previous) {
+          ticketRef.current = previous;
+          setTicket(previous);
+        }
+      }
+    },
+    [ticketId],
+  );
+
+  const handleCriteriaChange = useCallback(
+    async (nextCriteria: AcceptanceCriterion[]) => {
+      const previous = ticketRef.current;
+      if (previous) {
+        const optimistic = { ...previous, acceptanceCriteria: nextCriteria };
+        ticketRef.current = optimistic;
+        setTicket(optimistic);
+      }
+      try {
+        const api = ensureNativeApi();
+        const updated = await api.ticketing.update({
+          id: ticketId,
+          acceptanceCriteria: nextCriteria,
+        });
+        ticketRef.current = updated;
+        setTicket(updated);
+      } catch (error) {
+        console.error("Failed to update acceptance criteria:", error);
+        if (previous) {
+          ticketRef.current = previous;
+          setTicket(previous);
+        }
+      }
+    },
+    [ticketId],
+  );
 
   const handleWorktreeSave = useCallback(async () => {
     const result = resolveNullableInlineTextSave({
@@ -940,69 +945,24 @@ export function KanbanTicketDetail({
         </div>
 
         {/* Description */}
-        <div className="rounded-md px-3 py-2">
+        <div className="rounded-md py-2">
           <p className="text-[11px] font-medium text-muted-foreground">Description</p>
-          {editingDescription ? (
-            <textarea
-              className="mt-0.5 w-full resize-y bg-transparent font-[inherit]! text-xs leading-relaxed text-foreground outline-none"
-              value={descriptionDraft}
-              onChange={(e) => setDescriptionDraft(e.target.value)}
-              onBlur={() => {
-                const blurAction = resolveInlineEditBlurAction({
-                  cancelRequested: cancelEditRef.current,
-                  isEditing: editingDescription,
-                });
-                if (blurAction === "cancel") {
-                  cancelEditRef.current = false;
-                  setEditingDescription(false);
-                } else if (blurAction === "save") {
-                  void handleDescriptionSave();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  cancelEditRef.current = true;
-                  (e.target as HTMLTextAreaElement).blur();
-                }
-              }}
-              autoFocus
-              style={{
-                minHeight: descriptionRef.current
-                  ? `${descriptionRef.current.offsetHeight}px`
-                  : undefined,
-              }}
-              rows={Math.max(3, descriptionDraft.split("\n").length + 1)}
+          <div className="mt-0.5 text-foreground">
+            <TicketDescriptionEditor
+              ticketId={ticketId}
+              initialContent={ticket.description}
+              onSave={saveDescription}
             />
-          ) : ticket.description ? (
-            <KanbanTicketDetailDescription
-              description={ticket.description}
-              descriptionRef={descriptionRef}
-              onClick={() => {
-                setDescriptionDraft(ticket.description ?? "");
-                setEditingDescription(true);
-              }}
-            />
-          ) : (
-            <p
-              className="mt-0.5 cursor-text text-xs italic text-muted-foreground/60"
-              onClick={() => {
-                setDescriptionDraft("");
-                setEditingDescription(true);
-              }}
-            >
-              Click to add a description...
-            </p>
-          )}
+          </div>
         </div>
 
         {/* Acceptance Criteria */}
-        {ticket.acceptanceCriteria && ticket.acceptanceCriteria.length > 0 && (
-          <TicketAcceptanceCriteria
-            ticketId={ticketId}
-            criteria={ticket.acceptanceCriteria}
-            onUpdated={() => void fetchTicket()}
-          />
-        )}
+        <TicketAcceptanceCriteria
+          ticketId={ticketId}
+          criteria={ticket.acceptanceCriteria ?? []}
+          onUpdated={() => void fetchTicket()}
+          onCriteriaChange={handleCriteriaChange}
+        />
 
         {/* Labels */}
         <TicketLabelPicker

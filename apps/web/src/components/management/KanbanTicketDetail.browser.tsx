@@ -124,6 +124,12 @@ vi.mock("./TicketMarkdown", () => ({
   TicketMarkdown: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+vi.mock("./TicketDescriptionEditor", () => ({
+  TicketDescriptionEditor: ({ initialContent }: { initialContent: string | null }) => (
+    <div>{initialContent}</div>
+  ),
+}));
+
 vi.mock("../chat/ProviderModelPicker", () => ({
   ProviderModelPicker: () => null,
 }));

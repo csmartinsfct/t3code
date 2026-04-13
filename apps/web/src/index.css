@@ -547,6 +547,26 @@ label:has(> select#reasoning-effort) select {
   text-align: left;
 }
 
+/* Tiptap description editor */
+.ticket-description-editor .ProseMirror {
+  min-height: 2rem;
+  cursor: text;
+}
+
+.ticket-description-editor .ProseMirror:focus {
+  outline: none;
+}
+
+.ticket-description-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  font-style: italic;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
 /* Diffs theme bridge (match diff surfaces to app palette) */
 .diff-panel-viewport {
   background: color-mix(in srgb, var(--background) 94%, var(--card));
