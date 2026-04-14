@@ -72,14 +72,13 @@ const columnMockState: {
 } = {
   lastProps: null,
 };
-const orchestrateDialogMockState: {
+const orchestrationSubpageMockState: {
   lastProps: {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
     selectedTickets: ReadonlyMap<string, TicketSummary>;
     allTickets: readonly TicketSummary[];
     projectId: string;
     onConfirm: (...args: unknown[]) => Promise<void> | void;
+    onBack: () => void;
   } | null;
 } = {
   lastProps: null,
@@ -241,17 +240,16 @@ vi.mock("./KanbanTicketDetail", () => ({
   },
 }));
 
-vi.mock("./OrchestrateConfirmDialog", () => ({
-  OrchestrateConfirmDialog: (props: {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
+vi.mock("./OrchestrationSubpage", () => ({
+  OrchestrationSubpage: (props: {
     selectedTickets: ReadonlyMap<string, TicketSummary>;
     allTickets: readonly TicketSummary[];
     projectId: string;
     onConfirm: (...args: unknown[]) => Promise<void> | void;
+    onBack: () => void;
   }) => {
-    orchestrateDialogMockState.lastProps = props;
-    return null;
+    orchestrationSubpageMockState.lastProps = props;
+    return <div>OrchestrationSubpage</div>;
   },
 }));
 
@@ -297,7 +295,7 @@ async function renderBoard({
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
   columnMockState.lastProps = null;
-  orchestrateDialogMockState.lastProps = null;
+  orchestrationSubpageMockState.lastProps = null;
   mockToastAdd.mockReset();
   mockCreateRun.mockReset();
   mockStartRun.mockReset();

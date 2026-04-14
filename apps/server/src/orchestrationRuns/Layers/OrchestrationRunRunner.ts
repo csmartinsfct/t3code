@@ -3,6 +3,7 @@ import type {
   ModelSelection,
   OrchestrationCommand,
   OrchestrationPromptId,
+  OrchestrationPromptOverrides,
   OrchestrationProject,
   OrchestrationRun,
   OrchestrationRunId,
@@ -330,7 +331,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           ),
         );
 
-    const getResolvedProjectPromptContext = (projectId: OrchestrationProject["id"]) =>
+    const getResolvedProjectPromptContext = (
+      projectId: OrchestrationProject["id"],
+      runId?: OrchestrationRunId,
+    ) =>
       Effect.gen(function* () {
         const [project, settings] = yield* Effect.all([
           getProject(projectId),
@@ -343,9 +347,18 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           });
         }
 
+        // Always read fresh overrides from the DB so mid-run edits take effect
+        let runOverrides: OrchestrationPromptOverrides | undefined;
+        if (runId) {
+          const freshRun = yield* withRunService((service) => service.get({ runId }));
+          runOverrides =
+            Object.keys(freshRun.promptOverrides).length > 0 ? freshRun.promptOverrides : undefined;
+        }
+
         return {
           project,
           prompts: resolveOrchestrationPromptDocuments({
+            runOverrides,
             projectOverrides: project.promptOverrides.orchestration,
             globalPrompts: settings.prompts.orchestration,
             shippedDefaults: settings.promptDefaults.orchestration,
@@ -781,8 +794,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly ticket: Ticket;
       readonly mode: DispatchWorkTurnMode;
       readonly reviewFeedback?: ReviewOutput;
+      readonly runId?: OrchestrationRunId;
     }) => {
-      return getResolvedProjectPromptContext(input.projectId).pipe(
+      return getResolvedProjectPromptContext(input.projectId, input.runId).pipe(
         Effect.flatMap(({ project, prompts }) => {
           if (input.mode === "resume") {
             return renderValidatedPromptDocument({
@@ -882,6 +896,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly ticket: Ticket;
       readonly workingThreadId: ThreadId;
       readonly reviewIteration: number;
+      readonly runId?: OrchestrationRunId;
       readonly priorRequestedChangesReview?: PriorRequestedChangesReview;
     }) =>
       Effect.gen(function* () {
@@ -909,7 +924,10 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 threadId: input.workingThreadId,
                 toTurnCount: turnCount,
               });
-        const { project, prompts } = yield* getResolvedProjectPromptContext(input.projectId);
+        const { project, prompts } = yield* getResolvedProjectPromptContext(
+          input.projectId,
+          input.runId,
+        );
         const promptId = isReReview ? "reReview" : "review";
         const prompt = yield* renderValidatedPromptDocument({
           promptId,
@@ -1457,6 +1475,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                     workingThreadId,
                     ticket,
                     mode: nextWorkMode,
+                    runId,
                     ...(pendingReviewFeedback ? { reviewFeedback: pendingReviewFeedback } : {}),
                   }),
                   runId,
@@ -1616,7 +1635,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                 threadId: reviewThreadId,
                 dispatch:
                   resumeReviewTurn && !shouldRestartReviewWithFreshAgent
-                    ? getResolvedProjectPromptContext(run.projectId).pipe(
+                    ? getResolvedProjectPromptContext(run.projectId, runId).pipe(
                         Effect.flatMap(({ project, prompts }) =>
                           renderValidatedPromptDocument({
                             promptId: "resume",
@@ -1651,6 +1670,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
                         ticket,
                         workingThreadId,
                         reviewIteration,
+                        runId,
                         ...(pendingReviewFeedback || pendingReviewedWorkingTurnCount !== undefined
                           ? {
                               priorRequestedChangesReview: {

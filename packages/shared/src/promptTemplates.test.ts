@@ -132,6 +132,35 @@ describe("orchestration prompt resolution", () => {
     expect(resolved.resume).toEqual(ORCHESTRATION_PROMPT_DEFAULTS.resume);
   });
 
+  it("resolves run overrides over project overrides over global", () => {
+    const resolved = resolveOrchestrationPromptDocuments({
+      globalPrompts: {
+        implement: {
+          version: 1,
+          blocks: [{ when: null, text: "Global implement" }],
+        },
+      },
+      projectOverrides: {
+        implement: {
+          version: 1,
+          blocks: [{ when: null, text: "Project implement" }],
+        },
+      },
+      runOverrides: {
+        implement: {
+          version: 1,
+          blocks: [{ when: null, text: "Run implement" }],
+        },
+      },
+    });
+
+    expect(resolved.implement).toEqual({
+      version: 1,
+      blocks: [{ when: null, text: "Run implement" }],
+    });
+    expect(resolved.resume).toEqual(ORCHESTRATION_PROMPT_DEFAULTS.resume);
+  });
+
   it("applies sparse override patches and removes cleared prompt ids", () => {
     const next = applyOrchestrationPromptOverridePatch({
       current: {

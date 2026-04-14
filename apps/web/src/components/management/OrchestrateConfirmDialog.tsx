@@ -1,5 +1,6 @@
 import {
   type ModelSelection,
+  type OrchestrationPromptOverrides,
   type TicketId,
   type TicketSummary,
   type TicketTreeNode,
@@ -236,10 +237,12 @@ export async function submitOrchestrationConfirm(input: {
   selectedTicketIdentifiers: string[];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
+  promptOverrides?: OrchestrationPromptOverrides;
   onConfirm: (
     selectedTicketIdentifiers: string[],
     implementerModelSelection: ModelSelection,
     reviewerModelSelection: ModelSelection,
+    promptOverrides?: OrchestrationPromptOverrides,
   ) => Promise<void> | void;
 }): Promise<{ kind: "noop" } | { kind: "started" } | { kind: "error"; message: string }> {
   if (input.plan?.kind !== "valid") {
@@ -251,6 +254,7 @@ export async function submitOrchestrationConfirm(input: {
       input.selectedTicketIdentifiers,
       input.implementerModelSelection,
       input.reviewerModelSelection,
+      input.promptOverrides,
     );
     return { kind: "started" };
   } catch (err: unknown) {

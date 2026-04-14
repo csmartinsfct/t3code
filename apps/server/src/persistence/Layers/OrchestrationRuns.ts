@@ -22,6 +22,7 @@ const RUN_SELECT = `
   current_phase AS "currentPhase",
   review_iteration AS "reviewIteration",
   max_review_iterations AS "maxReviewIterations",
+  prompt_overrides_json AS "promptOverridesJson",
   created_at AS "createdAt",
   updated_at AS "updatedAt"
 `;
@@ -43,6 +44,7 @@ const makeOrchestrationRunRepository = Effect.gen(function* () {
           current_phase,
           review_iteration,
           max_review_iterations,
+          prompt_overrides_json,
           created_at,
           updated_at
         )
@@ -56,6 +58,7 @@ const makeOrchestrationRunRepository = Effect.gen(function* () {
           ${row.currentPhase},
           ${row.reviewIteration},
           ${row.maxReviewIterations},
+          ${row.promptOverridesJson},
           ${row.createdAt},
           ${row.updatedAt}
         )
@@ -73,6 +76,7 @@ const makeOrchestrationRunRepository = Effect.gen(function* () {
           current_phase = ${row.currentPhase},
           review_iteration = ${row.reviewIteration},
           max_review_iterations = ${row.maxReviewIterations},
+          prompt_overrides_json = ${row.promptOverridesJson},
           updated_at = ${row.updatedAt}
         WHERE id = ${row.id}
       `,
@@ -92,11 +96,12 @@ const makeOrchestrationRunRepository = Effect.gen(function* () {
   const listRuns = SqlSchema.findAll({
     Request: OrchestrationRunListByProjectInput,
     Result: PersistedOrchestrationRun,
-    execute: ({ projectId }) =>
+    execute: ({ projectId, status }) =>
       sql`
         SELECT ${sql.literal(RUN_SELECT)}
         FROM orchestration_runs
         WHERE project_id = ${projectId}
+          ${status && status.length > 0 ? sql`AND status IN ${sql.in(status)}` : sql``}
         ORDER BY created_at DESC
       `,
   });

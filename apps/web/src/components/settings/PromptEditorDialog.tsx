@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type {
   CanonicalPromptVariableKey,
+  PromptDocumentV1,
   PromptId,
   PreviewPromptDocumentResult,
   PromptDocumentState,
@@ -60,6 +61,8 @@ interface PromptEditorDialogProps {
   onSaved: () => void;
   documentState: PromptDocumentState | null;
   scopeInput: PromptManagementScope;
+  /** When provided, Save writes locally instead of calling the prompt update API. */
+  onLocalSave?: (promptId: PromptId, document: PromptDocumentV1) => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -220,6 +223,7 @@ export function PromptEditorDialog({
   onSaved,
   documentState,
   scopeInput,
+  onLocalSave,
 }: PromptEditorDialogProps) {
   const [blocks, setBlocks] = useState<EditorBlock[]>([]);
   const [validation, setValidation] = useState<PromptDocumentValidationResult | null>(null);
@@ -315,9 +319,18 @@ export function PromptEditorDialog({
     setSaving(true);
     try {
       const doc = editorToDocument(blocks);
+      if (onLocalSave) {
+        onLocalSave(promptId, doc);
+        toastManager.add({ type: "success", title: "Prompt override applied" });
+        onSaved();
+        return;
+      }
       await ensureNativeApi().prompts.updateDocument({
         scope: scopeInput.scope,
         ...(scopeInput.scope === "project" ? { projectId: scopeInput.projectId } : {}),
+        ...(scopeInput.scope === "orchestration-run"
+          ? { orchestrationRunId: scopeInput.orchestrationRunId }
+          : {}),
         promptId,
         document: doc,
       });
@@ -332,13 +345,17 @@ export function PromptEditorDialog({
     } finally {
       setSaving(false);
     }
-  }, [blocks, promptId, scopeInput, onSaved]);
+  }, [blocks, promptId, scopeInput, onSaved, onLocalSave]);
 
   const canRevert =
     documentState?.scopeState === "customized" || documentState?.scopeState === "overridden";
 
   const revertLabel =
-    documentState?.scopeState === "overridden" ? "Revert to global" : "Reset to default";
+    scopeInput.scope === "orchestration-run"
+      ? "Remove run override"
+      : documentState?.scopeState === "overridden"
+        ? "Revert to global"
+        : "Reset to default";
 
   const handleRevert = useCallback(async () => {
     if (!promptId) return;
@@ -347,6 +364,9 @@ export function PromptEditorDialog({
       await ensureNativeApi().prompts.updateDocument({
         scope: scopeInput.scope,
         ...(scopeInput.scope === "project" ? { projectId: scopeInput.projectId } : {}),
+        ...(scopeInput.scope === "orchestration-run"
+          ? { orchestrationRunId: scopeInput.orchestrationRunId }
+          : {}),
         promptId,
         document: null,
       });

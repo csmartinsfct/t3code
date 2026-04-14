@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
+import { OrchestrationRunId, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   CanonicalPromptVariableKey as CanonicalPromptVariableKeySchema,
   PromptGroupId,
@@ -10,12 +10,17 @@ import {
   PromptTemplateVersion,
 } from "./promptTemplates";
 
-export const PromptManagementScopeKind = Schema.Literals(["global", "project"]);
+export const PromptManagementScopeKind = Schema.Literals([
+  "global",
+  "project",
+  "orchestration-run",
+]);
 export type PromptManagementScopeKind = typeof PromptManagementScopeKind.Type;
 
 export const PromptManagementScope = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
+  orchestrationRunId: Schema.optionalKey(OrchestrationRunId),
 });
 export type PromptManagementScope = typeof PromptManagementScope.Type;
 
@@ -50,6 +55,7 @@ export const PromptDocumentSource = Schema.Literals([
   "shipped_default",
   "global",
   "project_override",
+  "run_override",
 ]);
 export type PromptDocumentSource = typeof PromptDocumentSource.Type;
 
@@ -67,6 +73,7 @@ export const PromptDocumentState = Schema.Struct({
   shippedDefaultDocument: PromptDocumentV1,
   globalDocument: PromptDocumentV1,
   projectOverrideDocument: Schema.NullOr(PromptDocumentV1),
+  runOverrideDocument: Schema.NullOr(PromptDocumentV1).pipe(Schema.withDecodingDefault(() => null)),
   effectiveDocument: PromptDocumentV1,
   effectiveSource: PromptDocumentSource,
   scopeState: PromptDocumentScopeState,
@@ -86,6 +93,7 @@ export type ListPromptDefinitionsResult = typeof ListPromptDefinitionsResult.Typ
 export const PromptDocumentQueryInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
+  orchestrationRunId: Schema.optionalKey(OrchestrationRunId),
   promptId: PromptIdSchema,
 });
 export type PromptDocumentQueryInput = typeof PromptDocumentQueryInput.Type;
@@ -103,6 +111,7 @@ export type PromptDocumentValidationResult = typeof PromptDocumentValidationResu
 export const ValidatePromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
+  orchestrationRunId: Schema.optionalKey(OrchestrationRunId),
   promptId: PromptIdSchema,
   document: Schema.Unknown,
 });
@@ -117,6 +126,7 @@ export type PromptPreviewVariable = typeof PromptPreviewVariable.Type;
 export const PreviewPromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
+  orchestrationRunId: Schema.optionalKey(OrchestrationRunId),
   promptId: PromptIdSchema,
   document: Schema.optionalKey(Schema.Unknown),
 });
@@ -136,6 +146,7 @@ export type PreviewPromptDocumentResult = typeof PreviewPromptDocumentResult.Typ
 export const UpdatePromptDocumentInput = Schema.Struct({
   scope: PromptManagementScopeKind,
   projectId: Schema.optionalKey(ProjectId),
+  orchestrationRunId: Schema.optionalKey(OrchestrationRunId),
   promptId: PromptIdSchema,
   document: Schema.NullOr(Schema.Unknown),
 });

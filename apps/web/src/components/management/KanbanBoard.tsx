@@ -2,6 +2,7 @@ import type {
   ModelSelection,
   OrchestrationCreateRunInput,
   OrchestrationCreateRunResult,
+  OrchestrationPromptOverrides,
   OrchestrationStartRunInput,
   ProjectId,
   Ticket,
@@ -40,7 +41,7 @@ import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanSelectionBar } from "./KanbanSelectionBar";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
-import { OrchestrateConfirmDialog } from "./OrchestrateConfirmDialog";
+import { OrchestrationSubpage } from "./OrchestrationSubpage";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 interface KanbanBoardProps {
@@ -141,6 +142,7 @@ export async function launchBoardOrchestration(input: {
   selectedTicketIdentifiers: OrchestrationCreateRunInput["selectedTicketIdentifiers"];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
+  promptOverrides?: OrchestrationPromptOverrides;
   orchestrateTickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>;
   onProjectMismatch: () => void;
   clearSelection: () => void;
@@ -160,6 +162,7 @@ export async function launchBoardOrchestration(input: {
     selectedTicketIdentifiers: input.selectedTicketIdentifiers,
     implementerModelSelection: input.implementerModelSelection,
     reviewerModelSelection: input.reviewerModelSelection,
+    ...(input.promptOverrides ? { promptOverrides: input.promptOverrides } : {}),
   });
   await input.api.orchestration.startRun({ runId: result.runId });
   input.clearSelection();
@@ -197,11 +200,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const navigate = useNavigate();
 
-  // Orchestration dialog state
-  const [orchestrateDialogOpen, setOrchestrateDialogOpen] = useState(false);
-  const [orchestrateTickets, setOrchestrateTickets] = useState<
-    ReadonlyMap<TicketId, TicketSummary>
-  >(new Map());
+  // Orchestration subpage state
+  const [orchestrationSubpage, setOrchestrationSubpage] = useState<{
+    tickets: ReadonlyMap<TicketId, TicketSummary>;
+  } | null>(null);
 
   useEffect(() => {
     if (!managementBoardContext || managementBoardContext.projectId !== typedProjectId) {
@@ -380,16 +382,16 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       });
 
       if (nextSelection) {
-        setOrchestrateTickets(nextSelection);
-        setOrchestrateDialogOpen(true);
+        setOrchestrationSubpage({ tickets: nextSelection });
       }
     },
     [selectedTicketIds, selectedTickets],
   );
 
   const openOrchestrateForSelection = useCallback(() => {
-    setOrchestrateTickets(resolveBoardOrchestrateSelectionFromSelectionBar(selectedTickets));
-    setOrchestrateDialogOpen(true);
+    setOrchestrationSubpage({
+      tickets: resolveBoardOrchestrateSelectionFromSelectionBar(selectedTickets),
+    });
   }, [selectedTickets]);
 
   const handleOrchestrateFromDetail = useCallback(
@@ -409,8 +411,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         return;
       }
 
-      setOrchestrateTickets(resolution.selectedTickets);
-      setOrchestrateDialogOpen(true);
+      setOrchestrationSubpage({ tickets: resolution.selectedTickets });
     },
     [setManagementBoardRoot, typedProjectId],
   );
@@ -420,26 +421,30 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       selectedTicketIdentifiers: string[],
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
+      promptOverrides?: OrchestrationPromptOverrides,
     ) => {
       const api = ensureNativeApi();
+      const tickets = orchestrationSubpage?.tickets ?? new Map();
       await launchBoardOrchestration({
         api,
         projectId: typedProjectId,
         selectedTicketIdentifiers,
         implementerModelSelection,
         reviewerModelSelection,
-        orchestrateTickets,
+        ...(promptOverrides ? { promptOverrides } : {}),
+        orchestrateTickets: tickets,
         onProjectMismatch: () => {
           toastManager.add({
             type: "error",
             title: "Board context changed",
             description: "Refresh the board and try starting orchestration again.",
           });
-          setOrchestrateDialogOpen(false);
+          setOrchestrationSubpage(null);
           setManagementBoardRoot(typedProjectId);
         },
         clearSelection,
         navigateToThread: (orchestrationThreadId) => {
+          setOrchestrationSubpage(null);
           void navigate({
             to: "/$threadId",
             params: { threadId: orchestrationThreadId },
@@ -447,14 +452,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         },
       });
     },
-    [
-      clearSelection,
-      navigate,
-      orchestrateTickets,
-      setManagementBoardRoot,
-      threadId,
-      typedProjectId,
-    ],
+    [clearSelection, navigate, orchestrationSubpage, setManagementBoardRoot, typedProjectId],
   );
 
   // ---------------------------------------------------------------------------
@@ -670,6 +668,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     popManagementBoardTicket();
   }, [clearSelection, popManagementBoardTicket]);
 
+  const handleOrchestrationBack = useCallback(() => {
+    setOrchestrationSubpage(null);
+  }, []);
+
   const handleNavigateToTicket = useCallback(
     (ticketId: TicketId) => {
       clearSelection();
@@ -689,11 +691,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       >
         <div className="flex min-w-0 items-center gap-2">
           <CollapsedSidebarTrigger className="size-7 shrink-0" />
-          {selectedTicketId ? (
+          {selectedTicketId || orchestrationSubpage ? (
             <button
               type="button"
               className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-              onClick={handleBack}
+              onClick={orchestrationSubpage ? handleOrchestrationBack : handleBack}
             >
               <ArrowLeftIcon className="size-3" />
               Back
@@ -712,6 +714,14 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         <div className="flex flex-1 items-center justify-center">
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
+      ) : orchestrationSubpage ? (
+        <OrchestrationSubpage
+          selectedTickets={orchestrationSubpage.tickets}
+          allTickets={tickets}
+          projectId={projectId}
+          onConfirm={handleConfirmOrchestrate}
+          onBack={handleOrchestrationBack}
+        />
       ) : selectedTicketId ? (
         <KanbanTicketDetail
           ticketId={selectedTicketId}
@@ -743,15 +753,6 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           )}
         </div>
       )}
-
-      <OrchestrateConfirmDialog
-        open={orchestrateDialogOpen}
-        onOpenChange={setOrchestrateDialogOpen}
-        selectedTickets={orchestrateTickets}
-        allTickets={tickets}
-        projectId={projectId}
-        onConfirm={handleConfirmOrchestrate}
-      />
     </div>
   );
 });

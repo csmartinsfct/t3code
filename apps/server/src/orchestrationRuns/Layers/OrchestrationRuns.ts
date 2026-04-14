@@ -1,6 +1,7 @@
 import type {
   CommandId,
   OrchestrationCommand,
+  OrchestrationPromptOverrides,
   OrchestrationRun,
   OrchestrationRunStatus,
   OrchestrationRunSummary,
@@ -51,6 +52,15 @@ const VALID_TRANSITIONS: Record<OrchestrationRunStatus, Set<OrchestrationRunStat
   failed: new Set(),
 };
 
+function parsePromptOverrides(json: string | null): OrchestrationPromptOverrides {
+  if (!json) return {};
+  try {
+    return JSON.parse(json) as OrchestrationPromptOverrides;
+  } catch {
+    return {};
+  }
+}
+
 function toRun(persisted: PersistedOrchestrationRun): OrchestrationRun {
   return {
     id: persisted.id,
@@ -62,6 +72,7 @@ function toRun(persisted: PersistedOrchestrationRun): OrchestrationRun {
     currentPhase: persisted.currentPhase,
     reviewIteration: persisted.reviewIteration,
     maxReviewIterations: persisted.maxReviewIterations,
+    promptOverrides: parsePromptOverrides(persisted.promptOverridesJson),
     createdAt: persisted.createdAt,
     updatedAt: persisted.updatedAt,
   };
@@ -77,6 +88,7 @@ function toSummary(persisted: PersistedOrchestrationRun): OrchestrationRunSummar
     currentTicketIndex: persisted.currentTicketIndex,
     ticketCount: ticketOrder.length,
     currentPhase: persisted.currentPhase,
+    promptOverrides: parsePromptOverrides(persisted.promptOverridesJson),
     createdAt: persisted.createdAt,
     updatedAt: persisted.updatedAt,
   };
@@ -280,6 +292,8 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           (initialSelectedTicketId ? selectedTicketTitleById.get(initialSelectedTicketId) : null) ??
           selectedTickets[0]?.title ??
           "Orchestration Run";
+        const promptOverrides = input.promptOverrides ?? {};
+        const hasOverrides = Object.keys(promptOverrides).length > 0;
         const persisted: PersistedOrchestrationRun = {
           id: runId,
           orchestrationThreadId,
@@ -290,6 +304,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           currentPhase: "working",
           reviewIteration: 0 as const,
           maxReviewIterations: effectiveMaxReviewIterations,
+          promptOverridesJson: hasOverrides ? JSON.stringify(promptOverrides) : null,
           createdAt: now,
           updatedAt: now,
         };
@@ -433,24 +448,29 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
       });
 
     const list: OrchestrationRunServiceShape["list"] = (input) =>
-      repo.listByProject({ projectId: input.projectId }).pipe(
-        Effect.map((rows) => rows.map(toSummary)),
-        Effect.tap((summaries) =>
-          Effect.logInfo(
-            formatTimelineLog(SCOPE, "run.list", {
-              projectId: input.projectId,
-              count: summaries.length,
-            }),
+      repo
+        .listByProject({
+          projectId: input.projectId,
+          ...(input.status ? { status: input.status } : {}),
+        })
+        .pipe(
+          Effect.map((rows) => rows.map(toSummary)),
+          Effect.tap((summaries) =>
+            Effect.logInfo(
+              formatTimelineLog(SCOPE, "run.list", {
+                projectId: input.projectId,
+                count: summaries.length,
+              }),
+            ),
           ),
-        ),
-        Effect.mapError(
-          (cause) =>
-            new OrchestrationRunError({
-              message: "Failed to list orchestration runs",
-              cause,
-            }),
-        ),
-      );
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: "Failed to list orchestration runs",
+                cause,
+              }),
+          ),
+        );
 
     const getChildThreads: OrchestrationRunServiceShape["getChildThreads"] = (input) =>
       Effect.gen(function* () {

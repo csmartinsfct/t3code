@@ -4,6 +4,8 @@ import {
   type CanonicalPromptVariableKey,
   type ListPromptDefinitionsInput,
   type ListPromptDefinitionsResult,
+  type OrchestrationPromptOverrides,
+  type OrchestrationRunId,
   type PromptId,
   ADMIN_PROMPT_GROUP_ID,
   ADMIN_PROMPT_IDS,
@@ -27,10 +29,14 @@ import {
   renderPromptTemplate,
   validatePromptTemplateDocument,
 } from "@t3tools/shared/promptTemplates";
-import { Effect, Equal, Layer } from "effect";
+import { Effect, Equal, Layer, Option } from "effect";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  OrchestrationRunRepository,
+  type PersistedOrchestrationRun,
+} from "../../persistence/Services/OrchestrationRuns.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
@@ -265,6 +271,7 @@ export const PromptManagementLive = Layer.effect(
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
     const startup = yield* ServerRuntimeStartup;
+    const runRepo = yield* OrchestrationRunRepository;
 
     const normalizeScope = (
       input:
@@ -284,6 +291,20 @@ export const PromptManagementLive = Layer.effect(
           return { scope: "global" } as const satisfies PromptManagementScope;
         }
 
+        if (input.scope === "orchestration-run") {
+          const orchestrationRunId =
+            "orchestrationRunId" in input ? input.orchestrationRunId : undefined;
+          if (!orchestrationRunId) {
+            return yield* invalidScopeError(
+              "Orchestration-run scope requires an orchestrationRunId.",
+            );
+          }
+          return {
+            scope: "orchestration-run",
+            orchestrationRunId,
+          } as const satisfies PromptManagementScope;
+        }
+
         if (!input.projectId) {
           return yield* invalidScopeError(
             "Project-scoped prompt operations must include a projectId.",
@@ -298,7 +319,7 @@ export const PromptManagementLive = Layer.effect(
 
     const getProjectForScope = (scope: PromptManagementScope) =>
       Effect.gen(function* () {
-        if (scope.scope === "global") {
+        if (scope.scope === "global" || scope.scope === "orchestration-run") {
           return null;
         }
 
@@ -318,6 +339,32 @@ export const PromptManagementLive = Layer.effect(
         return project;
       });
 
+    const getRunForScope = (scope: PromptManagementScope) =>
+      Effect.gen(function* () {
+        if (scope.scope !== "orchestration-run" || !scope.orchestrationRunId) {
+          return null;
+        }
+        const runOption = yield* runRepo
+          .getById({ runId: scope.orchestrationRunId })
+          .pipe(
+            Effect.mapError((cause) =>
+              operationFailedError(`Failed to load orchestration run.`, cause),
+            ),
+          );
+        return Option.getOrNull(runOption);
+      });
+
+    const parseRunOverrides = (
+      run: PersistedOrchestrationRun | null,
+    ): OrchestrationPromptOverrides => {
+      if (!run?.promptOverridesJson) return {};
+      try {
+        return JSON.parse(run.promptOverridesJson) as OrchestrationPromptOverrides;
+      } catch {
+        return {};
+      }
+    };
+
     const getDocumentState = (scope: PromptManagementScope, promptId: PromptId) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings.pipe(
@@ -335,38 +382,58 @@ export const PromptManagementLive = Layer.effect(
             : "customized";
 
           return {
-            scope: { scope: "global" },
+            scope: { scope: "global" as const },
             definition: adminPromptDefinition(promptId),
             shippedDefaultDocument,
             globalDocument,
             projectOverrideDocument: null,
+            runOverrideDocument: null,
             effectiveDocument: globalDocument,
-            effectiveSource: scopeState === "default" ? "shipped_default" : "global",
+            effectiveSource:
+              scopeState === "default" ? ("shipped_default" as const) : ("global" as const),
             scopeState,
-          } as const satisfies PromptDocumentState;
+          } satisfies PromptDocumentState;
         }
 
         // Orchestration prompts
         const orchId = promptId as OrchestrationPromptId;
-        const project = yield* getProjectForScope(scope);
+
+        // For orchestration-run scope, load both the run and its parent project
+        const run = yield* getRunForScope(scope);
+        const runOverrides = parseRunOverrides(run);
+        const runOverrideDocument = runOverrides[orchId] ?? null;
+
+        // Resolve project from run's projectId or directly from scope
+        const projectScope: PromptManagementScope =
+          scope.scope === "orchestration-run" && run
+            ? { scope: "project", projectId: run.projectId }
+            : scope;
+        const project = yield* getProjectForScope(projectScope);
+
         const shippedDefaultDocument = settings.promptDefaults.orchestration[orchId];
         const globalDocument = settings.prompts.orchestration[orchId];
         const projectOverrideDocument = project?.promptOverrides.orchestration[orchId] ?? null;
-        const effectiveDocument = projectOverrideDocument ?? globalDocument;
-        const effectiveSource =
-          projectOverrideDocument !== null
-            ? "project_override"
-            : Equal.equals(globalDocument, shippedDefaultDocument)
-              ? "shipped_default"
-              : "global";
-        const scopeState =
-          scope.scope === "project"
-            ? projectOverrideDocument !== null
+        const effectiveDocument = runOverrideDocument ?? projectOverrideDocument ?? globalDocument;
+        const effectiveSource: PromptDocumentState["effectiveSource"] =
+          runOverrideDocument !== null
+            ? "run_override"
+            : projectOverrideDocument !== null
+              ? "project_override"
+              : Equal.equals(globalDocument, shippedDefaultDocument)
+                ? "shipped_default"
+                : "global";
+        const scopeState: PromptDocumentState["scopeState"] =
+          scope.scope === "orchestration-run"
+            ? runOverrideDocument !== null
               ? "overridden"
               : "inherited"
-            : Equal.equals(globalDocument, shippedDefaultDocument)
-              ? "default"
-              : "customized";
+            : scope.scope === "project"
+              ? projectOverrideDocument !== null
+                ? "overridden"
+                : "inherited"
+              : Equal.equals(globalDocument, shippedDefaultDocument)
+                ? "default"
+                : "customized";
 
         return {
           scope,
@@ -374,10 +441,11 @@ export const PromptManagementLive = Layer.effect(
           shippedDefaultDocument,
           globalDocument,
           projectOverrideDocument,
+          runOverrideDocument,
           effectiveDocument,
           effectiveSource,
           scopeState,
-        } as const satisfies PromptDocumentState;
+        } satisfies PromptDocumentState;
       });
 
     const validateDocument = (
@@ -471,6 +539,46 @@ export const PromptManagementLive = Layer.effect(
           );
       });
 
+    const updateRunPromptDocument = (
+      orchestrationRunId: OrchestrationRunId,
+      promptId: OrchestrationPromptId,
+      document: PromptDocumentState["effectiveDocument"] | null,
+    ) =>
+      Effect.gen(function* () {
+        const runOption = yield* runRepo
+          .getById({ runId: orchestrationRunId })
+          .pipe(
+            Effect.mapError((cause) =>
+              operationFailedError("Failed to load orchestration run for prompt update.", cause),
+            ),
+          );
+        const run = Option.getOrNull(runOption);
+        if (!run) {
+          return yield* operationFailedError(
+            `Orchestration run ${orchestrationRunId} was not found.`,
+          );
+        }
+        const currentOverrides = parseRunOverrides(run);
+        const nextOverrides = { ...currentOverrides };
+        if (document === null) {
+          delete nextOverrides[promptId];
+        } else {
+          nextOverrides[promptId] = document;
+        }
+        const hasOverrides = Object.keys(nextOverrides).length > 0;
+        yield* runRepo
+          .update({
+            ...run,
+            promptOverridesJson: hasOverrides ? JSON.stringify(nextOverrides) : null,
+            updatedAt: new Date().toISOString(),
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              operationFailedError("Failed to persist orchestration run prompt override.", cause),
+            ),
+          );
+      });
+
     const service: PromptManagementShape = {
       listPromptDefinitions: (input) =>
         Effect.gen(function* () {
@@ -533,40 +641,53 @@ export const PromptManagementLive = Layer.effect(
         Effect.gen(function* () {
           const scope = yield* normalizeScope(input);
 
-          // Admin prompts reject project scope
-          if (isAdminPromptId(input.promptId) && scope.scope === "project") {
-            return yield* invalidScopeError("Admin prompts do not support project scope.");
+          // Admin prompts reject non-global scope
+          if (isAdminPromptId(input.promptId) && scope.scope !== "global") {
+            return yield* invalidScopeError("Admin prompts only support global scope.");
           }
 
-          yield* getProjectForScope(scope);
+          // Orchestration-run scope only applies to orchestration prompts
+          if (scope.scope === "orchestration-run" && !isOrchestrationPromptId(input.promptId)) {
+            return yield* invalidScopeError(
+              "Orchestration-run scope only applies to orchestration prompts.",
+            );
+          }
+
+          if (scope.scope !== "orchestration-run") {
+            yield* getProjectForScope(scope);
+          }
+
+          const applyUpdate = (document: PromptDocumentState["effectiveDocument"] | null) =>
+            Effect.gen(function* () {
+              if (scope.scope === "global") {
+                yield* updateGlobalPromptDocument(input.promptId, document);
+              } else if (
+                scope.scope === "orchestration-run" &&
+                scope.orchestrationRunId &&
+                isOrchestrationPromptId(input.promptId)
+              ) {
+                yield* updateRunPromptDocument(scope.orchestrationRunId, input.promptId, document);
+              } else if (
+                scope.scope === "project" &&
+                scope.projectId &&
+                isOrchestrationPromptId(input.promptId)
+              ) {
+                yield* updateProjectPromptDocument(
+                  { scope: "project", projectId: scope.projectId },
+                  input.promptId,
+                  document,
+                );
+              }
+            });
 
           if (input.document !== null) {
             const validation = validateDocument(scope, input.promptId, input.document);
             if (!validation.ok || validation.document === null) {
               return yield* validationFailedError(validation.errors);
             }
-
-            if (scope.scope === "global") {
-              yield* updateGlobalPromptDocument(input.promptId, validation.document);
-            } else if (isOrchestrationPromptId(input.promptId)) {
-              yield* updateProjectPromptDocument(
-                { scope: "project", projectId: scope.projectId },
-                input.promptId,
-                validation.document,
-              );
-            }
-
-            return yield* getDocumentState(scope, input.promptId);
-          }
-
-          if (scope.scope === "global") {
-            yield* updateGlobalPromptDocument(input.promptId, null);
-          } else if (isOrchestrationPromptId(input.promptId)) {
-            yield* updateProjectPromptDocument(
-              { scope: "project", projectId: scope.projectId },
-              input.promptId,
-              null,
-            );
+            yield* applyUpdate(validation.document);
+          } else {
+            yield* applyUpdate(null);
           }
 
           return yield* getDocumentState(scope, input.promptId);

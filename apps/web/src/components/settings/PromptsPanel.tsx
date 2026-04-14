@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderIcon, PencilIcon } from "lucide-react";
+import { LoaderIcon } from "lucide-react";
 import type {
   ListPromptDefinitionsResult,
-  PromptDocumentScopeState,
+  OrchestrationRunId,
+  OrchestrationRunSummary,
   PromptDocumentState,
   PromptId,
   PromptManagementScopeKind,
@@ -12,21 +13,20 @@ import { ADMIN_PROMPT_GROUP_ID } from "@t3tools/contracts";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
+import { SettingsPageContainer } from "./SettingsPanels";
 import { PromptEditorDialog } from "./PromptEditorDialog";
+import { PromptList } from "./PromptList";
 
-const SCOPE_STATE_BADGE: Record<
-  PromptDocumentScopeState,
-  { label: string; variant: "outline" | "info" | "warning" }
-> = {
-  default: { label: "Default", variant: "outline" },
-  customized: { label: "Customized", variant: "info" },
-  inherited: { label: "Inherited", variant: "outline" },
-  overridden: { label: "Overridden", variant: "warning" },
-};
+function runLabel(
+  run: OrchestrationRunSummary | undefined,
+  projects?: readonly { id: string; name: string }[],
+): string {
+  if (!run) return "Run";
+  const projectName = projects?.find((p) => p.id === run.projectId)?.name;
+  const prefix = projectName ? `${projectName} — ` : "";
+  return `${prefix}Run ${run.id.slice(0, 6)} (${run.status})`;
+}
 
 export function PromptsPanel() {
   const projects = useStore((s) => s.projects);
@@ -34,6 +34,8 @@ export function PromptsPanel() {
   // Orchestration scope state
   const [scopeKind, setScopeKind] = useState<PromptManagementScopeKind>("global");
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<OrchestrationRunId | null>(null);
+  const [activeRuns, setActiveRuns] = useState<OrchestrationRunSummary[]>([]);
 
   // Shared definitions (both groups come from one listDefinitions call)
   const [definitions, setDefinitions] = useState<ListPromptDefinitionsResult | null>(null);
@@ -46,14 +48,24 @@ export function PromptsPanel() {
   const [editingPromptId, setEditingPromptId] = useState<PromptId | null>(null);
   const [editingIsAdmin, setEditingIsAdmin] = useState(false);
 
-  const scopeValue = scopeKind === "project" && selectedProjectId ? selectedProjectId : "global";
+  const scopeValue =
+    scopeKind === "orchestration-run" && selectedRunId
+      ? `run:${selectedRunId}`
+      : scopeKind === "project" && selectedProjectId
+        ? selectedProjectId
+        : "global";
 
   const orchScopeInput = useMemo(
     () =>
-      scopeKind === "project" && selectedProjectId
-        ? { scope: "project" as const, projectId: selectedProjectId }
-        : { scope: "global" as const },
-    [scopeKind, selectedProjectId],
+      scopeKind === "orchestration-run" && selectedRunId
+        ? {
+            scope: "orchestration-run" as const,
+            orchestrationRunId: selectedRunId,
+          }
+        : scopeKind === "project" && selectedProjectId
+          ? { scope: "project" as const, projectId: selectedProjectId }
+          : { scope: "global" as const },
+    [scopeKind, selectedProjectId, selectedRunId],
   );
 
   const adminScopeInput = useMemo(() => ({ scope: "global" as const }), []);
@@ -84,7 +96,11 @@ export function PromptsPanel() {
         orchDefs.map((def) =>
           api.prompts.getDocument({
             scope: orchScopeInput.scope,
-            ...(orchScopeInput.scope === "project" ? { projectId: orchScopeInput.projectId } : {}),
+            ...(orchScopeInput.scope === "orchestration-run"
+              ? { orchestrationRunId: orchScopeInput.orchestrationRunId }
+              : orchScopeInput.scope === "project"
+                ? { projectId: orchScopeInput.projectId }
+                : {}),
             promptId: def.promptId,
           }),
         ),
@@ -106,15 +122,40 @@ export function PromptsPanel() {
     void loadData();
   }, [loadData]);
 
-  const handleScopeChange = useCallback((value: string | null) => {
-    if (!value || value === "global") {
-      setScopeKind("global");
-      setSelectedProjectId(null);
-    } else {
-      setScopeKind("project");
-      setSelectedProjectId(value as ProjectId);
-    }
-  }, []);
+  // Fetch resumable runs across all projects so they always appear in the dropdown
+  useEffect(() => {
+    const api = ensureNativeApi();
+    const resumableStatuses = ["pending", "running", "paused", "failed"] as const;
+    Promise.all(
+      projects.map((p) =>
+        api.orchestration.listRuns({ projectId: p.id as ProjectId, status: resumableStatuses }),
+      ),
+    )
+      .then((results) => setActiveRuns(results.flat()))
+      .catch(() => setActiveRuns([]));
+  }, [projects]);
+
+  const handleScopeChange = useCallback(
+    (value: string | null) => {
+      if (!value || value === "global") {
+        setScopeKind("global");
+        setSelectedProjectId(null);
+        setSelectedRunId(null);
+      } else if (value.startsWith("run:")) {
+        const runId = value.slice(4) as OrchestrationRunId;
+        // Find which project this run belongs to
+        const run = activeRuns.find((r) => r.id === runId);
+        setScopeKind("orchestration-run");
+        if (run) setSelectedProjectId(run.projectId);
+        setSelectedRunId(runId);
+      } else {
+        setScopeKind("project");
+        setSelectedProjectId(value as ProjectId);
+        setSelectedRunId(null);
+      }
+    },
+    [activeRuns],
+  );
 
   const handleEditorClose = useCallback(() => {
     setEditingPromptId(null);
@@ -138,6 +179,16 @@ export function PromptsPanel() {
   const orchDefs =
     definitions?.definitions.filter((d) => d.groupId !== ADMIN_PROMPT_GROUP_ID) ?? [];
 
+  const handleEditAdmin = useCallback((promptId: PromptId) => {
+    setEditingIsAdmin(true);
+    setEditingPromptId(promptId);
+  }, []);
+
+  const handleEditOrch = useCallback((promptId: PromptId) => {
+    setEditingIsAdmin(false);
+    setEditingPromptId(promptId);
+  }, []);
+
   return (
     <SettingsPageContainer>
       {loading ? (
@@ -147,61 +198,28 @@ export function PromptsPanel() {
       ) : (
         <>
           {/* Admin Prompts — always global, no scope dropdown */}
-          {adminGroups.map((group) => (
-            <SettingsSection key={group.groupId} title={group.label}>
-              {adminDefs
-                .filter((def) => def.groupId === group.groupId)
-                .map((def) => {
-                  const docState = adminDocStates.get(def.promptId);
-                  const badgeConfig = docState
-                    ? SCOPE_STATE_BADGE[docState.scopeState]
-                    : SCOPE_STATE_BADGE.default;
-
-                  return (
-                    <div
-                      key={def.promptId}
-                      className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex min-h-5 items-center gap-2">
-                            <h3 className="text-sm font-medium text-foreground">{def.label}</h3>
-                            <Badge variant={badgeConfig.variant} size="sm">
-                              {badgeConfig.label}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground">{def.description}</p>
-                        </div>
-                        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingIsAdmin(true);
-                              setEditingPromptId(def.promptId);
-                            }}
-                          >
-                            <PencilIcon className="size-3" />
-                            Edit
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </SettingsSection>
-          ))}
+          <PromptList
+            definitions={adminDefs}
+            groups={adminGroups}
+            documentStates={adminDocStates}
+            onEditPrompt={handleEditAdmin}
+          />
 
           {/* Scope dropdown — only affects orchestration prompts */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-foreground">Scope</span>
               <Select value={scopeValue} onValueChange={handleScopeChange}>
-                <SelectTrigger className="w-full sm:w-48" aria-label="Prompt scope">
+                <SelectTrigger className="w-full sm:w-56" aria-label="Prompt scope">
                   <SelectValue>
-                    {scopeKind === "global"
-                      ? "Global"
-                      : (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project")}
+                    {scopeKind === "orchestration-run"
+                      ? (runLabel(
+                          activeRuns.find((r) => r.id === selectedRunId),
+                          projects,
+                        ) ?? "Run")
+                      : scopeKind === "global"
+                        ? "Global"
+                        : (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project")}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -213,56 +231,31 @@ export function PromptsPanel() {
                       {project.name}
                     </SelectItem>
                   ))}
+                  {activeRuns.length > 0 && (
+                    <>
+                      <div className="mx-2 my-1 border-t border-border" />
+                      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Orchestrations
+                      </div>
+                      {activeRuns.map((run) => (
+                        <SelectItem hideIndicator key={run.id} value={`run:${run.id}`}>
+                          {runLabel(run, projects)}
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectPopup>
               </Select>
             </div>
           </div>
 
           {/* Orchestration Prompts — affected by scope */}
-          {orchGroups.map((group) => (
-            <SettingsSection key={group.groupId} title={group.label}>
-              {orchDefs
-                .filter((def) => def.groupId === group.groupId)
-                .map((def) => {
-                  const docState = orchDocStates.get(def.promptId);
-                  const badgeConfig = docState
-                    ? SCOPE_STATE_BADGE[docState.scopeState]
-                    : SCOPE_STATE_BADGE.default;
-
-                  return (
-                    <div
-                      key={def.promptId}
-                      className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex min-h-5 items-center gap-2">
-                            <h3 className="text-sm font-medium text-foreground">{def.label}</h3>
-                            <Badge variant={badgeConfig.variant} size="sm">
-                              {badgeConfig.label}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground">{def.description}</p>
-                        </div>
-                        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingIsAdmin(false);
-                              setEditingPromptId(def.promptId);
-                            }}
-                          >
-                            <PencilIcon className="size-3" />
-                            Edit
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </SettingsSection>
-          ))}
+          <PromptList
+            definitions={orchDefs}
+            groups={orchGroups}
+            documentStates={orchDocStates}
+            onEditPrompt={handleEditOrch}
+          />
         </>
       )}
 

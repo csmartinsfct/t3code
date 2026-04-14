@@ -143,6 +143,7 @@ export function createPromptDocumentState(input: {
       version: 1,
       blocks: [...(input.effectiveBlocks ?? projectBlocks ?? globalBlocks)],
     },
+    runOverrideDocument: null,
     effectiveSource:
       input.effectiveSource ?? (input.scope.scope === "project" ? "project_override" : "global"),
     scopeState: input.scopeState,

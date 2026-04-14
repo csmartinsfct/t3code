@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationRunRepository } from "../../persistence/Services/OrchestrationRuns.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { PromptManagementService } from "../Services/PromptManagement.ts";
@@ -77,6 +78,16 @@ function makePromptManagementLayer(options?: {
         awaitCommandReady: Effect.void,
         markHttpListening: Effect.void,
         enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) => effect,
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(OrchestrationRunRepository, {
+        create: () => Effect.void,
+        update: () => Effect.void,
+        getById: () => Effect.succeed(Option.none()),
+        getByOrchestrationThreadId: () => Effect.succeed(Option.none()),
+        listByProject: () => Effect.succeed([]),
+        deleteById: () => Effect.void,
       }),
     ),
   );

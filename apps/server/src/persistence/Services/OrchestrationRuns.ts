@@ -22,6 +22,7 @@ export const PersistedOrchestrationRun = Schema.Struct({
   currentPhase: OrchestrationRunPhase,
   reviewIteration: NonNegativeInt,
   maxReviewIterations: NonNegativeInt,
+  promptOverridesJson: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -39,6 +40,7 @@ export type OrchestrationRunByThreadLookupInput = typeof OrchestrationRunByThrea
 
 export const OrchestrationRunListByProjectInput = Schema.Struct({
   projectId: ProjectId,
+  status: Schema.optionalKey(Schema.Array(OrchestrationRunStatus)),
 });
 export type OrchestrationRunListByProjectInput = typeof OrchestrationRunListByProjectInput.Type;
 

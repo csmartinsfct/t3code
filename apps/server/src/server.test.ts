@@ -993,6 +993,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         shippedDefaultDocument: DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration.implement,
         globalDocument: DEFAULT_SERVER_SETTINGS.prompts.orchestration.implement,
         projectOverrideDocument: null,
+        runOverrideDocument: null,
         effectiveDocument: DEFAULT_SERVER_SETTINGS.prompts.orchestration.implement,
         effectiveSource: "shipped_default" as const,
         scopeState: "default" as const,

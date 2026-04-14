@@ -141,11 +141,14 @@ import type {
   OrchestrationCreateRunResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetRunInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
+  OrchestrationListRunsInput,
   OrchestrationReadModel,
   OrchestrationRun,
+  OrchestrationRunSummary,
   OrchestrationStartRunInput,
 } from "./orchestration";
 import { EditorId } from "./editor";
@@ -367,5 +370,7 @@ export interface NativeApi {
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
     createRun: (input: OrchestrationCreateRunInput) => Promise<OrchestrationCreateRunResult>;
     startRun: (input: OrchestrationStartRunInput) => Promise<OrchestrationRun>;
+    listRuns: (input: OrchestrationListRunsInput) => Promise<OrchestrationRunSummary[]>;
+    getRun: (input: OrchestrationGetRunInput) => Promise<OrchestrationRun>;
   };
 }

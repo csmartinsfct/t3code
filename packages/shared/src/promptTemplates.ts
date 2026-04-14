@@ -134,6 +134,7 @@ export const ORCHESTRATION_PROMPT_DEFAULTS = ORCHESTRATION_PROMPT_SHIPPED_DEFAUL
 >;
 
 export function resolveOrchestrationPromptDocuments(input?: {
+  readonly runOverrides?: OrchestrationPromptOverrides | null | undefined;
   readonly projectOverrides?: OrchestrationPromptOverrides | null | undefined;
   readonly globalPrompts?: Partial<Record<OrchestrationPromptId, PromptTemplateDocument>> | null;
   readonly shippedDefaults?: Readonly<Record<OrchestrationPromptId, PromptTemplateDocument>>;
@@ -142,6 +143,7 @@ export function resolveOrchestrationPromptDocuments(input?: {
     ...(input?.shippedDefaults ?? ORCHESTRATION_PROMPT_DEFAULTS),
     ...(input?.globalPrompts ?? {}),
     ...(input?.projectOverrides ?? {}),
+    ...(input?.runOverrides ?? {}),
   };
 }
 

@@ -1,7 +1,7 @@
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import type { PromptId, ProjectId } from "@t3tools/contracts";
+import type { OrchestrationRunId, PromptId, ProjectId } from "@t3tools/contracts";
 import {
   ADMIN_PROMPT_IDS,
   ORCHESTRATION_PROMPT_IDS,
@@ -33,7 +33,11 @@ type AuthContext = {
 // ---------------------------------------------------------------------------
 
 function authorizeScope(
-  input: { scope: "global" | "project"; projectId?: string },
+  input: {
+    scope: "global" | "project" | "orchestration-run";
+    projectId?: string | undefined;
+    orchestrationRunId?: string | undefined;
+  },
   auth: AuthContext,
 ) {
   if (input.scope === "global") {
@@ -50,6 +54,19 @@ function authorizeScope(
       });
     }
     return { scope: "global" as const };
+  }
+
+  if (input.scope === "orchestration-run") {
+    if (!input.orchestrationRunId) {
+      throw new PromptManagementError({
+        code: "invalid_scope",
+        message: "Orchestration-run scope requires an orchestrationRunId.",
+      });
+    }
+    return {
+      scope: "orchestration-run" as const,
+      orchestrationRunId: input.orchestrationRunId as OrchestrationRunId,
+    };
   }
 
   if (!input.projectId) {
@@ -72,8 +89,20 @@ function authorizeScope(
   };
 }
 
-function scopeInput(scope: "global" | "project", projectId?: string) {
-  return projectId === undefined ? { scope } : { scope, projectId };
+function scopeInput(
+  scope: "global" | "project" | "orchestration-run",
+  projectId?: string,
+  orchestrationRunId?: string,
+): {
+  scope: "global" | "project" | "orchestration-run";
+  projectId?: string;
+  orchestrationRunId?: string;
+} {
+  return {
+    scope,
+    ...(projectId !== undefined ? { projectId } : {}),
+    ...(orchestrationRunId !== undefined ? { orchestrationRunId } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -217,21 +246,23 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
   return {
     list_prompt_definitions: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const scope = input.scope as "global" | "project";
+        const scope = input.scope as "global" | "project" | "orchestration-run";
         const projectId = input.projectId as string | undefined;
-        const result = yield* promptManagement.listPromptDefinitions(
-          authorizeScope(scopeInput(scope, projectId), auth),
-        );
+        const orchestrationRunId = input.orchestrationRunId as string | undefined;
+        const authorized = authorizeScope({ scope, projectId, orchestrationRunId }, auth);
+        const result = yield* promptManagement.listPromptDefinitions(authorized);
         return respondOk(result);
       }),
 
     get_prompt_document: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const scope = input.scope as "global" | "project";
+        const scope = input.scope as "global" | "project" | "orchestration-run";
         const projectId = input.projectId as string | undefined;
+        const orchestrationRunId = input.orchestrationRunId as string | undefined;
         const promptId = input.promptId as PromptId;
+        const authorized = authorizeScope({ scope, projectId, orchestrationRunId }, auth);
         const result = yield* promptManagement.getPromptDocument({
-          ...authorizeScope(scopeInput(scope, projectId), auth),
+          ...authorized,
           promptId,
         });
         return respondOk(result);
@@ -239,12 +270,14 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
 
     validate_prompt_document: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const scope = input.scope as "global" | "project";
+        const scope = input.scope as "global" | "project" | "orchestration-run";
         const projectId = input.projectId as string | undefined;
+        const orchestrationRunId = input.orchestrationRunId as string | undefined;
         const promptId = input.promptId as PromptId;
         const document = input.document;
+        const authorized = authorizeScope({ scope, projectId, orchestrationRunId }, auth);
         const result = yield* promptManagement.validatePromptDocument({
-          ...authorizeScope(scopeInput(scope, projectId), auth),
+          ...authorized,
           promptId,
           document,
         });
@@ -253,12 +286,14 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
 
     preview_prompt_document: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const scope = input.scope as "global" | "project";
+        const scope = input.scope as "global" | "project" | "orchestration-run";
         const projectId = input.projectId as string | undefined;
+        const orchestrationRunId = input.orchestrationRunId as string | undefined;
         const promptId = input.promptId as PromptId;
         const document = input.document;
+        const authorized = authorizeScope({ scope, projectId, orchestrationRunId }, auth);
         const result = yield* promptManagement.previewPromptDocument({
-          ...authorizeScope(scopeInput(scope, projectId), auth),
+          ...authorized,
           promptId,
           ...(document !== undefined ? { document } : {}),
         });
@@ -267,12 +302,14 @@ function toolHandlers(ctx: { promptManagement: PromptManagementShape; auth: Auth
 
     update_prompt_document: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
-        const scope = input.scope as "global" | "project";
+        const scope = input.scope as "global" | "project" | "orchestration-run";
         const projectId = input.projectId as string | undefined;
+        const orchestrationRunId = input.orchestrationRunId as string | undefined;
         const promptId = input.promptId as PromptId;
         const document = input.document;
+        const authorized = authorizeScope({ scope, projectId, orchestrationRunId }, auth);
         const result = yield* promptManagement.updatePromptDocument({
-          ...authorizeScope(scopeInput(scope, projectId), auth),
+          ...authorized,
           promptId,
           document,
         });

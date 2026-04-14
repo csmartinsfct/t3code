@@ -100,6 +100,7 @@ function makeRun(overrides: Partial<OrchestrationRun> = {}): OrchestrationRun {
     currentPhase: "working",
     reviewIteration: 0,
     maxReviewIterations: 2,
+    promptOverrides: {},
     createdAt: "2026-04-09T10:00:00.000Z",
     updatedAt: "2026-04-09T10:00:00.000Z",
     ...overrides,

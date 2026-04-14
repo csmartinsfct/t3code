@@ -1309,6 +1309,7 @@ export const OrchestrationRun = Schema.Struct({
   currentPhase: OrchestrationRunPhase,
   reviewIteration: NonNegativeInt,
   maxReviewIterations: NonNegativeInt,
+  promptOverrides: OrchestrationPromptOverrides,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1322,6 +1323,7 @@ export const OrchestrationRunSummary = Schema.Struct({
   currentTicketIndex: Schema.Int,
   ticketCount: NonNegativeInt,
   currentPhase: OrchestrationRunPhase,
+  promptOverrides: OrchestrationPromptOverrides,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1353,6 +1355,7 @@ export const OrchestrationCreateRunInput = Schema.Struct({
   reviewerModelSelection: ModelSelection,
   runtimeMode: Schema.optional(RuntimeMode),
   maxReviewIterations: Schema.optional(NonNegativeInt),
+  promptOverrides: Schema.optional(OrchestrationPromptOverrides),
 });
 export type OrchestrationCreateRunInput = typeof OrchestrationCreateRunInput.Type;
 
@@ -1370,6 +1373,7 @@ export type OrchestrationGetRunInput = typeof OrchestrationGetRunInput.Type;
 
 export const OrchestrationListRunsInput = Schema.Struct({
   projectId: ProjectId,
+  status: Schema.optionalKey(Schema.Array(OrchestrationRunStatus)),
 });
 export type OrchestrationListRunsInput = typeof OrchestrationListRunsInput.Type;
 

@@ -173,6 +173,8 @@ export function createWsNativeApi(): NativeApi {
       onDomainEvent: (callback) => rpcClient.orchestration.onDomainEvent(callback),
       createRun: rpcClient.orchestration.createRun,
       startRun: rpcClient.orchestration.startRun,
+      listRuns: (input) => rpcClient.orchestration.listRuns(input).then((runs) => [...runs]),
+      getRun: rpcClient.orchestration.getRun,
     },
   };
 
