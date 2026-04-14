@@ -100,6 +100,8 @@ const DIFF_PANEL_UNSAFE_CSS = `
   color: color-mix(in srgb, var(--foreground) 84%, var(--primary)) !important;
   text-decoration-color: currentColor;
 }
+
+
 `;
 
 type RenderablePatch =
@@ -336,14 +338,41 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     target?.scrollIntoView({ block: "nearest" });
   }, [selectedFilePath, renderableFiles]);
 
+  /** When "All repos" is selected with multiple repos, build per-repo file entries so each file
+   *  carries its source repo label (needed because different repos can share file paths). */
+  const allRepoFileEntries = useMemo(() => {
+    if (selectedRepoCwd || !repoDiffs || repos.length <= 1) return null;
+    const entries: Array<{
+      fileDiff: FileDiffMetadata;
+      repoLabel: string;
+      repoCwd: string;
+    }> = [];
+    for (const rd of repoDiffs) {
+      const repo = repos.find((r) => r.cwd === rd.repoRoot);
+      if (!repo) continue;
+      const parsed = getRenderablePatch(rd.diff, `repo-group:${rd.repoRoot}:${resolvedTheme}`);
+      if (parsed?.kind !== "files") continue;
+      const sorted = parsed.files.toSorted((left, right) =>
+        resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+      for (const file of sorted) {
+        entries.push({ fileDiff: file, repoLabel: repo.label, repoCwd: repo.cwd });
+      }
+    }
+    return entries.length > 0 ? entries : null;
+  }, [selectedRepoCwd, repoDiffs, repos, resolvedTheme]);
+
   const openDiffFileInEditor = useCallback(
-    (filePath: string) => {
+    (filePath: string, repoCwd?: string | null) => {
       const api = readNativeApi();
       if (!api) return;
       const targetPath = resolveDiffEditorTarget({
         activeCwd,
         filePath,
-        selectedRepoCwd,
+        selectedRepoCwd: repoCwd ?? selectedRepoCwd,
       });
       void openInPreferredEditor(api, targetPath).catch((error) => {
         console.warn("Failed to open diff file in editor.", error);
@@ -437,7 +466,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
   const repoTabStrip =
     repos.length > 1 ? (
-      <div className="flex gap-1 border-b border-border px-4 py-1 [-webkit-app-region:no-drag]">
+      <div className="repo-tab-strip flex gap-1 overflow-x-auto border-b border-border px-4 py-1 [-webkit-app-region:no-drag]">
         <button
           type="button"
           className={cn(
@@ -477,7 +506,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
   const headerRow = (
     <>
-      {repoTabStrip}
       <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
         {canScrollTurnStripLeft && (
           <div className="pointer-events-none absolute inset-y-0 left-8 z-10 w-7 bg-linear-to-r from-card to-transparent" />
@@ -605,7 +633,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
+    <DiffPanelShell mode={mode} header={headerRow} topStrip={repoTabStrip}>
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
@@ -649,10 +677,19 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   intersectionObserverMargin: 1200,
                 }}
               >
-                {renderableFiles.map((fileDiff) => {
+                {(
+                  allRepoFileEntries ??
+                  renderableFiles.map((f) => ({
+                    fileDiff: f,
+                    repoLabel: null as string | null,
+                    repoCwd: null as string | null,
+                  }))
+                ).map(({ fileDiff, repoLabel, repoCwd }) => {
                   const filePath = resolveFileDiffPath(fileDiff);
                   const fileKey = buildFileDiffRenderKey(fileDiff);
-                  const themedFileKey = `${fileKey}:${resolvedTheme}`;
+                  const themedFileKey = repoCwd
+                    ? `${repoCwd}:${fileKey}:${resolvedTheme}`
+                    : `${fileKey}:${resolvedTheme}`;
                   return (
                     <div
                       key={themedFileKey}
@@ -666,7 +703,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           return node.hasAttribute("data-title");
                         });
                         if (!clickedHeader) return;
-                        openDiffFileInEditor(filePath);
+                        openDiffFileInEditor(filePath, repoCwd);
                       }}
                     >
                       <FileDiff
@@ -679,6 +716,26 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                           themeType: resolvedTheme as DiffThemeType,
                           unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                         }}
+                        {...(repoLabel
+                          ? {
+                              renderHeaderMetadata: () => (
+                                <span
+                                  style={{
+                                    padding: "2px 8px",
+                                    color: "oklch(97% 0 0)",
+                                    border: "1px solid #2d2d2d",
+                                    background: "#1f1f1f",
+                                    borderRadius: "6px",
+                                    fontSize: "10px",
+                                    fontWeight: 500,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {repoLabel}
+                                </span>
+                              ),
+                            }
+                          : null)}
                       />
                     </div>
                   );

@@ -18,6 +18,8 @@ function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
 export function DiffPanelShell(props: {
   mode: DiffPanelMode;
   header: ReactNode;
+  /** Optional strip rendered as its own row above the main header (e.g. repo tabs). */
+  topStrip?: ReactNode;
   children: ReactNode;
 }) {
   const shouldUseDragRegion = isElectron && props.mode !== "sheet";
@@ -32,9 +34,13 @@ export function DiffPanelShell(props: {
       )}
     >
       {shouldUseDragRegion ? (
-        <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
+        <>
+          {props.topStrip}
+          <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
+        </>
       ) : (
         <div className="border-b border-border">
+          {props.topStrip}
           <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
         </div>
       )}

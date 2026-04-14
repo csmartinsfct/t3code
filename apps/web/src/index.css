@@ -202,13 +202,15 @@ input {
   background: rgba(255, 255, 255, 0.18);
 }
 
-.turn-chip-strip {
+.turn-chip-strip,
+.repo-tab-strip {
   scrollbar-width: none;
   -ms-overflow-style: none;
   overscroll-behavior-x: contain;
 }
 
-.turn-chip-strip::-webkit-scrollbar {
+.turn-chip-strip::-webkit-scrollbar,
+.repo-tab-strip::-webkit-scrollbar {
   display: none;
 }
 
