@@ -2485,7 +2485,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    sessions.delete(context.session.threadId);
+    // Only remove this context from the map if it is still the active entry.
+    // A newer session may have already replaced it (e.g. session restart).
+    if (sessions.get(context.session.threadId) === context) {
+      sessions.delete(context.session.threadId);
+    }
   });
 
   const requireSession = (
@@ -3033,6 +3037,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         recovery: { runFork, canUseTool, baseQueryOptions, contextRef },
       };
       yield* Ref.set(contextRef, context);
+
+      // Stop old session if one exists for this thread — prevents orphaned CLI
+      // processes and stream fibers that can later corrupt session state.
+      const existingContext = sessions.get(threadId);
+      if (existingContext && !existingContext.stopped) {
+        yield* stopSessionInternal(existingContext, { emitExitEvent: false });
+      }
       sessions.set(threadId, context);
 
       const sessionStartedStamp = yield* makeEventStamp();
