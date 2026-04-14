@@ -1,11 +1,50 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-13T11:28:37.798Z",
-  "lastProcessedCommit": "796c567d1b2f18ca78c3b2f746924968ddd62c05",
+  "generatedAt": "2026-04-13T18:39:11.170Z",
+  "lastProcessedCommit": "02bba69ef9d60e29b47a163a34c300083fe35518",
   "groups": [
     {
       "date": "2026-04-13",
       "entries": [
+        {
+          "id": "5ecfbb05b819eed1",
+          "title": "Markdown formatting in review summaries and comments",
+          "summary": "Review output now renders markdown in summaries and comment bodies, improving readability for formatted feedback.",
+          "category": "improvement",
+          "commitShas": ["02bba69ef9d60e29b47a163a34c300083fe35518"]
+        },
+        {
+          "id": "c3d66d68c7880da1",
+          "title": "Added editable admin prompts in Settings",
+          "summary": "Settings now include an Admin Prompts section for managed runs, scheduled tasks, and ticketing, making these instructions configurable without code changes.",
+          "category": "feature",
+          "commitShas": ["c07a5f04dd5389fd968c16abffd7f2b3cd29fb31"]
+        },
+        {
+          "id": "7c557401e3b7f9f5",
+          "title": "Fixed POST-based admin actions that could fail unexpectedly",
+          "summary": "Resolved a request parsing issue that could break POST requests for ticketing, managed runs, and scheduled tasks.",
+          "category": "fix",
+          "commitShas": ["c07a5f04dd5389fd968c16abffd7f2b3cd29fb31"]
+        },
+        {
+          "id": "971309991fa02eab",
+          "title": "Improved stability during long-running sessions",
+          "summary": "Reduced memory growth in board and orchestration-heavy workflows by bounding cached orchestration data and improving cleanup of background provider processes.",
+          "category": "performance",
+          "commitShas": [
+            "21451031ce1b6cda81a1fd843940a856ddaf7ad8",
+            "5362068b52481466dde0f2e71fa5a6980e8b9a28",
+            "754d5b7df2e96c39286025e4921b9889f3507b4c"
+          ]
+        },
+        {
+          "id": "e12620dd2119b0fc",
+          "title": "Added automatic cleanup for idle sessions",
+          "summary": "Sessions can now be stopped automatically after a configurable idle timeout, with new Settings options for disabling cleanup or choosing common timeout lengths. Idle sessions remain resumable when you return.",
+          "category": "improvement",
+          "commitShas": ["2bcd1525bc1b33610d36168c56f99bc0f1fd233f"]
+        },
         {
           "id": "5b1558573b0365fc",
           "title": "Ticket editing now includes rich text formatting and inline acceptance criteria",
@@ -1265,6 +1304,34 @@
           "796c567d1b2f18ca78c3b2f746924968ddd62c05"
         ],
         "commitCount": 4,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-13T12:36:39.332Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "796c567d1b2f18ca78c3b2f746924968ddd62c05",
+        "toInclusiveCommit": "9d91bc2502c661e2f5bbec56351adc8b7dd397bf",
+        "commitShas": [
+          "21451031ce1b6cda81a1fd843940a856ddaf7ad8",
+          "754d5b7df2e96c39286025e4921b9889f3507b4c",
+          "2bcd1525bc1b33610d36168c56f99bc0f1fd233f",
+          "5362068b52481466dde0f2e71fa5a6980e8b9a28",
+          "c07a5f04dd5389fd968c16abffd7f2b3cd29fb31",
+          "0310f8f99703925a81ad73bdc9e537cef023df6f",
+          "9d91bc2502c661e2f5bbec56351adc8b7dd397bf"
+        ],
+        "commitCount": 7,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-13T18:39:11.076Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "9d91bc2502c661e2f5bbec56351adc8b7dd397bf",
+        "toInclusiveCommit": "02bba69ef9d60e29b47a163a34c300083fe35518",
+        "commitShas": ["02bba69ef9d60e29b47a163a34c300083fe35518"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }
