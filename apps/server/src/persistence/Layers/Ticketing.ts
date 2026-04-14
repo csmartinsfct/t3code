@@ -449,6 +449,7 @@ const makeTicketingRepository = Effect.gen(function* () {
       ),
     getByIdentifier: (input) =>
       Effect.gen(function* () {
+        if (!input.identifier) return Option.none();
         const rows =
           input.projectId === undefined
             ? yield* sql`SELECT ${sql.literal(TICKET_SELECT)} FROM tickets WHERE identifier = ${input.identifier}`

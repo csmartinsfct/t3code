@@ -717,6 +717,9 @@ function toolHandlers(ctx: ToolContext) {
   /** Resolve a ticket UUID or human-readable identifier within the current project. */
   const resolveId = (idOrIdentifier: string) =>
     Effect.gen(function* () {
+      if (!idOrIdentifier) {
+        return yield* Effect.fail(new Error("Missing required ticket ID or identifier"));
+      }
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         idOrIdentifier,
       );
