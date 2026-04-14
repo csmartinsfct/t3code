@@ -344,6 +344,330 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("excludes archived threads and their linked rows from the startup snapshot", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-archived-filter',
+          'Archived Filter Project',
+          '/tmp/project-archived-filter',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-03-03T00:00:00.000Z',
+          '2026-03-03T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-active',
+            'project-archived-filter',
+            'Active Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            'turn-active',
+            '2026-03-03T00:00:02.000Z',
+            '2026-03-03T00:00:03.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-archived',
+            'project-archived-filter',
+            'Archived Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            'turn-archived',
+            '2026-03-03T00:00:04.000Z',
+            '2026-03-03T00:00:05.000Z',
+            '2026-03-03T00:00:06.000Z',
+            NULL
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-active',
+            'thread-active',
+            'turn-active',
+            'assistant',
+            'active message',
+            0,
+            '2026-03-03T00:00:07.000Z',
+            '2026-03-03T00:00:07.000Z'
+          ),
+          (
+            'message-archived',
+            'thread-archived',
+            'turn-archived',
+            'assistant',
+            'archived message',
+            0,
+            '2026-03-03T00:00:08.000Z',
+            '2026-03-03T00:00:08.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'plan-active',
+            'thread-active',
+            'turn-active',
+            '# Active plan',
+            NULL,
+            NULL,
+            '2026-03-03T00:00:09.000Z',
+            '2026-03-03T00:00:09.000Z'
+          ),
+          (
+            'plan-archived',
+            'thread-archived',
+            'turn-archived',
+            '# Archived plan',
+            NULL,
+            NULL,
+            '2026-03-03T00:00:10.000Z',
+            '2026-03-03T00:00:10.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          created_at
+        )
+        VALUES
+          (
+            'activity-active',
+            'thread-active',
+            'turn-active',
+            'info',
+            'runtime.note',
+            'active activity',
+            '{"kind":"active"}',
+            '2026-03-03T00:00:11.000Z'
+          ),
+          (
+            'activity-archived',
+            'thread-archived',
+            'turn-archived',
+            'info',
+            'runtime.note',
+            'archived activity',
+            '{"kind":"archived"}',
+            '2026-03-03T00:00:12.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES
+          (
+            'thread-active',
+            'idle',
+            'codex',
+            'provider-session-active',
+            'provider-thread-active',
+            'full-access',
+            NULL,
+            NULL,
+            '2026-03-03T00:00:13.000Z'
+          ),
+          (
+            'thread-archived',
+            'idle',
+            'codex',
+            'provider-session-archived',
+            'provider-thread-archived',
+            'full-access',
+            NULL,
+            NULL,
+            '2026-03-03T00:00:14.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_status,
+          checkpoint_files_json
+        )
+        VALUES
+          (
+            'thread-active',
+            'turn-active',
+            NULL,
+            NULL,
+            NULL,
+            'message-active',
+            'completed',
+            '2026-03-03T00:00:15.000Z',
+            '2026-03-03T00:00:15.000Z',
+            '2026-03-03T00:00:15.000Z',
+            1,
+            'checkpoint-active',
+            'ready',
+            '[]'
+          ),
+          (
+            'thread-archived',
+            'turn-archived',
+            NULL,
+            NULL,
+            NULL,
+            'message-archived',
+            'completed',
+            '2026-03-03T00:00:16.000Z',
+            '2026-03-03T00:00:16.000Z',
+            '2026-03-03T00:00:16.000Z',
+            1,
+            'checkpoint-archived',
+            'ready',
+            '[]'
+          )
+      `;
+
+      let sequence = 20;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-03-03T00:00:17.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+
+      assert.deepEqual(
+        snapshot.threads.map((thread) => thread.id),
+        [ThreadId.makeUnsafe("thread-active")],
+      );
+      assert.deepEqual(
+        snapshot.threads[0]?.messages.map((message) => message.id),
+        [asMessageId("message-active")],
+      );
+      assert.deepEqual(
+        snapshot.threads[0]?.proposedPlans.map((plan) => plan.id),
+        ["plan-active"],
+      );
+      assert.deepEqual(
+        snapshot.threads[0]?.activities.map((activity) => activity.id),
+        [asEventId("activity-active")],
+      );
+      assert.deepEqual(
+        snapshot.threads[0]?.checkpoints.map((checkpoint) => checkpoint.checkpointRef),
+        [asCheckpointRef("checkpoint-active")],
+      );
+      assert.equal(snapshot.threads[0]?.session?.threadId, ThreadId.makeUnsafe("thread-active"));
+      assert.equal(
+        snapshot.threads.some((thread) => thread.id === ThreadId.makeUnsafe("thread-archived")),
+        false,
+      );
+    }),
+  );
+
   it.effect(
     "reads targeted project, thread, and count queries without hydrating the full snapshot",
     () =>
@@ -437,6 +761,21 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             NULL
           ),
           (
+            'thread-archived',
+            'project-active',
+            'Archived Thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-03-01T00:00:08.500Z',
+            '2026-03-01T00:00:08.600Z',
+            '2026-03-01T00:00:08.700Z',
+            NULL
+          ),
+          (
             'thread-deleted',
             'project-active',
             'Deleted Thread',
@@ -456,7 +795,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         const counts = yield* snapshotQuery.getCounts();
         assert.deepEqual(counts, {
           projectCount: 2,
-          threadCount: 3,
+          threadCount: 4,
         });
 
         const project = yield* snapshotQuery.getActiveProjectByWorkspaceRoot("/tmp/workspace");

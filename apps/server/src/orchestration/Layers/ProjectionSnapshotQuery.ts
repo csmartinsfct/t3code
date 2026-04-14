@@ -229,6 +229,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           archived_at AS "archivedAt",
           deleted_at AS "deletedAt"
         FROM projection_threads
+        WHERE archived_at IS NULL
         ORDER BY created_at ASC, thread_id ASC
       `,
   });
@@ -239,18 +240,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          metadata_json AS "metadata",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+          projection_thread_messages.message_id AS "messageId",
+          projection_thread_messages.thread_id AS "threadId",
+          projection_thread_messages.turn_id AS "turnId",
+          projection_thread_messages.role,
+          projection_thread_messages.text,
+          projection_thread_messages.attachments_json AS "attachments",
+          projection_thread_messages.metadata_json AS "metadata",
+          projection_thread_messages.is_streaming AS "isStreaming",
+          projection_thread_messages.created_at AS "createdAt",
+          projection_thread_messages.updated_at AS "updatedAt"
         FROM projection_thread_messages
-        ORDER BY thread_id ASC, created_at ASC, message_id ASC
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_thread_messages.thread_id
+        WHERE projection_threads.archived_at IS NULL
+        ORDER BY
+          projection_thread_messages.thread_id ASC,
+          projection_thread_messages.created_at ASC,
+          projection_thread_messages.message_id ASC
       `,
   });
 
@@ -260,16 +267,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          plan_id AS "planId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          plan_markdown AS "planMarkdown",
-          implemented_at AS "implementedAt",
-          implementation_thread_id AS "implementationThreadId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+          projection_thread_proposed_plans.plan_id AS "planId",
+          projection_thread_proposed_plans.thread_id AS "threadId",
+          projection_thread_proposed_plans.turn_id AS "turnId",
+          projection_thread_proposed_plans.plan_markdown AS "planMarkdown",
+          projection_thread_proposed_plans.implemented_at AS "implementedAt",
+          projection_thread_proposed_plans.implementation_thread_id AS "implementationThreadId",
+          projection_thread_proposed_plans.created_at AS "createdAt",
+          projection_thread_proposed_plans.updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
-        ORDER BY thread_id ASC, created_at ASC, plan_id ASC
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_thread_proposed_plans.thread_id
+        WHERE projection_threads.archived_at IS NULL
+        ORDER BY
+          projection_thread_proposed_plans.thread_id ASC,
+          projection_thread_proposed_plans.created_at ASC,
+          projection_thread_proposed_plans.plan_id ASC
       `,
   });
 
@@ -279,22 +292,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          activity_id AS "activityId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          tone,
-          kind,
-          summary,
-          payload_json AS "payload",
-          sequence,
-          created_at AS "createdAt"
+          projection_thread_activities.activity_id AS "activityId",
+          projection_thread_activities.thread_id AS "threadId",
+          projection_thread_activities.turn_id AS "turnId",
+          projection_thread_activities.tone,
+          projection_thread_activities.kind,
+          projection_thread_activities.summary,
+          projection_thread_activities.payload_json AS "payload",
+          projection_thread_activities.sequence,
+          projection_thread_activities.created_at AS "createdAt"
         FROM projection_thread_activities
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_thread_activities.thread_id
+        WHERE projection_threads.archived_at IS NULL
         ORDER BY
-          thread_id ASC,
+          projection_thread_activities.thread_id ASC,
           CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
           sequence ASC,
-          created_at ASC,
-          activity_id ASC
+          projection_thread_activities.created_at ASC,
+          projection_thread_activities.activity_id ASC
       `,
   });
 
@@ -304,17 +320,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          status,
-          provider_name AS "providerName",
-          provider_session_id AS "providerSessionId",
-          provider_thread_id AS "providerThreadId",
-          runtime_mode AS "runtimeMode",
-          active_turn_id AS "activeTurnId",
-          last_error AS "lastError",
-          updated_at AS "updatedAt"
+          projection_thread_sessions.thread_id AS "threadId",
+          projection_thread_sessions.status,
+          projection_thread_sessions.provider_name AS "providerName",
+          projection_thread_sessions.provider_session_id AS "providerSessionId",
+          projection_thread_sessions.provider_thread_id AS "providerThreadId",
+          projection_thread_sessions.runtime_mode AS "runtimeMode",
+          projection_thread_sessions.active_turn_id AS "activeTurnId",
+          projection_thread_sessions.last_error AS "lastError",
+          projection_thread_sessions.updated_at AS "updatedAt"
         FROM projection_thread_sessions
-        ORDER BY thread_id ASC
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_thread_sessions.thread_id
+        WHERE projection_threads.archived_at IS NULL
+        ORDER BY projection_thread_sessions.thread_id ASC
       `,
   });
 
@@ -324,17 +343,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          checkpoint_turn_count AS "checkpointTurnCount",
-          checkpoint_ref AS "checkpointRef",
-          checkpoint_status AS "status",
-          checkpoint_files_json AS "files",
-          assistant_message_id AS "assistantMessageId",
-          completed_at AS "completedAt"
+          projection_turns.thread_id AS "threadId",
+          projection_turns.turn_id AS "turnId",
+          projection_turns.checkpoint_turn_count AS "checkpointTurnCount",
+          projection_turns.checkpoint_ref AS "checkpointRef",
+          projection_turns.checkpoint_status AS "status",
+          projection_turns.checkpoint_files_json AS "files",
+          projection_turns.assistant_message_id AS "assistantMessageId",
+          projection_turns.completed_at AS "completedAt"
         FROM projection_turns
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_turns.thread_id
         WHERE checkpoint_turn_count IS NOT NULL
-        ORDER BY thread_id ASC, checkpoint_turn_count ASC
+          AND projection_threads.archived_at IS NULL
+        ORDER BY projection_turns.thread_id ASC, checkpoint_turn_count ASC
       `,
   });
 
@@ -344,18 +366,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          state,
-          requested_at AS "requestedAt",
-          started_at AS "startedAt",
-          completed_at AS "completedAt",
-          assistant_message_id AS "assistantMessageId",
-          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          source_proposed_plan_id AS "sourceProposedPlanId"
+          projection_turns.thread_id AS "threadId",
+          projection_turns.turn_id AS "turnId",
+          projection_turns.state,
+          projection_turns.requested_at AS "requestedAt",
+          projection_turns.started_at AS "startedAt",
+          projection_turns.completed_at AS "completedAt",
+          projection_turns.assistant_message_id AS "assistantMessageId",
+          projection_turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          projection_turns.source_proposed_plan_id AS "sourceProposedPlanId"
         FROM projection_turns
+        INNER JOIN projection_threads
+          ON projection_threads.thread_id = projection_turns.thread_id
         WHERE turn_id IS NOT NULL
-        ORDER BY thread_id ASC, requested_at DESC, turn_id DESC
+          AND projection_threads.archived_at IS NULL
+        ORDER BY projection_turns.thread_id ASC, requested_at DESC, turn_id DESC
       `,
   });
 
@@ -419,6 +444,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId"
         FROM projection_threads
         WHERE project_id = ${projectId}
+          AND archived_at IS NULL
           AND deleted_at IS NULL
         ORDER BY created_at ASC, thread_id ASC
         LIMIT 1
