@@ -52,7 +52,6 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
-import { TicketOriginThreadSection } from "./TicketOriginThreadSection";
 import { resolveTicketModelOverrideState } from "./orchestrationModelDisplay";
 import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
@@ -313,6 +312,7 @@ interface KanbanTicketDetailProps {
   onBack: () => void;
   onNavigateToTicket: (ticketId: TicketId) => void;
   onOrchestrate?: (ticket: Ticket) => void;
+  findTicketSummary?: (id: TicketId) => TicketSummary | undefined;
 }
 
 function TicketRelationRowButton({
@@ -338,6 +338,29 @@ function TicketRelationRowButton({
       </Badge>
       <span className="shrink-0 text-muted-foreground">{identifier}</span>
       <span className="truncate text-foreground">{title}</span>
+    </button>
+  );
+}
+
+export function ParentTicketIndicator({
+  parent,
+  onClick,
+}: {
+  parent: { identifier: string; title: string };
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="mt-2 flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1.5 text-left text-xs transition-colors hover:bg-accent"
+      onClick={onClick}
+    >
+      <ListTreeIcon className="size-3 shrink-0 text-muted-foreground" />
+      <span className="text-[11px] text-muted-foreground">Sub-issue of</span>
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+        {parent.identifier}
+      </span>
+      <span className="truncate text-foreground">{parent.title}</span>
     </button>
   );
 }
@@ -464,6 +487,7 @@ export function KanbanTicketDetail({
   onBack,
   onNavigateToTicket,
   onOrchestrate,
+  findTicketSummary,
 }: KanbanTicketDetailProps) {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -482,6 +506,11 @@ export function KanbanTicketDetail({
   const removeFromSelection = useTicketSelectionStore((s) => s.removeFromSelection);
   const settings = useSettings();
   const serverProviders = useServerProviders();
+
+  const parentSummary = useMemo(() => {
+    if (!ticket?.parentId || !findTicketSummary) return null;
+    return findTicketSummary(ticket.parentId) ?? null;
+  }, [ticket?.parentId, findTicketSummary]);
 
   const resolvedGlobalImplementer = useMemo(
     () =>
@@ -842,41 +871,52 @@ export function KanbanTicketDetail({
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between">
             <div className="min-w-0 flex-1">
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {ticket.identifier}
-              </span>
-              <input
-                type="text"
-                className="mt-0.5 w-full cursor-text bg-transparent font-[inherit]! text-sm font-medium text-foreground outline-none"
-                value={editingTitle ? titleDraft : ticket.title}
-                onFocus={() => {
-                  setTitleDraft(ticket.title);
-                  setEditingTitle(true);
-                }}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onBlur={() => {
-                  const blurAction = resolveInlineEditBlurAction({
-                    cancelRequested: cancelEditRef.current,
-                    isEditing: editingTitle,
-                  });
-                  if (blurAction === "cancel") {
-                    cancelEditRef.current = false;
-                    setEditingTitle(false);
-                  } else if (blurAction === "save") {
-                    void handleTitleSave();
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    e.currentTarget.blur();
-                  }
-                  if (e.key === "Escape") {
-                    cancelEditRef.current = true;
-                    e.currentTarget.blur();
-                  }
-                }}
-              />
+              <div className="flex items-baseline gap-2">
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                  {ticket.identifier}
+                </span>
+                <input
+                  type="text"
+                  className="min-w-0 flex-1 cursor-text bg-transparent font-[inherit]! text-sm font-medium text-foreground outline-none"
+                  value={editingTitle ? titleDraft : ticket.title}
+                  onFocus={() => {
+                    setTitleDraft(ticket.title);
+                    setEditingTitle(true);
+                  }}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={() => {
+                    const blurAction = resolveInlineEditBlurAction({
+                      cancelRequested: cancelEditRef.current,
+                      isEditing: editingTitle,
+                    });
+                    if (blurAction === "cancel") {
+                      cancelEditRef.current = false;
+                      setEditingTitle(false);
+                    } else if (blurAction === "save") {
+                      void handleTitleSave();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }
+                    if (e.key === "Escape") {
+                      cancelEditRef.current = true;
+                      e.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
+              {parentSummary && (
+                <ParentTicketIndicator
+                  parent={{
+                    identifier: parentSummary.identifier,
+                    title: parentSummary.title,
+                  }}
+                  onClick={() => onNavigateToTicket(parentSummary.id)}
+                />
+              )}
             </div>
             <TicketDetailActionsMenu
               ticket={ticket}
@@ -941,28 +981,26 @@ export function KanbanTicketDetail({
             <span className="text-[11px] text-muted-foreground">
               Created {formatRelativeDate(ticket.createdAt)}
             </span>
+            {threadLinks?.originThread && (
+              <>
+                <span className="text-border">|</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/$threadId",
+                      params: { threadId: threadLinks.originThread!.threadId },
+                    })
+                  }
+                >
+                  <Badge size="sm" variant="outline" className="cursor-pointer">
+                    Origin Thread
+                  </Badge>
+                </button>
+              </>
+            )}
           </div>
         </div>
-
-        {/* Description */}
-        <div className="rounded-md py-2">
-          <p className="text-[11px] font-medium text-muted-foreground">Description</p>
-          <div className="mt-0.5 text-foreground">
-            <TicketDescriptionEditor
-              ticketId={ticketId}
-              initialContent={ticket.description}
-              onSave={saveDescription}
-            />
-          </div>
-        </div>
-
-        {/* Acceptance Criteria */}
-        <TicketAcceptanceCriteria
-          ticketId={ticketId}
-          criteria={ticket.acceptanceCriteria ?? []}
-          onUpdated={() => void fetchTicket()}
-          onCriteriaChange={handleCriteriaChange}
-        />
 
         {/* Labels */}
         <TicketLabelPicker
@@ -971,26 +1009,6 @@ export function KanbanTicketDetail({
           labels={ticket.labels}
           onUpdated={() => void fetchTicket()}
         />
-
-        {/* Dependencies */}
-        {ticket.dependencies.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Dependencies ({ticket.dependencies.length})
-            </h3>
-            <div className="flex flex-col gap-1">
-              {ticket.dependencies.map((dep) => {
-                return (
-                  <DependencyTicketRow
-                    key={dep.dependsOnTicketId}
-                    dependency={dep}
-                    onNavigateToTicket={onNavigateToTicket}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {/* Worktree */}
         <div className="flex flex-col gap-2">
@@ -1034,16 +1052,44 @@ export function KanbanTicketDetail({
           />
         </div>
 
-        {threadLinks?.originThread && (
-          <TicketOriginThreadSection
-            thread={threadLinks.originThread}
-            onOpenThread={(nextThreadId) =>
-              void navigate({
-                to: "/$threadId",
-                params: { threadId: nextThreadId },
-              })
-            }
-          />
+        {/* Description */}
+        <div className="rounded-md py-2">
+          <p className="text-[11px] font-medium text-muted-foreground">Description</p>
+          <div className="mt-0.5 text-foreground">
+            <TicketDescriptionEditor
+              ticketId={ticketId}
+              initialContent={ticket.description}
+              onSave={saveDescription}
+            />
+          </div>
+        </div>
+
+        {/* Acceptance Criteria */}
+        <TicketAcceptanceCriteria
+          ticketId={ticketId}
+          criteria={ticket.acceptanceCriteria ?? []}
+          onUpdated={() => void fetchTicket()}
+          onCriteriaChange={handleCriteriaChange}
+        />
+
+        {/* Dependencies */}
+        {ticket.dependencies.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Dependencies ({ticket.dependencies.length})
+            </h3>
+            <div className="flex flex-col gap-1">
+              {ticket.dependencies.map((dep) => {
+                return (
+                  <DependencyTicketRow
+                    key={dep.dependsOnTicketId}
+                    dependency={dep}
+                    onNavigateToTicket={onNavigateToTicket}
+                  />
+                );
+              })}
+            </div>
+          </div>
         )}
 
         {/* Model overrides */}

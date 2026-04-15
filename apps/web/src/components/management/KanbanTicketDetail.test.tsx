@@ -15,6 +15,7 @@ import {
   buildTicketDetailActionItems,
   DECOMPOSE_PROMPT,
   DependencyTicketRow,
+  ParentTicketIndicator,
   resolveInlineEditBlurAction,
   resolveNullableInlineTextSave,
   resolveRequiredInlineTextSave,
@@ -143,6 +144,31 @@ describe("KanbanTicketDetail", () => {
     expect(html).toContain("Blocked");
     expect(html).toContain("T3CO-3");
     expect(html).toContain("Child ticket title");
+  });
+
+  it("renders parent ticket indicator with identifier, title, and sub-issue label", () => {
+    const html = renderToStaticMarkup(
+      <ParentTicketIndicator
+        parent={{ identifier: "T3CO-1", title: "Parent ticket" }}
+        onClick={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Sub-issue of");
+    expect(html).toContain("T3CO-1");
+    expect(html).toContain("Parent ticket");
+  });
+
+  it("fires onClick when parent ticket indicator is clicked", () => {
+    const onClick = vi.fn();
+    const element = ParentTicketIndicator({
+      parent: { identifier: "T3CO-1", title: "Parent ticket" },
+      onClick,
+    });
+
+    element.props.onClick();
+
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
   it("resolves model override rendering from defaults, overrides, and disabled review settings", () => {

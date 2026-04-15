@@ -680,6 +680,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     [clearSelection, pushManagementBoardTicket, typedProjectId],
   );
 
+  const findTicketSummary = useCallback(
+    (id: TicketId): TicketSummary | undefined => tickets.find((t) => t.id === id),
+    [tickets],
+  );
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Board header */}
@@ -729,6 +734,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           onBack={handleBack}
           onNavigateToTicket={handleNavigateToTicket}
           onOrchestrate={handleOrchestrateFromDetail}
+          findTicketSummary={findTicketSummary}
         />
       ) : (
         <div ref={boardBodyRef} className="relative flex min-h-0 flex-1 overflow-x-auto">

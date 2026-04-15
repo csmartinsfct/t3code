@@ -34,6 +34,7 @@ const detailMockState: {
     ticketId: TicketSummary["id"];
     onBack: () => void;
     onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+    findTicketSummary?: (id: TicketSummary["id"]) => TicketSummary | undefined;
     onOrchestrate?: (ticket: {
       id: TicketSummary["id"];
       projectId: TicketSummary["projectId"];
@@ -216,6 +217,7 @@ vi.mock("./KanbanTicketDetail", () => ({
     ticketId: TicketSummary["id"];
     onBack: () => void;
     onNavigateToTicket: (ticketId: TicketSummary["id"]) => void;
+    findTicketSummary?: (id: TicketSummary["id"]) => TicketSummary | undefined;
     onOrchestrate?: (ticket: {
       id: TicketSummary["id"];
       projectId: TicketSummary["projectId"];
