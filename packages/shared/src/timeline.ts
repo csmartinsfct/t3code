@@ -70,6 +70,20 @@ export function isTimelineLogMessage(message: string): boolean {
   return message.includes(TIMELINE_PREFIX);
 }
 
+export function truncateForLog(text: string | undefined | null, maxChars = 100): string | null {
+  if (text === undefined || text === null) {
+    return null;
+  }
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxChars)}...`;
+}
+
 export function summarizeTimelineText(
   text: string,
   maxChars = DEFAULT_TIMELINE_TEXT_PREVIEW_CHARS,

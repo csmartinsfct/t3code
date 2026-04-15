@@ -4,6 +4,10 @@ import path from "node:path";
 
 import type { ModelSelection, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
 import {
+  ProviderLifecycleLogger,
+  noopProviderLifecycleLogger,
+} from "../../provider/Services/ProviderLifecycleLogger";
+import {
   ApprovalRequestId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -238,6 +242,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.succeed(ProviderLifecycleLogger, noopProviderLifecycleLogger)),
     );
     const runtime = ManagedRuntime.make(layer);
 

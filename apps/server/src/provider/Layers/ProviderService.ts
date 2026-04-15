@@ -47,12 +47,17 @@ import {
   type ProviderRuntimeBinding,
 } from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import type {
+  ProviderLifecycleLoggerShape,
+  LifecycleEntry,
+} from "../Services/ProviderLifecycleLogger.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
   readonly canonicalEventLogger?: EventNdjsonLogger;
+  readonly lifecycleLogger?: ProviderLifecycleLoggerShape;
 }
 
 const ProviderRollbackConversationInput = Schema.Struct({
@@ -151,6 +156,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 ) {
   const analytics = yield* Effect.service(AnalyticsService);
   const serverSettings = yield* ServerSettingsService;
+  const lifecycle = options?.lifecycleLogger;
+  const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
+    lifecycle ? lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void)) : Effect.void;
   const canonicalEventLogger =
     options?.canonicalEventLogger ??
     (options?.canonicalEventLogPath !== undefined
@@ -236,6 +244,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.thread_id": input.binding.threadId,
     });
     return yield* Effect.gen(function* () {
+      yield* lfcyl(input.binding.threadId, {
+        scope: "provider-service",
+        event: "session.recover",
+        details: {
+          provider: input.binding.provider,
+          hasResumeCursor:
+            input.binding.resumeCursor !== undefined && input.binding.resumeCursor !== null,
+          strategy: "resume-from-binding",
+        },
+      });
       const adapter = yield* registry.getByProvider(input.binding.provider);
       const hasResumeCursor =
         input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
@@ -371,6 +389,22 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           baseProviderKind(persistedBinding.provider) === baseProviderKind(input.provider)
             ? persistedBinding.resumeCursor
             : undefined);
+        yield* lfcyl(threadId, {
+          scope: "provider-service",
+          event: "session.start",
+          details: {
+            provider: input.provider,
+            hasResumeCursor: effectiveResumeCursor !== undefined,
+            cursorSource:
+              input.resumeCursor !== undefined
+                ? "input"
+                : effectiveResumeCursor !== undefined
+                  ? "binding-fallback"
+                  : "none",
+            runtimeMode: input.runtimeMode,
+            hasCwd: typeof input.cwd === "string" && input.cwd.trim().length > 0,
+          },
+        });
         const adapter = yield* registry.getByProvider(input.provider);
         const session = yield* adapter.startSession({
           ...input,
@@ -454,6 +488,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;
+      yield* lfcyl(input.threadId, {
+        scope: "provider-service",
+        event: "turn.send",
+        details: {
+          provider: routed.adapter.provider,
+          model: input.modelSelection?.model ?? null,
+        },
+      });
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
@@ -637,6 +679,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           allowRecovery: false,
         });
         metricProvider = routed.adapter.provider;
+        yield* lfcyl(input.threadId, {
+          scope: "provider-service",
+          event: "session.stop",
+          details: {
+            provider: routed.adapter.provider ?? null,
+            sessionWasActive: routed.isActive,
+          },
+        });
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "stop-session",
           "provider.kind": routed.adapter.provider,

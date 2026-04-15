@@ -23,6 +23,10 @@ import { Cache, Cause, Duration, Effect, Layer, Option, Schedule, Stream } from 
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import {
+  ProviderLifecycleLogger,
+  type LifecycleEntry,
+} from "../../provider/Services/ProviderLifecycleLogger.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
@@ -766,6 +770,9 @@ const make = Effect.fn("make")(function* () {
   const rateLimitsCache = yield* ProviderRateLimitsCache;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const lifecycle = yield* ProviderLifecycleLogger;
+  const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
+    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1347,6 +1354,18 @@ const make = Effect.fn("make")(function* () {
       })();
 
       if (shouldApplyThreadLifecycle) {
+        yield* lfcyl(thread.id, {
+          scope: "ingestion",
+          event: "session-lifecycle.apply",
+          details: {
+            eventType: event.type,
+            newStatus: status,
+            previousStatus: thread.session?.status ?? null,
+            activeTurnId: nextActiveTurnId ?? null,
+            lastError: lastError ?? null,
+          },
+        });
+
         if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
           yield* markSourceProposedPlanImplemented(
             acceptedTurnStartedSourcePlan.sourceThreadId,
@@ -1389,6 +1408,15 @@ const make = Effect.fn("make")(function* () {
             lastError,
           }),
         );
+      } else {
+        yield* lfcyl(thread.id, {
+          scope: "ingestion",
+          event: "session-lifecycle.rejected",
+          details: {
+            eventType: event.type,
+            reason: "lifecycle-guard",
+          },
+        });
       }
     }
 
@@ -1504,6 +1532,14 @@ const make = Effect.fn("make")(function* () {
     }
 
     if (event.type === "turn.completed") {
+      yield* lfcyl(thread.id, {
+        scope: "ingestion",
+        event: "turn.complete.ingested",
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+        details: {
+          status: event.payload.state,
+        },
+      });
       const turnId = toTurnId(event.turnId);
       if (turnId) {
         const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);

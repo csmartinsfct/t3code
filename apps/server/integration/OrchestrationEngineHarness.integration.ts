@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  ProviderLifecycleLogger,
+  noopProviderLifecycleLogger,
+} from "../src/provider/Services/ProviderLifecycleLogger";
+import {
   ApprovalRequestId,
   ProviderKind,
   type OrchestrationEvent,
@@ -360,6 +364,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.succeed(ProviderLifecycleLogger, noopProviderLifecycleLogger)),
     );
 
     const runtime = ManagedRuntime.make(layer);

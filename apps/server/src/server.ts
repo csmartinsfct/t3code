@@ -11,6 +11,11 @@ import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
+import { makeProviderLifecycleLogger } from "./provider/Layers/ProviderLifecycleLogger";
+import {
+  ProviderLifecycleLogger,
+  noopProviderLifecycleLogger,
+} from "./provider/Services/ProviderLifecycleLogger";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
@@ -150,13 +155,16 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const ProviderLayerLive = Layer.unwrap(
   Effect.gen(function* () {
-    const { providerEventLogPath } = yield* ServerConfig;
+    const { providerEventLogPath, providerLogsDir } = yield* ServerConfig;
     const nativeEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "native",
     });
     const canonicalEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "canonical",
     });
+    const lifecycleLogger =
+      (yield* makeProviderLifecycleLogger(providerLogsDir)) ?? noopProviderLifecycleLogger;
+    const lifecycleLoggerLayer = Layer.succeed(ProviderLifecycleLogger, lifecycleLogger);
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
     );
@@ -174,7 +182,7 @@ const ProviderLayerLive = Layer.unwrap(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     ).pipe(Layer.provide(managedRunDeps), Layer.provide(snapshotQueryDeps));
     const claudeAdapterLayer = makeClaudeAdapterLive(
-      nativeEventLogger ? { nativeEventLogger } : undefined,
+      nativeEventLogger ? { nativeEventLogger, lifecycleLogger } : { lifecycleLogger },
     ).pipe(Layer.provide(managedRunDeps), Layer.provide(snapshotQueryDeps));
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
@@ -182,8 +190,12 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(
-      canonicalEventLogger ? { canonicalEventLogger } : undefined,
-    ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
+      canonicalEventLogger ? { canonicalEventLogger, lifecycleLogger } : { lifecycleLogger },
+    ).pipe(
+      Layer.provide(adapterRegistryLayer),
+      Layer.provide(providerSessionDirectoryLayer),
+      Layer.provideMerge(lifecycleLoggerLayer),
+    );
   }),
 );
 

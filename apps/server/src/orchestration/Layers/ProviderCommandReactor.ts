@@ -16,7 +16,11 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { formatTimelineLog } from "@t3tools/shared/timeline";
+import { formatTimelineLog, truncateForLog } from "@t3tools/shared/timeline";
+import {
+  ProviderLifecycleLogger,
+  type LifecycleEntry,
+} from "../../provider/Services/ProviderLifecycleLogger.ts";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -189,6 +193,9 @@ const make = Effect.gen(function* () {
   const git = yield* GitCore;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const lifecycle = yield* ProviderLifecycleLogger;
+  const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
+    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
   const handledTurnStartKeys = yield* Cache.make<string, true>({
     capacity: HANDLED_TURN_START_KEY_MAX,
     timeToLive: HANDLED_TURN_START_KEY_TTL,
@@ -302,6 +309,15 @@ const make = Effect.gen(function* () {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
 
+    yield* lfcyl(threadId, {
+      scope: "reactor",
+      event: "ensure-session.begin",
+      details: {
+        hasExistingSession: thread.session != null && thread.session.status !== "stopped",
+        existingSessionStatus: thread.session?.status ?? null,
+      },
+    });
+
     const desiredRuntimeMode = thread.runtimeMode;
     const currentProvider: ProviderKind | undefined = Schema.is(ProviderKind)(
       thread.session?.providerName,
@@ -399,6 +415,11 @@ const make = Effect.gen(function* () {
         !cwdChanged &&
         !activeSessionMissing
       ) {
+        yield* lfcyl(threadId, {
+          scope: "reactor",
+          event: "ensure-session.reuse",
+          details: { existingSessionThreadId },
+        });
         return existingSessionThreadId;
       }
 
@@ -423,6 +444,23 @@ const make = Effect.gen(function* () {
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
         hasResumeCursor: resumeCursor !== undefined,
+      });
+      yield* lfcyl(threadId, {
+        scope: "reactor",
+        event: "ensure-session.restart",
+        details: {
+          runtimeModeChanged,
+          providerChanged,
+          activeSessionMissing,
+          cwdChanged,
+          modelChanged,
+          shouldRestartForModelChange,
+          shouldRestartForModelSelectionChange,
+          resumeCursor: resumeCursor ?? null,
+          currentProvider: currentProvider ?? null,
+          desiredProvider: desiredModelSelection.provider,
+          activeSessionModel: activeSession?.model ?? null,
+        },
       });
       const restartedSession = yield* startProviderSession(
         resumeCursor !== undefined ? { resumeCursor } : undefined,
@@ -466,6 +504,17 @@ const make = Effect.gen(function* () {
         sameProfile &&
         forkSource.resumeCursor
       ) {
+        yield* lfcyl(threadId, {
+          scope: "reactor",
+          event: "ensure-session.fork",
+          details: {
+            forkType: "sdk",
+            sourceProvider: forkSource.provider,
+            targetProvider: preferredProvider,
+            sameProfile,
+            hasResumeCursor: !!forkSource.resumeCursor,
+          },
+        });
         const forkResumeCursor = {
           ...(typeof forkSource.resumeCursor === "object" && forkSource.resumeCursor !== null
             ? forkSource.resumeCursor
@@ -478,6 +527,16 @@ const make = Effect.gen(function* () {
       }
 
       // All other forks: start fresh session, store context for first-turn injection.
+      yield* lfcyl(threadId, {
+        scope: "reactor",
+        event: "ensure-session.fork",
+        details: {
+          forkType: "generic",
+          sourceProvider: forkSource.provider,
+          targetProvider: preferredProvider,
+          hasResumeCursor: !!forkSource.resumeCursor,
+        },
+      });
       const forkReadModel = yield* orchestrationEngine.getReadModel();
       const forkThread = forkReadModel.threads.find((t) => t.id === threadId);
       if (forkThread && forkThread.messages.length > 0) {
@@ -490,6 +549,11 @@ const make = Effect.gen(function* () {
     }
 
     // Original path: no fork (or generic fork), fresh session.
+    yield* lfcyl(threadId, {
+      scope: "reactor",
+      event: "ensure-session.fresh-start",
+      details: { reason: "no-existing-session" },
+    });
     const startedSession = yield* startProviderSession(undefined);
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
@@ -512,6 +576,16 @@ const make = Effect.gen(function* () {
       );
       return;
     }
+    yield* lfcyl(input.threadId, {
+      scope: "reactor",
+      event: "turn-send.dispatching",
+      details: {
+        inputPreview: truncateForLog(input.messageText),
+        model: input.modelSelection?.model ?? null,
+        interactionMode: input.interactionMode ?? null,
+        hasForkContext: pendingForkContext.has(input.threadId),
+      },
+    });
     yield* Effect.logInfo(
       formatTimelineLog("server.provider-reactor", "turn-send.start", {
         threadId: input.threadId,

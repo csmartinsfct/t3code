@@ -64,8 +64,23 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Multi-Layout](docs/multi-layout.md) — Board view with Kanban ticket management, drag-and-drop reordering/status changes, nested sidebar layout, and ticket composer attachments.
 - [Design Language](docs/design-language.md) — Prescriptive design system reference: color tokens, typography, spacing, component patterns, animations, layout recipes, and anti-patterns. Used as context for LLM-generated UIs.
 - [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via REST API.
+- [Visibility](docs/visibility.md) — Practical debugging guide: lifecycle logs, timeline logs, provider event logs, log file locations, context-loss investigation workflow, and logging best practices.
+- [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.
 
 These docs must be kept up to date as related code changes.
+
+## Bug Investigation Protocol
+
+**When a bug is reported, always inspect logs first before making code changes.**
+
+1. **Get the threadId** from the user or the UI.
+2. **Read `~/.t3/{env}/logs/provider/{threadId}.lifecycle.log`** — this shows every session decision, state transition, and recovery attempt. It's small and focused.
+3. **Read `~/.t3/{env}/logs/provider/{threadId}.log`** — raw provider events if you need token counts, streaming details, or SDK-level data.
+4. **Check timeline logs** — `grep '[timeline]' desktop-main.log server-child.log` for cross-boundary event flow.
+5. **If the bug is in the past**: reconstruct the timeline from existing log files. The lifecycle log is usually sufficient.
+6. **If reproducing**: tail logs live (`tail -f *.lifecycle.log`) while triggering the bug. Use the chrome-devtools MCP to interact with the running app, inspect state, and observe behavior in real time.
+
+See [Visibility](docs/visibility.md) for the full debugging reference including common issue patterns (context loss, rate limit recovery, stuck turns, orphaned sessions).
 
 ## Dev Server
 
@@ -100,6 +115,7 @@ Electron also stores Chromium profile data (localStorage, cookies) under `~/Libr
 
 ## Skills (`.claude/skills/`)
 
+- `debug` — Investigate bugs using lifecycle logs, provider event logs, and timeline logs. Use `/debug THREAD_ID` when a bug is reported.
 - `start-electron-dev` — Start the Electron dev stack (`bun run dev:desktop`).
 - `production-build` — Build a production macOS DMG via `scripts/build-desktop-artifact.ts`.
 - `test-managed-runs-mcp` — Test the managed runs REST endpoint end-to-end using the dev bypass token.

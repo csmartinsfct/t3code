@@ -33,6 +33,10 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProviderRateLimitsCacheLive } from "../../provider/Layers/ProviderRateLimitsCache.ts";
+import {
+  ProviderLifecycleLogger,
+  noopProviderLifecycleLogger,
+} from "../../provider/Services/ProviderLifecycleLogger.ts";
 import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
 import {
   OrchestrationEngineService,
@@ -211,6 +215,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(ProviderRateLimitsCacheLive),
+      Layer.provideMerge(Layer.succeed(ProviderLifecycleLogger, noopProviderLifecycleLogger)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),

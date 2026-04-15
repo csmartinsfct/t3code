@@ -23,6 +23,10 @@ import {
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import { ServerConfig } from "./config";
+import {
+  ProviderLifecycleLogger,
+  type LifecycleEntry,
+} from "./provider/Services/ProviderLifecycleLogger.ts";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { Keybindings } from "./keybindings";
 import { Open } from "./open";
@@ -235,6 +239,9 @@ const runStartupRecovery = Effect.gen(function* () {
   const orchestrationRunRepo = yield* OrchestrationRunRepository;
   const projectionThreadRepo = yield* ProjectionThreadRepository;
   const serverSettings = yield* ServerSettingsService;
+  const lifecycle = yield* ProviderLifecycleLogger;
+  const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
+    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
   const settings = yield* serverSettings.getSettings;
   const readModel = yield* orchestrationEngine.getReadModel();
   const threadsById = new Map(readModel.threads.map((thread) => [thread.id, thread] as const));
@@ -325,6 +332,16 @@ const runStartupRecovery = Effect.gen(function* () {
     initialWasWorkingThreadIds.add(thread.id);
   }
 
+  yield* lfcyl(null, {
+    scope: "startup",
+    event: "recovery.begin",
+    details: {
+      totalThreads: readModel.threads.length,
+      wasWorkingCount: initialWasWorkingThreadIds.size,
+      resumeEnabled: settings.resumeAgentsOnStartup === true,
+    },
+  });
+
   if (!settings.resumeAgentsOnStartup) {
     return {
       wasWorkingThreadIds: readModel.threads
@@ -337,6 +354,16 @@ const runStartupRecovery = Effect.gen(function* () {
   const resumedOrchestrationThreadIds = new Set<ThreadId>();
 
   for (const candidate of runningOrchestrationResumeCandidatesWithoutBlocking) {
+    const orchThread = threadsById.get(candidate.threadId);
+    yield* lfcyl(candidate.threadId, {
+      scope: "startup",
+      event: "recovery.thread.attempt",
+      details: {
+        type: "orchestration",
+        sessionStatus: orchThread?.session?.status ?? null,
+        activeTurnId: orchThread?.session?.activeTurnId ?? null,
+      },
+    });
     yield* Effect.logInfo(
       formatTimelineLog("server.startup", "resume-orchestration.start", {
         orchestrationThreadId: candidate.threadId,
@@ -346,19 +373,33 @@ const runStartupRecovery = Effect.gen(function* () {
     yield* orchestrationRunRunner.resumeRun({ runId: candidate.runId }).pipe(
       Effect.tap(() => {
         resumedOrchestrationThreadIds.add(candidate.threadId);
-        return Effect.logInfo(
-          formatTimelineLog("server.startup", "resume-orchestration.success", {
-            orchestrationThreadId: candidate.threadId,
-            runId: candidate.runId,
+        return Effect.all([
+          lfcyl(candidate.threadId, {
+            scope: "startup",
+            event: "recovery.thread.result",
+            details: { success: true },
           }),
-        );
+          Effect.logInfo(
+            formatTimelineLog("server.startup", "resume-orchestration.success", {
+              orchestrationThreadId: candidate.threadId,
+              runId: candidate.runId,
+            }),
+          ),
+        ]);
       }),
       Effect.catchCause((cause) =>
-        Effect.logWarning("failed to auto-resume orchestration run on startup", {
-          orchestrationThreadId: candidate.threadId,
-          runId: candidate.runId,
-          cause,
-        }),
+        Effect.all([
+          lfcyl(candidate.threadId, {
+            scope: "startup",
+            event: "recovery.thread.result",
+            details: { success: false, error: String(cause).slice(0, 200) },
+          }),
+          Effect.logWarning("failed to auto-resume orchestration run on startup", {
+            orchestrationThreadId: candidate.threadId,
+            runId: candidate.runId,
+            cause,
+          }),
+        ]),
       ),
     );
   }
@@ -367,6 +408,15 @@ const runStartupRecovery = Effect.gen(function* () {
     if (thread.isOrchestrationThread || thread.parentThreadId !== null) {
       continue;
     }
+    yield* lfcyl(thread.id, {
+      scope: "startup",
+      event: "recovery.thread.attempt",
+      details: {
+        type: "standalone",
+        sessionStatus: thread.session?.status ?? null,
+        activeTurnId: thread.session?.activeTurnId ?? null,
+      },
+    });
     yield* Effect.logInfo(
       formatTimelineLog("server.startup", "resume-thread.start", {
         threadId: thread.id,
@@ -391,17 +441,31 @@ const runStartupRecovery = Effect.gen(function* () {
       .pipe(
         Effect.tap(() => {
           resumedStandaloneThreadIds.add(thread.id);
-          return Effect.logInfo(
-            formatTimelineLog("server.startup", "resume-thread.success", {
-              threadId: thread.id,
+          return Effect.all([
+            lfcyl(thread.id, {
+              scope: "startup",
+              event: "recovery.thread.result",
+              details: { success: true },
             }),
-          );
+            Effect.logInfo(
+              formatTimelineLog("server.startup", "resume-thread.success", {
+                threadId: thread.id,
+              }),
+            ),
+          ]);
         }),
         Effect.catchCause((cause) =>
-          Effect.logWarning("failed to auto-resume thread on startup", {
-            threadId: thread.id,
-            cause,
-          }),
+          Effect.all([
+            lfcyl(thread.id, {
+              scope: "startup",
+              event: "recovery.thread.result",
+              details: { success: false, error: String(cause).slice(0, 200) },
+            }),
+            Effect.logWarning("failed to auto-resume thread on startup", {
+              threadId: thread.id,
+              cause,
+            }),
+          ]),
         ),
       );
   }
@@ -425,6 +489,14 @@ const runStartupRecovery = Effect.gen(function* () {
       }
       return true;
     });
+
+  yield* lfcyl(null, {
+    scope: "startup",
+    event: "recovery.complete",
+    details: {
+      wasWorkingIds: wasWorkingThreadIds,
+    },
+  });
 
   return {
     wasWorkingThreadIds,

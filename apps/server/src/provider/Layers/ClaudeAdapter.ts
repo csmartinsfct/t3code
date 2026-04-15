@@ -91,7 +91,12 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { ClaudeAdapter, type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import type {
+  LifecycleEntry,
+  ProviderLifecycleLoggerShape,
+} from "../Services/ProviderLifecycleLogger.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { truncateForLog } from "@t3tools/shared/timeline";
 
 const PROVIDER = "claudeAgent" as const;
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -204,6 +209,7 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly lifecycleLogger?: ProviderLifecycleLoggerShape;
 }
 
 function isUuid(value: string): boolean {
@@ -973,6 +979,27 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       readonly options: ClaudeQueryOptions;
     }) => query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime);
 
+  const lifecycle = options?.lifecycleLogger;
+  const lfcyl = (
+    threadId: ThreadId | null,
+    entry: Omit<LifecycleEntry, "sessionId" | "turnId"> & {
+      readonly sessionId?: string | undefined;
+      readonly turnId?: string | undefined;
+    },
+  ) => {
+    // Strip undefined optional fields for exactOptionalPropertyTypes compliance.
+    const clean = {
+      scope: entry.scope,
+      event: entry.event,
+      ...(entry.details !== undefined ? { details: entry.details } : {}),
+      ...(entry.sessionId !== undefined ? { sessionId: entry.sessionId } : {}),
+      ...(entry.turnId !== undefined ? { turnId: entry.turnId } : {}),
+    } satisfies LifecycleEntry;
+    return lifecycle
+      ? lifecycle.log(threadId, clean).pipe(Effect.catch(() => Effect.void))
+      : Effect.void;
+  };
+
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const serverSettingsService = yield* ServerSettingsService;
@@ -1057,6 +1084,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       resumeCursor,
       updatedAt: yield* nowIso,
     };
+
+    yield* lfcyl(threadId, {
+      scope: "claude-adapter",
+      event: "resume-cursor.updated",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        resumeSessionId: context.resumeSessionId ?? null,
+        lastAssistantUuid: context.lastAssistantUuid ?? null,
+        turnCount: context.turns.length,
+      },
+    });
   });
 
   const ensureAssistantTextBlock = Effect.fn("ensureAssistantTextBlock")(function* (
@@ -1249,6 +1287,16 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
 
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "thread-id.resolved",
+      sessionId: message.session_id,
+      details: {
+        providerThreadId: message.session_id,
+        isNew: context.lastThreadStartedId !== nextThreadId,
+      },
+    });
+
     if (context.lastThreadStartedId !== nextThreadId) {
       context.lastThreadStartedId = nextThreadId;
       const stamp = yield* makeEventStamp();
@@ -1374,6 +1422,18 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     errorMessage?: string,
     result?: SDKResultMessage,
   ) {
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "turn.complete",
+      sessionId: context.resumeSessionId ?? undefined,
+      turnId: context.turnState?.turnId,
+      details: {
+        status,
+        turnCount: context.turns.length,
+        errorMessage: truncateForLog(errorMessage, 200),
+      },
+    });
+
     const resultUsage =
       result?.usage && typeof result.usage === "object" ? { ...result.usage } : undefined;
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
@@ -2292,6 +2352,26 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     exit: Exit.Exit<void, Error>,
   ) {
+    const isRateLimit = Exit.isFailure(exit) && isRateLimitCause(exit.cause);
+    const isInterrupted = Exit.isFailure(exit) && isClaudeInterruptedCause(exit.cause);
+    const exitType = isRateLimit
+      ? "rate-limit"
+      : isInterrupted
+        ? "interrupted"
+        : Exit.isFailure(exit)
+          ? "error"
+          : "success";
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "stream.exit",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        exitType,
+        hasTurnState: context.turnState !== undefined,
+        hasStreamFiber: context.streamFiber !== undefined,
+      },
+    });
+
     if (context.stopped) {
       return;
     }
@@ -2315,6 +2395,16 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         if (context.turnState) {
           yield* completeTurn(context, "failed", message);
         }
+
+        yield* lfcyl(context.session.threadId, {
+          scope: "claude-adapter",
+          event: "stream.exit.rate-limit",
+          sessionId: context.resumeSessionId ?? undefined,
+          details: {
+            sessionPreserved: true,
+            message: truncateForLog(message, 200),
+          },
+        });
 
         // Clean up dead stream resources without destroying the session.
         context.streamFiber = undefined;
@@ -2354,6 +2444,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* completeTurn(context, "interrupted", "Claude runtime stream ended.");
     }
 
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "stream.exit.destroyed",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        reason: Exit.isFailure(exit)
+          ? truncateForLog(messageFromClaudeStreamCause(exit.cause, "unknown"), 200)
+          : "stream-ended",
+      },
+    });
+
     yield* stopSessionInternal(context, {
       emitExitEvent: true,
     });
@@ -2366,6 +2467,15 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const recreateQueryAndStream = Effect.fn("recreateQueryAndStream")(function* (
     context: ClaudeSessionContext,
   ) {
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "stream.recreate.begin",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        resumeSessionId: context.resumeSessionId ?? null,
+      },
+    });
+
     // 1. Shut down old queue (discards any pending items from the failed turn).
     yield* Queue.shutdown(context.promptQueue);
 
@@ -2412,13 +2522,40 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
 
     yield* Ref.set(context.recovery.contextRef, context);
+
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "stream.recreate.success",
+      sessionId: context.resumeSessionId ?? undefined,
+    });
   });
 
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
     context: ClaudeSessionContext,
-    options?: { readonly emitExitEvent?: boolean },
+    stopOptions?: { readonly emitExitEvent?: boolean },
   ) {
-    if (context.stopped) return;
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "session.stop.begin",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        alreadyStopped: context.stopped,
+        sessionStatus: context.session.status,
+        pendingApprovalsCount: context.pendingApprovals.size,
+        hasTurnState: context.turnState !== undefined,
+        hasStreamFiber: context.streamFiber !== undefined,
+        emitExitEvent: stopOptions?.emitExitEvent !== false,
+      },
+    });
+
+    if (context.stopped) {
+      yield* lfcyl(context.session.threadId, {
+        scope: "claude-adapter",
+        event: "session.stop.already-stopped",
+        sessionId: context.resumeSessionId ?? undefined,
+      });
+      return;
+    }
 
     context.stopped = true;
 
@@ -2469,7 +2606,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       updatedAt,
     };
 
-    if (options?.emitExitEvent !== false) {
+    if (stopOptions?.emitExitEvent !== false) {
       const stamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
         type: "session.exited",
@@ -2490,6 +2627,16 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (sessions.get(context.session.threadId) === context) {
       sessions.delete(context.session.threadId);
     }
+
+    yield* lfcyl(context.session.threadId, {
+      scope: "claude-adapter",
+      event: "session.stop.complete",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        removedFromMap: sessions.get(context.session.threadId) !== context,
+        emitExitEvent: stopOptions?.emitExitEvent !== false,
+      },
+    });
   });
 
   const requireSession = (
@@ -2529,6 +2676,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      yield* lfcyl(input.threadId, {
+        scope: "claude-adapter",
+        event: "session.start.begin",
+        details: {
+          resumeCursor: input.resumeCursor ?? null,
+          modelSelection: input.modelSelection ?? null,
+          runtimeMode: input.runtimeMode ?? null,
+          cwd: input.cwd ?? null,
+        },
+      });
+
       const startedAt = yield* nowIso;
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
@@ -2537,6 +2695,21 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const newSessionId =
         existingResumeSessionId === undefined || isFork ? yield* Random.nextUUIDv4 : undefined;
       const sessionId = isFork ? newSessionId : (existingResumeSessionId ?? newSessionId);
+
+      yield* lfcyl(input.threadId, {
+        scope: "claude-adapter",
+        event: "session.start.resume-state",
+        sessionId: sessionId ?? undefined,
+        details: {
+          resume: existingResumeSessionId ?? null,
+          resumeSessionAt: resumeState?.resumeSessionAt ?? null,
+          turnCount: resumeState?.turnCount ?? null,
+          fork: resumeState?.fork ?? null,
+          isFork,
+          sessionId: sessionId ?? null,
+          isNewSession: newSessionId !== undefined,
+        },
+      });
 
       const services = yield* Effect.services();
       const runFork = Effect.runForkWith(services);
@@ -3042,9 +3215,30 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // processes and stream fibers that can later corrupt session state.
       const existingContext = sessions.get(threadId);
       if (existingContext && !existingContext.stopped) {
+        yield* lfcyl(input.threadId, {
+          scope: "claude-adapter",
+          event: "session.start.existing-cleanup",
+          details: {
+            existingSessionStopped: existingContext.stopped,
+            existingSessionStatus: existingContext.session.status,
+          },
+        });
         yield* stopSessionInternal(existingContext, { emitExitEvent: false });
       }
       sessions.set(threadId, context);
+
+      yield* lfcyl(threadId, {
+        scope: "claude-adapter",
+        event: "session.start.success",
+        sessionId: sessionId ?? undefined,
+        details: {
+          resumeSessionId: context.resumeSessionId ?? null,
+          isFork,
+          model: context.currentApiModelId ?? null,
+          cwd: input.cwd ?? null,
+          provider: sessionProvider,
+        },
+      });
 
       const sessionStartedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -3119,8 +3313,32 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const sendTurn: ClaudeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const context = yield* requireSession(input.threadId);
 
+    const triggeringRecovery =
+      !context.streamFiber && !context.stopped && !!context.resumeSessionId;
+    yield* lfcyl(input.threadId, {
+      scope: "claude-adapter",
+      event: "turn.send.begin",
+      sessionId: context.resumeSessionId ?? undefined,
+      details: {
+        hasStreamFiber: context.streamFiber !== undefined,
+        triggeringRecovery,
+        inputPreview: truncateForLog(input.input),
+        attachmentCount: input.attachments?.length ?? 0,
+        model: input.modelSelection?.model ?? null,
+        interactionMode: input.interactionMode ?? null,
+      },
+    });
+
     // Lazily recreate stream if it died (e.g., after rate limit).
     if (!context.streamFiber && !context.stopped && context.resumeSessionId) {
+      yield* lfcyl(input.threadId, {
+        scope: "claude-adapter",
+        event: "turn.send.stream-recovery",
+        sessionId: context.resumeSessionId ?? undefined,
+        details: {
+          resumeSessionId: context.resumeSessionId ?? null,
+        },
+      });
       yield* recreateQueryAndStream(context);
     }
 
