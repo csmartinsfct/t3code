@@ -238,7 +238,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           selectedTickets.map((ticket) => [ticket.id, ticket] as const),
         );
         const executionTickets: Array<{ ticket: Ticket; selectedTicketId: Ticket["id"] }> = [];
-        for (const entry of plan.orderedTickets) {
+        for (const entry of plan.orderedTickets.filter((e) => e.annotation !== "skipped-done")) {
           const ticket =
             selectedTicketById.get(entry.ticket.id) ??
             (yield* ticketing.getById({ id: entry.ticket.id }).pipe(

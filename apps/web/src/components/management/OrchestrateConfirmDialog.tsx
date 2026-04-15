@@ -121,7 +121,7 @@ export function OrchestrateConfirmDialog({
     setError(null);
     const result = await submitOrchestrationConfirm({
       plan,
-      selectedTicketIdentifiers: [...selectedTickets.values()].map((ticket) => ticket.identifier),
+      selectedTicketIdentifiers: getRunnableTicketIdentifiers(plan),
       implementerModelSelection: implSel,
       reviewerModelSelection: revSel,
       onConfirm,

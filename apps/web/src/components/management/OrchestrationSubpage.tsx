@@ -227,7 +227,7 @@ export function OrchestrationSubpage({
         : null;
     const result = await submitOrchestrationConfirm({
       plan,
-      selectedTicketIdentifiers: [...selectedTickets.values()].map((ticket) => ticket.identifier),
+      selectedTicketIdentifiers: getRunnableTicketIdentifiers(plan),
       implementerModelSelection: implSel,
       reviewerModelSelection: revSel,
       ...(overrides ? { promptOverrides: overrides } : {}),
