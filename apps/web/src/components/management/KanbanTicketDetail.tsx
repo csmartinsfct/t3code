@@ -1054,14 +1054,11 @@ export function KanbanTicketDetail({
 
         {/* Description */}
         <div className="rounded-md py-2">
-          <p className="text-[11px] font-medium text-muted-foreground">Description</p>
-          <div className="mt-0.5 text-foreground">
-            <TicketDescriptionEditor
-              ticketId={ticketId}
-              initialContent={ticket.description}
-              onSave={saveDescription}
-            />
-          </div>
+          <TicketDescriptionEditor
+            ticketId={ticketId}
+            initialContent={ticket.description}
+            onSave={saveDescription}
+          />
         </div>
 
         {/* Acceptance Criteria */}
