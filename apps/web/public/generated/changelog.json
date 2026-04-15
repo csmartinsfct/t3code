@@ -1,8 +1,55 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-13T18:39:11.170Z",
-  "lastProcessedCommit": "02bba69ef9d60e29b47a163a34c300083fe35518",
+  "generatedAt": "2026-04-14T20:19:58.677Z",
+  "lastProcessedCommit": "172d683c9ca038fd8488bae4bfb3bab2804baca7",
   "groups": [
+    {
+      "date": "2026-04-14",
+      "entries": [
+        {
+          "id": "7671e4b5a9a199f5",
+          "title": "More reliable session recovery after restarts",
+          "summary": "Fixed a restart issue that could leave behind orphaned CLI processes and corrupt the active session state. This improves stability when sessions are restarted, helping prevent unexpected stops and lost conversation context.",
+          "category": "fix",
+          "commitShas": ["172d683c9ca038fd8488bae4bfb3bab2804baca7"]
+        },
+        {
+          "id": "b570a244576ae59d",
+          "title": "Per-run prompt overrides for orchestration",
+          "summary": "Orchestration runs now support prompt overrides scoped to a single run, so you can adjust instructions for one execution without changing your project-wide prompt setup. Active runs also appear in the Prompts settings view, and edits made during a run can take effect without affecting other runs.",
+          "category": "feature",
+          "commitShas": ["2e1e7289d7b70f11ec316d4a92c2b75ab5e6cb93"]
+        },
+        {
+          "id": "f6a57f26f5f58c4d",
+          "title": "Improved stability when resolving ticket identifiers",
+          "summary": "Fixed a crash that could occur when ticket identifier requests were missing or invalid, resulting in clearer failures instead of unexpected errors.",
+          "category": "fix",
+          "commitShas": ["464298d7780e6f77a719705ab1b419847ae617a4"]
+        },
+        {
+          "id": "8658159c707726fe",
+          "title": "Diff panel is clearer when working across multiple repositories",
+          "summary": "The diff view now keeps repository tabs separate from turn navigation, groups changes by repository, and adds repo badges in All repos mode so similarly named files are easier to distinguish.",
+          "category": "improvement",
+          "commitShas": ["5ff26d26e69b7d3f59b4badca5505a92cd33fda3"]
+        },
+        {
+          "id": "4f533b0eec122355",
+          "title": "Archived threads are excluded from startup recovery",
+          "summary": "Archived threads no longer appear in the startup snapshot, reducing clutter and keeping recovery state focused on active work.",
+          "category": "fix",
+          "commitShas": ["2196b0f2ec047c406285b0c502bf748b094626bc"]
+        },
+        {
+          "id": "a7ecb28db1642dd8",
+          "title": "Claude profile rate limits now update correctly",
+          "summary": "Fixed the rate limit meter so it reflects the currently selected Claude profile when you switch providers or change the dropdown selection.",
+          "category": "fix",
+          "commitShas": ["1dc65417376a5a90274db13ce5eda2af41fd8b12"]
+        }
+      ]
+    },
     {
       "date": "2026-04-13",
       "entries": [
@@ -1332,6 +1379,46 @@
         "toInclusiveCommit": "02bba69ef9d60e29b47a163a34c300083fe35518",
         "commitShas": ["02bba69ef9d60e29b47a163a34c300083fe35518"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-14T02:02:04.657Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "02bba69ef9d60e29b47a163a34c300083fe35518",
+        "toInclusiveCommit": "a5c13a177863cd385140fc69c8d2004202db10ef",
+        "commitShas": [
+          "1dc65417376a5a90274db13ce5eda2af41fd8b12",
+          "2196b0f2ec047c406285b0c502bf748b094626bc",
+          "a5c13a177863cd385140fc69c8d2004202db10ef"
+        ],
+        "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-14T14:27:13.568Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "a5c13a177863cd385140fc69c8d2004202db10ef",
+        "toInclusiveCommit": "464298d7780e6f77a719705ab1b419847ae617a4",
+        "commitShas": [
+          "5ff26d26e69b7d3f59b4badca5505a92cd33fda3",
+          "464298d7780e6f77a719705ab1b419847ae617a4"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-14T20:19:58.564Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "464298d7780e6f77a719705ab1b419847ae617a4",
+        "toInclusiveCommit": "172d683c9ca038fd8488bae4bfb3bab2804baca7",
+        "commitShas": [
+          "2e1e7289d7b70f11ec316d4a92c2b75ab5e6cb93",
+          "172d683c9ca038fd8488bae4bfb3bab2804baca7"
+        ],
+        "commitCount": 2,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

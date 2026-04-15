@@ -77,7 +77,7 @@ export function TicketDescriptionEditor({
     autofocus: false,
     editorProps: {
       attributes: {
-        class: "ticket-markdown text-xs leading-relaxed outline-none",
+        class: "ticket-markdown text-[13px] leading-relaxed outline-none",
       },
     },
     onUpdate: ({ editor }) => {

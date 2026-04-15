@@ -449,8 +449,8 @@ label:has(> select#reasoning-effort) select {
 }
 
 .ticket-markdown h2 {
-  font-size: 0.875rem;
-  margin: 1.25rem 0 0.35rem;
+  font-size: 1rem;
+  margin: 1.75rem 0 0.75rem;
 }
 
 /* Sub-headers — moderate separation */
