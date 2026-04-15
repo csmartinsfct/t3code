@@ -4,7 +4,6 @@ import { useCallback, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { resolveInlineEditBlurAction } from "../management/KanbanTicketDetail";
-import { Button } from "../ui/button";
 import { formatRelativeDate } from "./ticketUtils";
 
 interface TicketAcceptanceCriteriaProps {
@@ -128,14 +127,18 @@ export function TicketAcceptanceCriteria({
   return (
     <div className="flex flex-col gap-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
         <p className="text-[11px] font-medium text-muted-foreground">
           Acceptance Criteria{criteria.length > 0 && ` (${metCount}/${criteria.length})`}
         </p>
-        <Button size="xs" variant="ghost" onClick={startAdding}>
+        <button
+          type="button"
+          className="inline-flex size-5 items-center justify-center rounded-sm border border-dashed border-muted-foreground/25 text-muted-foreground/50 transition-colors hover:border-muted-foreground/40 hover:text-muted-foreground/80"
+          onClick={startAdding}
+          aria-label="Add criterion"
+        >
           <PlusIcon className="size-3" />
-          Add
-        </Button>
+        </button>
       </div>
 
       {/* Criteria list */}
@@ -238,9 +241,9 @@ function CriterionRow({
         : "text-foreground";
 
   return (
-    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5">
+    <div className="group flex items-start gap-2 rounded-md px-2 py-1.5">
       {/* Status checkbox */}
-      <button type="button" className="relative top-px shrink-0" onClick={onToggle}>
+      <button type="button" className="mt-px shrink-0" onClick={onToggle}>
         {criterion.status === "met" ? (
           <div className="flex size-4 items-center justify-center rounded-[.25rem] bg-emerald-500 text-white">
             <CheckIcon className="size-3" strokeWidth={3} />
