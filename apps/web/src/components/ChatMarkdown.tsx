@@ -26,7 +26,7 @@ import {
   isProposeScheduledTaskBlock,
   parseProposeScheduledTaskPayload,
 } from "../lib/proposeScheduledTaskParser";
-import { parseInternalLinkTarget } from "../lib/internalLinkTargets";
+import { parseInternalLinkTarget, unwrapBacktickedTicketLinks } from "../lib/internalLinkTargets";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import { splitPathAndPosition } from "../terminal-links";
@@ -425,7 +425,7 @@ function ChatMarkdown({
             : defaultUrlTransform(value)
         }
       >
-        {text}
+        {unwrapBacktickedTicketLinks(text)}
       </ReactMarkdown>
     </div>
   );

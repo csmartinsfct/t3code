@@ -82,6 +82,21 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("renders backtick-wrapped ticket links as badges, not inline code", async () => {
+    const mounted = await mountMarkdown({
+      text: "The ticket `[METR-39](t3://ticket/METR-39)` is done.",
+      onOpenTicketLink: () => {},
+    });
+
+    try {
+      const link = document.querySelector<HTMLAnchorElement>('a[href="t3://ticket/METR-39"]');
+      expect(link).toBeTruthy();
+      expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe("METR-39");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("renders external links with normal outbound attributes", async () => {
     const mounted = await mountMarkdown({
       text: "[OpenAI](https://openai.com/)",

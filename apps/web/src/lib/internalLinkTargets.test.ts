@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseInternalLinkTarget } from "./internalLinkTargets";
+import { parseInternalLinkTarget, unwrapBacktickedTicketLinks } from "./internalLinkTargets";
 
 describe("parseInternalLinkTarget", () => {
   it("parses ticket links", () => {
@@ -37,5 +37,30 @@ describe("parseInternalLinkTarget", () => {
     expect(parseInternalLinkTarget("t3://ticket/T3CO-191?foo=bar")).toBeNull();
     expect(parseInternalLinkTarget("t3://ticket/T3CO-191#details")).toBeNull();
     expect(parseInternalLinkTarget("t3://ticket/%20")).toBeNull();
+  });
+});
+
+describe("unwrapBacktickedTicketLinks", () => {
+  it("strips backticks around a ticket link", () => {
+    expect(unwrapBacktickedTicketLinks("`[METR-39](t3://ticket/METR-39)`")).toBe(
+      "[METR-39](t3://ticket/METR-39)",
+    );
+  });
+
+  it("handles multiple ticket links in the same text", () => {
+    const input = "see `[A-1](t3://ticket/A-1)` and `[B-2](t3://ticket/B-2)`";
+    expect(unwrapBacktickedTicketLinks(input)).toBe(
+      "see [A-1](t3://ticket/A-1) and [B-2](t3://ticket/B-2)",
+    );
+  });
+
+  it("leaves non-ticket backticked content alone", () => {
+    const input = "run `bun test` and check `[link](https://example.com)`";
+    expect(unwrapBacktickedTicketLinks(input)).toBe(input);
+  });
+
+  it("leaves bare ticket links unchanged", () => {
+    const input = "[METR-39](t3://ticket/METR-39)";
+    expect(unwrapBacktickedTicketLinks(input)).toBe(input);
   });
 });
