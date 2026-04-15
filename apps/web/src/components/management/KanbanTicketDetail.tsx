@@ -497,6 +497,10 @@ export function KanbanTicketDetail({
   const [movingToBoard, setMovingToBoard] = useState(false);
   const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
   const ticketRef = useRef<Ticket | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  /** Saved scroll positions keyed by ticketId — used to restore on back navigation. */
+  const scrollMapRef = useRef<Map<TicketId, number>>(new Map());
+  const prevTicketIdRef = useRef<TicketId>(ticketId);
   const [titleDraft, setTitleDraft] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingWorktree, setEditingWorktree] = useState(false);
@@ -606,6 +610,30 @@ export function KanbanTicketDetail({
       onBack();
     }
   }, [onBack, projectId, ticket]);
+
+  // Scroll management: reset to top on forward navigation, restore on back.
+  useEffect(() => {
+    const prev = prevTicketIdRef.current;
+    if (prev === ticketId) return;
+
+    // Save scroll position of the ticket we're leaving.
+    const container = scrollContainerRef.current;
+    if (container) {
+      scrollMapRef.current.set(prev, container.scrollTop);
+    }
+    prevTicketIdRef.current = ticketId;
+
+    // If we have a saved position for the incoming ticket, restore it (back navigation).
+    // Otherwise scroll to top (forward navigation).
+    const saved = scrollMapRef.current.get(ticketId);
+    if (container) {
+      container.scrollTop = saved ?? 0;
+    }
+    // Clean up the restored entry so re-visiting later starts fresh.
+    if (saved != null) {
+      scrollMapRef.current.delete(ticketId);
+    }
+  }, [ticketId]);
 
   const handleStatusChange = useCallback(
     async (status: TicketStatus) => {
@@ -865,7 +893,7 @@ export function KanbanTicketDetail({
   const priorityCfg = PRIORITY_CONFIG[ticket.priority];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-8">
         {/* Header */}
         <div className="flex flex-col gap-3">
