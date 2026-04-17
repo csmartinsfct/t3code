@@ -456,6 +456,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             ),
           { "rpc.aggregate": "orchestration" },
         ),
+      [ORCHESTRATION_WS_METHODS.getChildThreadIds]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getChildThreadIds,
+          orchestrationRuns.getChildThreadIds(input).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(OrchestrationRunError)(cause)
+                ? cause
+                : new OrchestrationRunError({
+                    message: "Failed to get child thread IDs",
+                    cause,
+                  }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
       [ORCHESTRATION_WS_METHODS.pauseRun]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.pauseRun,

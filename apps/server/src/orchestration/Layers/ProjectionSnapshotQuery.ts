@@ -669,28 +669,36 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // Drive from projection_threads (one row per thread) and resolve the latest
+  // per-thread row via a single indexed LIMIT 1 subquery, then join back by
+  // primary key. The obvious correlated NOT EXISTS shape degrades to O(N^2) on
+  // SQLite once activity counts reach hundreds of thousands.
   const listLatestUserMessageRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionLatestUserMessageRowSchema,
     execute: () =>
       sql`
+        WITH latest_message AS (
+          SELECT
+            thread.thread_id AS thread_id,
+            (
+              SELECT message.message_id
+              FROM projection_thread_messages AS message
+              WHERE message.thread_id = thread.thread_id
+                AND message.role = 'user'
+              ORDER BY message.created_at DESC, message.message_id DESC
+              LIMIT 1
+            ) AS latest_id
+          FROM projection_threads AS thread
+        )
         SELECT
           latest.thread_id AS "threadId",
-          latest.message_id AS "messageId",
-          latest.text,
-          latest.created_at AS "createdAt"
-        FROM projection_thread_messages AS latest
-        WHERE latest.role = 'user'
-          AND NOT EXISTS (
-            SELECT 1
-            FROM projection_thread_messages AS newer
-            WHERE newer.thread_id = latest.thread_id
-              AND newer.role = 'user'
-              AND (
-                newer.created_at > latest.created_at
-                OR (newer.created_at = latest.created_at AND newer.message_id > latest.message_id)
-              )
-          )
+          message.message_id AS "messageId",
+          message.text,
+          message.created_at AS "createdAt"
+        FROM latest_message AS latest
+        JOIN projection_thread_messages AS message
+          ON message.message_id = latest.latest_id
         ORDER BY latest.thread_id ASC
       `,
   });
@@ -700,20 +708,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     Result: ProjectionLatestActivitySummaryRowSchema,
     execute: () =>
       sql`
+        WITH latest_activity AS (
+          SELECT
+            thread.thread_id AS thread_id,
+            (
+              SELECT activity.activity_id
+              FROM projection_thread_activities AS activity
+              WHERE activity.thread_id = thread.thread_id
+              ORDER BY activity.created_at DESC, activity.activity_id DESC
+              LIMIT 1
+            ) AS latest_id
+          FROM projection_threads AS thread
+        )
         SELECT
           latest.thread_id AS "threadId",
-          latest.summary,
-          latest.created_at AS "createdAt"
-        FROM projection_thread_activities AS latest
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM projection_thread_activities AS newer
-          WHERE newer.thread_id = latest.thread_id
-            AND (
-              newer.created_at > latest.created_at
-              OR (newer.created_at = latest.created_at AND newer.activity_id > latest.activity_id)
-            )
-        )
+          activity.summary,
+          activity.created_at AS "createdAt"
+        FROM latest_activity AS latest
+        JOIN projection_thread_activities AS activity
+          ON activity.activity_id = latest.latest_id
         ORDER BY latest.thread_id ASC
       `,
   });

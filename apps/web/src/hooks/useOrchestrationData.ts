@@ -1,7 +1,6 @@
 import type {
   OrchestrationRun,
   OrchestrationRunStreamEvent,
-  OrchestrationThread,
   ProjectId,
   ThreadId,
   TicketSummary,
@@ -10,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LRUCache } from "../lib/lruCache";
 import { ensureNativeApi } from "../nativeApi";
-import { useStore } from "../store";
+import { isThreadContentLoaded, useStore } from "../store";
 import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 import type { Thread } from "../types";
 import { getWsRpcClient } from "../wsRpcClient";
@@ -128,31 +127,15 @@ export function useOrchestrationData(
         return;
       }
 
-      // Get full run details + child threads + tickets in parallel
-      const [fullRun, children, ticketList] = await Promise.all([
+      const [fullRun, childThreadIdsResult, ticketList] = await Promise.all([
         rpc.orchestration.getRun({ runId: matchingRun.id }),
-        rpc.orchestration.getChildThreads({ parentThreadId: parentThreadId as ThreadId }),
+        rpc.orchestration.getChildThreadIds({ parentThreadId: parentThreadId as ThreadId }),
         ensureNativeApi().ticketing.list({ projectId: projectId as never }),
       ]);
       if (fetchIdRef.current !== currentFetchId) return;
 
       setRun(fullRun);
-      const syncThreadContent = useStore.getState().syncThreadContent;
-      for (const child of children as ReadonlyArray<OrchestrationThread>) {
-        // getChildThreads returns fully materialized child threads, but the
-        // OrchestrationThread contract does not expose the projection sequence.
-        // syncThreadContent currently treats sequence as advisory, so use 0 for
-        // this bulk-load path until child thread RPCs carry their own cursor.
-        syncThreadContent({
-          threadId: child.id,
-          sequence: 0,
-          messages: child.messages,
-          proposedPlans: child.proposedPlans,
-          activities: child.activities,
-          checkpoints: child.checkpoints,
-        });
-      }
-      const newChildThreadIds = children.map((c) => c.id);
+      const newChildThreadIds = [...childThreadIdsResult.threadIds];
       setChildThreadIds(newChildThreadIds);
       setTickets(ticketList);
       const cacheEntry: OrchestrationCacheEntry = {
@@ -162,11 +145,27 @@ export function useOrchestrationData(
       };
       orchestrationDataCache.set(parentThreadId, cacheEntry, estimateEntrySize(cacheEntry));
 
+      const EAGER_HYDRATION_LIMIT = 4;
+      const toHydrate = newChildThreadIds.slice(-EAGER_HYDRATION_LIMIT);
+      const api = ensureNativeApi();
+      const syncThreadContent = useStore.getState().syncThreadContent;
+      const threadsById = useStore.getState().threadsById;
+      await Promise.all(
+        toHydrate
+          .filter((id) => !isThreadContentLoaded(threadsById[id]))
+          .map((id) =>
+            api.orchestration
+              .getThreadContent({ threadId: id as ThreadId })
+              .then(syncThreadContent),
+          ),
+      );
+
       logWebTimeline("orchestration.data.fetch.success", {
         threadId: parentThreadId,
         runId: fullRun.id,
         runStatus: fullRun.status,
-        childThreadCount: children.length,
+        childThreadCount: newChildThreadIds.length,
+        eagerlyHydratedCount: toHydrate.length,
         ticketCount: ticketList.length,
         currentTicketIndex: fullRun.currentTicketIndex,
       });

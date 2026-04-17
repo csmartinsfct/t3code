@@ -59,6 +59,18 @@ Events targeting threads whose content is not loaded update **metadata only**:
 - Activity summary and timestamps update.
 - No `getThreadContent` RPC fires until the user actually navigates to the thread.
 
+### Orchestration Threads
+
+Opening an orchestration parent thread does **not** bulk-load all child thread content. Instead:
+
+1. **Child thread IDs** are fetched via a lightweight `getChildThreadIds` RPC (no snapshot, no content).
+2. The **4 most recent children** are eagerly hydrated in parallel via per-thread `getThreadContent` calls.
+3. **Remaining children** hydrate on demand when the user navigates to them via the thread switcher.
+4. The **switcher menu** works immediately from startup snapshot metadata — it only needs thread titles, status badges, and ticket identifiers, not message content.
+5. The **orchestration timeline** shows a loading state until the parent and all required child threads are hydrated.
+
+For small orchestrations (4 or fewer children), all threads are eagerly hydrated. For larger runs, only the most recent work is loaded upfront.
+
 ## Bounded Content Cache
 
 Loaded thread content is held in a client-side LRU cache with a configurable size limit.

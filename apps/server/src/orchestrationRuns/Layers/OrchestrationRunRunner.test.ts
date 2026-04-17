@@ -322,6 +322,7 @@ const makeRunService = (
   get: () => Effect.succeed(makeRun()),
   list: () => Effect.succeed([]),
   getChildThreads: () => Effect.succeed([]),
+  getChildThreadIds: () => Effect.succeed({ threadIds: [] }),
   pause: () => Effect.succeed(makeRun({ status: "paused" })),
   resume: () => Effect.succeed(makeRun({ status: "running" })),
   cancel: () => Effect.succeed(makeRun({ status: "canceled" })),

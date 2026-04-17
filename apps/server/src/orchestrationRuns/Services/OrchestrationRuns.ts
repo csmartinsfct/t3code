@@ -35,6 +35,13 @@ export interface OrchestrationRunServiceShape {
     input: OrchestrationGetChildThreadsInput,
   ) => Effect.Effect<ReadonlyArray<OrchestrationThread>, OrchestrationRunError>;
 
+  readonly getChildThreadIds: (
+    input: OrchestrationGetChildThreadsInput,
+  ) => Effect.Effect<
+    { readonly threadIds: ReadonlyArray<import("@t3tools/contracts").ThreadId> },
+    OrchestrationRunError
+  >;
+
   readonly pause: (
     input: OrchestrationPauseRunInput,
   ) => Effect.Effect<OrchestrationRun, OrchestrationRunError>;

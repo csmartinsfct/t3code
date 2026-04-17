@@ -254,6 +254,7 @@ export interface WsRpcClient {
     readonly getRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getRun>;
     readonly listRuns: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.listRuns>;
     readonly getChildThreads: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getChildThreads>;
+    readonly getChildThreadIds: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getChildThreadIds>;
     readonly pauseRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.pauseRun>;
     readonly resumeRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.resumeRun>;
     readonly cancelRun: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.cancelRun>;
@@ -580,6 +581,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport
           .request((client) => client[ORCHESTRATION_WS_METHODS.getChildThreads](input))
           .then((threads) => [...threads]),
+      getChildThreadIds: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getChildThreadIds](input)),
       pauseRun: async (input) => {
         logWebTimeline("orchestration.run.pause.start", { runId: input.runId });
         const result = await transport.request((client) =>

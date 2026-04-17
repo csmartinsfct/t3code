@@ -667,6 +667,15 @@ export const WsOrchestrationGetChildThreadsRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetChildThreadIdsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getChildThreadIds,
+  {
+    payload: OrchestrationRpcSchemas.getChildThreadIds.input,
+    success: OrchestrationRpcSchemas.getChildThreadIds.output,
+    error: OrchestrationRunError,
+  },
+);
+
 export const WsOrchestrationPauseRunRpc = Rpc.make(ORCHESTRATION_WS_METHODS.pauseRun, {
   payload: OrchestrationRpcSchemas.pauseRun.input,
   success: OrchestrationRpcSchemas.pauseRun.output,
@@ -1096,6 +1105,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetRunRpc,
   WsOrchestrationListRunsRpc,
   WsOrchestrationGetChildThreadsRpc,
+  WsOrchestrationGetChildThreadIdsRpc,
   WsOrchestrationPauseRunRpc,
   WsOrchestrationResumeRunRpc,
   WsOrchestrationCancelRunRpc,

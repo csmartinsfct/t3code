@@ -1,11 +1,60 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-17T03:40:26.774Z",
-  "lastProcessedCommit": "066abcae1c4ce5f8460affbdd60019ee0931c51b",
+  "generatedAt": "2026-04-17T19:31:57.850Z",
+  "lastProcessedCommit": "47b50bfe8772507dc0e723e0c885fb04db2f34f1",
   "groups": [
     {
       "date": "2026-04-17",
       "entries": [
+        {
+          "id": "5783cddb658a380b",
+          "title": "Clearer Resource Management Settings",
+          "summary": "Conversation cache and idle session timeout controls are now grouped in a dedicated Resource Management section with clearer descriptions, making memory and inactive session behavior easier to understand.",
+          "category": "improvement",
+          "commitShas": ["47b50bfe8772507dc0e723e0c885fb04db2f34f1"]
+        },
+        {
+          "id": "a93c1f98e6fcce73",
+          "title": "Configurable Thread Content Cache",
+          "summary": "A new Settings > General option lets users choose how much thread content T3 Code keeps cached, from unlimited to 1, 2, 4, or 8 GB. The default cache limit is now 1 GB to improve responsiveness while keeping memory use bounded.",
+          "category": "feature",
+          "commitShas": [
+            "619e1244e083c54267c80fab66ebc598b06e6cdf",
+            "96cf4641aa624d189c96672baeaa2b7c2bba0545"
+          ]
+        },
+        {
+          "id": "3578a57164bc5431",
+          "title": "Scheduled Task Views Use Lighter Data Loading",
+          "summary": "Scheduled task proposal and settings views now use the lighter snapshot data path, improving responsiveness when browsing tasks in larger projects.",
+          "category": "performance",
+          "commitShas": [
+            "6f8136f91afa37aaf07fe2560e9a3f83d05a79e1",
+            "7247f171aa2bd44f666741908f58d5bc38c3eb5f"
+          ]
+        },
+        {
+          "id": "5c7b1a76aa0ea671",
+          "title": "On-Demand Thread Loading",
+          "summary": "Opening a thread now hydrates its messages and related panels on demand, with clearer loading behavior across chat, diffs, plans, and timelines.",
+          "category": "improvement",
+          "commitShas": [
+            "2f898e14625fdc546798a42c41fe414336661d06",
+            "ae9115b6ea0401d556946afa46ed0d4d13113882",
+            "ee6a7ed7870934b54da07bc65dc36ae50af188cb"
+          ]
+        },
+        {
+          "id": "8aee473e71011926",
+          "title": "Faster Startup for Large Workspaces",
+          "summary": "T3 Code now starts with a lightweight orchestration snapshot and loads detailed thread content only when needed, reducing initial load work while preserving session state.",
+          "category": "performance",
+          "commitShas": [
+            "526694a99ede07369107e8293e02573c04482cc0",
+            "7d83bab0e7c880400e17cd4143c37dd75fce8d3c",
+            "7ffaa274c574420feba68fcbc4c94f98114c2cdc"
+          ]
+        },
         {
           "id": "ba03f97845254e9f",
           "title": "Faster scoped data loading",
@@ -1581,6 +1630,38 @@
         "fromExclusiveCommit": "b4fcd465839cb901af6f51e8032a90726785dab4",
         "toInclusiveCommit": "066abcae1c4ce5f8460affbdd60019ee0931c51b",
         "commitShas": ["066abcae1c4ce5f8460affbdd60019ee0931c51b"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-17T18:34:06.068Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "066abcae1c4ce5f8460affbdd60019ee0931c51b",
+        "toInclusiveCommit": "96cf4641aa624d189c96672baeaa2b7c2bba0545",
+        "commitShas": [
+          "6f896df2b1a3d439ff4f6488cc4c239e80f9b320",
+          "7ffaa274c574420feba68fcbc4c94f98114c2cdc",
+          "7d83bab0e7c880400e17cd4143c37dd75fce8d3c",
+          "526694a99ede07369107e8293e02573c04482cc0",
+          "ee6a7ed7870934b54da07bc65dc36ae50af188cb",
+          "ae9115b6ea0401d556946afa46ed0d4d13113882",
+          "2f898e14625fdc546798a42c41fe414336661d06",
+          "619e1244e083c54267c80fab66ebc598b06e6cdf",
+          "7247f171aa2bd44f666741908f58d5bc38c3eb5f",
+          "6f8136f91afa37aaf07fe2560e9a3f83d05a79e1",
+          "96cf4641aa624d189c96672baeaa2b7c2bba0545"
+        ],
+        "commitCount": 11,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-17T19:31:57.844Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "96cf4641aa624d189c96672baeaa2b7c2bba0545",
+        "toInclusiveCommit": "47b50bfe8772507dc0e723e0c885fb04db2f34f1",
+        "commitShas": ["47b50bfe8772507dc0e723e0c885fb04db2f34f1"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true

@@ -568,6 +568,52 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
         return result;
       });
 
+    const getChildThreadIds: OrchestrationRunServiceShape["getChildThreadIds"] = (input) =>
+      Effect.gen(function* () {
+        const persistedChildren = yield* projectionThreadRepo
+          .listByParentThreadId({ parentThreadId: input.parentThreadId })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationRunError({
+                  message: "Failed to load child thread IDs",
+                  cause,
+                }),
+            ),
+          );
+        const childThreadIdSet = new Set(persistedChildren.map((thread) => thread.threadId));
+
+        const run = yield* repo
+          .getByOrchestrationThreadId({
+            orchestrationThreadId: input.parentThreadId,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationRunError({
+                  message: "Failed to load orchestration run for child thread IDs",
+                  cause,
+                }),
+            ),
+          );
+        if (Option.isNone(run)) {
+          return { threadIds: [...childThreadIdSet] as ReadonlyArray<ThreadId> };
+        }
+
+        const ticketOrder = JSON.parse(
+          run.value.ticketOrderJson,
+        ) as Array<OrchestrationTicketEntry>;
+        const orderedIds = ticketOrder.flatMap((entry) =>
+          entry.reviewThreadId !== undefined
+            ? [entry.workingThreadId, entry.reviewThreadId]
+            : [entry.workingThreadId],
+        );
+        const orderedSet = new Set(orderedIds);
+        const extraIds = [...childThreadIdSet].filter((id) => !orderedSet.has(id));
+
+        return { threadIds: [...orderedIds, ...extraIds] as ReadonlyArray<ThreadId> };
+      });
+
     const transitionStatus = (
       runId: import("@t3tools/contracts").OrchestrationRunId,
       targetStatus: OrchestrationRunStatus,
@@ -747,6 +793,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
       get,
       list,
       getChildThreads,
+      getChildThreadIds,
       pause,
       resume,
       cancel,

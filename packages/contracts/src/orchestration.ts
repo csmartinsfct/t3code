@@ -35,6 +35,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getRun: "orchestration.getRun",
   listRuns: "orchestration.listRuns",
   getChildThreads: "orchestration.getChildThreads",
+  getChildThreadIds: "orchestration.getChildThreadIds",
   pauseRun: "orchestration.pauseRun",
   resumeRun: "orchestration.resumeRun",
   cancelRun: "orchestration.cancelRun",
@@ -1460,6 +1461,16 @@ export const OrchestrationGetChildThreadsInput = Schema.Struct({
 });
 export type OrchestrationGetChildThreadsInput = typeof OrchestrationGetChildThreadsInput.Type;
 
+export const OrchestrationGetChildThreadIdsInput = Schema.Struct({
+  parentThreadId: ThreadId,
+});
+export type OrchestrationGetChildThreadIdsInput = typeof OrchestrationGetChildThreadIdsInput.Type;
+
+export const OrchestrationGetChildThreadIdsResult = Schema.Struct({
+  threadIds: Schema.Array(ThreadId),
+});
+export type OrchestrationGetChildThreadIdsResult = typeof OrchestrationGetChildThreadIdsResult.Type;
+
 export const OrchestrationPauseRunInput = Schema.Struct({
   runId: OrchestrationRunId,
 });
@@ -1541,6 +1552,10 @@ export const OrchestrationRpcSchemas = {
   getChildThreads: {
     input: OrchestrationGetChildThreadsInput,
     output: Schema.Array(OrchestrationThread),
+  },
+  getChildThreadIds: {
+    input: OrchestrationGetChildThreadIdsInput,
+    output: OrchestrationGetChildThreadIdsResult,
   },
   pauseRun: {
     input: OrchestrationPauseRunInput,

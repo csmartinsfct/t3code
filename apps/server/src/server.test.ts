@@ -418,6 +418,7 @@ const buildAppUnderTest = (options?: {
             get: () => Effect.die(new Error("not mocked")),
             list: () => Effect.succeed([]),
             getChildThreads: () => Effect.succeed([]),
+            getChildThreadIds: () => Effect.succeed({ threadIds: [] }),
             pause: () => Effect.die(new Error("not mocked")),
             resume: () => Effect.die(new Error("not mocked")),
             cancel: () => Effect.die(new Error("not mocked")),
