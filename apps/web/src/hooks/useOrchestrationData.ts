@@ -139,6 +139,10 @@ export function useOrchestrationData(
       setRun(fullRun);
       const syncThreadContent = useStore.getState().syncThreadContent;
       for (const child of children as ReadonlyArray<OrchestrationThread>) {
+        // getChildThreads returns fully materialized child threads, but the
+        // OrchestrationThread contract does not expose the projection sequence.
+        // syncThreadContent currently treats sequence as advisory, so use 0 for
+        // this bulk-load path until child thread RPCs carry their own cursor.
         syncThreadContent({
           threadId: child.id,
           sequence: 0,

@@ -1232,6 +1232,20 @@ async function nextFrame(): Promise<void> {
   });
 }
 
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolveDeferred: ((value: T | PromiseLike<T>) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveDeferred = resolve;
+  });
+  if (!resolveDeferred) {
+    throw new Error("Expected deferred promise resolver to be initialized.");
+  }
+  return { promise, resolve: resolveDeferred };
+}
+
 async function waitForLayout(): Promise<void> {
   await nextFrame();
   await nextFrame();
@@ -3248,6 +3262,139 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
 
       expect(timelineItem.textContent ?? "").toContain("Timeline");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps metadata-only orchestration parent navigation loading until parent and child content hydrate", async () => {
+    installTestNativeApi();
+    const run = createOrchestrationRun("running");
+    const snapshot = createOrchestrationWaitingSnapshot();
+    const startupSnapshot = createStartupSnapshotFromReadModel(snapshot);
+    const parentThread = snapshot.threads.find(
+      (thread) => thread.id === ORCHESTRATION_PARENT_THREAD_ID,
+    );
+    const childThreads = snapshot.threads.filter(
+      (thread) => thread.parentThreadId === ORCHESTRATION_PARENT_THREAD_ID,
+    );
+    if (!parentThread || childThreads.length === 0) {
+      throw new Error("Expected orchestration parent and child threads in test fixture.");
+    }
+
+    const parentContent = createThreadContentFromReadModelThread(parentThread);
+    const parentContentDeferred = createDeferred<OrchestrationThreadContent>();
+    const childContentDeferred =
+      createDeferred<ReadonlyArray<OrchestrationReadModel["threads"][number]>>();
+    const parentThreadContentRequests: ThreadId[] = [];
+    const childThreadFetchRequests: ThreadId[] = [];
+    const orchestrationTicket = {
+      id: ORCHESTRATION_TICKET_ID,
+      projectId: PROJECT_ID,
+      parentId: null,
+      ticketNumber: 266,
+      identifier: "T3CO-266",
+      title: "Lazy orchestration hydration",
+      status: "in_progress" as const,
+      priority: "high" as const,
+      sortOrder: 0,
+      isArchived: false,
+      worktree: null,
+      labels: [],
+      subTicketCount: 0,
+      dependencyCount: 0,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      resolveRpc: (body) => {
+        const tag = String(body._tag);
+        if (tag === ORCHESTRATION_WS_METHODS.getStartupSnapshot) {
+          return startupSnapshot;
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getThreadContent) {
+          const request = body as { threadId?: ThreadId };
+          if (request.threadId === ORCHESTRATION_PARENT_THREAD_ID) {
+            parentThreadContentRequests.push(request.threadId);
+            return parentContentDeferred.promise;
+          }
+          return new Promise<OrchestrationThreadContent>(() => {});
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.listRuns || tag.endsWith("listRuns")) {
+          return [
+            {
+              id: run.id,
+              orchestrationThreadId: run.orchestrationThreadId,
+              projectId: run.projectId,
+              status: run.status,
+              currentTicketIndex: run.currentTicketIndex,
+              ticketCount: run.ticketOrder.length,
+              currentPhase: run.currentPhase,
+              createdAt: run.createdAt,
+              updatedAt: run.updatedAt,
+            },
+          ];
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getRun || tag.endsWith("getRun")) {
+          return run;
+        }
+        if (tag === ORCHESTRATION_WS_METHODS.getChildThreads || tag.endsWith("getChildThreads")) {
+          const request = body as { parentThreadId?: ThreadId };
+          if (request.parentThreadId) {
+            childThreadFetchRequests.push(request.parentThreadId);
+          }
+          return childContentDeferred.promise;
+        }
+        if (tag === WS_METHODS.ticketingList || tag.endsWith("ticketing.list")) {
+          return [orchestrationTicket];
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: ORCHESTRATION_PARENT_THREAD_ID },
+      });
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${ORCHESTRATION_PARENT_THREAD_ID}`,
+        "Route should navigate to the metadata-only orchestration parent thread.",
+      );
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Orchestration timeline");
+        expect(text).not.toContain("No orchestration activity yet");
+        expect(text).not.toContain("Waiting child thread");
+        expect(parentThreadContentRequests).toContain(ORCHESTRATION_PARENT_THREAD_ID);
+        expect(childThreadFetchRequests).toContain(ORCHESTRATION_PARENT_THREAD_ID);
+      });
+      expect(document.querySelector('[data-chat-composer-form="true"]')).toBeNull();
+      expect(document.querySelector('[contenteditable="true"]')).toBeNull();
+
+      parentContentDeferred.resolve(parentContent);
+      await waitForLayout();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Orchestration timeline");
+        expect(text).not.toContain("No orchestration activity yet");
+        expect(text).not.toContain("Waiting child thread");
+      });
+
+      childContentDeferred.resolve(childThreads);
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Running");
+        expect(text).toContain("Waiting child thread");
+        expect(text).not.toContain("No orchestration activity yet");
+      });
     } finally {
       await mounted.cleanup();
     }
