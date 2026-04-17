@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { OrchestrationTimelineRow } from "../../hooks/useOrchestrationTimeline.logic";
-import type { Thread } from "../../types";
+import type { ChatMessage } from "../../types";
 
 vi.mock("@tanstack/react-virtual", () => ({
   measureElement: () => undefined,
@@ -178,7 +178,7 @@ describe("OrchestrationTimeline", () => {
         sectionKind: "working",
         messages: [
           {
-            id: "impl-1" as Thread["messages"][number]["id"],
+            id: "impl-1" as ChatMessage["id"],
             role: "assistant",
             text: "Initial implementation",
             createdAt: "2026-04-09T10:00:01.000Z",
@@ -194,7 +194,7 @@ describe("OrchestrationTimeline", () => {
         sectionKind: "working",
         messages: [
           {
-            id: "impl-2" as Thread["messages"][number]["id"],
+            id: "impl-2" as ChatMessage["id"],
             role: "assistant",
             text: "Addressed review feedback",
             createdAt: "2026-04-09T10:00:03.000Z",
@@ -221,7 +221,7 @@ describe("OrchestrationTimeline", () => {
         sectionKind: "review",
         messages: [
           {
-            id: "review-2" as Thread["messages"][number]["id"],
+            id: "review-2" as ChatMessage["id"],
             role: "assistant",
             text: '{"changesNeeded":false,"summary":"Looks good now.","comments":[]}',
             createdAt: "2026-04-09T10:00:04.000Z",
@@ -265,7 +265,7 @@ describe("OrchestrationTimeline", () => {
           isActive: false,
           messages: [
             {
-              id: "impl" as Thread["messages"][number]["id"],
+              id: "impl" as ChatMessage["id"],
               role: "assistant",
               text: "[T3CO-191](t3://ticket/T3CO-191)",
               createdAt: "2026-04-09T10:00:01.000Z",
@@ -340,14 +340,14 @@ describe("OrchestrationTimeline", () => {
           isActive: false,
           messages: [
             {
-              id: "review-user" as Thread["messages"][number]["id"],
+              id: "review-user" as ChatMessage["id"],
               role: "user",
               text: "Human review follow-up",
               createdAt: "2026-04-09T10:00:01.000Z",
               streaming: false,
             },
             {
-              id: "review-assistant" as Thread["messages"][number]["id"],
+              id: "review-assistant" as ChatMessage["id"],
               role: "assistant",
               text: '{"changesNeeded":false,"summary":"Looks good now.","comments":[]}',
               createdAt: "2026-04-09T10:00:02.000Z",
@@ -379,7 +379,7 @@ describe("OrchestrationTimeline", () => {
           reviewOutcome: "approved",
           messages: [
             {
-              id: "review-approved" as Thread["messages"][number]["id"],
+              id: "review-approved" as ChatMessage["id"],
               role: "assistant",
               text: '{"changesNeeded":false,"summary":"Ship it.","comments":[]}',
               createdAt: "2026-04-09T10:00:01.000Z",
@@ -397,7 +397,7 @@ describe("OrchestrationTimeline", () => {
           reviewOutcome: "requested-changes",
           messages: [
             {
-              id: "review-failed" as Thread["messages"][number]["id"],
+              id: "review-failed" as ChatMessage["id"],
               role: "assistant",
               text: '{"changesNeeded":true,"summary":"Still needs follow-up.","comments":[]}',
               createdAt: "2026-04-09T10:00:02.000Z",
@@ -415,7 +415,7 @@ describe("OrchestrationTimeline", () => {
           reviewOutcome: "blocked",
           messages: [
             {
-              id: "review-blocked" as Thread["messages"][number]["id"],
+              id: "review-blocked" as ChatMessage["id"],
               role: "assistant",
               text: '{"changesNeeded":true,"summary":"Missing review payload.","comments":[]}',
               createdAt: "2026-04-09T10:00:03.000Z",

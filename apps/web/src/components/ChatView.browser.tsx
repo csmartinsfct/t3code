@@ -491,6 +491,10 @@ function buildMaterializedThread(thread: OrchestrationReadModel["threads"][numbe
     worktreePath: thread.worktreePath,
     turnDiffSummaries: [],
     activities: [],
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     isOrchestrationThread: thread.isOrchestrationThread,
     parentThreadId: thread.parentThreadId,
     ticketId: thread.ticketId,
@@ -1034,7 +1038,10 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return customResult;
   }
   const tag = body._tag;
-  if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
+  if (
+    tag === ORCHESTRATION_WS_METHODS.getSnapshot ||
+    tag === ORCHESTRATION_WS_METHODS.getStartupSnapshot
+  ) {
     return fixture.snapshot;
   }
   if (tag === WS_METHODS.serverGetConfig) {

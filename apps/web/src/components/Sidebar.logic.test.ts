@@ -784,6 +784,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     worktreePath: null,
     turnDiffSummaries: [],
     activities: [],
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     isOrchestrationThread: false,
     parentThreadId: null,
     ticketId: null,
@@ -799,6 +803,7 @@ describe("sortThreadsForSidebar", () => {
           id: ThreadId.makeUnsafe("thread-1"),
           createdAt: "2026-03-09T10:00:00.000Z",
           updatedAt: "2026-03-09T10:10:00.000Z",
+          latestUserMessageAt: "2026-03-09T10:01:00.000Z",
           messages: [
             {
               id: "message-1" as never,
@@ -814,6 +819,7 @@ describe("sortThreadsForSidebar", () => {
           id: ThreadId.makeUnsafe("thread-2"),
           createdAt: "2026-03-09T10:05:00.000Z",
           updatedAt: "2026-03-09T10:05:00.000Z",
+          latestUserMessageAt: "2026-03-09T10:06:00.000Z",
           messages: [
             {
               id: "message-2" as never,
@@ -998,6 +1004,7 @@ describe("sortProjectsForSidebar", () => {
       makeThread({
         projectId: ProjectId.makeUnsafe("project-1"),
         updatedAt: "2026-03-09T10:20:00.000Z",
+        latestUserMessageAt: "2026-03-09T10:01:00.000Z",
         messages: [
           {
             id: "message-1" as never,
@@ -1013,6 +1020,7 @@ describe("sortProjectsForSidebar", () => {
         id: ThreadId.makeUnsafe("thread-2"),
         projectId: ProjectId.makeUnsafe("project-2"),
         updatedAt: "2026-03-09T10:05:00.000Z",
+        latestUserMessageAt: "2026-03-09T10:05:00.000Z",
         messages: [
           {
             id: "message-2" as never,

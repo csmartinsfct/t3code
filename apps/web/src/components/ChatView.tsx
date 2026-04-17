@@ -83,7 +83,7 @@ import {
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { useStore } from "../store";
+import { isThreadContentLoaded, useStore } from "../store";
 import { useProjectById, useThreadById } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -276,6 +276,7 @@ function formatTicketAttachmentsForModel(
 }
 
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
+const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
@@ -657,6 +658,7 @@ function PersistentThreadTerminalDrawer({
 
 export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
+  const syncThreadContent = useStore((store) => store.syncThreadContent);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -947,6 +949,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : null;
   const activeOrchestrationRun = orchestrationData.run;
   const isReviewOrchestrationChild = activeOrchestrationItem?.kind === "review-thread";
+  useEffect(() => {
+    if (!serverThread || isThreadContentLoaded(serverThread)) {
+      return;
+    }
+    const api = readNativeApi();
+    if (!api) {
+      return;
+    }
+    let disposed = false;
+    void api.orchestration
+      .getThreadContent({ threadId: serverThread.id })
+      .then((content) => {
+        if (!disposed) {
+          syncThreadContent(content);
+        }
+      })
+      .catch((error) => {
+        if (disposed) {
+          return;
+        }
+        logWebTimeline("chat.thread-content.load-failed", {
+          threadId: serverThread.id,
+          error,
+        });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [serverThread, syncThreadContent]);
+
   const currentOrchestrationWorkingItem = useMemo(() => {
     if (!orchestrationSwitcher.visible || !activeOrchestrationRun) {
       return null;
@@ -1699,9 +1731,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       delete attachmentPreviewHandoffTimeoutByMessageIdRef.current[messageId];
     }, ATTACHMENT_PREVIEW_HANDOFF_TTL_MS);
   }, []);
-  const serverMessages = activeThread?.messages;
+  const serverMessages =
+    activeThread && isThreadContentLoaded(activeThread) ? activeThread.messages : EMPTY_MESSAGES;
   const timelineMessages = useMemo(() => {
-    const messages = serverMessages ?? [];
+    const messages = serverMessages;
     const serverMessagesWithPreviewHandoff =
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
         ? messages
@@ -2105,7 +2138,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const envLocked = Boolean(
     activeThread &&
-    (activeThread.messages.length > 0 ||
+    ((isThreadContentLoaded(activeThread) && activeThread.messages.length > 0) ||
+      activeThread.latestUserMessageAt !== null ||
       (activeThread.session !== null && activeThread.session.status !== "closed")),
   );
   const activeTerminalGroup =
@@ -3101,7 +3135,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThread?.id) return;
-    if (activeThread.messages.length === 0) {
+    if (!isThreadContentLoaded(activeThread) || activeThread.messages.length === 0) {
       return;
     }
     const serverIds = new Set(activeThread.messages.map((message) => message.id));
@@ -3130,7 +3164,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
+  }, [activeThread, handoffAttachmentPreviews, optimisticUserMessages]);
 
   useEffect(() => {
     promptRef.current = prompt;
@@ -3912,7 +3946,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    const isFirstMessage =
+      !isServerThread ||
+      (isThreadContentLoaded(activeThread) &&
+        activeThread.messages.length === 0 &&
+        activeThread.latestUserMessageAt === null);
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
         ? activeThread.branch

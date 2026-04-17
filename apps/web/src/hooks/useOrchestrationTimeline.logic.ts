@@ -10,6 +10,7 @@ import {
   compareOrchestrationActivities,
   compareOrchestrationTimelineInstants,
 } from "../lib/orchestrationTimelineOrdering";
+import { isThreadContentLoaded } from "../store";
 import type { ChatMessage, Thread } from "../types";
 
 export interface SeparatorRow {
@@ -371,6 +372,7 @@ function buildMessageSources(input: {
       const threadPlan = input.threadPlanByThreadId.get(thread.id);
       const sectionKind = inferThreadSectionKind(thread, threadPlan);
       if (sectionKind === "other") return [];
+      if (!isThreadContentLoaded(thread)) return [];
 
       const ticketId = thread.ticketId ?? threadPlan?.ticketId;
       const sortedMessages = thread.messages.toSorted((left, right) => {
@@ -435,7 +437,9 @@ function buildWaitingItems(input: {
     const phaseStart = getWorkingPhaseStart(currentTicketPlan.ticketId, input.sortedActivities);
     const thread = input.childThreads.find((candidate) => candidate.id === threadId);
     const hasVisibleMessage = Boolean(
-      thread?.messages.some(
+      thread &&
+      isThreadContentLoaded(thread) &&
+      thread.messages.some(
         (message) =>
           message.createdAt >= phaseStart && isVisibleOrchestrationTimelineMessage(message),
       ),
@@ -467,7 +471,9 @@ function buildWaitingItems(input: {
 
     const thread = input.childThreads.find((candidate) => candidate.id === threadId);
     const hasVisibleMessage = Boolean(
-      thread?.messages.some(
+      thread &&
+      isThreadContentLoaded(thread) &&
+      thread.messages.some(
         (message) =>
           message.createdAt >= phaseStart && isVisibleOrchestrationTimelineMessage(message),
       ),

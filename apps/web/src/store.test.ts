@@ -8,6 +8,8 @@ import {
   TurnId,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationStartupSnapshot,
+  type OrchestrationThreadContent,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +17,7 @@ import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   syncServerReadModel,
+  syncThreadContent,
   type AppState,
 } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
@@ -36,6 +39,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
     archivedAt: null,
@@ -159,6 +166,50 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
   };
 }
 
+function makeStartupSnapshotThread(
+  overrides: Partial<OrchestrationStartupSnapshot["threads"][number]>,
+): OrchestrationStartupSnapshot["threads"][number] {
+  return {
+    id: ThreadId.makeUnsafe("thread-1"),
+    projectId: ProjectId.makeUnsafe("project-1"),
+    title: "Thread",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+    },
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    branch: null,
+    worktreePath: null,
+    parentThreadId: null,
+    isOrchestrationThread: false,
+    ticketId: null,
+    latestTurn: null,
+    latestTurnStatus: null,
+    latestSessionStatus: null,
+    session: null,
+    latestUserActivity: null,
+    pendingApprovalCount: 0,
+    pendingUserInputCount: 0,
+    actionablePlanState: null,
+    lastActivitySummary: null,
+    createdAt: "2026-02-27T00:00:00.000Z",
+    updatedAt: "2026-02-27T00:00:00.000Z",
+    archivedAt: null,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makeStartupSnapshot(
+  thread: OrchestrationStartupSnapshot["threads"][number],
+): OrchestrationStartupSnapshot {
+  return {
+    ...makeReadModel(makeReadModelThread({})),
+    threads: [thread],
+  };
+}
+
 function makeReadModelProject(
   overrides: Partial<OrchestrationReadModel["projects"][number]>,
 ): OrchestrationReadModel["projects"][number] {
@@ -260,6 +311,110 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("represents shallow startup threads with unloaded message content and explicit summary fields", () => {
+    const initialState = makeState(makeThread());
+    const latestTurn = {
+      turnId: TurnId.makeUnsafe("turn-1"),
+      state: "completed" as const,
+      requestedAt: "2026-02-27T00:01:00.000Z",
+      startedAt: "2026-02-27T00:01:01.000Z",
+      completedAt: "2026-02-27T00:02:00.000Z",
+      assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+    };
+    const next = syncServerReadModel(
+      initialState,
+      makeStartupSnapshot(
+        makeStartupSnapshotThread({
+          latestTurn,
+          latestTurnStatus: "completed",
+          latestUserActivity: {
+            messageId: MessageId.makeUnsafe("user-1"),
+            createdAt: "2026-02-27T00:01:00.000Z",
+          },
+          pendingApprovalCount: 1,
+          pendingUserInputCount: 1,
+          actionablePlanState: {
+            id: "plan-1" as never,
+            turnId: TurnId.makeUnsafe("turn-1"),
+            createdAt: "2026-02-27T00:01:30.000Z",
+            updatedAt: "2026-02-27T00:01:30.000Z",
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.messages).toBe("not-loaded");
+    expect(next.sidebarThreadsById["thread-1"]).toMatchObject({
+      latestUserMessageAt: "2026-02-27T00:01:00.000Z",
+      hasPendingApprovals: true,
+      hasPendingUserInput: true,
+      hasActionableProposedPlan: true,
+      latestTurn,
+    });
+  });
+
+  it("keeps metadata updates on unloaded threads without fabricating empty conversations", () => {
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(
+        makeStartupSnapshotThread({
+          latestUserActivity: {
+            messageId: MessageId.makeUnsafe("user-1"),
+            createdAt: "2026-02-27T00:01:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    const next = applyOrchestrationEvent(
+      initialState,
+      makeEvent("thread.meta-updated", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        title: "Renamed thread",
+        updatedAt: "2026-02-27T00:03:00.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.messages).toBe("not-loaded");
+    expect(next.sidebarThreadsById["thread-1"]).toMatchObject({
+      title: "Renamed thread",
+      latestUserMessageAt: "2026-02-27T00:01:00.000Z",
+    });
+  });
+
+  it("hydrates unloaded thread content into loaded arrays and recomputes summaries", () => {
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(makeStartupSnapshotThread({})),
+    );
+    const content: OrchestrationThreadContent = {
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      sequence: 2,
+      messages: [
+        {
+          id: MessageId.makeUnsafe("user-1"),
+          role: "user",
+          text: "hello",
+          attachments: [],
+          turnId: TurnId.makeUnsafe("turn-1"),
+          streaming: false,
+          createdAt: "2026-02-27T00:04:00.000Z",
+          updatedAt: "2026-02-27T00:04:00.000Z",
+        },
+      ],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    };
+
+    const next = syncThreadContent(initialState, content);
+
+    expect(Array.isArray(next.threads[0]?.messages)).toBe(true);
+    expect(next.sidebarThreadsById["thread-1"]?.latestUserMessageAt).toBe(
+      "2026-02-27T00:04:00.000Z",
+    );
   });
 
   it("projects recoverable ready-session lastError values into the thread error state", () => {
@@ -557,7 +712,8 @@ describe("incremental orchestration updates", () => {
       }),
     );
 
-    expect(next.threads[0]?.messages[0]?.text).toBe("hello world");
+    const messages = next.threads[0]?.messages;
+    expect(Array.isArray(messages) ? messages[0]?.text : null).toBe("hello world");
     expect(next.threads[0]?.latestTurn?.state).toBe("running");
     expect(next.threads[1]).toBe(thread2);
   });
@@ -855,7 +1011,8 @@ describe("incremental orchestration updates", () => {
       }),
     );
 
-    expect(next.threads[0]?.messages.map((message) => message.id)).toEqual([
+    const messages = next.threads[0]?.messages;
+    expect(Array.isArray(messages) ? messages.map((message) => message.id) : []).toEqual([
       "user-1",
       "assistant-1",
     ]);

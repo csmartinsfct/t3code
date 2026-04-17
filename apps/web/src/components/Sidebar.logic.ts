@@ -15,7 +15,6 @@ type SidebarProject = {
 };
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
   latestUserMessageAt?: string | null;
-  messages?: Pick<Thread["messages"][number], "createdAt" | "role">[];
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
@@ -492,23 +491,6 @@ function getLatestUserMessageTimestamp(thread: SidebarThreadSortInput): number {
   if (thread.latestUserMessageAt) {
     return toSortableTimestamp(thread.latestUserMessageAt) ?? Number.NEGATIVE_INFINITY;
   }
-
-  let latestUserMessageTimestamp: number | null = null;
-
-  for (const message of thread.messages ?? []) {
-    if (message.role !== "user") continue;
-    const messageTimestamp = toSortableTimestamp(message.createdAt);
-    if (messageTimestamp === null) continue;
-    latestUserMessageTimestamp =
-      latestUserMessageTimestamp === null
-        ? messageTimestamp
-        : Math.max(latestUserMessageTimestamp, messageTimestamp);
-  }
-
-  if (latestUserMessageTimestamp !== null) {
-    return latestUserMessageTimestamp;
-  }
-
   return toSortableTimestamp(thread.updatedAt ?? thread.createdAt) ?? Number.NEGATIVE_INFINITY;
 }
 

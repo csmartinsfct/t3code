@@ -1,12 +1,15 @@
 import type { OrchestrationRun, TicketSummary } from "@t3tools/contracts";
+import { isThreadContentLoaded } from "../store";
 import type { Thread } from "../types";
 import type { OrchestrationSwitcherItem } from "./useOrchestrationSwitcher";
 
 function threadHasStarted(thread: Thread | undefined): boolean {
   if (!thread) return false;
   return (
-    thread.messages.length > 0 ||
-    thread.activities.length > 0 ||
+    thread.latestUserMessageAt !== null ||
+    (isThreadContentLoaded(thread) && thread.messages.length > 0) ||
+    thread.hasPendingApprovals ||
+    thread.hasPendingUserInput ||
     thread.latestTurn !== null ||
     thread.session !== null
   );

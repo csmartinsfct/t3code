@@ -507,7 +507,7 @@ function EventRouter() {
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
+        const snapshot = await api.orchestration.getStartupSnapshot();
         if (!disposed) {
           logWebTimeline("orchestration.recovery.snapshot.success", {
             reason,

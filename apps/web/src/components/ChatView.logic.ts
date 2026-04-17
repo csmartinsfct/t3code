@@ -10,7 +10,7 @@ import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } 
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import { Schema } from "effect";
-import { useStore } from "../store";
+import { isThreadContentLoaded, useStore } from "../store";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
@@ -49,6 +49,10 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     isOrchestrationThread: false,
     parentThreadId: null,
     ticketId: null,
@@ -290,7 +294,11 @@ export async function openTicketLinkInManagementView(input: {
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
-    thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+    thread &&
+    (thread.latestTurn !== null ||
+      thread.latestUserMessageAt !== null ||
+      (isThreadContentLoaded(thread) && thread.messages.length > 0) ||
+      thread.session !== null),
   );
 }
 

@@ -54,6 +54,8 @@ export interface ChatMessage {
   streaming: boolean;
 }
 
+export type ThreadMessages = ChatMessage[] | "not-loaded";
+
 export interface ProposedPlan {
   id: OrchestrationProposedPlanId;
   turnId: TurnId | null;
@@ -108,7 +110,7 @@ export interface Thread {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   session: ThreadSession | null;
-  messages: ChatMessage[];
+  messages: ThreadMessages;
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;
@@ -120,6 +122,10 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  latestUserMessageAt: string | null;
+  hasPendingApprovals: boolean;
+  hasPendingUserInput: boolean;
+  hasActionableProposedPlan: boolean;
   initialDraft?: ThreadInitialDraft | undefined;
   isOrchestrationThread: boolean;
   parentThreadId: string | null;
