@@ -1297,6 +1297,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           proposedPlans,
           activities,
           pendingSourceProposedPlan: undefined,
+          hasActionableProposedPlan: false,
           latestTurn:
             latestCheckpoint === null
               ? null

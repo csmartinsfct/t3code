@@ -384,6 +384,60 @@ describe("store read model sync", () => {
     });
   });
 
+  it("updates unloaded thread message summaries without materializing messages", () => {
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(
+        makeStartupSnapshotThread({
+          latestUserActivity: {
+            messageId: MessageId.makeUnsafe("user-1"),
+            createdAt: "2026-02-27T00:01:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    const afterUserMessage = applyOrchestrationEvent(
+      initialState,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("user-2"),
+        role: "user",
+        text: "newer user message",
+        turnId: TurnId.makeUnsafe("turn-2"),
+        streaming: false,
+        createdAt: "2026-02-27T00:05:00.000Z",
+        updatedAt: "2026-02-27T00:05:00.000Z",
+      }),
+    );
+
+    expect(afterUserMessage.threads[0]?.messages).toBe("not-loaded");
+    expect(afterUserMessage.threads[0]?.latestUserMessageAt).toBe("2026-02-27T00:05:00.000Z");
+    expect(afterUserMessage.sidebarThreadsById["thread-1"]?.latestUserMessageAt).toBe(
+      "2026-02-27T00:05:00.000Z",
+    );
+
+    const afterAssistantMessage = applyOrchestrationEvent(
+      initialState,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("assistant-1"),
+        role: "assistant",
+        text: "assistant response",
+        turnId: TurnId.makeUnsafe("turn-2"),
+        streaming: false,
+        createdAt: "2026-02-27T00:06:00.000Z",
+        updatedAt: "2026-02-27T00:06:00.000Z",
+      }),
+    );
+
+    expect(afterAssistantMessage.threads[0]?.messages).toBe("not-loaded");
+    expect(afterAssistantMessage.threads[0]?.latestUserMessageAt).toBe("2026-02-27T00:01:00.000Z");
+    expect(afterAssistantMessage.sidebarThreadsById["thread-1"]?.latestUserMessageAt).toBe(
+      "2026-02-27T00:01:00.000Z",
+    );
+  });
+
   it("hydrates unloaded thread content into loaded arrays and recomputes summaries", () => {
     const initialState = syncServerReadModel(
       makeState(makeThread()),
