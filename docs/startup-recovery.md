@@ -22,6 +22,23 @@ After the server starts keybindings, settings, and orchestration reactors, it sc
 
 The startup pass deliberately skips threads/runs that were actually blocked on approval or user input before shutdown. Those were not meaningfully "working", and callback state does not survive a restart.
 
+## Startup Snapshot And Lazy Thread Content
+
+The web app can initialize sidebar and header state with `orchestration.getStartupSnapshot`. This RPC returns all projects plus shallow thread metadata for every known thread, including archived threads, without loading heavyweight per-thread content.
+
+Thread metadata includes the summary fields the shell needs without deriving them from nested arrays:
+
+- latest user activity
+- pending approval and pending user-input counts
+- actionable plan state
+- latest turn status
+- latest session status
+- last activity summary
+
+Full content for a thread is loaded on demand through `orchestration.getThreadContent({ threadId })`. The response contains that thread's messages, activities, checkpoints, proposed plans, and a `sequence` value computed from the projection state so clients can reconcile any live domain events that arrive while the content RPC is in flight.
+
+The older `orchestration.getSnapshot` RPC remains available during migration for callers that still need the full read model in one response.
+
 ## Auto Resume
 
 When `resumeAgentsOnStartup` is enabled, recovery is initiated by the server exactly once during startup:

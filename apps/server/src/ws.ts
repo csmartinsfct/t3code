@@ -17,6 +17,8 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
+  OrchestrationGetStartupSnapshotError,
+  OrchestrationGetThreadContentError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   OrchestrationRunError,
@@ -50,6 +52,7 @@ import { Keybindings } from "./keybindings";
 import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 
 import {
   observeRpcEffect,
@@ -90,6 +93,7 @@ import * as nodePath from "node:path";
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
@@ -244,6 +248,34 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(ORCHESTRATION_WS_METHODS.getSnapshot, orchestrationEngine.getReadModel(), {
           "rpc.aggregate": "orchestration",
         }),
+      [ORCHESTRATION_WS_METHODS.getStartupSnapshot]: (_input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getStartupSnapshot,
+          projectionSnapshotQuery.getStartupSnapshot().pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetStartupSnapshotError({
+                  message: "Failed to load orchestration startup snapshot",
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.getThreadContent]: (input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getThreadContent,
+          projectionSnapshotQuery.getThreadContent(input.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetThreadContentError({
+                  message: "Failed to load orchestration thread content",
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
       [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.dispatchCommand,

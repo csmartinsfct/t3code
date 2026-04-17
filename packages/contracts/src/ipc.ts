@@ -141,6 +141,9 @@ import type {
   OrchestrationCreateRunResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetStartupSnapshotResult,
+  OrchestrationGetThreadContentInput,
+  OrchestrationGetThreadContentResult,
   OrchestrationGetRunInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
@@ -361,6 +364,10 @@ export interface NativeApi {
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
+    getStartupSnapshot: () => Promise<OrchestrationGetStartupSnapshotResult>;
+    getThreadContent: (
+      input: OrchestrationGetThreadContentInput,
+    ) => Promise<OrchestrationGetThreadContentResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (

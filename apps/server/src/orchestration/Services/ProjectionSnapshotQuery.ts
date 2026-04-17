@@ -10,6 +10,8 @@ import type {
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationReadModel,
+  OrchestrationStartupSnapshot,
+  OrchestrationThreadContent,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -57,6 +59,27 @@ export interface ProjectionSnapshotQueryShape {
    * projector cursor state.
    */
   readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, ProjectionRepositoryError>;
+
+  /**
+   * Read the startup read model without per-thread content arrays.
+   *
+   * Projects and thread metadata are eager; messages, activities, checkpoints,
+   * and proposed plans are loaded through getThreadContent.
+   */
+  readonly getStartupSnapshot: () => Effect.Effect<
+    OrchestrationStartupSnapshot,
+    ProjectionRepositoryError
+  >;
+
+  /**
+   * Read one thread's nested content directly from projection tables.
+   *
+   * The returned sequence is the projection cursor observed in the same
+   * transaction and is used by clients to reconcile live domain events.
+   */
+  readonly getThreadContent: (
+    threadId: ThreadId,
+  ) => Effect.Effect<OrchestrationThreadContent, ProjectionRepositoryError>;
 
   /**
    * Read aggregate projection counts without hydrating the full read model.

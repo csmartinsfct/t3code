@@ -970,4 +970,299 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }
     }),
   );
+
+  it.effect(
+    "returns shallow startup metadata with summaries and keeps thread content separate",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_thread_messages`;
+        yield* sql`DELETE FROM projection_thread_proposed_plans`;
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_thread_sessions`;
+        yield* sql`DELETE FROM projection_turns`;
+        yield* sql`DELETE FROM projection_state`;
+
+        yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-shallow',
+          'Shallow Project',
+          '/tmp/project-shallow',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-01T00:00:00.000Z',
+          '2026-04-01T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-shallow-active',
+            'project-shallow',
+            'Active Metadata',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'approval-required',
+            'plan',
+            'feature/shallow',
+            '/tmp/project-shallow/worktree',
+            'turn-shallow',
+            '2026-04-01T00:00:02.000Z',
+            '2026-04-01T00:00:03.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-shallow-archived',
+            'project-shallow',
+            'Archived Metadata',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-01T00:00:04.000Z',
+            '2026-04-01T00:00:05.000Z',
+            '2026-04-01T00:00:06.000Z',
+            NULL
+          )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'message-user-latest',
+          'thread-shallow-active',
+          'turn-shallow',
+          'user',
+          'Latest user request',
+          0,
+          '2026-04-01T00:00:07.000Z',
+          '2026-04-01T00:00:07.000Z'
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'plan-actionable',
+          'thread-shallow-active',
+          'turn-shallow',
+          '# Actionable',
+          NULL,
+          NULL,
+          '2026-04-01T00:00:08.000Z',
+          '2026-04-01T00:00:09.000Z'
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-approval-open',
+            'thread-shallow-active',
+            'turn-shallow',
+            'approval',
+            'approval.requested',
+            'Command approval requested',
+            '{"requestId":"approval-1","requestKind":"command"}',
+            41,
+            '2026-04-01T00:00:10.000Z'
+          ),
+          (
+            'activity-user-input-open',
+            'thread-shallow-active',
+            'turn-shallow',
+            'info',
+            'user-input.requested',
+            'User input requested',
+            '{"requestId":"input-1","questions":[{"id":"choice","header":"Choice","question":"Pick","options":[{"label":"A","description":"A"}]}]}',
+            42,
+            '2026-04-01T00:00:11.000Z'
+          )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES (
+          'thread-shallow-active',
+          'running',
+          'codex',
+          'provider-session-shallow',
+          'provider-thread-shallow',
+          'approval-required',
+          'turn-shallow',
+          NULL,
+          '2026-04-01T00:00:12.000Z'
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_status,
+          checkpoint_files_json
+        )
+        VALUES (
+          'thread-shallow-active',
+          'turn-shallow',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          'running',
+          '2026-04-01T00:00:13.000Z',
+          '2026-04-01T00:00:14.000Z',
+          '2026-04-01T00:00:14.500Z',
+          1,
+          'checkpoint-shallow',
+          'ready',
+          '[]'
+        )
+      `;
+
+        for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+          yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            40,
+            '2026-04-01T00:00:15.000Z'
+          )
+        `;
+        }
+
+        const startupSnapshot = yield* snapshotQuery.getStartupSnapshot();
+
+        assert.equal(startupSnapshot.snapshotSequence, 40);
+        assert.deepEqual(
+          startupSnapshot.threads.map((thread) => thread.id),
+          [
+            ThreadId.makeUnsafe("thread-shallow-active"),
+            ThreadId.makeUnsafe("thread-shallow-archived"),
+          ],
+        );
+        const active = startupSnapshot.threads[0]!;
+        assert.equal(Object.hasOwn(active, "messages"), false);
+        assert.equal(Object.hasOwn(active, "activities"), false);
+        assert.equal(Object.hasOwn(active, "checkpoints"), false);
+        assert.equal(Object.hasOwn(active, "proposedPlans"), false);
+        assert.deepEqual(active.latestUserActivity, {
+          messageId: asMessageId("message-user-latest"),
+          createdAt: "2026-04-01T00:00:07.000Z",
+        });
+        assert.equal(active.pendingApprovalCount, 1);
+        assert.equal(active.pendingUserInputCount, 1);
+        assert.equal(active.actionablePlanState?.id, "plan-actionable");
+        assert.equal(active.latestTurnStatus, "running");
+        assert.equal(active.latestSessionStatus, "running");
+        assert.equal(active.lastActivitySummary, "User input requested");
+
+        const threadContent = yield* snapshotQuery.getThreadContent(
+          ThreadId.makeUnsafe("thread-shallow-active"),
+        );
+        assert.equal(threadContent.sequence, 40);
+        assert.deepEqual(
+          threadContent.messages.map((message) => message.id),
+          [asMessageId("message-user-latest")],
+        );
+        assert.deepEqual(
+          threadContent.activities.map((activity) => activity.id),
+          [asEventId("activity-approval-open"), asEventId("activity-user-input-open")],
+        );
+        assert.deepEqual(
+          threadContent.proposedPlans.map((plan) => plan.id),
+          ["plan-actionable"],
+        );
+        assert.deepEqual(
+          threadContent.checkpoints.map((checkpoint) => checkpoint.checkpointRef),
+          [asCheckpointRef("checkpoint-shallow")],
+        );
+      }),
+  );
 });

@@ -54,6 +54,8 @@ function makePromptManagementLayer(options?: {
     Layer.provide(
       Layer.succeed(ProjectionSnapshotQuery, {
         getSnapshot: () => Effect.succeed(options?.getSnapshot?.() ?? makeSnapshot()),
+        getStartupSnapshot: () => Effect.die("unused"),
+        getThreadContent: () => Effect.die("unused"),
         getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 0 }),
         getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),

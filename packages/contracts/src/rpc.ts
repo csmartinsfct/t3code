@@ -37,6 +37,10 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
+  OrchestrationGetStartupSnapshotError,
+  OrchestrationGetStartupSnapshotInput,
+  OrchestrationGetThreadContentError,
+  OrchestrationGetThreadContentInput,
   OrchestrationGetSnapshotError,
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffError,
@@ -588,6 +592,24 @@ export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   error: OrchestrationGetSnapshotError,
 });
 
+export const WsOrchestrationGetStartupSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getStartupSnapshot,
+  {
+    payload: OrchestrationGetStartupSnapshotInput,
+    success: OrchestrationRpcSchemas.getStartupSnapshot.output,
+    error: OrchestrationGetStartupSnapshotError,
+  },
+);
+
+export const WsOrchestrationGetThreadContentRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadContent,
+  {
+    payload: OrchestrationGetThreadContentInput,
+    success: OrchestrationRpcSchemas.getThreadContent.output,
+    error: OrchestrationGetThreadContentError,
+  },
+);
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -1064,6 +1086,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingDeleteTemplateRpc,
   WsSubscribeTicketingEventsRpc,
   WsOrchestrationGetSnapshotRpc,
+  WsOrchestrationGetStartupSnapshotRpc,
+  WsOrchestrationGetThreadContentRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
