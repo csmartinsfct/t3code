@@ -145,27 +145,26 @@ export function useOrchestrationData(
       };
       orchestrationDataCache.set(parentThreadId, cacheEntry, estimateEntrySize(cacheEntry));
 
-      const EAGER_HYDRATION_LIMIT = 4;
-      const toHydrate = newChildThreadIds.slice(-EAGER_HYDRATION_LIMIT);
       const api = ensureNativeApi();
       const syncThreadContent = useStore.getState().syncThreadContent;
-      const threadsById = useStore.getState().threadsById;
-      await Promise.all(
-        toHydrate
-          .filter((id) => !isThreadContentLoaded(threadsById[id]))
-          .map((id) =>
+      const storeThreads = useStore.getState().threadsById;
+      const toHydrate = newChildThreadIds.filter((id) => !isThreadContentLoaded(storeThreads[id]));
+      if (toHydrate.length > 0) {
+        await Promise.all(
+          toHydrate.map((id) =>
             api.orchestration
               .getThreadContent({ threadId: id as ThreadId })
               .then(syncThreadContent),
           ),
-      );
+        );
+      }
 
       logWebTimeline("orchestration.data.fetch.success", {
         threadId: parentThreadId,
         runId: fullRun.id,
         runStatus: fullRun.status,
         childThreadCount: newChildThreadIds.length,
-        eagerlyHydratedCount: toHydrate.length,
+        hydratedCount: toHydrate.length,
         ticketCount: ticketList.length,
         currentTicketIndex: fullRun.currentTicketIndex,
       });

@@ -64,12 +64,11 @@ Events targeting threads whose content is not loaded update **metadata only**:
 Opening an orchestration parent thread does **not** bulk-load all child thread content. Instead:
 
 1. **Child thread IDs** are fetched via a lightweight `getChildThreadIds` RPC (no snapshot, no content).
-2. The **4 most recent children** are eagerly hydrated in parallel via per-thread `getThreadContent` calls.
-3. **Remaining children** hydrate on demand when the user navigates to them via the thread switcher.
-4. The **switcher menu** works immediately from startup snapshot metadata — it only needs thread titles, status badges, and ticket identifiers, not message content.
-5. The **orchestration timeline** shows a loading state until the parent and all required child threads are hydrated.
+2. **All children** are hydrated in parallel via per-thread `getThreadContent` calls — each as an independent lightweight SQLite query, not a full snapshot load.
+3. The **switcher menu** works immediately from startup snapshot metadata — it only needs thread titles, status badges, and ticket identifiers, not message content.
+4. The **orchestration timeline** shows a loading state until the parent and all required child threads are hydrated.
 
-For small orchestrations (4 or fewer children), all threads are eagerly hydrated. For larger runs, only the most recent work is loaded upfront.
+The key difference from the startup path: child threads are bounded by the orchestration's ticket count (typically 2-20 threads), so hydrating all of them in parallel is fast. The old approach loaded a full system-wide snapshot to extract a few children.
 
 ## Bounded Content Cache
 
