@@ -1082,108 +1082,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Idle session timeout"
-          description="Automatically stop provider sessions that have been idle for the specified duration to free memory and processes."
-          resetAction={
-            settings.idleSessionTimeoutMinutes !==
-            DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes ? (
-              <SettingResetButton
-                label="idle session timeout"
-                onClick={() =>
-                  updateSettings({
-                    idleSessionTimeoutMinutes: DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={String(settings.idleSessionTimeoutMinutes)}
-              onValueChange={(value) =>
-                updateSettings({ idleSessionTimeoutMinutes: Number(value) })
-              }
-            >
-              <SelectTrigger className="w-full sm:w-36" aria-label="Idle session timeout">
-                <SelectValue>
-                  {settings.idleSessionTimeoutMinutes === 0
-                    ? "Never"
-                    : settings.idleSessionTimeoutMinutes < 60
-                      ? `${settings.idleSessionTimeoutMinutes} min`
-                      : `${settings.idleSessionTimeoutMinutes / 60} hr`}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="0">
-                  Never
-                </SelectItem>
-                <SelectItem hideIndicator value="30">
-                  30 minutes
-                </SelectItem>
-                <SelectItem hideIndicator value="60">
-                  1 hour
-                </SelectItem>
-                <SelectItem hideIndicator value="120">
-                  2 hours
-                </SelectItem>
-                <SelectItem hideIndicator value="240">
-                  4 hours
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          title="Thread content cache"
-          description="Maximum memory for cached thread content. Threads beyond this limit are unloaded and re-fetched on navigation. Set to 0 for unlimited."
-          resetAction={
-            settings.threadContentCacheMaxGB !==
-            DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB ? (
-              <SettingResetButton
-                label="thread content cache"
-                onClick={() =>
-                  updateSettings({
-                    threadContentCacheMaxGB: DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={String(settings.threadContentCacheMaxGB)}
-              onValueChange={(value) => updateSettings({ threadContentCacheMaxGB: Number(value) })}
-            >
-              <SelectTrigger className="w-full sm:w-36" aria-label="Thread content cache">
-                <SelectValue>
-                  {settings.threadContentCacheMaxGB === 0
-                    ? "Unlimited"
-                    : `${settings.threadContentCacheMaxGB} GB`}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="0">
-                  Unlimited
-                </SelectItem>
-                <SelectItem hideIndicator value="1">
-                  1 GB
-                </SelectItem>
-                <SelectItem hideIndicator value="2">
-                  2 GB
-                </SelectItem>
-                <SelectItem hideIndicator value="4">
-                  4 GB
-                </SelectItem>
-                <SelectItem hideIndicator value="8">
-                  8 GB
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1375,6 +1273,110 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Resource Management">
+        <SettingsRow
+          title="Conversation cache"
+          description="How much memory the app uses to keep visited conversations ready. Older conversations are reloaded when you return to them. Set to 0 to keep everything in memory."
+          resetAction={
+            settings.threadContentCacheMaxGB !==
+            DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB ? (
+              <SettingResetButton
+                label="conversation cache"
+                onClick={() =>
+                  updateSettings({
+                    threadContentCacheMaxGB: DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.threadContentCacheMaxGB)}
+              onValueChange={(value) => updateSettings({ threadContentCacheMaxGB: Number(value) })}
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="Conversation cache">
+                <SelectValue>
+                  {settings.threadContentCacheMaxGB === 0
+                    ? "Unlimited"
+                    : `${settings.threadContentCacheMaxGB} GB`}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="0">
+                  Unlimited
+                </SelectItem>
+                <SelectItem hideIndicator value="1">
+                  1 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="2">
+                  2 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="4">
+                  4 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="8">
+                  8 GB
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Idle session timeout"
+          description="How long an inactive agent session stays alive before being shut down. Stopped sessions can be resumed but need a moment to restart."
+          resetAction={
+            settings.idleSessionTimeoutMinutes !==
+            DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes ? (
+              <SettingResetButton
+                label="idle session timeout"
+                onClick={() =>
+                  updateSettings({
+                    idleSessionTimeoutMinutes: DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.idleSessionTimeoutMinutes)}
+              onValueChange={(value) =>
+                updateSettings({ idleSessionTimeoutMinutes: Number(value) })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="Idle session timeout">
+                <SelectValue>
+                  {settings.idleSessionTimeoutMinutes === 0
+                    ? "Never"
+                    : settings.idleSessionTimeoutMinutes < 60
+                      ? `${settings.idleSessionTimeoutMinutes} min`
+                      : `${settings.idleSessionTimeoutMinutes / 60} hr`}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="0">
+                  Never
+                </SelectItem>
+                <SelectItem hideIndicator value="30">
+                  30 minutes
+                </SelectItem>
+                <SelectItem hideIndicator value="60">
+                  1 hour
+                </SelectItem>
+                <SelectItem hideIndicator value="120">
+                  2 hours
+                </SelectItem>
+                <SelectItem hideIndicator value="240">
+                  4 hours
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>
