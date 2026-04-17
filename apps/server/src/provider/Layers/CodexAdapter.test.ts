@@ -170,6 +170,7 @@ const projectionSnapshotQueryTestLayer = Layer.succeed(ProjectionSnapshotQuery, 
   getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
   getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
   getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+  getProjectById: () => Effect.succeed(Option.none()),
   getThreadCheckpointContext: () => Effect.succeed(Option.none()),
 });
 

@@ -1,11 +1,34 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-15T12:08:25.797Z",
-  "lastProcessedCommit": "2434a7193aa92fd1c577ecf5e64d943e5b59a952",
+  "generatedAt": "2026-04-17T01:21:08.535Z",
+  "lastProcessedCommit": "ef2395e88baa1757347c4f91542b0a46b0c70f5b",
   "groups": [
+    {
+      "date": "2026-04-17",
+      "entries": [
+        {
+          "id": "464b13668a85fac4",
+          "title": "Preserved Conversation Context After Idle Stops",
+          "summary": "Idle or manually stopped sessions now preserve their resume data, so returning to a session after inactivity no longer starts a fresh conversation or loses prior context.",
+          "category": "fix",
+          "commitShas": [
+            "ef2395e88baa1757347c4f91542b0a46b0c70f5b"
+          ]
+        }
+      ]
+    },
     {
       "date": "2026-04-15",
       "entries": [
+        {
+          "id": "23d7894bc832c74e",
+          "title": "Kanban ticket details now remember your scroll position",
+          "summary": "Returning to a previously viewed ticket in the Kanban detail view restores your earlier scroll position, making it easier to continue where you left off.",
+          "category": "improvement",
+          "commitShas": [
+            "1230bca9d1d7361846601759d9b9272d7983d349"
+          ]
+        },
         {
           "id": "7445bfc1e9b1aa5b",
           "title": "Improved provider lifecycle diagnostics",
@@ -1649,6 +1672,30 @@
           "2434a7193aa92fd1c577ecf5e64d943e5b59a952"
         ],
         "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-15T12:16:11.979Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "2434a7193aa92fd1c577ecf5e64d943e5b59a952",
+        "toInclusiveCommit": "1230bca9d1d7361846601759d9b9272d7983d349",
+        "commitShas": [
+          "1230bca9d1d7361846601759d9b9272d7983d349"
+        ],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-17T01:21:08.530Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "1230bca9d1d7361846601759d9b9272d7983d349",
+        "toInclusiveCommit": "ef2395e88baa1757347c4f91542b0a46b0c70f5b",
+        "commitShas": [
+          "ef2395e88baa1757347c4f91542b0a46b0c70f5b"
+        ],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

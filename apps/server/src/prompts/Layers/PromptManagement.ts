@@ -323,17 +323,19 @@ export const PromptManagementLive = Layer.effect(
           return null;
         }
 
-        const snapshot = yield* projectionSnapshotQuery
-          .getSnapshot()
+        if (!scope.projectId) {
+          return yield* projectNotFoundError(`Project scope requires a projectId.`);
+        }
+
+        const projectOption = yield* projectionSnapshotQuery
+          .getProjectById(scope.projectId)
           .pipe(
             Effect.mapError((cause) =>
               settingsReadError(`Failed to load project ${scope.projectId}.`, cause),
             ),
           );
-        const project = snapshot.projects.find(
-          (candidate) => candidate.id === scope.projectId && candidate.deletedAt === null,
-        );
-        if (!project) {
+        const project = Option.getOrNull(projectOption);
+        if (!project || project.deletedAt !== null) {
           return yield* projectNotFoundError(`Project ${scope.projectId} was not found.`);
         }
         return project;

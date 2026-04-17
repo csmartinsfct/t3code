@@ -57,6 +57,11 @@ function makePromptManagementLayer(options?: {
         getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 0 }),
         getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
         getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+        getProjectById: (pid) => {
+          const snapshot = options?.getSnapshot?.() ?? makeSnapshot();
+          const project = snapshot.projects.find((p) => p.id === pid);
+          return Effect.succeed(project ? Option.some(project) : Option.none());
+        },
         getThreadCheckpointContext: () => Effect.succeed(Option.none()),
       }),
     ),

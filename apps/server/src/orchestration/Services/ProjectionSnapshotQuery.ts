@@ -66,6 +66,13 @@ export interface ProjectionSnapshotQueryShape {
   ) => Effect.Effect<Option.Option<ThreadId>, ProjectionRepositoryError>;
 
   /**
+   * Read a single project by ID (lightweight — no threads/messages/etc.).
+   */
+  readonly getProjectById: (
+    projectId: ProjectId,
+  ) => Effect.Effect<Option.Option<OrchestrationProject>, ProjectionRepositoryError>;
+
+  /**
    * Read the checkpoint context needed to resolve a single thread diff.
    */
   readonly getThreadCheckpointContext: (
