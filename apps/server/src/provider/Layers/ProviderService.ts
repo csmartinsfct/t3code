@@ -695,7 +695,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
-        yield* directory.remove(input.threadId);
+        yield* directory.upsert({
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          status: "stopped",
+          runtimePayload: {
+            activeTurnId: null,
+            lastRuntimeEvent: "provider.sessionStop",
+            lastRuntimeEventAt: new Date().toISOString(),
+          },
+        });
         yield* analytics.record("provider.session.stopped", {
           provider: routed.adapter.provider,
         });
@@ -872,7 +881,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                   `(idle ${Math.round(idleMs / 60_000)}m, threshold ${timeoutMinutes}m)`,
               );
               yield* adapter.stopSession(session.threadId).pipe(
-                Effect.tap(() => directory.remove(session.threadId)),
+                Effect.tap(() =>
+                  directory.upsert({
+                    threadId: session.threadId,
+                    provider: adapter.provider,
+                    status: "stopped",
+                    runtimePayload: {
+                      activeTurnId: null,
+                      lastRuntimeEvent: "provider.idleReaper",
+                      lastRuntimeEventAt: new Date().toISOString(),
+                    },
+                  }),
+                ),
                 Effect.catch(() => Effect.void),
               );
             }),

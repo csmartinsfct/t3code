@@ -19,6 +19,19 @@ This repository is a VERY EARLY WIP. Proposing sweeping changes that improve lon
 
 If a tradeoff is required, choose correctness and robustness over short-term convenience.
 
+## Rules
+
+### NEVER destroy provider session resume cursors
+
+The resume cursor (`ProviderRuntimeBinding.resumeCursor`) is the ONLY mechanism for restoring conversation context after a session is stopped. It contains the Anthropic session ID that lets a new CLI process resume a prior conversation. Without it, sessions start completely fresh and the user loses all conversation history.
+
+- **NEVER call `directory.remove(threadId)`** in production code. This deletes the binding and its resume cursor permanently.
+- When stopping a session (idle reaper, explicit stop, shutdown), use `directory.upsert({ status: "stopped" })` to mark it stopped while preserving the cursor.
+- The only acceptable place for `directory.remove` is in test cleanup code.
+- Any code path that transitions a session to stopped/closed MUST preserve the binding's resume cursor.
+
+This rule exists because the idle reaper previously called `directory.remove()` after stopping idle sessions, which permanently destroyed resume cursors and caused users to lose conversation context after periods of inactivity. The graceful shutdown path (`runStopAll`) correctly uses `directory.upsert({ status: "stopped" })` — all other stop paths must follow the same pattern.
+
 ## Maintainability
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
