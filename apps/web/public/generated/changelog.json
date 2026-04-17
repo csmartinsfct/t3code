@@ -1,11 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-17T20:27:13.675Z",
-  "lastProcessedCommit": "c22baeaa119b5156889055073d653b2da9f79cc6",
+  "generatedAt": "2026-04-17T20:40:47.249Z",
+  "lastProcessedCommit": "32c0b123d672f3d922cec567cde13c30b2495e08",
   "groups": [
     {
       "date": "2026-04-17",
       "entries": [
+        {
+          "id": "a18de2599c6b62a2",
+          "title": "Faster Orchestration Loading",
+          "summary": "Orchestration views now load child threads in parallel, reducing wait time when opening runs with multiple related threads.",
+          "category": "performance",
+          "commitShas": ["32c0b123d672f3d922cec567cde13c30b2495e08"]
+        },
         {
           "id": "3f7a1686c79a0b97",
           "title": "Faster orchestration loading",
@@ -1679,6 +1686,16 @@
         "fromExclusiveCommit": "47b50bfe8772507dc0e723e0c885fb04db2f34f1",
         "toInclusiveCommit": "c22baeaa119b5156889055073d653b2da9f79cc6",
         "commitShas": ["c22baeaa119b5156889055073d653b2da9f79cc6"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-17T20:40:47.119Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "c22baeaa119b5156889055073d653b2da9f79cc6",
+        "toInclusiveCommit": "32c0b123d672f3d922cec567cde13c30b2495e08",
+        "commitShas": ["32c0b123d672f3d922cec567cde13c30b2495e08"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
