@@ -227,6 +227,7 @@ function mapHydratedThread(thread: OrchestrationThread): Thread {
       ...mappedContent,
       latestTurn: thread.latestTurn,
     }),
+    lastActivitySummary: null,
     initialDraft: thread.initialDraft,
     isOrchestrationThread: thread.isOrchestrationThread,
     parentThreadId: thread.parentThreadId,
@@ -260,6 +261,7 @@ function mapMetadataThread(thread: OrchestrationThreadMetadata): Thread {
     hasPendingApprovals: thread.pendingApprovalCount > 0,
     hasPendingUserInput: thread.pendingUserInputCount > 0,
     hasActionableProposedPlan: thread.actionablePlanState !== null,
+    lastActivitySummary: thread.lastActivitySummary,
     initialDraft: thread.initialDraft,
     isOrchestrationThread: thread.isOrchestrationThread,
     parentThreadId: thread.parentThreadId,
@@ -319,6 +321,7 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
+    lastActivitySummary: thread.lastActivitySummary ?? null,
     isOrchestrationThread: thread.isOrchestrationThread,
     parentThreadId: thread.parentThreadId,
   };
@@ -345,6 +348,7 @@ function sidebarThreadSummariesEqual(
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
     left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
+    (left.lastActivitySummary ?? null) === (right.lastActivitySummary ?? null) &&
     left.isOrchestrationThread === right.isOrchestrationThread &&
     left.parentThreadId === right.parentThreadId
   );

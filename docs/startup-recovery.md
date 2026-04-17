@@ -37,6 +37,10 @@ Thread metadata includes the summary fields the shell needs without deriving the
 
 Full content for a thread is loaded on demand through `orchestration.getThreadContent({ threadId })`. The response contains that thread's messages, activities, checkpoints, proposed plans, and a `sequence` value computed from the projection state so clients can reconcile any live domain events that arrive while the content RPC is in flight.
 
+While this request is in flight, chat routes must keep the active thread shell stable: title, project, model/runtime controls, worktree-aware file explorer access, and the latest shallow activity summary render from metadata immediately. Message timelines, plan state, and diff state show loading shells instead of empty states, and the composer remains disabled until the thread content is present.
+
+Orchestration parent routes also hydrate the required child-thread content before deriving the combined timeline. The switcher can still render from run and ticket metadata while child messages load, but the parent timeline stays in a loading state until the parent and ordered child threads are hydrated.
+
 The older `orchestration.getSnapshot` RPC remains available during migration for callers that still need the full read model in one response.
 
 ## Auto Resume

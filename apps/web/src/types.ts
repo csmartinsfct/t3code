@@ -126,6 +126,7 @@ export interface Thread {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  lastActivitySummary?: string | null;
   initialDraft?: ThreadInitialDraft | undefined;
   isOrchestrationThread: boolean;
   parentThreadId: string | null;
@@ -148,6 +149,7 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  lastActivitySummary?: string | null;
   isOrchestrationThread: boolean;
   parentThreadId: string | null;
 }

@@ -61,6 +61,7 @@ function stepStatusIcon(status: string): React.ReactNode {
 interface PlanSidebarProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
+  isLoading?: boolean;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
@@ -70,6 +71,7 @@ interface PlanSidebarProps {
 const PlanSidebar = memo(function PlanSidebar({
   activePlan,
   activeProposedPlan,
+  isLoading = false,
   markdownCwd,
   workspaceRoot,
   timestampFormat,
@@ -387,7 +389,19 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
 
           {/* Empty state */}
-          {!activePlan && !planMarkdown ? (
+          {isLoading ? (
+            <div className="space-y-3 py-4">
+              <div className="flex items-center gap-2 text-muted-foreground/60">
+                <LoaderIcon className="size-3.5 animate-spin" />
+                <span className="text-[13px]">Loading plan state...</span>
+              </div>
+              <div className="space-y-2">
+                <span className="block h-4 w-4/5 animate-skeleton rounded bg-muted" />
+                <span className="block h-4 w-2/3 animate-skeleton rounded bg-muted" />
+                <span className="block h-4 w-3/4 animate-skeleton rounded bg-muted" />
+              </div>
+            </div>
+          ) : !activePlan && !planMarkdown ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <p className="text-[13px] text-muted-foreground/40">No active plan yet.</p>
               <p className="mt-1 text-[11px] text-muted-foreground/30">

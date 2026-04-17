@@ -932,6 +932,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
+  const isThreadHydrating = Boolean(serverThread && !isThreadContentLoaded(serverThread));
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const isOrchestrationThread = activeThread?.isOrchestrationThread ?? false;
   const isOrchestrationChild = (activeThread?.parentThreadId ?? null) !== null;
@@ -1598,8 +1599,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     localDispatchStartedAt,
   );
   const isComposerApprovalState = activePendingApproval !== null;
-  const isComposerLockedForAgentStart = isWaitingForAgentStart;
-  const isComposerInputDisabled = isConnecting || isComposerApprovalState || isWaitingForAgentStart;
+  const isComposerLockedForAgentStart = isWaitingForAgentStart || isThreadHydrating;
+  const isComposerInputDisabled =
+    isConnecting || isComposerApprovalState || isWaitingForAgentStart || isThreadHydrating;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -3879,6 +3881,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       isSendBusy ||
       isConnecting ||
       isWaitingForAgentStart ||
+      isThreadHydrating ||
       sendInFlightRef.current
     ) {
       return;
@@ -5254,6 +5257,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <MessagesTimeline
                       key={activeThread.id}
                       hasMessages={timelineEntries.length > 0}
+                      isHydrating={isThreadHydrating}
+                      hydrationSummary={activeThread.lastActivitySummary ?? null}
                       isWorking={isWorking}
                       activeTurnInProgress={isWorking || !latestTurnSettled}
                       activeTurnStartedAt={activeWorkStartedAt}
@@ -5504,13 +5509,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 "Resolve this approval request to continue")
                               : isWaitingForAgentStart
                                 ? "This thread will become interactive once the agent starts working on it"
-                                : activePendingProgress
-                                  ? "Type your own answer, or leave this blank to use the selected option"
-                                  : showPlanFollowUpPrompt && activeProposedPlan
-                                    ? "Add feedback to refine the plan, or leave this blank to implement it"
-                                    : phase === "disconnected"
-                                      ? "Ask for follow-up changes or attach images"
-                                      : "Ask anything, @tag files/folders, or use / to show available commands"
+                                : isThreadHydrating
+                                  ? "Loading thread content..."
+                                  : activePendingProgress
+                                    ? "Type your own answer, or leave this blank to use the selected option"
+                                    : showPlanFollowUpPrompt && activeProposedPlan
+                                      ? "Add feedback to refine the plan, or leave this blank to implement it"
+                                      : phase === "disconnected"
+                                        ? "Ask for follow-up changes or attach images"
+                                        : "Ask anything, @tag files/folders, or use / to show available commands"
                           }
                           disabled={isComposerInputDisabled}
                         />
@@ -5684,6 +5691,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               isPreparingWorktree={isPreparingWorktree}
                               hasSendableContent={composerSendState.hasSendableContent}
                               disabled={isComposerLockedForAgentStart}
+                              disabledLabel={
+                                isThreadHydrating
+                                  ? "Loading thread content"
+                                  : "Waiting for agent to start"
+                              }
                               onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                               onInterrupt={() => void onInterrupt()}
                               onImplementPlanInNewThread={() => void onImplementPlanInNewThread()}
@@ -5731,6 +5743,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            isLoading={isThreadHydrating}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeProject?.cwd ?? undefined}
             timestampFormat={timestampFormat}

@@ -27,6 +27,7 @@ import {
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  Loader2Icon,
   type LucideIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -71,6 +72,8 @@ const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
+  isHydrating?: boolean;
+  hydrationSummary?: string | null;
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
@@ -118,6 +121,8 @@ interface MessagesTimelineProps {
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
+  isHydrating = false,
+  hydrationSummary,
   isWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
@@ -640,6 +645,27 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       )}
     </div>
   );
+
+  if (isHydrating) {
+    return (
+      <div className="mx-auto flex h-full w-full max-w-3xl flex-col justify-center gap-4 px-1 py-8">
+        <div className="flex items-center gap-2 text-muted-foreground/70">
+          <Loader2Icon className="size-3.5 animate-spin" />
+          <span className="text-sm">Loading thread content...</span>
+        </div>
+        {hydrationSummary ? (
+          <div className="rounded-md border border-border/60 bg-card/45 px-3 py-2 text-sm text-muted-foreground/80">
+            {hydrationSummary}
+          </div>
+        ) : null}
+        <div className="space-y-3">
+          <div className="h-16 w-4/5 animate-skeleton rounded-lg bg-muted/80" />
+          <div className="ml-auto h-20 w-3/5 animate-skeleton rounded-lg bg-muted/70" />
+          <div className="h-24 w-5/6 animate-skeleton rounded-lg bg-muted/60" />
+        </div>
+      </div>
+    );
+  }
 
   if (!hasMessages && !isWorking) {
     return (

@@ -11,6 +11,8 @@ import {
   type NativeApi,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationStartupSnapshot,
+  type OrchestrationThreadContent,
   type ProjectId,
   type ScheduledTaskId,
   type ServerConfig,
@@ -373,6 +375,68 @@ function createSnapshotForTargetUser(options: {
       },
     ],
     updatedAt: NOW_ISO,
+  };
+}
+
+function createStartupSnapshotFromReadModel(
+  snapshot: OrchestrationReadModel,
+): OrchestrationStartupSnapshot {
+  return {
+    snapshotSequence: snapshot.snapshotSequence,
+    projects: snapshot.projects,
+    updatedAt: snapshot.updatedAt,
+    threads: snapshot.threads.map((thread) => {
+      const latestUserMessage = thread.messages.findLast((message) => message.role === "user");
+      return {
+        id: thread.id,
+        projectId: thread.projectId,
+        title: thread.title,
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        parentThreadId: thread.parentThreadId,
+        isOrchestrationThread: thread.isOrchestrationThread,
+        ticketId: thread.ticketId,
+        latestTurn: thread.latestTurn,
+        latestTurnStatus: thread.latestTurn?.state ?? null,
+        latestSessionStatus: thread.session?.status ?? null,
+        session: thread.session,
+        latestUserActivity: latestUserMessage
+          ? {
+              messageId: latestUserMessage.id,
+              createdAt: latestUserMessage.createdAt,
+            }
+          : null,
+        pendingApprovalCount: thread.activities.filter(
+          (activity) => activity.kind === "approval.requested",
+        ).length,
+        pendingUserInputCount: thread.activities.filter(
+          (activity) => activity.kind === "user-input.requested",
+        ).length,
+        actionablePlanState: null,
+        lastActivitySummary: latestUserMessage?.text ?? null,
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt,
+        archivedAt: thread.archivedAt,
+        deletedAt: thread.deletedAt,
+        ...(thread.initialDraft ? { initialDraft: thread.initialDraft } : {}),
+      };
+    }),
+  };
+}
+
+function createThreadContentFromReadModelThread(
+  thread: OrchestrationReadModel["threads"][number],
+): OrchestrationThreadContent {
+  return {
+    threadId: thread.id,
+    sequence: 2,
+    messages: thread.messages,
+    proposedPlans: thread.proposedPlans,
+    activities: thread.activities,
+    checkpoints: thread.checkpoints,
   };
 }
 
@@ -1636,6 +1700,55 @@ describe("ChatView timeline estimator parity (full app)", () => {
     customWsRpcResolver = null;
     delete window.nativeApi;
     document.body.innerHTML = "";
+  });
+
+  it("keeps direct navigation to a metadata-only thread stable while hydrating content", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-lazy-hydration" as MessageId,
+      targetText: "hydrate me without flashing empty state",
+    });
+    const startupSnapshot = createStartupSnapshotFromReadModel(snapshot);
+    const hydratedContent = createThreadContentFromReadModelThread(snapshot.threads[0]!);
+    let resolveThreadContent: ((content: OrchestrationThreadContent) => void) | undefined;
+    const threadContentPromise = new Promise<OrchestrationThreadContent>((resolve) => {
+      resolveThreadContent = resolve;
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.getStartupSnapshot) {
+          return startupSnapshot;
+        }
+        if (body._tag === ORCHESTRATION_WS_METHODS.getThreadContent) {
+          return threadContentPromise;
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Browser test thread");
+        expect(document.body.textContent ?? "").toContain("Loading thread content");
+        expect(document.body.textContent ?? "").toContain("filler user message 21");
+        expect(document.body.textContent ?? "").not.toContain(
+          "Send a message to start the conversation.",
+        );
+      });
+      expect(document.querySelector('[contenteditable="true"]')).toBeNull();
+
+      resolveThreadContent?.(hydratedContent);
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").not.toContain("Loading thread content");
+        expect(document.body.textContent ?? "").toContain("assistant filler 3");
+      });
+      expect(document.querySelector('[contenteditable="true"]')).not.toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("accepts a propose-scheduled-task card and dispatches the confirmation turn", async () => {

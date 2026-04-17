@@ -16,6 +16,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   disabled?: boolean;
+  disabledLabel?: string;
   isRunning: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -46,6 +47,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   disabled = false,
+  disabledLabel = "Waiting for agent to start",
   isRunning,
   showPlanFollowUpPrompt,
   promptHasText,
@@ -177,7 +179,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       disabled={disabled || isSendBusy || isConnecting || !hasSendableContent}
       aria-label={
         disabled
-          ? "Waiting for agent to start"
+          ? disabledLabel
           : isConnecting
             ? "Connecting"
             : isPreparingWorktree

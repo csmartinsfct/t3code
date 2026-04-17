@@ -1,6 +1,7 @@
 import type {
   OrchestrationRun,
   OrchestrationRunStreamEvent,
+  OrchestrationThread,
   ProjectId,
   ThreadId,
   TicketSummary,
@@ -136,6 +137,17 @@ export function useOrchestrationData(
       if (fetchIdRef.current !== currentFetchId) return;
 
       setRun(fullRun);
+      const syncThreadContent = useStore.getState().syncThreadContent;
+      for (const child of children as ReadonlyArray<OrchestrationThread>) {
+        syncThreadContent({
+          threadId: child.id,
+          sequence: 0,
+          messages: child.messages,
+          proposedPlans: child.proposedPlans,
+          activities: child.activities,
+          checkpoints: child.checkpoints,
+        });
+      }
       const newChildThreadIds = children.map((c) => c.id);
       setChildThreadIds(newChildThreadIds);
       setTickets(ticketList);
