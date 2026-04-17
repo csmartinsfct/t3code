@@ -46,6 +46,7 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
+  type ProjectionThreadSummary,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 
@@ -119,6 +120,21 @@ const ThreadIdLookupInput = Schema.Struct({
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
   threadId: ThreadId,
+});
+const ProjectionThreadSummaryRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: Schema.String,
+  worktreePath: Schema.NullOr(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+const ThreadUserMessageExistsRowSchema = Schema.Struct({
+  threadExists: Schema.Number,
+  hasUserMessages: Schema.Number,
 });
 const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -456,6 +472,44 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           deleted_at AS "deletedAt"
         FROM projection_projects
         WHERE project_id = ${projectId}
+        LIMIT 1
+      `,
+  });
+
+  const getThreadRowById = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadSummaryRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          title,
+          worktree_path AS "worktreePath",
+          branch,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+        LIMIT 1
+      `,
+  });
+
+  const checkThreadUserMessages = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ThreadUserMessageExistsRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          1 AS "threadExists",
+          CASE WHEN EXISTS (
+            SELECT 1 FROM projection_thread_messages
+            WHERE thread_id = ${threadId} AND role = 'user'
+          ) THEN 1 ELSE 0 END AS "hasUserMessages"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
         LIMIT 1
       `,
   });
@@ -925,11 +979,49 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ),
     );
 
+  const getThreadById: ProjectionSnapshotQueryShape["getThreadById"] = (threadId) =>
+    getThreadRowById({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getThreadById:query",
+          "ProjectionSnapshotQuery.getThreadById:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.map(
+          (row): ProjectionThreadSummary => ({
+            id: row.threadId,
+            projectId: row.projectId,
+            title: row.title,
+            worktreePath: row.worktreePath,
+            branch: row.branch,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            archivedAt: row.archivedAt,
+            deletedAt: row.deletedAt,
+          }),
+        ),
+      ),
+    );
+
+  const hasThreadUserMessages: ProjectionSnapshotQueryShape["hasThreadUserMessages"] = (threadId) =>
+    checkThreadUserMessages({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.hasThreadUserMessages:query",
+          "ProjectionSnapshotQuery.hasThreadUserMessages:decodeRow",
+        ),
+      ),
+      Effect.map(Option.map((row) => row.hasUserMessages === 1)),
+    );
+
   return {
     getSnapshot,
     getCounts,
     getActiveProjectByWorkspaceRoot,
     getProjectById,
+    getThreadById,
+    hasThreadUserMessages,
     getFirstActiveThreadIdByProjectId,
     getThreadCheckpointContext,
   } satisfies ProjectionSnapshotQueryShape;

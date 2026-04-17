@@ -27,6 +27,7 @@ import {
   type ManagedRunDeclaredServiceSnapshot,
   type ManagedRunRuntimeService,
   type ManagedRunStreamEvent,
+  type OrchestrationProject,
   type ThreadId,
 } from "@t3tools/contracts";
 
@@ -227,8 +228,7 @@ const makeManagedRunService = Effect.gen(function* () {
     projectId: ProjectId,
     scriptId: string,
   ) {
-    const readModel = yield* snapshotQuery.getSnapshot();
-    const project = readModel.projects.find((candidate) => candidate.id === projectId) ?? null;
+    const project = Option.getOrNull(yield* snapshotQuery.getProjectById(projectId));
     return project?.scripts.find((candidate) => candidate.id === scriptId) ?? null;
   });
 
@@ -895,16 +895,19 @@ const makeManagedRunService = Effect.gen(function* () {
       return;
     }
 
-    const readModel = yield* snapshotQuery
-      .getSnapshot()
-      .pipe(Effect.catch(() => Effect.succeed(null)));
-    if (!readModel) {
-      return;
+    const uniqueProjectIds = [...new Set(allRuns.map((run) => run.projectId))];
+    const projectMap = new Map<string, OrchestrationProject>();
+    for (const pid of uniqueProjectIds) {
+      const projectOption = yield* snapshotQuery
+        .getProjectById(pid)
+        .pipe(Effect.catch(() => Effect.succeed(Option.none<OrchestrationProject>())));
+      if (Option.isSome(projectOption)) {
+        projectMap.set(pid, projectOption.value);
+      }
     }
 
     for (const run of allRuns) {
-      const project =
-        readModel.projects.find((candidate) => candidate.id === run.projectId) ?? null;
+      const project = projectMap.get(run.projectId) ?? null;
       const scriptExists = project?.scripts.some((script) => script.id === run.scriptId) ?? false;
       if (scriptExists) {
         continue;
@@ -962,13 +965,12 @@ const makeManagedRunService = Effect.gen(function* () {
   const launchProjectScript = Effect.fn("managedRuns.launchProjectScript")(function* (
     input: ManagedRunLaunchProjectScriptInput,
   ) {
-    const readModel = yield* snapshotQuery
-      .getSnapshot()
+    const projectOption = yield* snapshotQuery
+      .getProjectById(input.projectId)
       .pipe(
-        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.getSnapshot", cause)),
+        Effect.mapError((cause) => toManagedRunOperationError("managedRuns.getProjectById", cause)),
       );
-    const project =
-      readModel.projects.find((candidate) => candidate.id === input.projectId) ?? null;
+    const project = Option.getOrNull(projectOption);
     if (!project) {
       return yield* new ManagedRunProjectLookupError({
         projectId: input.projectId,
@@ -976,7 +978,15 @@ const makeManagedRunService = Effect.gen(function* () {
       });
     }
 
-    const thread = readModel.threads.find((candidate) => candidate.id === input.threadId) ?? null;
+    const thread = Option.getOrNull(
+      yield* snapshotQuery
+        .getThreadById(input.threadId)
+        .pipe(
+          Effect.mapError((cause) =>
+            toManagedRunOperationError("managedRuns.getThreadById", cause),
+          ),
+        ),
+    );
     const script = project.scripts.find((candidate) => candidate.id === input.scriptId) ?? null;
     if (!script) {
       return yield* new ManagedRunScriptLookupError({

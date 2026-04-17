@@ -24,6 +24,18 @@ export interface ProjectionSnapshotCounts {
   readonly threadCount: number;
 }
 
+export interface ProjectionThreadSummary {
+  readonly id: ThreadId;
+  readonly projectId: ProjectId;
+  readonly title: string;
+  readonly worktreePath: string | null;
+  readonly branch: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly archivedAt: string | null;
+  readonly deletedAt: string | null;
+}
+
 export interface ProjectionThreadCheckpointContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
@@ -71,6 +83,21 @@ export interface ProjectionSnapshotQueryShape {
   readonly getProjectById: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<OrchestrationProject>, ProjectionRepositoryError>;
+
+  /**
+   * Read a single thread by ID (lightweight — no messages/activities/sessions).
+   */
+  readonly getThreadById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ProjectionThreadSummary>, ProjectionRepositoryError>;
+
+  /**
+   * Check whether a thread has any user-role messages.
+   * Returns None if the thread does not exist.
+   */
+  readonly hasThreadUserMessages: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<boolean>, ProjectionRepositoryError>;
 
   /**
    * Read the checkpoint context needed to resolve a single thread diff.

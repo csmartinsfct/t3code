@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import type { ProjectId, ProjectScript, ThreadId } from "@t3tools/contracts";
@@ -298,10 +298,10 @@ const handlePost = Effect.gen(function* () {
 
   // Resolve project scripts
   const snapshotQuery = yield* ProjectionSnapshotQuery;
-  const readModel = yield* snapshotQuery
-    .getSnapshot()
-    .pipe(Effect.catch(() => Effect.succeed(null)));
-  const project = readModel?.projects.find((p) => p.id === auth.projectId);
+  const projectOption = yield* snapshotQuery
+    .getProjectById(auth.projectId)
+    .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+  const project = Option.getOrNull(projectOption);
   const scripts = project?.scripts ?? [];
 
   const managedRuns = yield* ManagedRunService;

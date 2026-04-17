@@ -152,6 +152,8 @@ describe("OrchestrationEngine", () => {
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getProjectById: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          getThreadById: () => Effect.succeed(Option.none()),
+          hasThreadUserMessages: () => Effect.succeed(Option.none()),
         }),
       ),
       Layer.provide(

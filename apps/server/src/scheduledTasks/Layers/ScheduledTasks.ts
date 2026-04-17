@@ -176,11 +176,12 @@ const makeScheduledTaskService = Effect.gen(function* () {
         const latestRun = latestRunOpt.value;
         if (latestRun.status === "created" && latestRun.threadId !== null) {
           // Check if thread still exists and has no user messages
-          const snapshot = yield* snapshotQuery
-            .getSnapshot()
-            .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.getSnapshot")));
-          const thread = snapshot.threads.find((t) => t.id === latestRun.threadId);
-          if (thread && thread.messages.filter((m) => m.role === "user").length === 0) {
+          const hasUserMsgsOption = yield* snapshotQuery
+            .hasThreadUserMessages(latestRun.threadId as ThreadId)
+            .pipe(
+              Effect.mapError(toScheduledTaskOperationError("executeJob.hasThreadUserMessages")),
+            );
+          if (Option.isSome(hasUserMsgsOption) && !hasUserMsgsOption.value) {
             const skippedRun: ScheduledTaskRun = {
               runId: ScheduledTaskRunId.makeUnsafe(crypto.randomUUID()),
               jobId,
@@ -222,10 +223,10 @@ const makeScheduledTaskService = Effect.gen(function* () {
         const config = job.newThreadConfig;
 
         // Look up project for defaults
-        const snapshot = yield* snapshotQuery
-          .getSnapshot()
-          .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.getSnapshot")));
-        const project = snapshot.projects.find((p) => p.id === config.projectId);
+        const projectOption = yield* snapshotQuery
+          .getProjectById(config.projectId)
+          .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.getProjectById")));
+        const project = Option.getOrNull(projectOption);
         const modelSelection = project?.defaultModelSelection ?? {
           provider: "codex" as const,
           model: "codex-mini-latest",
