@@ -164,13 +164,13 @@ export function getCustomModelOptionsByProvider(
       providers,
       "codex",
       selectedBaseProvider === "codex" ? selectedModel : undefined,
-    ),
+    ).map(({ slug, name }) => ({ slug, name })),
     claudeAgent: getAppModelOptions(
       settings,
       providers,
       "claudeAgent",
       selectedBaseProvider === "claudeAgent" ? selectedModel : undefined,
-    ),
+    ).map(({ slug, name }) => ({ slug, name })),
   };
 }
 

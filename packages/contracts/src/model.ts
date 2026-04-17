@@ -1,11 +1,6 @@
 import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
-import {
-  baseProviderKind,
-  providerProfileId,
-  type BaseProviderKind,
-  type ProviderKind,
-} from "./orchestration";
+import type { BaseProviderKind, ProviderKind } from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
@@ -104,8 +99,9 @@ export const PROVIDER_DISPLAY_NAMES: Record<BaseProviderKind, string> = {
 /** Resolve display name for any ProviderKind, including profiled ones like "claudeAgent:zbd". */
 export function providerDisplayName(kind: ProviderKind, overrideDisplayName?: string): string {
   if (overrideDisplayName) return overrideDisplayName;
-  const base = baseProviderKind(kind);
-  const profile = providerProfileId(kind);
+  const separatorIndex = kind.indexOf(":");
+  const base = (separatorIndex === -1 ? kind : kind.slice(0, separatorIndex)) as BaseProviderKind;
+  const profile = separatorIndex === -1 ? undefined : kind.slice(separatorIndex + 1);
   if (!profile) return PROVIDER_DISPLAY_NAMES[base];
   return `${PROVIDER_DISPLAY_NAMES[base]} (${profile})`;
 }

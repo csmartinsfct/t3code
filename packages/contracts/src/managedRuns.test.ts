@@ -54,7 +54,12 @@ function makeSummary(overrides: Record<string, unknown> = {}) {
     completedAt: null,
     lastExitCode: null,
     lastExitSignal: null,
+    declaredServices: [],
+    runtimeServices: [],
     serviceStatuses: [],
+    inferenceStatus: "pending",
+    inferenceUpdatedAt: null,
+    inferenceError: null,
     ...overrides,
   };
 }
@@ -172,6 +177,7 @@ describe("ManagedRunDetail", () => {
       lastError: null,
       logsExpireAt: null,
       evidence: [],
+      latestInference: null,
     });
     expect(result.evidence).toEqual([]);
   });
@@ -181,6 +187,7 @@ describe("ManagedRunDetail", () => {
       ...makeSummary(),
       lastError: null,
       logsExpireAt: null,
+      latestInference: null,
       evidence: [
         {
           type: "process",
@@ -203,6 +210,7 @@ describe("ManagedRunDetail", () => {
         ...makeSummary(),
         lastError: null,
         logsExpireAt: null,
+        latestInference: null,
         evidence: [
           {
             type: "url",
@@ -224,6 +232,7 @@ describe("ManagedRunDetail", () => {
         ...makeSummary(),
         lastError: null,
         logsExpireAt: null,
+        latestInference: null,
         evidence: [
           {
             type: "docker",

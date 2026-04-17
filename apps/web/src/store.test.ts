@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  reconcileThreadContentCache,
   syncServerReadModel,
   syncThreadContent,
   type AppState,
@@ -469,6 +470,205 @@ describe("store read model sync", () => {
     expect(next.sidebarThreadsById["thread-1"]?.latestUserMessageAt).toBe(
       "2026-02-27T00:04:00.000Z",
     );
+  });
+
+  it("reconciles live events that arrive while unloaded content is hydrating", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(makeStartupSnapshotThread({ id: threadId })),
+    );
+    const withPendingEvent = applyOrchestrationEvent(
+      initialState,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-live"),
+          role: "assistant",
+          text: "live update",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          streaming: false,
+          createdAt: "2026-02-27T00:05:00.000Z",
+          updatedAt: "2026-02-27T00:05:00.000Z",
+        },
+        { sequence: 3 },
+      ),
+    );
+    const hydrated = syncThreadContent(withPendingEvent, {
+      threadId,
+      sequence: 2,
+      messages: [
+        {
+          id: MessageId.makeUnsafe("user-1"),
+          role: "user",
+          text: "hello",
+          attachments: [],
+          turnId: TurnId.makeUnsafe("turn-1"),
+          streaming: false,
+          createdAt: "2026-02-27T00:04:00.000Z",
+          updatedAt: "2026-02-27T00:04:00.000Z",
+        },
+      ],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+
+    const messages = hydrated.threadsById[threadId]?.messages;
+    expect(Array.isArray(messages) ? messages.map((message) => message.id) : []).toEqual([
+      "user-1",
+      "assistant-live",
+    ]);
+  });
+
+  it("replays pending live events after an empty-sequence hydration snapshot", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(makeStartupSnapshotThread({ id: threadId })),
+    );
+    const withPendingEvent = applyOrchestrationEvent(
+      initialState,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-live"),
+          role: "assistant",
+          text: "live update",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          streaming: false,
+          createdAt: "2026-02-27T00:05:00.000Z",
+          updatedAt: "2026-02-27T00:05:00.000Z",
+        },
+        { sequence: 1 },
+      ),
+    );
+    const hydrated = syncThreadContent(withPendingEvent, {
+      threadId,
+      sequence: 0,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+
+    const messages = hydrated.threadsById[threadId]?.messages;
+    expect(Array.isArray(messages) ? messages.map((message) => message.id) : []).toEqual([
+      "assistant-live",
+    ]);
+  });
+
+  it("does not duplicate live events already included in hydrated content", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initialState = syncServerReadModel(
+      makeState(makeThread()),
+      makeStartupSnapshot(makeStartupSnapshotThread({ id: threadId })),
+    );
+    const event = makeEvent(
+      "thread.message-sent",
+      {
+        threadId,
+        messageId: MessageId.makeUnsafe("assistant-live"),
+        role: "assistant",
+        text: "live update",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        streaming: false,
+        createdAt: "2026-02-27T00:05:00.000Z",
+        updatedAt: "2026-02-27T00:05:00.000Z",
+      },
+      { sequence: 3 },
+    );
+    const withPendingEvent = applyOrchestrationEvent(initialState, event);
+    const hydrated = syncThreadContent(withPendingEvent, {
+      threadId,
+      sequence: 3,
+      messages: [
+        {
+          id: event.payload.messageId,
+          role: event.payload.role,
+          text: event.payload.text,
+          attachments: [],
+          turnId: event.payload.turnId,
+          streaming: event.payload.streaming,
+          createdAt: event.payload.createdAt,
+          updatedAt: event.payload.updatedAt,
+        },
+      ],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+
+    const messages = hydrated.threadsById[threadId]?.messages;
+    expect(Array.isArray(messages) ? messages.map((message) => message.id) : []).toEqual([
+      "assistant-live",
+    ]);
+  });
+
+  it("evicts least-recently used loaded content by byte budget while preserving pinned threads", () => {
+    const firstThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-1"),
+      messages: [
+        {
+          id: MessageId.makeUnsafe("message-1"),
+          role: "user",
+          text: "x".repeat(200),
+          turnId: TurnId.makeUnsafe("turn-1"),
+          createdAt: "2026-02-27T00:00:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const secondThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-2"),
+      messages: [
+        {
+          id: MessageId.makeUnsafe("message-2"),
+          role: "user",
+          text: "y".repeat(200),
+          turnId: TurnId.makeUnsafe("turn-2"),
+          createdAt: "2026-02-27T00:01:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const state: AppState = {
+      ...makeState(firstThread),
+      threads: [firstThread, secondThread],
+      threadsById: {
+        [firstThread.id]: firstThread,
+        [secondThread.id]: secondThread,
+      },
+      threadIdsByProjectId: {
+        [firstThread.projectId]: [firstThread.id, secondThread.id],
+      },
+      threadContentCache: {
+        [firstThread.id]: {
+          sizeBytes: 1_000,
+          loadedSequence: 1,
+          lastAccessedAt: 1,
+          pendingEvents: [],
+        },
+        [secondThread.id]: {
+          sizeBytes: 1_000,
+          loadedSequence: 1,
+          lastAccessedAt: 2,
+          pendingEvents: [],
+        },
+      },
+    };
+
+    const next = reconcileThreadContentCache(state, {
+      focusedThreadId: secondThread.id,
+      visibleThreadIds: [secondThread.id],
+      maxBytes: 1_000,
+      now: 10,
+    });
+
+    expect(next.threadsById[firstThread.id]?.messages).toBe("not-loaded");
+    expect(Array.isArray(next.threadsById[secondThread.id]?.messages)).toBe(true);
   });
 
   it("projects recoverable ready-session lastError values into the thread error state", () => {

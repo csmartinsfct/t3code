@@ -659,6 +659,7 @@ function PersistentThreadTerminalDrawer({
 export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const syncThreadContent = useStore((store) => store.syncThreadContent);
+  const reconcileThreadContentCache = useStore((store) => store.reconcileThreadContentCache);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -1014,6 +1015,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     return currentTicketEntry.workingThreadId;
   }, [activeOrchestrationRun]);
+  const visibleContentThreadIds = useMemo(() => {
+    const ids = new Set<ThreadId>();
+    if (serverThread) {
+      ids.add(serverThread.id);
+    }
+    if (activeOrchestrationRun) {
+      ids.add(activeOrchestrationRun.orchestrationThreadId);
+    }
+    for (const childThreadId of orchestrationData.childThreadIds) {
+      ids.add(childThreadId as ThreadId);
+    }
+    if (currentOrchestrationThreadId) {
+      ids.add(currentOrchestrationThreadId);
+    }
+    return [...ids];
+  }, [
+    activeOrchestrationRun,
+    currentOrchestrationThreadId,
+    orchestrationData.childThreadIds,
+    serverThread,
+  ]);
+  useEffect(() => {
+    reconcileThreadContentCache({
+      focusedThreadId: serverThread?.id ?? null,
+      visibleThreadIds: visibleContentThreadIds,
+    });
+  }, [reconcileThreadContentCache, serverThread?.id, visibleContentThreadIds]);
   const orchestrationCenterLabel = useMemo(() => {
     if (!activeOrchestrationRun) return null;
     if (isOrchestrationThread) {

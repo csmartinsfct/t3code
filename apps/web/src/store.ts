@@ -37,6 +37,8 @@ export interface AppState {
   threadIdsByProjectId: Record<string, ThreadId[]>;
   bootstrapComplete: boolean;
   orchestrationRunStatusByThreadId: Record<string, OrchestrationRunStatus>;
+  threadContentCache?: ThreadContentCacheState;
+  threadContentCachePins?: ThreadContentCachePins;
 }
 
 const initialState: AppState = {
@@ -47,12 +49,39 @@ const initialState: AppState = {
   threadIdsByProjectId: {},
   bootstrapComplete: false,
   orchestrationRunStatusByThreadId: {},
+  threadContentCache: {},
+  threadContentCachePins: {
+    focusedThreadId: null,
+    visibleThreadIds: [],
+  },
 };
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 const MAX_THREAD_PROPOSED_PLANS = 200;
 const MAX_THREAD_ACTIVITIES = 500;
+const DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const EMPTY_THREAD_IDS: ThreadId[] = [];
+
+export interface ThreadContentCacheEntry {
+  readonly sizeBytes: number;
+  readonly loadedSequence: number | null;
+  readonly lastAccessedAt: number;
+  readonly pendingEvents: ReadonlyArray<OrchestrationEvent>;
+}
+
+export type ThreadContentCacheState = Record<string, ThreadContentCacheEntry>;
+
+export interface ThreadContentCachePins {
+  readonly focusedThreadId: ThreadId | null;
+  readonly visibleThreadIds: ReadonlyArray<ThreadId>;
+}
+
+export interface ThreadContentCacheReconcileInput {
+  readonly focusedThreadId?: ThreadId | null;
+  readonly visibleThreadIds?: ReadonlyArray<ThreadId>;
+  readonly maxBytes?: number;
+  readonly now?: number;
+}
 
 // ── Pure helpers ──────────────────────────────────────────────────────
 
@@ -174,6 +203,232 @@ export function isThreadContentLoaded(
 
 function getThreadMessages(thread: Pick<Thread, "messages">): ChatMessage[] {
   return isThreadContentLoaded(thread) ? thread.messages : [];
+}
+
+function threadIdFromEvent(event: OrchestrationEvent): ThreadId | null {
+  return "threadId" in event.payload ? event.payload.threadId : null;
+}
+
+function emptyContentCacheEntry(now: number): ThreadContentCacheEntry {
+  return {
+    sizeBytes: 0,
+    loadedSequence: null,
+    lastAccessedAt: now,
+    pendingEvents: [],
+  };
+}
+
+function activeSessionThreadIds(threads: ReadonlyArray<Thread>): ThreadId[] {
+  return threads
+    .filter((thread) => {
+      const status = thread.session?.orchestrationStatus;
+      return (
+        status === "idle" || status === "starting" || status === "running" || status === "ready"
+      );
+    })
+    .map((thread) => thread.id);
+}
+
+function threadContentCachePinsEqual(
+  left: ThreadContentCachePins | undefined,
+  right: ThreadContentCachePins,
+): boolean {
+  if (!left || left.focusedThreadId !== right.focusedThreadId) {
+    return false;
+  }
+  if (left.visibleThreadIds.length !== right.visibleThreadIds.length) {
+    return false;
+  }
+  return left.visibleThreadIds.every(
+    (threadId, index) => threadId === right.visibleThreadIds[index],
+  );
+}
+
+function estimateTextBytes(text: string | null | undefined): number {
+  return text ? text.length * 2 : 0;
+}
+
+function estimateThreadContentSize(thread: Thread): number {
+  if (!isThreadContentLoaded(thread)) {
+    return 0;
+  }
+
+  let size = 512;
+  for (const message of thread.messages) {
+    size += 256 + estimateTextBytes(message.text);
+    for (const attachment of message.attachments ?? []) {
+      size += 256 + attachment.name.length * 2 + attachment.mimeType.length * 2;
+    }
+  }
+  for (const proposedPlan of thread.proposedPlans) {
+    size += 256 + estimateTextBytes(proposedPlan.planMarkdown);
+  }
+  for (const checkpoint of thread.turnDiffSummaries) {
+    size += 256 + checkpoint.files.length * 128;
+  }
+  for (const activity of thread.activities) {
+    size += 512 + estimateTextBytes(activity.kind) + estimateTextBytes(activity.summary);
+  }
+  return size;
+}
+
+function unloadThreadContent(thread: Thread): Thread {
+  if (!isThreadContentLoaded(thread)) {
+    return thread;
+  }
+
+  return {
+    ...thread,
+    messages: "not-loaded",
+    proposedPlans: [],
+    turnDiffSummaries: [],
+    activities: [],
+  };
+}
+
+function setCachedThreadContentLoaded(
+  state: AppState,
+  threadId: ThreadId,
+  thread: Thread | undefined,
+  sequence: number | null,
+  now: number,
+  pendingEvents: ReadonlyArray<OrchestrationEvent> = [],
+): AppState {
+  const threadContentCache = {
+    ...state.threadContentCache,
+    [threadId]: {
+      sizeBytes: thread ? estimateThreadContentSize(thread) : 0,
+      loadedSequence: sequence,
+      lastAccessedAt: now,
+      pendingEvents,
+    },
+  };
+  return { ...state, threadContentCache };
+}
+
+function rememberPendingContentEvent(state: AppState, event: OrchestrationEvent): AppState {
+  const threadId = threadIdFromEvent(event);
+  if (!threadId) {
+    return state;
+  }
+
+  const thread = state.threadsById[threadId];
+  if (!thread || isThreadContentLoaded(thread)) {
+    return state;
+  }
+
+  const now = Date.now();
+  const previous = state.threadContentCache?.[threadId] ?? emptyContentCacheEntry(now);
+  if (previous.pendingEvents.some((pendingEvent) => pendingEvent.sequence === event.sequence)) {
+    return state;
+  }
+
+  return {
+    ...state,
+    threadContentCache: {
+      ...state.threadContentCache,
+      [threadId]: {
+        ...previous,
+        pendingEvents: [...previous.pendingEvents, event].toSorted(
+          (left, right) => left.sequence - right.sequence,
+        ),
+      },
+    },
+  };
+}
+
+export function reconcileThreadContentCache(
+  state: AppState,
+  input: ThreadContentCacheReconcileInput = {},
+): AppState {
+  const now = input.now ?? Date.now();
+  const previousPins = state.threadContentCachePins ?? {
+    focusedThreadId: null,
+    visibleThreadIds: [],
+  };
+  const pins: ThreadContentCachePins = {
+    focusedThreadId:
+      input.focusedThreadId !== undefined ? input.focusedThreadId : previousPins.focusedThreadId,
+    visibleThreadIds:
+      input.visibleThreadIds !== undefined
+        ? [...input.visibleThreadIds]
+        : previousPins.visibleThreadIds,
+  };
+  const protectedThreadIds = new Set<string>([
+    ...(pins.focusedThreadId ? [pins.focusedThreadId] : []),
+    ...pins.visibleThreadIds,
+    ...activeSessionThreadIds(state.threads),
+  ]);
+  let threadContentCache: ThreadContentCacheState = { ...state.threadContentCache };
+  let cacheChanged = !threadContentCachePinsEqual(state.threadContentCachePins, pins);
+
+  for (const threadId of Object.keys(threadContentCache)) {
+    if (!state.threadsById[threadId]) {
+      const { [threadId]: _, ...rest } = threadContentCache;
+      threadContentCache = rest;
+      cacheChanged = true;
+    }
+  }
+
+  for (const threadId of protectedThreadIds) {
+    const entry = threadContentCache[threadId];
+    if (entry && entry.sizeBytes > 0 && entry.lastAccessedAt !== now) {
+      threadContentCache = {
+        ...threadContentCache,
+        [threadId]: {
+          ...entry,
+          lastAccessedAt: now,
+        },
+      };
+      cacheChanged = true;
+    }
+  }
+
+  const maxBytes = input.maxBytes ?? DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES;
+  let totalBytes = Object.values(threadContentCache).reduce(
+    (total, entry) => total + entry.sizeBytes,
+    0,
+  );
+  const evictionCandidates = Object.entries(threadContentCache)
+    .filter(([threadId, entry]) => entry.sizeBytes > 0 && !protectedThreadIds.has(threadId))
+    .toSorted(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
+
+  if (totalBytes <= maxBytes || evictionCandidates.length === 0) {
+    return cacheChanged ? { ...state, threadContentCache, threadContentCachePins: pins } : state;
+  }
+
+  let threads = state.threads;
+  const threadsById = { ...state.threadsById };
+  const sidebarThreadsById = { ...state.sidebarThreadsById };
+  for (const [threadId, entry] of evictionCandidates) {
+    if (totalBytes <= maxBytes) {
+      break;
+    }
+    const thread = threadsById[threadId];
+    if (!thread || !isThreadContentLoaded(thread)) {
+      continue;
+    }
+    const evictedThread = unloadThreadContent(thread);
+    threads = updateThread(threads, evictedThread.id, () => evictedThread);
+    threadsById[evictedThread.id] = evictedThread;
+    sidebarThreadsById[evictedThread.id] = buildSidebarThreadSummary(evictedThread);
+    threadContentCache[threadId] = {
+      ...entry,
+      sizeBytes: 0,
+      loadedSequence: null,
+    };
+    totalBytes -= entry.sizeBytes;
+    cacheChanged = true;
+  }
+
+  return {
+    ...state,
+    threads,
+    threadsById,
+    sidebarThreadsById,
+    threadContentCache,
+    threadContentCachePins: pins,
+  };
 }
 
 function deriveThreadSummaryFields(
@@ -699,6 +954,18 @@ export function syncServerReadModel(state: AppState, readModel: ThreadReadModel)
   const threadsById = buildThreadsById(threads);
   const sidebarThreadsById = buildSidebarThreadsById(threads);
   const threadIdsByProjectId = buildThreadIdsByProjectId(threads);
+  const now = Date.now();
+  const threadContentCache = Object.fromEntries(
+    threads.filter(isThreadContentLoaded).map((thread) => [
+      thread.id,
+      {
+        sizeBytes: estimateThreadContentSize(thread),
+        loadedSequence: "snapshotSequence" in readModel ? readModel.snapshotSequence : null,
+        lastAccessedAt: now,
+        pendingEvents: [],
+      } satisfies ThreadContentCacheEntry,
+    ]),
+  );
   return {
     ...state,
     projects,
@@ -707,6 +974,7 @@ export function syncServerReadModel(state: AppState, readModel: ThreadReadModel)
     sidebarThreadsById,
     threadIdsByProjectId,
     bootstrapComplete: true,
+    threadContentCache,
   };
 }
 
@@ -722,15 +990,44 @@ function mapThreadContent(
 }
 
 export function syncThreadContent(state: AppState, content: OrchestrationThreadContent): AppState {
-  return updateThreadState(state, content.threadId, (thread) =>
+  const previousPendingEvents = state.threadContentCache?.[content.threadId]?.pendingEvents ?? [];
+  const pendingEvents = previousPendingEvents.filter((event) => event.sequence > content.sequence);
+  const hydratedState = updateThreadState(state, content.threadId, (thread) =>
     withDerivedThreadSummary({
       ...thread,
       ...mapThreadContent(content),
     }),
   );
+  const hydratedThread = hydratedState.threadsById[content.threadId];
+  const cachedState = setCachedThreadContentLoaded(
+    hydratedState,
+    content.threadId,
+    hydratedThread,
+    content.sequence,
+    Date.now(),
+    [],
+  );
+  if (pendingEvents.length === 0) {
+    return reconcileThreadContentCache(cachedState);
+  }
+
+  const reconciledState = applyOrchestrationEventsInternal(cachedState, pendingEvents, {
+    trackPendingForUnloadedThreads: false,
+  });
+  return reconcileThreadContentCache({
+    ...reconciledState,
+    threadContentCache: {
+      ...reconciledState.threadContentCache,
+      [content.threadId]: {
+        ...(reconciledState.threadContentCache?.[content.threadId] ??
+          emptyContentCacheEntry(Date.now())),
+        pendingEvents: [],
+      },
+    },
+  });
 }
 
-export function applyOrchestrationEvent(state: AppState, event: OrchestrationEvent): AppState {
+function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent): AppState {
   switch (event.type) {
     case "project.created": {
       const existingIndex = state.projects.findIndex(
@@ -1362,14 +1659,84 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
   return state;
 }
 
-export function applyOrchestrationEvents(
+interface ApplyEventOptions {
+  readonly trackPendingForUnloadedThreads: boolean;
+}
+
+function refreshLoadedThreadCache(
+  state: AppState,
+  previousState: AppState,
+  event: OrchestrationEvent,
+): AppState {
+  const threadId = threadIdFromEvent(event);
+  if (!threadId) {
+    return state;
+  }
+
+  const thread = state.threadsById[threadId];
+  if (!thread || !isThreadContentLoaded(thread)) {
+    return state;
+  }
+
+  const previous = previousState.threadContentCache?.[threadId];
+  return setCachedThreadContentLoaded(
+    state,
+    threadId,
+    thread,
+    event.sequence,
+    previous?.lastAccessedAt ?? Date.now(),
+    previous?.pendingEvents ?? [],
+  );
+}
+
+function applyOrchestrationEventInternal(
+  state: AppState,
+  event: OrchestrationEvent,
+  options: ApplyEventOptions,
+): AppState {
+  const threadId = threadIdFromEvent(event);
+  if (threadId === null) {
+    return applyOrchestrationEventBase(state, event);
+  }
+  const shouldRememberPending =
+    options.trackPendingForUnloadedThreads && !isThreadContentLoaded(state.threadsById[threadId]);
+  const nextState = applyOrchestrationEventBase(state, event);
+  const cachedState = shouldRememberPending
+    ? rememberPendingContentEvent(nextState, event)
+    : refreshLoadedThreadCache(nextState, state, event);
+  if (cachedState === state) {
+    return state;
+  }
+  return reconcileThreadContentCache(cachedState);
+}
+
+export function applyOrchestrationEvent(state: AppState, event: OrchestrationEvent): AppState {
+  return applyOrchestrationEventInternal(state, event, {
+    trackPendingForUnloadedThreads: true,
+  });
+}
+
+function applyOrchestrationEventsInternal(
   state: AppState,
   events: ReadonlyArray<OrchestrationEvent>,
+  options: ApplyEventOptions,
 ): AppState {
   if (events.length === 0) {
     return state;
   }
-  return events.reduce((nextState, event) => applyOrchestrationEvent(nextState, event), state);
+  return events.reduce(
+    (nextState, event) => applyOrchestrationEventInternal(nextState, event, options),
+    state,
+  );
+}
+
+export function applyOrchestrationEvents(
+  state: AppState,
+  events: ReadonlyArray<OrchestrationEvent>,
+): AppState {
+  return applyOrchestrationEventsInternal(state, events, {
+    trackPendingForUnloadedThreads: true,
+  });
 }
 
 export const selectProjectById =
@@ -1427,6 +1794,7 @@ export function setThreadBranch(
 interface AppStore extends AppState {
   syncServerReadModel: (readModel: ThreadReadModel) => void;
   syncThreadContent: (content: OrchestrationThreadContent) => void;
+  reconcileThreadContentCache: (input?: ThreadContentCacheReconcileInput) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent) => void;
   applyOrchestrationEvents: (events: ReadonlyArray<OrchestrationEvent>) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
@@ -1437,6 +1805,7 @@ export const useStore = create<AppStore>((set) => ({
   ...initialState,
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
   syncThreadContent: (content) => set((state) => syncThreadContent(state, content)),
+  reconcileThreadContentCache: (input) => set((state) => reconcileThreadContentCache(state, input)),
   applyOrchestrationEvent: (event) => set((state) => applyOrchestrationEvent(state, event)),
   applyOrchestrationEvents: (events) => set((state) => applyOrchestrationEvents(state, events)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
