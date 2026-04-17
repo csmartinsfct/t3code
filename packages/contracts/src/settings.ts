@@ -145,6 +145,8 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Minutes of inactivity before a provider session is automatically stopped. 0 = disabled. */
   idleSessionTimeoutMinutes: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 60)),
+  /** Maximum thread content cache size in GB. 0 = unlimited (no eviction). */
+  threadContentCacheMaxGB: Schema.Number.pipe(Schema.withDecodingDefault(() => 1)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
@@ -262,6 +264,7 @@ export const ServerSettingsPatch = Schema.Struct({
   resumeAgentsOnStartup: Schema.optionalKey(Schema.Boolean),
   maxReviewIterations: Schema.optionalKey(NonNegativeInt),
   idleSessionTimeoutMinutes: Schema.optionalKey(NonNegativeInt),
+  threadContentCacheMaxGB: Schema.optionalKey(Schema.Number),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   managedRunInferenceModelSelection: Schema.optionalKey(ModelSelectionPatch),

@@ -79,6 +79,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via REST API.
 - [Visibility](docs/visibility.md) — Practical debugging guide: lifecycle logs, timeline logs, provider event logs, log file locations, context-loss investigation workflow, and logging best practices.
 - [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.
+- [Resource Management](docs/resource-management.md) — Lazy loading, shallow startup snapshot, thread content cache (LRU eviction, configurable size), idle session timeout, and memory optimization.
 
 These docs must be kept up to date as related code changes.
 

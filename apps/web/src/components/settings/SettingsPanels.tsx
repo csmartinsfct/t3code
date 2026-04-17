@@ -491,6 +491,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.idleSessionTimeoutMinutes !== DEFAULT_UNIFIED_SETTINGS.idleSessionTimeoutMinutes
         ? ["Idle session timeout"]
         : []),
+      ...(settings.threadContentCacheMaxGB !== DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB
+        ? ["Thread content cache"]
+        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -511,6 +514,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.idleSessionTimeoutMinutes,
       settings.maxReviewIterations,
       settings.resumeAgentsOnStartup,
+      settings.threadContentCacheMaxGB,
       settings.timestampFormat,
       theme,
     ],
@@ -1124,6 +1128,55 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="240">
                   4 hours
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Thread content cache"
+          description="Maximum memory for cached thread content. Threads beyond this limit are unloaded and re-fetched on navigation. Set to 0 for unlimited."
+          resetAction={
+            settings.threadContentCacheMaxGB !==
+            DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB ? (
+              <SettingResetButton
+                label="thread content cache"
+                onClick={() =>
+                  updateSettings({
+                    threadContentCacheMaxGB: DEFAULT_UNIFIED_SETTINGS.threadContentCacheMaxGB,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.threadContentCacheMaxGB)}
+              onValueChange={(value) => updateSettings({ threadContentCacheMaxGB: Number(value) })}
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="Thread content cache">
+                <SelectValue>
+                  {settings.threadContentCacheMaxGB === 0
+                    ? "Unlimited"
+                    : `${settings.threadContentCacheMaxGB} GB`}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="0">
+                  Unlimited
+                </SelectItem>
+                <SelectItem hideIndicator value="1">
+                  1 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="2">
+                  2 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="4">
+                  4 GB
+                </SelectItem>
+                <SelectItem hideIndicator value="8">
+                  8 GB
                 </SelectItem>
               </SelectPopup>
             </Select>

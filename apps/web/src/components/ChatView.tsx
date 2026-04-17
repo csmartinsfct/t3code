@@ -1036,6 +1036,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     orchestrationData.childThreadIds,
     serverThread,
   ]);
+  const setThreadContentCacheMaxGB = useStore((store) => store.setThreadContentCacheMaxGB);
+  useEffect(() => {
+    setThreadContentCacheMaxGB(settings.threadContentCacheMaxGB);
+  }, [setThreadContentCacheMaxGB, settings.threadContentCacheMaxGB]);
   useEffect(() => {
     reconcileThreadContentCache({
       focusedThreadId: serverThread?.id ?? null,

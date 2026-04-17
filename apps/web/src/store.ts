@@ -39,6 +39,7 @@ export interface AppState {
   orchestrationRunStatusByThreadId: Record<string, OrchestrationRunStatus>;
   threadContentCache?: ThreadContentCacheState;
   threadContentCachePins?: ThreadContentCachePins;
+  threadContentCacheMaxBytes?: number;
 }
 
 const initialState: AppState = {
@@ -59,7 +60,7 @@ const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 const MAX_THREAD_PROPOSED_PLANS = 200;
 const MAX_THREAD_ACTIVITIES = 500;
-const DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES = 1024 * 1024 * 1024;
 const EMPTY_THREAD_IDS: ThreadId[] = [];
 
 export interface ThreadContentCacheEntry {
@@ -384,7 +385,8 @@ export function reconcileThreadContentCache(
     }
   }
 
-  const maxBytes = input.maxBytes ?? DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES;
+  const maxBytes =
+    input.maxBytes ?? state.threadContentCacheMaxBytes ?? DEFAULT_THREAD_CONTENT_CACHE_MAX_BYTES;
   let totalBytes = Object.values(threadContentCache).reduce(
     (total, entry) => total + entry.sizeBytes,
     0,
@@ -1799,6 +1801,7 @@ interface AppStore extends AppState {
   applyOrchestrationEvents: (events: ReadonlyArray<OrchestrationEvent>) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
+  setThreadContentCacheMaxGB: (gb: number) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -1811,4 +1814,11 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
+  setThreadContentCacheMaxGB: (gb) =>
+    set((state) =>
+      reconcileThreadContentCache({
+        ...state,
+        threadContentCacheMaxBytes: gb === 0 ? Infinity : gb * 1024 * 1024 * 1024,
+      }),
+    ),
 }));
