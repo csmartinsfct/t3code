@@ -8,7 +8,7 @@ import type {
   OrchestrationRun,
   OrchestrationRunId,
   OrchestrationResumeRunMode,
-  OrchestrationThread,
+  OrchestrationThreadMetadata,
   ProviderRuntimeEvent,
   PromptTemplateDocument,
   PromptTemplateValidationError,
@@ -74,6 +74,10 @@ import {
   OrchestrationRunService,
   type OrchestrationRunServiceShape,
 } from "../Services/OrchestrationRuns.ts";
+import {
+  ProjectionSnapshotQuery,
+  type ProjectionSnapshotQueryShape,
+} from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   OrchestrationRunRunner,
   type OrchestrationRunRunnerShape,
@@ -240,6 +244,7 @@ interface OrchestrationRunRunnerDeps {
   readonly orchestrationEngine: OrchestrationEngineShape;
   readonly providerService: ProviderServiceShape;
   readonly checkpointDiffQuery: CheckpointDiffQueryShape;
+  readonly projectionSnapshotQuery: ProjectionSnapshotQueryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
   readonly serverSettings: ServerSettingsShape;
@@ -252,6 +257,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       orchestrationEngine,
       providerService,
       checkpointDiffQuery,
+      projectionSnapshotQuery,
       ticketing,
       startup,
       serverSettings,
@@ -322,6 +328,17 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           ),
         );
 
+    const getThreadContentForRun = (threadId: ThreadId) =>
+      projectionSnapshotQuery.getThreadContent(threadId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationRunError({
+              message: `Failed to load thread content for ${threadId}`,
+              cause,
+            }),
+        ),
+      );
+
     const getProject = (projectId: OrchestrationProject["id"]) =>
       orchestrationEngine
         .getReadModel()
@@ -371,53 +388,58 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly ticketId: Ticket["id"];
     }) =>
       getThread(input.orchestrationThreadId).pipe(
-        Effect.map((thread) => {
-          if (!thread) {
+        Effect.flatMap((thread) =>
+          Effect.gen(function* () {
+            if (!thread) {
+              return null;
+            }
+
+            const content = yield* getThreadContentForRun(thread.id);
+            for (let index = content.activities.length - 1; index >= 0; index -= 1) {
+              const activity = content.activities[index]!;
+              if (activity.kind !== "orchestration.run.ticket.review.requested-changes") {
+                continue;
+              }
+
+              if (!isRecord(activity.payload) || activity.payload.ticketId !== input.ticketId) {
+                continue;
+              }
+
+              const reviewSummary =
+                typeof activity.payload.reviewSummary === "string" &&
+                activity.payload.reviewSummary.length > 0
+                  ? activity.payload.reviewSummary
+                  : undefined;
+              const reviewedWorkingTurnCount =
+                typeof activity.payload.reviewedWorkingTurnCount === "number" &&
+                Number.isInteger(activity.payload.reviewedWorkingTurnCount) &&
+                activity.payload.reviewedWorkingTurnCount >= 0
+                  ? activity.payload.reviewedWorkingTurnCount
+                  : undefined;
+
+              return {
+                ...(reviewSummary ? { reviewSummary } : {}),
+                ...(reviewedWorkingTurnCount !== undefined ? { reviewedWorkingTurnCount } : {}),
+              } satisfies PriorRequestedChangesReview;
+            }
+
             return null;
-          }
-
-          for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
-            const activity = thread.activities[index]!;
-            if (activity.kind !== "orchestration.run.ticket.review.requested-changes") {
-              continue;
-            }
-
-            if (!isRecord(activity.payload) || activity.payload.ticketId !== input.ticketId) {
-              continue;
-            }
-
-            const reviewSummary =
-              typeof activity.payload.reviewSummary === "string" &&
-              activity.payload.reviewSummary.length > 0
-                ? activity.payload.reviewSummary
-                : undefined;
-            const reviewedWorkingTurnCount =
-              typeof activity.payload.reviewedWorkingTurnCount === "number" &&
-              Number.isInteger(activity.payload.reviewedWorkingTurnCount) &&
-              activity.payload.reviewedWorkingTurnCount >= 0
-                ? activity.payload.reviewedWorkingTurnCount
-                : undefined;
-
-            return {
-              ...(reviewSummary ? { reviewSummary } : {}),
-              ...(reviewedWorkingTurnCount !== undefined ? { reviewedWorkingTurnCount } : {}),
-            } satisfies PriorRequestedChangesReview;
-          }
-
-          return null;
-        }),
+          }),
+        ),
       );
 
     const waitForThread = <A>(
       threadId: ThreadId,
-      resolve: (thread: OrchestrationThread) => A | null,
+      resolve: (
+        thread: OrchestrationThreadMetadata,
+      ) => Effect.Effect<A | null, OrchestrationRunError>,
       message: string,
     ) =>
       Effect.gen(function* () {
         for (let attempt = 0; attempt < 20; attempt += 1) {
           const thread = yield* getThread(threadId);
           if (thread) {
-            const value = resolve(thread);
+            const value = yield* resolve(thread);
             if (value !== null) {
               return value;
             }
@@ -434,16 +456,26 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
     const getCompletedTurnCount = (threadId: ThreadId) =>
       waitForThread(
         threadId,
-        (thread) => {
-          const latestTurn = thread.latestTurn;
-          if (!latestTurn || latestTurn.state !== "completed") {
-            return null;
-          }
-          const turnCheckpoint = thread.checkpoints.find(
-            (checkpoint) => checkpoint.turnId === latestTurn.turnId,
-          );
-          return turnCheckpoint?.checkpointTurnCount ?? null;
-        },
+        (thread) =>
+          Effect.gen(function* () {
+            const latestTurn = thread.latestTurn;
+            if (!latestTurn || latestTurn.state !== "completed") {
+              return null;
+            }
+            const content = yield* getThreadContentForRun(thread.id);
+            const turnCheckpoint = content.checkpoints.find(
+              (checkpoint) => checkpoint.turnId === latestTurn.turnId,
+            );
+            return turnCheckpoint?.checkpointTurnCount ?? null;
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationRunError({
+                  message: `Failed to load checkpoints for thread ${thread.id}`,
+                  cause,
+                }),
+            ),
+          ),
         `Timed out waiting for completed checkpoint state on thread ${threadId}`,
       );
 
@@ -452,46 +484,49 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       readonly turnId: TurnId | null;
     }) =>
       getThread(input.threadId).pipe(
-        Effect.map((thread) => {
-          if (input.turnId === null || !thread) {
-            return null;
-          }
-
-          const latestTurn = thread.latestTurn;
-          if (
-            !latestTurn ||
-            latestTurn.turnId !== input.turnId ||
-            latestTurn.state !== "completed"
-          ) {
-            return null;
-          }
-
-          const assistantMessages = thread.messages.filter(
-            (message) =>
-              message.turnId === input.turnId &&
-              message.role === "assistant" &&
-              message.streaming === false &&
-              message.text.length > 0,
-          );
-          if (assistantMessages.length === 0) {
-            return null;
-          }
-
-          return assistantMessages.toSorted((left, right) => {
-            const leftPriority =
-              latestTurn.assistantMessageId !== null && left.id === latestTurn.assistantMessageId
-                ? 1
-                : 0;
-            const rightPriority =
-              latestTurn.assistantMessageId !== null && right.id === latestTurn.assistantMessageId
-                ? 1
-                : 0;
-            if (leftPriority !== rightPriority) {
-              return rightPriority - leftPriority;
+        Effect.flatMap((thread) =>
+          Effect.gen(function* () {
+            if (input.turnId === null || !thread) {
+              return null;
             }
-            return right.updatedAt.localeCompare(left.updatedAt);
-          });
-        }),
+
+            const latestTurn = thread.latestTurn;
+            if (
+              !latestTurn ||
+              latestTurn.turnId !== input.turnId ||
+              latestTurn.state !== "completed"
+            ) {
+              return null;
+            }
+
+            const content = yield* getThreadContentForRun(thread.id);
+            const assistantMessages = content.messages.filter(
+              (message) =>
+                message.turnId === input.turnId &&
+                message.role === "assistant" &&
+                message.streaming === false &&
+                message.text.length > 0,
+            );
+            if (assistantMessages.length === 0) {
+              return null;
+            }
+
+            return assistantMessages.toSorted((left, right) => {
+              const leftPriority =
+                latestTurn.assistantMessageId !== null && left.id === latestTurn.assistantMessageId
+                  ? 1
+                  : 0;
+              const rightPriority =
+                latestTurn.assistantMessageId !== null && right.id === latestTurn.assistantMessageId
+                  ? 1
+                  : 0;
+              if (leftPriority !== rightPriority) {
+                return rightPriority - leftPriority;
+              }
+              return right.updatedAt.localeCompare(left.updatedAt);
+            });
+          }),
+        ),
       );
 
     const parseReviewOutput = (input: {
@@ -1364,7 +1399,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           const entry = ticketOrder[index]!;
           const ticket = tickets.get(entry.ticketId)!;
           const workingThreadId = entry.workingThreadId as ThreadId;
-          const title = resolveOrchestrationTitle({ entry, ticketsById: tickets });
 
           // 4a. Check run status — may have been paused/canceled externally
           const currentRun = yield* withRunService((runService) => runService.get({ runId }));
@@ -2331,6 +2365,7 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   yield* ProviderRateLimitsCache;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
   const serverSettings = yield* ServerSettingsService;
@@ -2340,6 +2375,7 @@ export const makeOrchestrationRunRunner = Effect.gen(function* () {
     orchestrationEngine,
     providerService,
     checkpointDiffQuery,
+    projectionSnapshotQuery,
     ticketing,
     startup,
     serverSettings,

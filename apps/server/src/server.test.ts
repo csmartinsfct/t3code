@@ -265,7 +265,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(
         Layer.mock(OrchestrationEngineService)({
-          getReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+          getReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel() as any),
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
@@ -1421,9 +1421,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
-            getReadModel: () => Effect.succeed(snapshot),
+            getReadModel: () => Effect.succeed(snapshot as any),
             dispatch: () => Effect.succeed({ sequence: 7 }),
             readEvents: () => Stream.empty,
+          },
+          projectionSnapshotQuery: {
+            getSnapshot: () => Effect.succeed(snapshot as any),
           },
           checkpointDiffQuery: {
             getTurnDiff: () =>
@@ -1561,7 +1564,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 Effect.succeed({
                   ...makeDefaultOrchestrationReadModel(),
                   snapshotSequence: 1,
-                }),
+                } as any),
               readEvents: (fromSequenceExclusive) => {
                 replayCursor = fromSequenceExclusive;
                 return Stream.make(makeEvent(2), makeEvent(3));
@@ -1619,7 +1622,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.succeed({
                 ...makeDefaultOrchestrationReadModel(),
                 snapshotSequence: 10,
-              }),
+              } as any),
             readEvents: (fromSequenceExclusive) => {
               replayCursor = fromSequenceExclusive;
               return Stream.make(makeEvent(5), makeEvent(6));

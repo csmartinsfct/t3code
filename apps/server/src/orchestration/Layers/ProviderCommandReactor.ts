@@ -33,6 +33,7 @@ import {
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
@@ -190,6 +191,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const git = yield* GitCore;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -537,11 +539,12 @@ const make = Effect.gen(function* () {
           hasResumeCursor: !!forkSource.resumeCursor,
         },
       });
-      const forkReadModel = yield* orchestrationEngine.getReadModel();
-      const forkThread = forkReadModel.threads.find((t) => t.id === threadId);
-      if (forkThread && forkThread.messages.length > 0) {
+      const forkContent = yield* projectionSnapshotQuery
+        .getThreadContent(threadId)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (forkContent && forkContent.messages.length > 0) {
         pendingForkContext.set(threadId, {
-          context: buildForkContextString(forkThread.messages),
+          context: buildForkContextString(forkContent.messages),
           capturedAt: Date.now(),
         });
       }
@@ -776,7 +779,8 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    const threadContent = yield* projectionSnapshotQuery.getThreadContent(event.payload.threadId);
+    const message = threadContent.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* Effect.logWarning(
         formatTimelineLog("server.provider-reactor", "turn-start-requested.missing-user-message", {
@@ -796,7 +800,7 @@ const make = Effect.gen(function* () {
     }
 
     const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+      threadContent.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
       const generationCwd =
         resolveThreadWorkspaceCwd({

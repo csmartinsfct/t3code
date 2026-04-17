@@ -163,76 +163,9 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
   });
 });
 
-function compareActivityOrder(
-  left: { readonly sequence?: number | undefined; readonly createdAt: string; readonly id: string },
-  right: {
-    readonly sequence?: number | undefined;
-    readonly createdAt: string;
-    readonly id: string;
-  },
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
-
-  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
-}
-
-function readActivityRequestId(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return null;
-  }
-  const requestId = "requestId" in payload ? payload.requestId : undefined;
-  return typeof requestId === "string" && requestId.length > 0 ? requestId : null;
-}
-
-function hasOpenBlockingActivity(
-  activities: ReadonlyArray<{
-    readonly kind: string;
-    readonly payload: unknown;
-    readonly sequence?: number | undefined;
-    readonly createdAt: string;
-    readonly id: string;
-  }>,
-): boolean {
-  const openApprovals = new Set<string>();
-  const openUserInput = new Set<string>();
-
-  for (const activity of [...activities].toSorted(compareActivityOrder)) {
-    const requestId = readActivityRequestId(activity.payload);
-    if (!requestId) {
-      continue;
-    }
-
-    switch (activity.kind) {
-      case "approval.requested":
-        openApprovals.add(requestId);
-        break;
-      case "approval.resolved":
-        openApprovals.delete(requestId);
-        break;
-      case "user-input.requested":
-        openUserInput.add(requestId);
-        break;
-      case "user-input.resolved":
-        openUserInput.delete(requestId);
-        break;
-      default:
-        break;
-    }
-  }
-
-  return openApprovals.size > 0 || openUserInput.size > 0;
-}
-
 const runStartupRecovery = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const ticketing = yield* TicketingService;
@@ -255,6 +188,7 @@ const runStartupRecovery = Effect.gen(function* () {
   const orchestrationRuns = yield* makeOrchestrationRunServiceFromDeps({
     repo: orchestrationRunRepo,
     orchestrationEngine,
+    projectionSnapshotQuery,
     projectionThreadRepo,
     ticketing,
     startup: inlineStartup,
@@ -265,6 +199,7 @@ const runStartupRecovery = Effect.gen(function* () {
     orchestrationEngine,
     providerService,
     checkpointDiffQuery,
+    projectionSnapshotQuery,
     ticketing,
     startup: inlineStartup,
     serverSettings,
@@ -305,8 +240,13 @@ const runStartupRecovery = Effect.gen(function* () {
       .map((threadId) => threadsById.get(threadId))
       .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined);
     const hasBlockingActivity =
-      (orchestrationThread ? hasOpenBlockingActivity(orchestrationThread.activities) : false) ||
-      childThreads.some((thread) => hasOpenBlockingActivity(thread.activities));
+      (orchestrationThread
+        ? orchestrationThread.pendingApprovalCount > 0 ||
+          orchestrationThread.pendingUserInputCount > 0
+        : false) ||
+      childThreads.some(
+        (thread) => thread.pendingApprovalCount > 0 || thread.pendingUserInputCount > 0,
+      );
     if (hasBlockingActivity) {
       blockedRunningOrchestrationThreadIds.add(candidate.threadId);
     }
@@ -324,7 +264,8 @@ const runStartupRecovery = Effect.gen(function* () {
     (thread) =>
       thread.session?.status === "running" &&
       thread.session.activeTurnId !== null &&
-      !hasOpenBlockingActivity(thread.activities),
+      thread.pendingApprovalCount === 0 &&
+      thread.pendingUserInputCount === 0,
   );
 
   const initialWasWorkingThreadIds = new Set<ThreadId>(runningOrchestrationThreadIds);

@@ -1,6 +1,7 @@
 import type {
   OrchestrationEvent,
-  OrchestrationReadModel,
+  OrchestrationStartupSnapshot,
+  OrchestrationThreadContent,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -37,7 +38,7 @@ import {
   type OrchestrationDispatchError,
 } from "../Errors.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
-import { createEmptyReadModel, projectEvent } from "../projector.ts";
+import { createEmptyStartupSnapshot, projectStartupSnapshotEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -81,7 +82,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
-  let readModel = createEmptyReadModel(new Date().toISOString());
+  let readModel = createEmptyStartupSnapshot(new Date().toISOString());
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
   const priorityQueue = yield* Queue.unbounded<CommandEnvelope>();
@@ -105,7 +106,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
       let nextReadModel = readModel;
       for (const persistedEvent of persistedEvents) {
-        nextReadModel = yield* projectEvent(nextReadModel, persistedEvent);
+        nextReadModel = yield* projectStartupSnapshotEvent(nextReadModel, persistedEvent);
       }
       readModel = nextReadModel;
 
@@ -138,9 +139,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        const contentByThreadId = yield* hydrateCommandContent(envelope.command);
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel,
+          contentByThreadId,
         });
         const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
         yield* Effect.logInfo(
@@ -159,7 +162,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
-                nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
+                nextReadModel = yield* projectStartupSnapshotEvent(nextReadModel, savedEvent);
                 yield* projectionPipeline.projectEvent(savedEvent);
                 committedEvents.push(savedEvent);
               }
@@ -299,8 +302,45 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     );
   };
 
+  const hydrateCommandContent = (
+    command: OrchestrationCommand,
+  ): Effect.Effect<
+    ReadonlyMap<string, OrchestrationThreadContent>,
+    OrchestrationCommandInvariantError
+  > =>
+    Effect.gen(function* () {
+      const threadIds = new Set<ThreadId>();
+      if (command.type === "thread.fork") {
+        threadIds.add(command.sourceThreadId);
+      }
+      if (command.type === "thread.turn.start" && command.sourceProposedPlan !== undefined) {
+        threadIds.add(command.sourceProposedPlan.threadId);
+      }
+      if (threadIds.size === 0) {
+        return new Map<string, OrchestrationThreadContent>();
+      }
+
+      const contentEntries = yield* Effect.forEach(
+        [...threadIds],
+        (threadId) =>
+          projectionSnapshotQuery.getThreadContent(threadId).pipe(
+            Effect.map((content) => [threadId, content] as const),
+            Effect.mapError(
+              (error) =>
+                new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail: `Could not load thread content for '${threadId}': ${error.message}`,
+                }),
+            ),
+          ),
+        { concurrency: 1 },
+      );
+
+      return new Map<string, OrchestrationThreadContent>(contentEntries);
+    });
+
   yield* projectionPipeline.bootstrap;
-  readModel = yield* projectionSnapshotQuery.getSnapshot();
+  readModel = yield* projectionSnapshotQuery.getStartupSnapshot();
 
   const takeNextCommand = Effect.gen(function* () {
     // Always drain priority items first (non-blocking poll)
@@ -318,7 +358,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   );
 
   const getReadModel: OrchestrationEngineShape["getReadModel"] = () =>
-    Effect.sync((): OrchestrationReadModel => readModel);
+    Effect.sync((): OrchestrationStartupSnapshot => readModel);
 
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive) =>
     eventStore.readFromSequence(fromSequenceExclusive);

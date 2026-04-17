@@ -2,11 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type {
-  OrchestrationReadModel,
-  ProviderRuntimeEvent,
-  ProviderSession,
-} from "@t3tools/contracts";
+import type { ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
   CommandId,
@@ -38,11 +34,9 @@ import {
   noopProviderLifecycleLogger,
 } from "../../provider/Services/ProviderLifecycleLogger.ts";
 import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
-import {
-  OrchestrationEngineService,
-  type OrchestrationEngineShape,
-} from "../Services/OrchestrationEngine.ts";
+import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -57,6 +51,10 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
+type TestEngine = {
+  readonly getReadModel: () => Effect.Effect<any, never, never>;
+  readonly readEvents: (afterSequence: number) => Stream.Stream<any, never, never>;
+} & Record<string, any>;
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
@@ -143,15 +141,15 @@ function createProviderServiceHarness() {
 }
 
 async function waitForThread(
-  engine: OrchestrationEngineShape,
+  engine: TestEngine,
   predicate: (thread: ProviderRuntimeTestThread) => boolean,
   timeoutMs = 2000,
   threadId: ThreadId = asThreadId("thread-1"),
 ) {
   const deadline = Date.now() + timeoutMs;
   const poll = async (): Promise<ProviderRuntimeTestThread> => {
-    const readModel = await Effect.runPromise(engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === threadId);
+    const readModel = (await Effect.runPromise(engine.getReadModel())) as any;
+    const thread = readModel.threads.find((entry: any) => entry.id === threadId);
     if (thread && predicate(thread)) {
       return thread;
     }
@@ -164,7 +162,7 @@ async function waitForThread(
   return poll();
 }
 
-type ProviderRuntimeTestReadModel = OrchestrationReadModel;
+type ProviderRuntimeTestReadModel = any;
 type ProviderRuntimeTestThread = ProviderRuntimeTestReadModel["threads"][number];
 type ProviderRuntimeTestMessage = ProviderRuntimeTestThread["messages"][number];
 type ProviderRuntimeTestProposedPlan = ProviderRuntimeTestThread["proposedPlans"][number];
@@ -173,7 +171,7 @@ type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][nu
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService,
+    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -212,6 +210,9 @@ describe("ProviderRuntimeIngestion", () => {
     );
     const layer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(
+        OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+      ),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(ProviderRateLimitsCacheLive),
@@ -222,6 +223,9 @@ describe("ProviderRuntimeIngestion", () => {
     );
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const projectionSnapshotQuery = await runtime.runPromise(
+      Effect.service(ProjectionSnapshotQuery),
+    );
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
@@ -287,7 +291,10 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     return {
-      engine,
+      engine: {
+        ...engine,
+        getReadModel: () => projectionSnapshotQuery.getSnapshot(),
+      } as unknown as TestEngine,
       emit: provider.emit,
       setProviderSession: provider.setSession,
       drain,
@@ -632,9 +639,9 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     await harness.drain();
-    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midReadModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const midThread = midReadModel.threads.find(
-      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(midThread?.session?.status).toBe("running");
     expect(midThread?.session?.activeTurnId).toBe("turn-midturn-lifecycle");
@@ -739,9 +746,9 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     await harness.drain();
-    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midReadModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const midThread = midReadModel.threads.find(
-      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(midThread?.session?.status).toBe("running");
     expect(midThread?.session?.activeTurnId).toBe("turn-primary");
@@ -793,9 +800,9 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     await harness.drain();
-    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midReadModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const midThread = midReadModel.threads.find(
-      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(midThread?.session?.status).toBe("running");
     expect(midThread?.session?.activeTurnId).toBe("turn-guarded-main");
@@ -1087,7 +1094,7 @@ describe("ProviderRuntimeIngestion", () => {
       sourceThreadId,
     );
     expect(
-      sourceThreadBeforeStart.proposedPlans.find((entry) => entry.id === sourcePlan.id),
+      sourceThreadBeforeStart.proposedPlans.find((entry: any) => entry.id === sourcePlan.id),
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
@@ -1115,7 +1122,7 @@ describe("ProviderRuntimeIngestion", () => {
       sourceThreadId,
     );
     expect(
-      sourceThreadAfterStart.proposedPlans.find((entry) => entry.id === sourcePlan.id),
+      sourceThreadAfterStart.proposedPlans.find((entry: any) => entry.id === sourcePlan.id),
     ).toMatchObject({
       implementationThreadId: "thread-implement",
     });
@@ -1256,19 +1263,21 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.drain();
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const sourceThreadAfterRejectedStart = readModel.threads.find(
-      (entry) => entry.id === sourceThreadId,
+      (entry: any) => entry.id === sourceThreadId,
     );
     expect(
-      sourceThreadAfterRejectedStart?.proposedPlans.find((entry) => entry.id === sourcePlan.id),
+      sourceThreadAfterRejectedStart?.proposedPlans.find(
+        (entry: any) => entry.id === sourcePlan.id,
+      ),
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
     });
 
     const targetThreadAfterRejectedStart = readModel.threads.find(
-      (entry) => entry.id === targetThreadId,
+      (entry: any) => entry.id === targetThreadId,
     );
     expect(targetThreadAfterRejectedStart?.session?.status).toBe("running");
     expect(targetThreadAfterRejectedStart?.session?.activeTurnId).toBe(activeTurnId);
@@ -1428,12 +1437,14 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.drain();
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const sourceThreadAfterUnrelatedStart = readModel.threads.find(
-      (entry) => entry.id === sourceThreadId,
+      (entry: any) => entry.id === sourceThreadId,
     );
     expect(
-      sourceThreadAfterUnrelatedStart?.proposedPlans.find((entry) => entry.id === sourcePlan.id),
+      sourceThreadAfterUnrelatedStart?.proposedPlans.find(
+        (entry: any) => entry.id === sourcePlan.id,
+      ),
     ).toMatchObject({
       implementedAt: null,
       implementationThreadId: null,
@@ -1539,9 +1550,9 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     await harness.drain();
-    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midReadModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const midThread = midReadModel.threads.find(
-      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(
       midThread?.messages.some(
@@ -1856,8 +1867,10 @@ describe("ProviderRuntimeIngestion", () => {
         ),
     );
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
+    const thread = readModel.threads.find(
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
     expect(thread).toBeDefined();
 
     const requested = thread?.activities.find(
@@ -1925,7 +1938,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     const thread = await waitForThread(harness.engine, (entry) =>
-      entry.activities.some((activity) => activity.id === "evt-runtime-error-activity"),
+      entry.activities.some((activity: any) => activity.id === "evt-runtime-error-activity"),
     );
     const activity = thread.activities.find(
       (entry: ProviderRuntimeTestActivity) => entry.id === "evt-runtime-error-activity",

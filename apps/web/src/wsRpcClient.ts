@@ -491,10 +491,46 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     orchestration: {
       getSnapshot: () =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
-      getStartupSnapshot: () =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getStartupSnapshot]({})),
-      getThreadContent: (input) =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadContent](input)),
+      getStartupSnapshot: async () => {
+        logWebTimeline("orchestration.startup-snapshot.start", {});
+        try {
+          const result = await transport.request((client) =>
+            client[ORCHESTRATION_WS_METHODS.getStartupSnapshot]({}),
+          );
+          logWebTimeline("orchestration.startup-snapshot.success", {
+            sequence: result.snapshotSequence,
+            projectCount: result.projects.length,
+            threadCount: result.threads.length,
+          });
+          return result;
+        } catch (error) {
+          logWebTimeline("orchestration.startup-snapshot.error", { error });
+          throw error;
+        }
+      },
+      getThreadContent: async (input) => {
+        logWebTimeline("orchestration.thread-content.start", { threadId: input.threadId });
+        try {
+          const result = await transport.request((client) =>
+            client[ORCHESTRATION_WS_METHODS.getThreadContent](input),
+          );
+          logWebTimeline("orchestration.thread-content.success", {
+            threadId: input.threadId,
+            sequence: result.sequence,
+            messageCount: result.messages.length,
+            activityCount: result.activities.length,
+            checkpointCount: result.checkpoints.length,
+            proposedPlanCount: result.proposedPlans.length,
+          });
+          return result;
+        } catch (error) {
+          logWebTimeline("orchestration.thread-content.error", {
+            threadId: input.threadId,
+            error,
+          });
+          throw error;
+        }
+      },
       dispatchCommand: async (input) => {
         logWebTimeline("orchestration.dispatch.start", summarizeOrchestrationCommand(input));
         try {

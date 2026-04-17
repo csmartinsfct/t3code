@@ -17,6 +17,7 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
+  OrchestrationGetSnapshotError,
   OrchestrationGetStartupSnapshotError,
   OrchestrationGetThreadContentError,
   OrchestrationGetTurnDiffError,
@@ -120,6 +121,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const orchestrationRuns = yield* makeOrchestrationRunServiceFromDeps({
       repo: orchestrationRunRepo,
       orchestrationEngine,
+      projectionSnapshotQuery,
       projectionThreadRepo,
       ticketing,
       startup,
@@ -130,6 +132,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       orchestrationEngine,
       providerService,
       checkpointDiffQuery,
+      projectionSnapshotQuery,
       ticketing,
       startup,
       serverSettings,
@@ -245,9 +248,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
 
     return WsRpcGroup.of({
       [ORCHESTRATION_WS_METHODS.getSnapshot]: (_input) =>
-        observeRpcEffect(ORCHESTRATION_WS_METHODS.getSnapshot, orchestrationEngine.getReadModel(), {
-          "rpc.aggregate": "orchestration",
-        }),
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.getSnapshot,
+          projectionSnapshotQuery.getSnapshot().pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationGetSnapshotError({
+                  message: "Failed to load orchestration snapshot",
+                  cause,
+                }),
+            ),
+          ),
+          {
+            "rpc.aggregate": "orchestration",
+          },
+        ),
       [ORCHESTRATION_WS_METHODS.getStartupSnapshot]: (_input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.getStartupSnapshot,

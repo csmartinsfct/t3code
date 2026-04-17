@@ -130,6 +130,13 @@ describe("OrchestrationEngine", () => {
           isOrchestrationThread: false,
           ticketId: null,
           latestTurn: null,
+          latestTurnStatus: null,
+          latestSessionStatus: null,
+          latestUserActivity: null,
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          actionablePlanState: null,
+          lastActivitySummary: null,
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
           archivedAt: null,
@@ -147,7 +154,7 @@ describe("OrchestrationEngine", () => {
       Layer.provide(
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () => Effect.succeed(projectionSnapshot),
-          getStartupSnapshot: () => Effect.die("unused"),
+          getStartupSnapshot: () => Effect.succeed(projectionSnapshot),
           getThreadContent: () => Effect.die("unused"),
           getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 1 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
@@ -573,17 +580,15 @@ describe("OrchestrationEngine", () => {
     const thread = (await system.run(engine.getReadModel())).threads.find(
       (entry) => entry.id === "thread-turn-diff",
     );
-    expect(thread?.checkpoints).toEqual([
-      {
-        turnId: asTurnId("turn-1"),
-        checkpointTurnCount: 1,
-        checkpointRef: asCheckpointRef("refs/t3/checkpoints/thread-turn-diff/turn/1"),
-        status: "ready",
-        files: [],
-        assistantMessageId: null,
-        completedAt: createdAt,
-      },
-    ]);
+    expect(thread?.latestTurn).toEqual({
+      turnId: asTurnId("turn-1"),
+      state: "completed",
+      requestedAt: createdAt,
+      startedAt: createdAt,
+      completedAt: createdAt,
+      assistantMessageId: null,
+    });
+    expect(thread?.latestTurnStatus).toBe("completed");
     await system.dispose();
   });
 

@@ -13,7 +13,7 @@
 import type {
   OrchestrationCommand,
   OrchestrationEvent,
-  OrchestrationReadModel,
+  OrchestrationStartupSnapshot,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect, Stream } from "effect";
@@ -26,11 +26,14 @@ import type { OrchestrationEventStoreError } from "../../persistence/Errors.ts";
  */
 export interface OrchestrationEngineShape {
   /**
-   * Read the current in-memory orchestration read model.
+   * Read the current in-memory orchestration metadata model.
    *
-   * @returns Effect containing the latest read model.
+   * Per-thread content is intentionally excluded from engine memory and should
+   * be loaded through ProjectionSnapshotQuery.getThreadContent when needed.
+   *
+   * @returns Effect containing the latest metadata model.
    */
-  readonly getReadModel: () => Effect.Effect<OrchestrationReadModel, never, never>;
+  readonly getReadModel: () => Effect.Effect<OrchestrationStartupSnapshot, never, never>;
 
   /**
    * Replay persisted orchestration events from an exclusive sequence cursor.

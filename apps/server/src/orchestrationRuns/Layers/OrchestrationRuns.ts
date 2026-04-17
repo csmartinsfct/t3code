@@ -19,6 +19,10 @@ import {
   type OrchestrationEngineShape,
 } from "../../orchestration/Services/OrchestrationEngine.ts";
 import {
+  ProjectionSnapshotQuery,
+  type ProjectionSnapshotQueryShape,
+} from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
   OrchestrationRunRepository,
   type OrchestrationRunRepositoryShape,
   type PersistedOrchestrationRun,
@@ -102,6 +106,7 @@ const compareIsoDateThenId = <T extends { createdAt: string; id: string }>(left:
 interface OrchestrationRunServiceDeps {
   readonly repo: OrchestrationRunRepositoryShape;
   readonly orchestrationEngine: OrchestrationEngineShape;
+  readonly projectionSnapshotQuery: ProjectionSnapshotQueryShape;
   readonly projectionThreadRepo: ProjectionThreadRepositoryShape;
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
@@ -110,8 +115,15 @@ interface OrchestrationRunServiceDeps {
 
 export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServiceDeps) =>
   Effect.gen(function* () {
-    const { repo, orchestrationEngine, projectionThreadRepo, ticketing, startup, serverSettings } =
-      deps;
+    const {
+      repo,
+      orchestrationEngine,
+      projectionSnapshotQuery,
+      projectionThreadRepo,
+      ticketing,
+      startup,
+      serverSettings,
+    } = deps;
 
     const eventsPubSub =
       yield* PubSub.unbounded<import("@t3tools/contracts").OrchestrationRunStreamEvent>();
@@ -474,7 +486,15 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
 
     const getChildThreads: OrchestrationRunServiceShape["getChildThreads"] = (input) =>
       Effect.gen(function* () {
-        const readModel = yield* orchestrationEngine.getReadModel();
+        const readModel = yield* projectionSnapshotQuery.getSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationRunError({
+                message: "Failed to load child thread content",
+                cause,
+              }),
+          ),
+        );
         const persistedChildren = yield* projectionThreadRepo
           .listByParentThreadId({ parentThreadId: input.parentThreadId })
           .pipe(
@@ -741,6 +761,7 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
 export const makeOrchestrationRunService = Effect.gen(function* () {
   const repo = yield* OrchestrationRunRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionThreadRepo = yield* ProjectionThreadRepository;
   const ticketing = yield* TicketingService;
   const startup = yield* ServerRuntimeStartup;
@@ -749,6 +770,7 @@ export const makeOrchestrationRunService = Effect.gen(function* () {
   return yield* makeOrchestrationRunServiceFromDeps({
     repo,
     orchestrationEngine,
+    projectionSnapshotQuery,
     projectionThreadRepo,
     ticketing,
     startup,

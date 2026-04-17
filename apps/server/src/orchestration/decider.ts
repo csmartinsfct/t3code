@@ -2,6 +2,8 @@ import type {
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationStartupSnapshot,
+  OrchestrationThreadContent,
 } from "@t3tools/contracts";
 import { applyOrchestrationPromptOverridePatch } from "@t3tools/shared/promptTemplates";
 import { Effect } from "effect";
@@ -14,6 +16,7 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  type OrchestrationCommandThread,
 } from "./commandInvariants.ts";
 
 const nowIso = () => new Date().toISOString();
@@ -48,12 +51,36 @@ function withEventBase(
   };
 }
 
+type DeciderReadModel = OrchestrationReadModel | OrchestrationStartupSnapshot;
+
+function getThreadMessages(
+  thread: OrchestrationCommandThread,
+  contentByThreadId: ReadonlyMap<string, OrchestrationThreadContent>,
+) {
+  if ("messages" in thread) {
+    return thread.messages;
+  }
+  return contentByThreadId.get(thread.id)?.messages ?? [];
+}
+
+function getThreadProposedPlans(
+  thread: OrchestrationCommandThread,
+  contentByThreadId: ReadonlyMap<string, OrchestrationThreadContent>,
+) {
+  if ("proposedPlans" in thread) {
+    return thread.proposedPlans;
+  }
+  return contentByThreadId.get(thread.id)?.proposedPlans ?? [];
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
+  contentByThreadId = new Map(),
 }: {
   readonly command: OrchestrationCommand;
-  readonly readModel: OrchestrationReadModel;
+  readonly readModel: DeciderReadModel;
+  readonly contentByThreadId?: ReadonlyMap<string, OrchestrationThreadContent>;
 }): Effect.fn.Return<
   Omit<OrchestrationEvent, "sequence"> | ReadonlyArray<Omit<OrchestrationEvent, "sequence">>,
   OrchestrationCommandInvariantError
@@ -232,29 +259,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
-      const messageEvents: Omit<OrchestrationEvent, "sequence">[] = sourceThread.messages.map(
-        (msg) => ({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.message-sent" as const,
-          payload: {
-            threadId: command.threadId,
-            messageId: crypto.randomUUID(),
-            role: msg.role,
-            text: msg.text,
-            ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
-            ...(msg.metadata !== undefined ? { metadata: msg.metadata } : {}),
-            turnId: null,
-            streaming: false,
-            createdAt: command.createdAt,
-            updatedAt: command.createdAt,
-          },
+      const sourceMessages = getThreadMessages(sourceThread, contentByThreadId);
+      const messageEvents: Omit<OrchestrationEvent, "sequence">[] = sourceMessages.map((msg) => ({
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
         }),
-      );
+        type: "thread.message-sent" as const,
+        payload: {
+          threadId: command.threadId,
+          messageId: crypto.randomUUID(),
+          role: msg.role,
+          text: msg.text,
+          ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
+          ...(msg.metadata !== undefined ? { metadata: msg.metadata } : {}),
+          turnId: null,
+          streaming: false,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      }));
       return [threadCreatedEvent, ...messageEvents];
     }
 
@@ -479,7 +505,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         : null;
       const sourcePlan =
         sourceProposedPlan && sourceThread
-          ? sourceThread.proposedPlans.find((entry) => entry.id === sourceProposedPlan.planId)
+          ? getThreadProposedPlans(sourceThread, contentByThreadId).find(
+              (entry) => entry.id === sourceProposedPlan.planId,
+            )
           : null;
       if (sourceProposedPlan && !sourcePlan) {
         return yield* new OrchestrationCommandInvariantError({

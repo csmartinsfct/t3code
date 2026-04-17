@@ -29,11 +29,9 @@ import { RuntimeReceiptBusLive } from "./RuntimeReceiptBus.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import {
-  OrchestrationEngineService,
-  type OrchestrationEngineShape,
-} from "../Services/OrchestrationEngine.ts";
+import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -46,6 +44,10 @@ import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
+type TestEngine = {
+  readonly getReadModel: () => Effect.Effect<any, never, never>;
+  readonly readEvents: (afterSequence: number) => Stream.Stream<any, never, never>;
+} & Record<string, any>;
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
@@ -114,22 +116,16 @@ function createProviderServiceHarness(
 }
 
 async function waitForThread(
-  engine: OrchestrationEngineShape,
-  predicate: (thread: {
-    latestTurn: { turnId: string } | null;
-    checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
-    activities: ReadonlyArray<{ kind: string }>;
-  }) => boolean,
+  engine: TestEngine,
+  predicate: (thread: any) => boolean,
   timeoutMs = 15_000,
 ) {
   const deadline = Date.now() + timeoutMs;
-  const poll = async (): Promise<{
-    latestTurn: { turnId: string } | null;
-    checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
-    activities: ReadonlyArray<{ kind: string }>;
-  }> => {
-    const readModel = await Effect.runPromise(engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+  const poll = async (): Promise<any> => {
+    const readModel = (await Effect.runPromise(engine.getReadModel())) as any;
+    const thread = readModel.threads.find(
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
     if (thread && predicate(thread)) {
       return thread;
     }
@@ -143,7 +139,7 @@ async function waitForThread(
 }
 
 async function waitForEvent(
-  engine: OrchestrationEngineShape,
+  engine: TestEngine,
   predicate: (event: { type: string }) => boolean,
   timeoutMs = 15_000,
 ) {
@@ -213,7 +209,7 @@ async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 15_000)
 
 describe("CheckpointReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | CheckpointReactor | CheckpointStore,
+    OrchestrationEngineService | CheckpointReactor | CheckpointStore | ProjectionSnapshotQuery,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -266,6 +262,9 @@ describe("CheckpointReactor", () => {
 
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(
+        OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provide(SqlitePersistenceMemory)),
+      ),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(CheckpointStoreLive),
@@ -279,6 +278,9 @@ describe("CheckpointReactor", () => {
 
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const projectionSnapshotQuery = await runtime.runPromise(
+      Effect.service(ProjectionSnapshotQuery),
+    );
     const reactor = await runtime.runPromise(Effect.service(CheckpointReactor));
     const checkpointStore = await runtime.runPromise(Effect.service(CheckpointStore));
     scope = await Effect.runPromise(Scope.make("sequential"));
@@ -343,7 +345,10 @@ describe("CheckpointReactor", () => {
     }
 
     return {
-      engine,
+      engine: {
+        ...engine,
+        getReadModel: () => projectionSnapshotQuery.getSnapshot(),
+      } as unknown as TestEngine,
       provider,
       cwd,
       drain,
@@ -476,10 +481,10 @@ describe("CheckpointReactor", () => {
     });
 
     await harness.drain();
-    const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const midReadModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
     const midThread = midReadModel.threads.find(
-      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
-    );
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    ) as any;
     expect(midThread?.checkpoints).toHaveLength(0);
 
     harness.provider.emit({
@@ -599,12 +604,12 @@ describe("CheckpointReactor", () => {
       harness.engine,
       (entry) =>
         entry.checkpoints.length === 1 &&
-        entry.activities.some((activity) => activity.kind === "checkpoint.capture.failed"),
+        entry.activities.some((activity: any) => activity.kind === "checkpoint.capture.failed"),
     );
 
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
     expect(
-      thread.activities.some((activity) => activity.kind === "checkpoint.capture.failed"),
+      thread.activities.some((activity: any) => activity.kind === "checkpoint.capture.failed"),
     ).toBe(true);
   });
 
@@ -731,11 +736,13 @@ describe("CheckpointReactor", () => {
     });
 
     await harness.drain();
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread?.checkpoints.some((checkpoint) => checkpoint.checkpointTurnCount === 3)).toBe(
-      false,
-    );
+    const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
+    const thread = readModel.threads.find(
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    ) as any;
+    expect(
+      thread?.checkpoints.some((checkpoint: any) => checkpoint.checkpointTurnCount === 3),
+    ).toBe(false);
   });
 
   it("continues processing runtime events after a single checkpoint runtime failure", async () => {
@@ -1043,12 +1050,12 @@ describe("CheckpointReactor", () => {
     );
 
     const thread = await waitForThread(harness.engine, (entry) =>
-      entry.activities.some((activity) => activity.kind === "checkpoint.revert.failed"),
+      entry.activities.some((activity: any) => activity.kind === "checkpoint.revert.failed"),
     );
 
-    expect(thread.activities.some((activity) => activity.kind === "checkpoint.revert.failed")).toBe(
-      true,
-    );
+    expect(
+      thread.activities.some((activity: any) => activity.kind === "checkpoint.revert.failed"),
+    ).toBe(true);
     expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
   });
 });

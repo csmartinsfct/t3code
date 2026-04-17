@@ -24,6 +24,7 @@ import {
   type CheckpointDiffQueryShape,
 } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
@@ -503,7 +504,7 @@ const makeLayer = (opts: {
             updatedAt: "2026-04-09T10:00:00.000Z",
             projects: [...readModelProjects],
             threads: [...readModelThreads],
-          }),
+          } as any),
         readEvents: () => Stream.empty,
         dispatch: (command: OrchestrationCommand) => {
           dispatchedCommands.push(command);
@@ -545,6 +546,46 @@ const makeLayer = (opts: {
             diff: "patch",
           }),
         ...opts.checkpointDiffQuery,
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(ProjectionSnapshotQuery, {
+        getSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 0,
+            updatedAt: "2026-04-09T10:00:00.000Z",
+            projects: [...readModelProjects],
+            threads: [...readModelThreads],
+          } as any),
+        getStartupSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 0,
+            updatedAt: "2026-04-09T10:00:00.000Z",
+            projects: [...readModelProjects],
+            threads: [...readModelThreads],
+          } as any),
+        getThreadContent: (threadId) => {
+          const thread = readModelThreads.find((entry) => entry.id === threadId);
+          return Effect.succeed({
+            threadId,
+            sequence: 0,
+            messages: thread?.messages ?? [],
+            proposedPlans: thread?.proposedPlans ?? [],
+            activities: thread?.activities ?? [],
+            checkpoints: thread?.checkpoints ?? [],
+          });
+        },
+        getCounts: () =>
+          Effect.succeed({
+            projectCount: readModelProjects.length,
+            threadCount: readModelThreads.length,
+          }),
+        getActiveProjectByWorkspaceRoot: () => Effect.succeed(null as any),
+        getFirstActiveThreadIdByProjectId: () => Effect.succeed(null as any),
+        getProjectById: () => Effect.succeed(null as any),
+        getThreadCheckpointContext: () => Effect.succeed(null as any),
+        getThreadById: () => Effect.succeed(null as any),
+        hasThreadUserMessages: () => Effect.succeed(null as any),
       }),
     ),
   );

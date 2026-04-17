@@ -33,6 +33,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
@@ -124,12 +125,6 @@ function pickRateLimitStatus(
 // ---------------------------------------------------------------------------
 // Codex rate-limit window helpers
 // ---------------------------------------------------------------------------
-
-/** Labels for Codex rate-limit windows by approximate window duration. */
-const CODEX_WINDOW_LABELS: Record<string, string> = {
-  five_hour: "five_hour",
-  weekly: "seven_day",
-};
 
 function codexWindowTierKey(windowMinutes: number | undefined): string {
   if (windowMinutes !== undefined && windowMinutes <= 360) return "five_hour";
@@ -769,6 +764,7 @@ const make = Effect.fn("make")(function* () {
   const providerService = yield* ProviderService;
   const rateLimitsCache = yield* ProviderRateLimitsCache;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const serverSettingsService = yield* ServerSettingsService;
   const lifecycle = yield* ProviderLifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
@@ -1118,7 +1114,10 @@ const make = Effect.fn("make")(function* () {
     ) {
       const readModel = yield* orchestrationEngine.getReadModel();
       const sourceThread = readModel.threads.find((entry) => entry.id === sourceThreadId);
-      const sourcePlan = sourceThread?.proposedPlans.find((entry) => entry.id === sourcePlanId);
+      const sourceContent = sourceThread
+        ? yield* projectionSnapshotQuery.getThreadContent(sourceThreadId)
+        : null;
+      const sourcePlan = sourceContent?.proposedPlans.find((entry) => entry.id === sourcePlanId);
       if (!sourceThread || !sourcePlan || sourcePlan.implementedAt !== null) {
         return;
       }
@@ -1158,9 +1157,10 @@ const make = Effect.fn("make")(function* () {
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === input.threadId);
     if (!thread || thread.interactionMode !== "plan-accept") return;
+    const threadContent = yield* projectionSnapshotQuery.getThreadContent(input.threadId);
 
     // Find the latest actionable proposed plan for the completed turn.
-    const actionablePlan = thread.proposedPlans
+    const actionablePlan = threadContent.proposedPlans
       .filter(
         (plan) =>
           plan.turnId === input.turnId &&
@@ -1492,7 +1492,8 @@ const make = Effect.fn("make")(function* () {
     if (assistantCompletion) {
       const assistantMessageId = assistantCompletion.messageId;
       const turnId = toTurnId(event.turnId);
-      const existingAssistantMessage = thread.messages.find(
+      const threadContent = yield* projectionSnapshotQuery.getThreadContent(thread.id);
+      const existingAssistantMessage = threadContent.messages.find(
         (entry) => entry.id === assistantMessageId,
       );
       const shouldApplyFallbackCompletionText =
@@ -1520,10 +1521,11 @@ const make = Effect.fn("make")(function* () {
     }
 
     if (proposedPlanCompletion) {
+      const threadContent = yield* projectionSnapshotQuery.getThreadContent(thread.id);
       yield* finalizeBufferedProposedPlan({
         event,
         threadId: thread.id,
-        threadProposedPlans: thread.proposedPlans,
+        threadProposedPlans: threadContent.proposedPlans,
         planId: proposedPlanCompletion.planId,
         ...(proposedPlanCompletion.turnId ? { turnId: proposedPlanCompletion.turnId } : {}),
         fallbackMarkdown: proposedPlanCompletion.planMarkdown,
@@ -1562,7 +1564,8 @@ const make = Effect.fn("make")(function* () {
         yield* finalizeBufferedProposedPlan({
           event,
           threadId: thread.id,
-          threadProposedPlans: thread.proposedPlans,
+          threadProposedPlans: (yield* projectionSnapshotQuery.getThreadContent(thread.id))
+            .proposedPlans,
           planId: proposedPlanIdForTurn(thread.id, turnId),
           turnId,
           updatedAt: now,
@@ -1629,17 +1632,18 @@ const make = Effect.fn("make")(function* () {
     if (event.type === "turn.diff.updated") {
       const turnId = toTurnId(event.turnId);
       if (turnId && (yield* isGitRepoForThread(thread.id))) {
+        const threadContent = yield* projectionSnapshotQuery.getThreadContent(thread.id);
         // Skip if a checkpoint already exists for this turn. A real
         // (non-placeholder) capture from CheckpointReactor should not
         // be clobbered, and dispatching a duplicate placeholder for the
         // same turnId would produce an unstable checkpointTurnCount.
-        if (thread.checkpoints.some((c) => c.turnId === turnId)) {
+        if (threadContent.checkpoints.some((c) => c.turnId === turnId)) {
           // Already tracked; no-op.
         } else {
           const assistantMessageId = MessageId.makeUnsafe(
             `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
           );
-          const maxTurnCount = thread.checkpoints.reduce(
+          const maxTurnCount = threadContent.checkpoints.reduce(
             (max, c) => Math.max(max, c.checkpointTurnCount),
             0,
           );

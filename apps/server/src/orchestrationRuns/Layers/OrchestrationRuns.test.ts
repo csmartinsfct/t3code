@@ -15,6 +15,7 @@ import {
   type OrchestrationDispatchError,
 } from "../../orchestration/Errors.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   OrchestrationRunRepository,
   type OrchestrationRunRepositoryShape,
@@ -223,7 +224,7 @@ const makeServiceLayer = ({
             updatedAt: "2026-04-09T10:00:00.000Z",
             projects: [],
             threads: [...(readModelThreads ?? [])],
-          }),
+          } as any),
         readEvents: () => Stream.empty,
         dispatch:
           dispatch ??
@@ -233,6 +234,17 @@ const makeServiceLayer = ({
             })),
         streamDomainEvents: Stream.empty,
       }),
+    ),
+    Layer.provide(
+      Layer.succeed(ProjectionSnapshotQuery, {
+        getSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 0,
+            updatedAt: "2026-04-09T10:00:00.000Z",
+            projects: [],
+            threads: [...(readModelThreads ?? [])],
+          }),
+      } as any),
     ),
   );
 
