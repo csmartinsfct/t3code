@@ -2,7 +2,10 @@ import { useState, useCallback, useEffect, memo } from "react";
 import { CheckIcon, ClockIcon, XIcon } from "lucide-react";
 
 import type { ProposeScheduledTaskPayload } from "../../lib/proposeScheduledTaskParser";
-import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
+import {
+  getOrchestrationProjectOptions,
+  type OrchestrationProjectOption,
+} from "../../lib/orchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -43,8 +46,8 @@ function ProposeScheduledTaskCard({
   const [projectId, setProjectId] = useState(initialProjectId);
   const [prompt, setPrompt] = useState(initialPrompt ?? "");
   const [status, setStatus] = useState<"pending" | "accepted" | "rejected">("pending");
-  const [projects, setProjects] = useState<ReadonlyArray<{ id: string; title: string }>>([
-    { id: initialProjectId, title: initialProjectName },
+  const [projects, setProjects] = useState<ReadonlyArray<OrchestrationProjectOption>>([
+    { id: initialProjectId, title: initialProjectName, workspaceRoot: "" },
   ]);
 
   const disabled = isStreaming || status !== "pending";
@@ -52,8 +55,7 @@ function ProposeScheduledTaskCard({
   useEffect(() => {
     void getOrchestrationProjectOptions(ensureNativeApi())
       .then((projectOptions) => {
-        const mapped = projectOptions.map((project) => ({ id: project.id, title: project.title }));
-        if (mapped.length > 0) setProjects(mapped);
+        if (projectOptions.length > 0) setProjects(projectOptions);
       })
       .catch(() => {});
   }, []);
