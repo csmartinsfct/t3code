@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, memo } from "react";
 import { CheckIcon, ClockIcon, XIcon } from "lucide-react";
 
 import type { ProposeScheduledTaskPayload } from "../../lib/proposeScheduledTaskParser";
+import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -49,10 +50,9 @@ function ProposeScheduledTaskCard({
   const disabled = isStreaming || status !== "pending";
 
   useEffect(() => {
-    void ensureNativeApi()
-      .orchestration.getSnapshot()
-      .then((snapshot) => {
-        const mapped = snapshot.projects.map((p) => ({ id: p.id, title: p.title }));
+    void getOrchestrationProjectOptions(ensureNativeApi())
+      .then((projectOptions) => {
+        const mapped = projectOptions.map((project) => ({ id: project.id, title: project.title }));
         if (mapped.length > 0) setProjects(mapped);
       })
       .catch(() => {});

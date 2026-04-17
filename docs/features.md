@@ -50,7 +50,9 @@ The core of T3 Code is an event-sourced orchestration engine that manages all ag
 
 **Agent interaction (WebSocket RPC):**
 
-- `orchestration.getSnapshot` — Full read model of projects, threads, messages, turns.
+- `orchestration.getStartupSnapshot` — Shallow startup/read-side metadata: projects plus thread shells for sidebar, header, settings, and lightweight cards.
+- `orchestration.getThreadContent` — On-demand thread messages, activities, proposed plans, and checkpoints for route-level hydration.
+- `orchestration.getSnapshot` — Full read model of projects, threads, messages, and turns. Kept for compatibility and server-side recovery paths that still need the complete model in one response.
 - `orchestration.dispatchCommand` — Send any orchestration command.
 - `orchestration.getTurnDiff` / `orchestration.getFullThreadDiff` — Retrieve diffs.
 - `orchestration.replayEvents` — Replay events from a given sequence number.
@@ -329,6 +331,7 @@ ScheduledTask {
 - Create, edit, enable/disable, and delete scheduled tasks in Settings → Scheduled Tasks.
 - View task detail with cron expression, project selector, prompt configuration.
 - Browse execution history with success/failure status.
+- Settings list/detail pages and chat proposal cards hydrate their project dropdowns from the shallow startup snapshot, so opening scheduled-task UI does not load every thread's message/activity content.
 
 **Agent interaction (REST API — `/api/scheduled-tasks`):**
 

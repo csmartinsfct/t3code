@@ -139,7 +139,7 @@ Layer implementation: `apps/server/src/scheduledTasks/Layers/ScheduledTasks.ts`
 
 - `ScheduledTaskRepository` — persistence
 - `OrchestrationEngineService` — dispatches `thread.create` commands
-- `ProjectionSnapshotQuery` — resolves project defaults, checks thread existence for duplicate prevention
+- `ProjectionSnapshotQuery` — resolves project defaults with targeted project lookups and checks thread existence/user-message counts for duplicate prevention
 
 ### Scheduler
 
@@ -154,7 +154,7 @@ Embedded in the service layer (not a separate reactor). On layer initialization:
 2. **Duplicate prevention**: Get latest run. If `status === "created"` and `threadId` is set, check if the thread still exists in the read model and has zero user messages. If so → create a `skipped` run and return.
 3. **Execute**: For `new_thread` type:
    - Generate new `ThreadId` and `CommandId`.
-   - Resolve project defaults (model selection) from snapshot.
+   - Resolve project defaults (model selection) from a targeted projection query.
    - Build `initialDraft` from config (prompt, skillIds, autoSend).
    - Dispatch `thread.create` orchestration command with `initialDraft`.
    - Create run record with `status: "created"`.
@@ -223,11 +223,15 @@ Appended to both Claude and Codex sessions alongside the managed runs prompt. In
 - **Sidebar nav**: `apps/web/src/components/settings/SettingsSidebarNav.tsx` — "Scheduled Tasks" tab with ClockIcon.
 - **Routes**: `apps/web/src/routes/settings.scheduled-tasks.tsx` (layout), `settings.scheduled-tasks.index.tsx` (list), `settings.scheduled-tasks.$jobId.tsx` (detail).
 
+The settings list/detail pages load project dropdown options through the shared startup snapshot helper (`orchestration.getStartupSnapshot`). They no longer request the full orchestration snapshot just to render project names.
+
 ### Propose Card (Chat)
 
 - **Parser**: `apps/web/src/lib/proposeScheduledTaskParser.ts` — detects `language-t3:propose-scheduled-task` code blocks, parses JSON payload.
 - **Card**: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx` — interactive card with editable name/description/cron/prompt, project dropdown, Accept/Reject buttons.
 - **Wiring**: `ChatMarkdown.tsx` → `MessagesTimeline.tsx` → `ChatView.tsx` (`handleProposeScheduledTask`).
+
+The card also uses the startup snapshot helper for project options, preserving the initially supplied project while avoiding full thread-content hydration during message rendering.
 
 See [Chat Model-to-User Prompts](chat-model-to-user-prompts.md) for the full data flow.
 

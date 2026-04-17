@@ -3,6 +3,7 @@ import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -58,18 +59,12 @@ export function ScheduledTasksPanel() {
   const fetchJobs = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const [jobsList, snapshot] = await Promise.all([
+      const [jobsList, projectOptions] = await Promise.all([
         api.scheduledTasks.list(),
-        api.orchestration.getSnapshot(),
+        getOrchestrationProjectOptions(api),
       ]);
       setJobs(jobsList);
-      setProjects(
-        snapshot.projects.map((p) => ({
-          id: p.id,
-          title: p.title,
-          workspaceRoot: p.workspaceRoot,
-        })),
-      );
+      setProjects(projectOptions);
     } catch (error) {
       console.error("Failed to fetch scheduled tasks:", error);
     } finally {

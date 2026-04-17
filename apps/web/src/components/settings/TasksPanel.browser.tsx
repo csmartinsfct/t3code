@@ -101,7 +101,7 @@ describe("TasksPanel browser coverage", () => {
         }),
       },
       orchestration: {
-        getSnapshot: vi.fn(async () => ({
+        getStartupSnapshot: vi.fn(async () => ({
           projects: [
             {
               id: PROJECT_ALPHA,

@@ -113,15 +113,17 @@ Emitted via `logWebTimeline` / `warnWebTimeline` from `apps/web/src/timelineLogg
 
 Key client events:
 
-| Event                                 | When                                |
-| ------------------------------------- | ----------------------------------- |
-| `composer.submit.start`               | User submits a message              |
-| `composer.turn-start.dispatched`      | Turn start sent to server           |
-| `store.thread-message.apply`          | Message applied to client state     |
-| `store.thread-session.apply`          | Session state applied to client     |
-| `orchestration.domain-event.received` | Domain event received via WebSocket |
-| `ws.transport.created`                | WebSocket connection established    |
-| `ws.subscription.disconnected`        | WebSocket subscription lost         |
+| Event                                 | When                                                                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `composer.submit.start`               | User submits a message                                                                                      |
+| `composer.turn-start.dispatched`      | Turn start sent to server                                                                                   |
+| `store.thread-message.apply`          | Message applied to client state                                                                             |
+| `store.thread-session.apply`          | Session state applied to client                                                                             |
+| `orchestration.startup-snapshot.*`    | Shallow project/thread metadata load for boot, recovery, settings selectors, and lightweight proposal cards |
+| `orchestration.thread-content.*`      | Per-thread message/activity/checkpoint hydration                                                            |
+| `orchestration.domain-event.received` | Domain event received via WebSocket                                                                         |
+| `ws.transport.created`                | WebSocket connection established                                                                            |
+| `ws.subscription.disconnected`        | WebSocket subscription lost                                                                                 |
 
 ### Server-Side (multiple scopes)
 

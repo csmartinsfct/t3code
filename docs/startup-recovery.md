@@ -24,7 +24,7 @@ The startup pass deliberately skips threads/runs that were actually blocked on a
 
 ## Startup Snapshot And Lazy Thread Content
 
-The web app can initialize sidebar and header state with `orchestration.getStartupSnapshot`. This RPC returns all projects plus shallow thread metadata for every known thread, including archived threads, without loading heavyweight per-thread content.
+The web app initializes sidebar, header, settings project selectors, and lightweight proposal cards with `orchestration.getStartupSnapshot`. This RPC returns all projects plus shallow thread metadata for every known thread, including archived threads, without loading heavyweight per-thread content.
 
 Thread metadata includes the summary fields the shell needs without deriving them from nested arrays:
 
@@ -47,7 +47,7 @@ While this request is in flight, chat routes must keep the active thread shell s
 
 Orchestration parent routes also hydrate the required child-thread content before deriving the combined timeline. The switcher can still render from run and ticket metadata while child messages load, but the parent timeline stays in a loading state until the parent and ordered child threads are hydrated.
 
-The older `orchestration.getSnapshot` RPC remains available during migration for callers that still need the full read model in one response.
+The older `orchestration.getSnapshot` RPC remains available for compatibility and server-side recovery/reconciliation code that still needs the full read model in one response. Web UI paths should prefer `getStartupSnapshot` for project/thread metadata and `getThreadContent` for route-level thread content.
 
 ## Auto Resume
 

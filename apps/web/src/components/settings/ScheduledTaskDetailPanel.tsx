@@ -3,6 +3,7 @@ import { ArrowLeftIcon, PlayIcon, PencilIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 
+import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import {
   AlertDialog,
@@ -57,20 +58,14 @@ export function ScheduledTaskDetailPanel() {
   const fetchData = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const [taskData, runsData, snapshot] = await Promise.all([
+      const [taskData, runsData, projectOptions] = await Promise.all([
         api.scheduledTasks.get({ jobId: taskId }),
         api.scheduledTasks.listRuns({ jobId: taskId, limit: 50 }),
-        api.orchestration.getSnapshot(),
+        getOrchestrationProjectOptions(api),
       ]);
       setTask(taskData);
       setRuns(runsData);
-      setProjects(
-        snapshot.projects.map((p) => ({
-          id: p.id,
-          title: p.title,
-          workspaceRoot: p.workspaceRoot,
-        })),
-      );
+      setProjects(projectOptions);
     } catch (error) {
       console.error("Failed to fetch scheduled task details:", error);
     } finally {

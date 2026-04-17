@@ -124,7 +124,7 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
         update: updateSpy,
       },
       orchestration: {
-        getSnapshot: vi.fn(async () => ({
+        getStartupSnapshot: vi.fn(async () => ({
           projects: [
             {
               id: PROJECT_ID,
