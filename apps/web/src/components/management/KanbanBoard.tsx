@@ -146,6 +146,7 @@ export async function launchBoardOrchestration(input: {
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   promptOverrides?: OrchestrationPromptOverrides;
+  maxReviewIterations?: number;
   orchestrateTickets: ReadonlyMap<TicketId, Pick<TicketSummary, "projectId">>;
   onProjectMismatch: () => void;
   clearSelection: () => void;
@@ -166,6 +167,9 @@ export async function launchBoardOrchestration(input: {
     implementerModelSelection: input.implementerModelSelection,
     reviewerModelSelection: input.reviewerModelSelection,
     ...(input.promptOverrides ? { promptOverrides: input.promptOverrides } : {}),
+    ...(input.maxReviewIterations !== undefined
+      ? { maxReviewIterations: input.maxReviewIterations }
+      : {}),
   });
   await input.api.orchestration.startRun({ runId: result.runId });
   input.clearSelection();
@@ -495,6 +499,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       implementerModelSelection: ModelSelection,
       reviewerModelSelection: ModelSelection,
       promptOverrides?: OrchestrationPromptOverrides,
+      maxReviewIterations?: number,
     ) => {
       const api = ensureNativeApi();
       const tickets = orchestrationSubpage?.tickets ?? new Map();
@@ -505,6 +510,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         implementerModelSelection,
         reviewerModelSelection,
         ...(promptOverrides ? { promptOverrides } : {}),
+        ...(maxReviewIterations !== undefined ? { maxReviewIterations } : {}),
         orchestrateTickets: tickets,
         onProjectMismatch: () => {
           toastManager.add({

@@ -1,11 +1,25 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-18T00:44:45.761Z",
-  "lastProcessedCommit": "165d6300703eafaeb8e5a1a7b424939fa20238bf",
+  "generatedAt": "2026-04-18T01:21:44.362Z",
+  "lastProcessedCommit": "6718e4e4a9ce5a470bfee34402a6d224c127ddd4",
   "groups": [
     {
       "date": "2026-04-18",
       "entries": [
+        {
+          "id": "207e1f8cdbae076b",
+          "title": "Smoother Sidebar Startup",
+          "summary": "The sidebar no longer animates during the initial render, reducing visual distraction when the app first loads.",
+          "category": "fix",
+          "commitShas": ["6718e4e4a9ce5a470bfee34402a6d224c127ddd4"]
+        },
+        {
+          "id": "d601e5cfd3eaadd7",
+          "title": "Improved Ticket Board Navigation and Filtering",
+          "summary": "Ticket management is easier to scan and refine with board/list view switching, richer filters, clearer ticket details, and preserved board context when starting new threads.",
+          "category": "improvement",
+          "commitShas": ["ada0a342220f66e24f51368c3f8a7e5c3838350a"]
+        },
         {
           "id": "af7ea0d99127923e",
           "title": "Expanded Ticket Board Views and Filtering",
@@ -1753,6 +1767,19 @@
         "toInclusiveCommit": "165d6300703eafaeb8e5a1a7b424939fa20238bf",
         "commitShas": ["165d6300703eafaeb8e5a1a7b424939fa20238bf"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-18T01:21:44.221Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "165d6300703eafaeb8e5a1a7b424939fa20238bf",
+        "toInclusiveCommit": "6718e4e4a9ce5a470bfee34402a6d224c127ddd4",
+        "commitShas": [
+          "ada0a342220f66e24f51368c3f8a7e5c3838350a",
+          "6718e4e4a9ce5a470bfee34402a6d224c127ddd4"
+        ],
+        "commitCount": 2,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

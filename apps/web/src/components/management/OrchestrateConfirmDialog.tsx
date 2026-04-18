@@ -232,18 +232,24 @@ export function isOrchestrationSubmitDisabled(input: {
   return input.plan?.kind !== "valid" || input.isSubmitting;
 }
 
+export interface OrchestrationConfirmOnConfirm {
+  (
+    selectedTicketIdentifiers: string[],
+    implementerModelSelection: ModelSelection,
+    reviewerModelSelection: ModelSelection,
+    promptOverrides?: OrchestrationPromptOverrides,
+    maxReviewIterations?: number,
+  ): Promise<void> | void;
+}
+
 export async function submitOrchestrationConfirm(input: {
   plan: OrchestrationPlan | null;
   selectedTicketIdentifiers: string[];
   implementerModelSelection: ModelSelection;
   reviewerModelSelection: ModelSelection;
   promptOverrides?: OrchestrationPromptOverrides;
-  onConfirm: (
-    selectedTicketIdentifiers: string[],
-    implementerModelSelection: ModelSelection,
-    reviewerModelSelection: ModelSelection,
-    promptOverrides?: OrchestrationPromptOverrides,
-  ) => Promise<void> | void;
+  maxReviewIterations?: number;
+  onConfirm: OrchestrationConfirmOnConfirm;
 }): Promise<{ kind: "noop" } | { kind: "started" } | { kind: "error"; message: string }> {
   if (input.plan?.kind !== "valid") {
     return { kind: "noop" };
@@ -255,6 +261,7 @@ export async function submitOrchestrationConfirm(input: {
       input.implementerModelSelection,
       input.reviewerModelSelection,
       input.promptOverrides,
+      input.maxReviewIterations,
     );
     return { kind: "started" };
   } catch (err: unknown) {

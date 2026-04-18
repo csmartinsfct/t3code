@@ -9,7 +9,14 @@ import type {
   TicketSummary,
   TicketTreeNode,
 } from "@t3tools/contracts";
-import { ADMIN_PROMPT_GROUP_ID, DEFAULT_RUNTIME_MODE, type ProjectId } from "@t3tools/contracts";
+import {
+  ADMIN_PROMPT_GROUP_ID,
+  DEFAULT_RUNTIME_MODE,
+  modelSelectionProviderKind,
+  type ProjectId,
+} from "@t3tools/contracts";
+import { DEFAULT_MAX_REVIEW_ITERATIONS } from "@t3tools/contracts/settings";
+import { Equal } from "effect";
 import {
   AlertTriangleIcon,
   CircleAlertIcon,
@@ -18,19 +25,22 @@ import {
   PlayIcon,
   SkipForwardIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useSettings } from "../../hooks/useSettings";
 import { buildOrchestrationPlan, type OrchestrationPlan } from "../../lib/orchestrationValidation";
+import { getCustomModelOptionsByProvider, makeAppModelSelection } from "../../modelSelection";
 import { ensureNativeApi } from "../../nativeApi";
-import {
-  formatModelSelectionSummary,
-  resolveReviewerConfigurationSummary,
-} from "./orchestrationModelDisplay";
+import { useServerProviders } from "../../rpc/serverState";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Skeleton } from "../ui/skeleton";
+import { Switch } from "../ui/switch";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { PromptEditorDialog } from "../settings/PromptEditorDialog";
 import { PromptList } from "../settings/PromptList";
 import { SettingsSection } from "../settings/SettingsPanels";
@@ -39,6 +49,7 @@ import {
   getRunnableTicketIdentifiers,
   isOrchestrationSubmitDisabled,
   submitOrchestrationConfirm,
+  type OrchestrationConfirmOnConfirm,
 } from "./OrchestrateConfirmDialog";
 
 // ---------------------------------------------------------------------------
@@ -49,12 +60,7 @@ interface OrchestrationSubpageProps {
   selectedTickets: ReadonlyMap<TicketId, TicketSummary>;
   allTickets: readonly TicketSummary[];
   projectId: string;
-  onConfirm: (
-    selectedTicketIdentifiers: string[],
-    implementerModelSelection: ModelSelection,
-    reviewerModelSelection: ModelSelection,
-    promptOverrides?: OrchestrationPromptOverrides,
-  ) => Promise<void> | void;
+  onConfirm: OrchestrationConfirmOnConfirm;
   onBack: () => void;
 }
 
@@ -75,10 +81,22 @@ export function OrchestrationSubpage({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Per-run inclusion set: user can uncheck tickets on this page to drop them
+  // from the run. Seeded with every originally-selected ticket (all on by default).
+  const [includedIds, setIncludedIds] = useState<Set<TicketId>>(
+    () => new Set(selectedTickets.keys()),
+  );
+
+  // If the caller replaces the selection, reset the inclusion set.
   useEffect(() => {
-    if (selectedTickets.size === 0) {
+    setIncludedIds(new Set(selectedTickets.keys()));
+  }, [selectedTickets]);
+
+  useEffect(() => {
+    if (includedIds.size === 0) {
       setPlan(null);
       setError(null);
+      setPlanLoading(false);
       return;
     }
 
@@ -91,8 +109,7 @@ export function OrchestrationSubpage({
       .getTree({ projectId: projectId as ProjectId })
       .then((tree: readonly TicketTreeNode[]) => {
         if (cancelled) return;
-        const selectedIds = new Set(selectedTickets.keys());
-        const result = buildOrchestrationPlan(selectedIds, tree, allTickets);
+        const result = buildOrchestrationPlan(includedIds, tree, allTickets);
         setPlan(result);
       })
       .catch((err: unknown) => {
@@ -106,14 +123,40 @@ export function OrchestrationSubpage({
     return () => {
       cancelled = true;
     };
-  }, [selectedTickets, allTickets, projectId]);
+  }, [includedIds, allTickets, projectId]);
 
-  // ── Settings ────────────────────────────────────────────────────────
+  const toggleIncluded = useCallback((id: TicketId, checked: boolean) => {
+    setIncludedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  // ── Settings + per-run model/review state ───────────────────────────
   const settings = useSettings();
-  const implSel = settings.orchestrationImplementerModelSelection;
-  const revSel = settings.orchestrationReviewerModelSelection;
-  const implDisplayName = formatModelSelectionSummary(implSel);
-  const revDisplayName = resolveReviewerConfigurationSummary(settings.maxReviewIterations, revSel);
+  const serverProviders = useServerProviders();
+  const settingsImplSel = settings.orchestrationImplementerModelSelection;
+  const settingsRevSel = settings.orchestrationReviewerModelSelection;
+  const settingsMaxReview = settings.maxReviewIterations;
+
+  const [implementerSelection, setImplementerSelection] = useState<ModelSelection>(settingsImplSel);
+  const [reviewerSelection, setReviewerSelection] = useState<ModelSelection>(settingsRevSel);
+  const [skipReview, setSkipReview] = useState<boolean>(settingsMaxReview === 0);
+
+  const implementerIsOverride = !Equal.equals(implementerSelection, settingsImplSel);
+  const reviewerIsOverride = !Equal.equals(reviewerSelection, settingsRevSel);
+
+  const resetImplementer = useCallback(() => {
+    setImplementerSelection(settingsImplSel);
+  }, [settingsImplSel]);
+  const resetReviewer = useCallback(() => {
+    setReviewerSelection(settingsRevSel);
+  }, [settingsRevSel]);
 
   // ── Prompts state ───────────────────────────────────────────────────
   const [promptDefs, setPromptDefs] = useState<ListPromptDefinitionsResult | null>(null);
@@ -214,7 +257,47 @@ export function OrchestrationSubpage({
     [projectId],
   );
 
+  // ── Display ordering ────────────────────────────────────────────────
+  // Always render every originally-selected ticket so checkboxes are stable,
+  // even when the plan becomes blocked after an unchecking.
+  const displayEntries = useMemo(() => {
+    const bySelectedOrder = Array.from(selectedTickets.values());
+    const planOrder = plan?.kind === "valid" ? plan.orderedTickets : null;
+    if (!planOrder) {
+      return bySelectedOrder.map((ticket) => ({
+        ticket,
+        planIndex: null as number | null,
+        annotation: null as string | null,
+      }));
+    }
+    const seen = new Set<TicketId>();
+    const ordered: Array<{
+      ticket: TicketSummary;
+      planIndex: number | null;
+      annotation: string | null;
+    }> = [];
+    planOrder.forEach((entry, i) => {
+      seen.add(entry.ticket.id);
+      ordered.push({
+        ticket: entry.ticket,
+        planIndex: entry.annotation === "skipped-done" ? null : i,
+        annotation: entry.annotation,
+      });
+    });
+    for (const ticket of bySelectedOrder) {
+      if (seen.has(ticket.id)) continue;
+      ordered.push({ ticket, planIndex: null, annotation: null });
+    }
+    return ordered;
+  }, [plan, selectedTickets]);
+
   // ── Submit ──────────────────────────────────────────────────────────
+  const resolvedMaxReviewIterations = useMemo<number | undefined>(() => {
+    if (skipReview) return 0;
+    if (settingsMaxReview === 0) return DEFAULT_MAX_REVIEW_ITERATIONS;
+    return undefined;
+  }, [skipReview, settingsMaxReview]);
+
   const handleConfirm = useCallback(async () => {
     if (isOrchestrationSubmitDisabled({ plan, isSubmitting })) {
       return;
@@ -228,9 +311,12 @@ export function OrchestrationSubpage({
     const result = await submitOrchestrationConfirm({
       plan,
       selectedTicketIdentifiers: getRunnableTicketIdentifiers(plan),
-      implementerModelSelection: implSel,
-      reviewerModelSelection: revSel,
+      implementerModelSelection: implementerSelection,
+      reviewerModelSelection: reviewerSelection,
       ...(overrides ? { promptOverrides: overrides } : {}),
+      ...(resolvedMaxReviewIterations !== undefined
+        ? { maxReviewIterations: resolvedMaxReviewIterations }
+        : {}),
       onConfirm,
     });
     if (result.kind === "started") {
@@ -241,7 +327,16 @@ export function OrchestrationSubpage({
       setError(result.message);
     }
     setIsSubmitting(false);
-  }, [isSubmitting, plan, implSel, revSel, localOverrides, onConfirm, onBack, selectedTickets]);
+  }, [
+    isSubmitting,
+    plan,
+    implementerSelection,
+    reviewerSelection,
+    resolvedMaxReviewIterations,
+    localOverrides,
+    onConfirm,
+    onBack,
+  ]);
 
   const runnableCount = getRunnableTicketIdentifiers(plan).length;
   const submitDisabled = isOrchestrationSubmitDisabled({ plan, isSubmitting });
@@ -264,7 +359,7 @@ export function OrchestrationSubpage({
         {/* Section 1: Ticket execution order */}
         <SettingsSection title="Execution order">
           <div className="px-4 py-3 sm:px-5">
-            {planLoading ? (
+            {planLoading && displayEntries.length === 0 ? (
               <div className="flex flex-col gap-2">
                 {Array.from({ length: Math.min(selectedTickets.size, 5) }).map((_, i) => (
                   <Skeleton key={i} className="h-8 w-full" />
@@ -275,29 +370,77 @@ export function OrchestrationSubpage({
                 <CircleAlertIcon className="size-3.5 shrink-0" />
                 {error}
               </div>
-            ) : plan?.kind === "blocked-external" ? (
-              <BlockedExternalInline externalDeps={plan.externalDeps} />
-            ) : plan?.kind === "blocked-cycle" ? (
-              <BlockedCycleInline cycles={plan.cycles} />
-            ) : plan?.kind === "valid" ? (
-              <div className="flex flex-col gap-1">
-                {plan.orderedTickets.map((entry, index) => (
-                  <TicketRow key={entry.ticket.id} entry={entry} index={index} />
-                ))}
+            ) : (
+              <div className="flex flex-col gap-3">
+                {plan?.kind === "blocked-external" ? (
+                  <BlockedExternalInline externalDeps={plan.externalDeps} />
+                ) : plan?.kind === "blocked-cycle" ? (
+                  <BlockedCycleInline cycles={plan.cycles} />
+                ) : null}
+                {includedIds.size === 0 ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <CircleAlertIcon className="size-3.5 shrink-0" />
+                    Select at least one ticket to run.
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-1">
+                  {displayEntries.map((entry) => (
+                    <TicketRow
+                      key={entry.ticket.id}
+                      ticket={entry.ticket}
+                      planIndex={entry.planIndex}
+                      annotation={entry.annotation}
+                      included={includedIds.has(entry.ticket.id)}
+                      onToggle={(checked) => toggleIncluded(entry.ticket.id, checked)}
+                    />
+                  ))}
+                </div>
               </div>
-            ) : null}
+            )}
           </div>
         </SettingsSection>
 
         {/* Section 2: Run configuration */}
         <SettingsSection title="Run configuration">
-          <div className="flex flex-col gap-1 px-4 py-3 text-xs text-foreground/80 sm:px-5">
-            <ConfigRow label="Implementer" value={implDisplayName} />
-            <ConfigRow label="Reviewer" value={revDisplayName} />
-            <ConfigRow
-              label="Runtime"
-              value={DEFAULT_RUNTIME_MODE === "full-access" ? "Full access" : "Approval required"}
+          <div className="flex flex-col divide-y divide-border/50">
+            <RunModelRow
+              label="Implementer"
+              selection={implementerSelection}
+              onChange={setImplementerSelection}
+              hasOverride={implementerIsOverride}
+              onReset={resetImplementer}
+              serverProviders={serverProviders}
+              settings={settings}
+              disabled={false}
             />
+            <RunModelRow
+              label="Reviewer"
+              selection={reviewerSelection}
+              onChange={setReviewerSelection}
+              hasOverride={reviewerIsOverride}
+              onReset={resetReviewer}
+              serverProviders={serverProviders}
+              settings={settings}
+              disabled={skipReview}
+              trailingControl={
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span>{skipReview ? "Skip review" : "Review"}</span>
+                  <Switch
+                    checked={!skipReview}
+                    onCheckedChange={(checked) => setSkipReview(!checked)}
+                    aria-label={
+                      skipReview ? "Enable review for this run" : "Skip review for this run"
+                    }
+                  />
+                </label>
+              }
+            />
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-foreground/80 sm:px-5">
+              <span className="text-muted-foreground">Runtime</span>
+              <span className="font-mono text-[11px]">
+                {DEFAULT_RUNTIME_MODE === "full-access" ? "Full access" : "Approval required"}
+              </span>
+            </div>
           </div>
         </SettingsSection>
 
@@ -351,34 +494,50 @@ export function OrchestrationSubpage({
 // ---------------------------------------------------------------------------
 
 function TicketRow({
-  entry,
-  index,
+  ticket,
+  planIndex,
+  annotation,
+  included,
+  onToggle,
 }: {
-  entry: { ticket: TicketSummary; annotation: string };
-  index: number;
+  ticket: TicketSummary;
+  planIndex: number | null;
+  annotation: string | null;
+  included: boolean;
+  onToggle: (checked: boolean) => void;
 }) {
-  const isSkipped = entry.annotation === "skipped-done";
-  const isWarn = entry.annotation === "warn-reprocess";
-  const statusCfg = STATUS_CONFIG[entry.ticket.status];
+  const isSkipped = annotation === "skipped-done";
+  const isWarn = annotation === "warn-reprocess";
+  const statusCfg = STATUS_CONFIG[ticket.status];
+  const dim = !included || isSkipped;
 
   return (
-    <div
-      className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${isSkipped ? "opacity-50" : ""}`}
-    >
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground">
-        {index + 1}
+    <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${dim ? "opacity-50" : ""}`}>
+      <Checkbox
+        checked={included}
+        onCheckedChange={(checked) => onToggle(Boolean(checked))}
+        aria-label={`Include ${ticket.identifier} in run`}
+      />
+      {included && planIndex !== null ? (
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground">
+          {planIndex + 1}
+        </span>
+      ) : (
+        <span className="size-5 shrink-0" aria-hidden />
+      )}
+      <span className="font-mono text-[10px] text-muted-foreground">{ticket.identifier}</span>
+      <span
+        className={`min-w-0 flex-1 truncate text-xs ${!included || isSkipped ? "line-through" : ""}`}
+      >
+        {ticket.title}
       </span>
-      <span className="font-mono text-[10px] text-muted-foreground">{entry.ticket.identifier}</span>
-      <span className={`min-w-0 flex-1 truncate text-xs ${isSkipped ? "line-through" : ""}`}>
-        {entry.ticket.title}
-      </span>
-      {isSkipped && (
+      {included && isSkipped && (
         <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
           <SkipForwardIcon className="size-3" />
           Skipped
         </span>
       )}
-      {isWarn && (
+      {included && isWarn && (
         <Badge size="sm" variant={statusCfg.badgeVariant} className="shrink-0">
           <AlertTriangleIcon className="size-2.5" />
           Re-processing
@@ -388,11 +547,91 @@ function TicketRow({
   );
 }
 
-function ConfigRow({ label, value }: { label: string; value: string }) {
+function RunModelRow({
+  label,
+  selection,
+  onChange,
+  hasOverride,
+  onReset,
+  serverProviders,
+  settings,
+  disabled,
+  trailingControl,
+}: {
+  label: string;
+  selection: ModelSelection;
+  onChange: (next: ModelSelection) => void;
+  hasOverride: boolean;
+  onReset: () => void;
+  serverProviders: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
+  settings: import("@t3tools/contracts").UnifiedSettings;
+  disabled: boolean;
+  trailingControl?: ReactNode;
+}) {
+  const provider = modelSelectionProviderKind(selection);
+  const optionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    provider,
+    selection.model,
+  );
+  const models = serverProviders.find((p) => p.provider === provider)?.models ?? [];
+
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-[11px]">{value}</span>
+    <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-foreground/80 sm:px-5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-muted-foreground">{label}</span>
+        {hasOverride && !disabled && (
+          <button
+            type="button"
+            className="text-muted-foreground/50 transition-colors hover:text-foreground"
+            onClick={onReset}
+            aria-label={`Reset ${label} to default`}
+          >
+            <XIcon className="size-3" />
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <div
+          className={`flex flex-wrap items-center gap-1.5 transition-opacity ${
+            disabled ? "pointer-events-none opacity-40" : ""
+          }`}
+          aria-disabled={disabled}
+        >
+          <ProviderModelPicker
+            provider={provider}
+            model={selection.model}
+            lockedProvider={null}
+            providers={serverProviders}
+            modelOptionsByProvider={optionsByProvider}
+            triggerVariant="outline"
+            triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+            disabled={disabled}
+            onProviderModelChange={(nextProvider, nextModel) => {
+              onChange(makeAppModelSelection(nextProvider, nextModel));
+            }}
+          />
+          <TraitsPicker
+            provider={provider}
+            models={models}
+            model={selection.model}
+            prompt=""
+            onPromptChange={() => {}}
+            modelOptions={(selection as Record<string, unknown>).options as never}
+            allowPromptInjectedEffort={false}
+            triggerVariant="outline"
+            triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+            onModelOptionsChange={(nextOptions) => {
+              onChange({
+                ...selection,
+                ...(nextOptions ? { options: nextOptions } : {}),
+              } as ModelSelection);
+            }}
+          />
+        </div>
+        {trailingControl}
+      </div>
     </div>
   );
 }
