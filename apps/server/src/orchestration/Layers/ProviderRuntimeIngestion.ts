@@ -41,9 +41,13 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   fetchClaudeOAuthUsage,
-  getBackoffState,
+  getBackoffState as getClaudeOAuthBackoffState,
   resolveOAuthToken,
 } from "../../provider/Layers/claudeOAuthUsage.ts";
+import {
+  fetchGeminiOAuthUsage,
+  getGeminiQuotaBackoffState,
+} from "../../provider/Layers/geminiOAuthUsage.ts";
 import {
   discoverClaudeProfiles,
   mergeClaudeProfiles,
@@ -1790,7 +1794,7 @@ const make = Effect.fn("make")(function* () {
             `oauth-poll: ${targets.length} target(s) deduplicated to ${byToken.size} unique token(s)`,
           );
 
-          // Fetch once per unique token, then store tiers for all profiles in that group.
+          // Fetch Claude once per unique token, then store tiers for all profiles in that group.
           yield* Effect.forEach(
             [...byToken.values()],
             (group) =>
@@ -1803,7 +1807,7 @@ const make = Effect.fn("make")(function* () {
                 });
 
                 // Derive a warning when the API is in backoff (e.g. 429).
-                const backoff = getBackoffState(representative.configDir);
+                const backoff = getClaudeOAuthBackoffState(representative.configDir);
                 const warning = backoff?.inBackoff
                   ? `Retrying in ${formatBackoffMinutes(backoff.backoffUntil)}`
                   : undefined;
@@ -1815,6 +1819,27 @@ const make = Effect.fn("make")(function* () {
               }).pipe(Effect.ignoreCause({ log: true })),
             { concurrency: "unbounded" },
           );
+
+          if (settings?.providers.gemini.enabled) {
+            yield* Effect.gen(function* () {
+              const homePath = settings.providers.gemini.homePath || undefined;
+              const tiers = yield* Effect.tryPromise({
+                try: () => fetchGeminiOAuthUsage(homePath),
+                catch: () => [] as const,
+              });
+
+              // Gemini quota is only available for Google-login Code Assist
+              // accounts. Avoid creating a synthetic meter when no quota
+              // buckets have ever been fetched.
+              if (tiers.length === 0) return;
+
+              const backoff = getGeminiQuotaBackoffState(homePath);
+              const warning = backoff?.inBackoff
+                ? `Retrying in ${formatBackoffMinutes(backoff.backoffUntil)}`
+                : undefined;
+              yield* rateLimitsCache.setOAuthTiers("gemini" as ProviderKind, tiers, warning);
+            }).pipe(Effect.ignoreCause({ log: true }));
+          }
         }).pipe(Effect.ignoreCause({ log: true }));
 
         // Initial fetch after a short delay.

@@ -170,11 +170,11 @@ export type ServerConfigStreamMcpConfigChangedEvent =
 // Provider rate-limits – account-level, not thread-level.
 // ---------------------------------------------------------------------------
 
-/** A single usage tier returned by the Anthropic OAuth usage API. */
+/** A single account-usage tier returned by provider OAuth/quota APIs. */
 export const OAuthUsageTier = Schema.Struct({
-  /** Tier key, e.g. "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet". */
+  /** Tier key, e.g. "five_hour", "seven_day_sonnet", or a model id. */
   tier: TrimmedNonEmptyString,
-  /** Utilization as 0–1 fraction (API returns 0–100; normalize before storing). */
+  /** Utilization as 0–1 fraction. */
   utilization: Schema.Number,
   /** ISO 8601 UTC reset timestamp. `null` when unknown. */
   resetsAt: Schema.NullOr(IsoDateTime),
@@ -185,7 +185,7 @@ export const ProviderRateLimitsSnapshot = Schema.Struct({
   provider: ProviderKind,
   rateLimitInfo: ProviderRateLimitInfo,
   updatedAt: IsoDateTime,
-  /** Multi-tier OAuth usage data (5h, 7d, model-specific). Absent when unavailable. */
+  /** Multi-tier OAuth/quota usage data (5h, 7d, model-specific). Absent when unavailable. */
   oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
   /** Warning message when the usage-data fetch is degraded (e.g. API 429 backoff). */
   fetchWarning: Schema.optional(Schema.String),

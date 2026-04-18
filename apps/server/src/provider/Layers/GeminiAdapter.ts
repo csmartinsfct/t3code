@@ -1353,7 +1353,8 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 rateLimits: {
                   provider: PROVIDER,
                   status: "unknown",
-                  reason: "Gemini ACP/CLI does not expose account rate-limit state.",
+                  reason:
+                    "Gemini ACP does not expose account rate-limit state; T3 polls Code Assist quota separately when Google-login credentials are available.",
                 },
               },
             });

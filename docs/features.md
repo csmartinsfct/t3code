@@ -95,6 +95,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   shows a max context/window denominator when Gemini emits an effective
   `usage_update.size`, because the CLI's effective context window can vary by
   account plan and is not safely derivable from model name alone.
+- Rate limits: for Google-login Code Assist accounts, T3 polls the Gemini Code
+  Assist quota endpoint through cached Gemini CLI OAuth credentials and displays
+  per-model quota usage as percentage used plus reset time when available.
 - Project title, T3 REST service guidance, and project system prompts are
   delivered through ACP embedded context on the first Gemini turn because Gemini
   ACP session creation does not accept a system-prompt parameter.

@@ -55,8 +55,15 @@ Gemini ACP exposes reliable per-thread context usage through:
   `usage.thoughtTokens`, `usage.cachedReadTokens`, and `usage.totalTokens`
 
 T3 emits those as `thread.token-usage.updated`. Missing Gemini fields are left
-unset. Account-level rate-limit state is not exposed by Gemini CLI 0.38, so T3
-reports it as `unknown` instead of synthesizing zero or allowed values.
+unset.
+
+For Google-login Code Assist accounts, T3 also reads Gemini CLI's cached OAuth
+credentials and polls the same Code Assist quota endpoint used by Gemini CLI.
+The response contains per-model quota buckets with `remainingFraction` and
+optional `resetTime`; T3 normalizes those into the shared rate-limit meter as
+used percentages. Absolute request counts are only shown when a provider exposes
+them through the shared contract; Gemini quota buckets are currently displayed as
+percent used per model.
 
 ## Resume, Fork, And Rollback
 
@@ -104,5 +111,7 @@ environment variables:
 - unauthenticated: selected auth mode is missing required credentials, or no
   known auth signal is present
 
-T3 never reads or displays token contents. It only checks credential file
-presence and optional cached account labels.
+Provider status detection only checks credential file presence and optional
+cached account labels. The Gemini quota poller reads cached OAuth token material
+only to call Google's Code Assist quota endpoint; token values are never logged
+or displayed.
