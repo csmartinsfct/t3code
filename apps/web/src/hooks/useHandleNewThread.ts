@@ -8,6 +8,7 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
+import { readNativeApi } from "../nativeApi";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { useStore } from "../store";
 import { useThreadById } from "../storeSelectors";
@@ -111,6 +112,29 @@ export function useHandleNewThread() {
           to: "/$threadId",
           params: { threadId },
         });
+
+        const boardContext = useUiStateStore.getState().managementBoardContext;
+        if (boardContext && boardContext.projectId === projectId) {
+          const viewedTicketId =
+            boardContext.ticketStack[boardContext.ticketStack.length - 1];
+          if (viewedTicketId) {
+            const api = readNativeApi();
+            if (api) {
+              api.ticketing
+                .getById({ id: viewedTicketId, projectId: boardContext.projectId })
+                .then((ticket) => {
+                  if (ticket) {
+                    useComposerDraftStore.getState().addTicketAttachment(threadId, {
+                      id: ticket.id,
+                      identifier: ticket.identifier,
+                      title: ticket.title,
+                    });
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+        }
       })();
     },
     [navigate, routeThreadId],

@@ -53,9 +53,9 @@ export function TicketDescriptionEditor({
           lastSavedMarkdown.current = markdown;
           void onSaveRef.current(markdown);
         },
-        { wait: DEBOUNCE_MS },
+        { wait: DEBOUNCE_MS }
       ),
-    [],
+    []
   );
 
   const editor = useEditor({
@@ -77,12 +77,14 @@ export function TicketDescriptionEditor({
     autofocus: false,
     editorProps: {
       attributes: {
-        class: "ticket-markdown text-[13px] leading-relaxed outline-none",
+        class: "ticket-markdown outline-none",
       },
     },
     onUpdate: ({ editor }) => {
       if (isExternalUpdate.current) return;
-      const md = getMarkdownText(editor.storage as unknown as Record<string, unknown>);
+      const md = getMarkdownText(
+        editor.storage as unknown as Record<string, unknown>
+      );
       const nextValue = md.trim() || null;
       if (nextValue === lastSavedMarkdown.current) return;
       debouncedSave.maybeExecute(nextValue);
@@ -90,7 +92,9 @@ export function TicketDescriptionEditor({
     onBlur: () => {
       debouncedSave.cancel();
       if (!editor) return;
-      const md = getMarkdownText(editor.storage as unknown as Record<string, unknown>);
+      const md = getMarkdownText(
+        editor.storage as unknown as Record<string, unknown>
+      );
       const nextValue = md.trim() || null;
       if (nextValue === lastSavedMarkdown.current) return;
       lastSavedMarkdown.current = nextValue;
@@ -145,14 +149,18 @@ export function TicketDescriptionEditor({
       <BubbleMenu editor={editor} options={{ placement: "top-start" }}>
         <div className="flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 shadow-sm">
           <ToolbarButton
-            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            onClick={() =>
+              editor.chain().focus().toggleHeading({ level: 1 }).run()
+            }
             active={editor.isActive("heading", { level: 1 })}
             title="Heading 1"
           >
             <Heading1Icon className="size-3.5" />
           </ToolbarButton>
           <ToolbarButton
-            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            onClick={() =>
+              editor.chain().focus().toggleHeading({ level: 2 }).run()
+            }
             active={editor.isActive("heading", { level: 2 })}
             title="Heading 2"
           >
@@ -192,7 +200,11 @@ export function TicketDescriptionEditor({
 
           <ToolbarSeparator />
 
-          <ToolbarButton onClick={toggleLink} active={editor.isActive("link")} title="Link">
+          <ToolbarButton
+            onClick={toggleLink}
+            active={editor.isActive("link")}
+            title="Link"
+          >
             <LinkIcon className="size-3.5" />
           </ToolbarButton>
           <ToolbarButton

@@ -75,7 +75,11 @@
   --secondary: --alpha(var(--color-black) / 4%);
   --secondary-foreground: var(--color-neutral-800);
   --muted: --alpha(var(--color-black) / 4%);
-  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --muted-foreground: color-mix(
+    in srgb,
+    var(--color-neutral-500) 90%,
+    var(--color-black)
+  );
   --accent: --alpha(var(--color-black) / 4%);
   --accent-foreground: var(--color-neutral-800);
   --destructive: var(--color-red-500);
@@ -92,7 +96,11 @@
 
   @variant dark {
     color-scheme: dark;
-    --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+    --background: color-mix(
+      in srgb,
+      var(--color-neutral-950) 95%,
+      var(--color-white)
+    );
     --foreground: var(--color-neutral-100);
     --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
@@ -103,10 +111,18 @@
     --secondary: --alpha(var(--color-white) / 4%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 4%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+    --muted-foreground: color-mix(
+      in srgb,
+      var(--color-neutral-500) 90%,
+      var(--color-white)
+    );
     --accent: --alpha(var(--color-white) / 4%);
     --accent-foreground: var(--color-neutral-100);
-    --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+    --destructive: color-mix(
+      in srgb,
+      var(--color-red-500) 90%,
+      var(--color-white)
+    );
     --border: --alpha(var(--color-white) / 6%);
     --input: --alpha(var(--color-white) / 8%);
     --ring: oklch(0.588 0.217 264);
@@ -121,13 +137,8 @@
 }
 
 body {
-  font-family:
-    "DM Sans",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    system-ui, sans-serif;
   margin: 0;
   padding: 0;
   min-height: 100vh;
@@ -160,7 +171,8 @@ pre,
 code,
 textarea,
 input {
-  font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+    monospace;
 }
 
 /* Window drag region (frameless titlebar) */
@@ -219,11 +231,19 @@ input {
   width: 6px !important;
 }
 
-.thread-terminal-drawer .xterm .xterm-scrollable-element > .scrollbar > .slider {
+.thread-terminal-drawer
+  .xterm
+  .xterm-scrollable-element
+  > .scrollbar
+  > .slider {
   border-radius: 3px;
 }
 
-.thread-terminal-drawer .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+.thread-terminal-drawer
+  .xterm
+  .xterm-scrollable-element
+  > .scrollbar.vertical
+  > .slider {
   width: 6px !important;
   left: 0 !important;
 }
@@ -327,7 +347,11 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown a {
   color: var(--info-foreground);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--info-foreground) 40%, transparent);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--info-foreground) 40%,
+    transparent
+  );
 }
 
 .chat-markdown a:hover {
@@ -391,14 +415,13 @@ label:has(> select#reasoning-effort) select {
   color: var(--muted-foreground);
   opacity: 0;
   pointer-events: none;
-  transition:
-    opacity 120ms ease,
-    color 120ms ease,
-    border-color 120ms ease;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 .chat-markdown .chat-markdown-codeblock:hover .chat-markdown-copy-button,
-.chat-markdown .chat-markdown-codeblock:focus-within .chat-markdown-copy-button {
+.chat-markdown
+  .chat-markdown-codeblock:focus-within
+  .chat-markdown-copy-button {
   opacity: 1;
   pointer-events: auto;
 }
@@ -409,7 +432,11 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown .chat-markdown-shiki .shiki {
-  background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
+  background: color-mix(
+    in srgb,
+    var(--muted) 78%,
+    var(--background)
+  ) !important;
 }
 
 .chat-markdown table {
@@ -429,6 +456,9 @@ label:has(> select#reasoning-effort) select {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  font-size: 14px;
+  font-weight: 100;
+  line-height: 1.65;
 }
 
 .ticket-markdown h1,
@@ -444,7 +474,7 @@ label:has(> select#reasoning-effort) select {
 
 /* Major section headers — generous top breathing room */
 .ticket-markdown h1 {
-  font-size: 1rem;
+  font-size: 18px;
   margin: 1.4rem 0 0.4rem;
 }
 
@@ -455,14 +485,14 @@ label:has(> select#reasoning-effort) select {
 
 /* Sub-headers — moderate separation */
 .ticket-markdown h3 {
-  font-size: 0.8rem;
+  font-size: 15px;
   margin: 1rem 0 0.3rem;
 }
 
 .ticket-markdown h4,
 .ticket-markdown h5,
 .ticket-markdown h6 {
-  font-size: 0.75rem;
+  font-size: 14px;
   margin: 0.75rem 0 0.25rem;
 }
 
@@ -499,7 +529,11 @@ label:has(> select#reasoning-effort) select {
 .ticket-markdown a {
   color: var(--info-foreground);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--info-foreground) 40%, transparent);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--info-foreground) 40%,
+    transparent
+  );
 }
 
 .ticket-markdown a:hover {
@@ -527,6 +561,10 @@ label:has(> select#reasoning-effort) select {
   border-radius: 0.5rem;
   background: var(--muted);
   padding: 0.5rem 0.6rem;
+}
+
+.ticket-markdown hr {
+  margin-top: 2rem;
 }
 
 .ticket-markdown pre code {
@@ -620,15 +658,10 @@ label:has(> select#reasoning-effort) select {
 }
 
 .ultrathink-pill {
-  background:
-    linear-gradient(var(--card), var(--card)) padding-box,
+  background: linear-gradient(var(--card), var(--card)) padding-box,
     var(--ultrathink-spectrum) border-box;
-  background-size:
-    100% 100%,
-    220% 220%;
-  background-position:
-    0 0,
-    0% 50%;
+  background-size: 100% 100%, 220% 220%;
+  background-position: 0 0, 0% 50%;
   animation: ultrathink-rainbow 10s linear infinite;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card) 82%, transparent);
 }

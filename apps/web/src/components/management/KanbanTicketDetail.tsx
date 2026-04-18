@@ -46,9 +46,21 @@ import {
 } from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { useSettings } from "../../hooks/useSettings";
@@ -104,7 +116,10 @@ export function resolveInlineEditBlurAction(input: {
   return input.isEditing ? "save" : "ignore";
 }
 
-export function resolveRequiredInlineTextSave(input: { currentValue: string; draft: string }): {
+export function resolveRequiredInlineTextSave(input: {
+  currentValue: string;
+  draft: string;
+}): {
   action: "skip" | "save";
   nextValue: string;
 } {
@@ -128,7 +143,7 @@ export function resolveNullableInlineTextSave(input: {
 
 export function buildTicketDetailLookupInput(
   ticketId: TicketId,
-  projectId: string,
+  projectId: string
 ): {
   id: TicketId;
   projectId: ProjectId;
@@ -143,7 +158,9 @@ export function shouldAutoBackFromTicketProjectMismatch(input: {
   ticket: Pick<Ticket, "projectId"> | null;
   projectId: string;
 }): boolean {
-  return !!input.ticket && input.ticket.projectId !== (input.projectId as ProjectId);
+  return (
+    !!input.ticket && input.ticket.projectId !== (input.projectId as ProjectId)
+  );
 }
 
 interface TicketDetailDecomposeComposerDraftStore {
@@ -155,13 +172,13 @@ interface TicketDetailDecomposeComposerDraftStore {
       createdAt: string;
       envMode: "local";
       runtimeMode: typeof DEFAULT_RUNTIME_MODE;
-    },
+    }
   ) => void;
   applyStickyState: (threadId: ThreadId) => void;
   setPrompt: (threadId: ThreadId, prompt: string) => void;
   addTicketAttachment: (
     threadId: ThreadId,
-    attachment: Pick<Ticket, "id" | "identifier" | "title">,
+    attachment: Pick<Ticket, "id" | "identifier" | "title">
   ) => void;
 }
 
@@ -176,11 +193,15 @@ export function startTicketDetailDecomposeFlow(input: {
   const createdAt = (input.now ?? (() => new Date().toISOString()))();
 
   input.composerDraftStore.clearProjectDraftThreadId(input.ticket.projectId);
-  input.composerDraftStore.setProjectDraftThreadId(input.ticket.projectId, threadId, {
-    createdAt,
-    envMode: "local",
-    runtimeMode: DEFAULT_RUNTIME_MODE,
-  });
+  input.composerDraftStore.setProjectDraftThreadId(
+    input.ticket.projectId,
+    threadId,
+    {
+      createdAt,
+      envMode: "local",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+    }
+  );
   input.composerDraftStore.applyStickyState(threadId);
   input.composerDraftStore.addTicketAttachment(threadId, {
     id: input.ticket.id,
@@ -241,7 +262,7 @@ function TicketDetailActionsMenu({
               {action.icon}
               {action.label}
             </MenuItem>
-          ),
+          )
         )}
       </MenuPopup>
     </Menu>
@@ -340,7 +361,12 @@ function TicketRelationRowButton({
   const statusCfg = STATUS_CONFIG[status];
 
   return (
-    <button ref={buttonRef} type="button" className={className} {...buttonProps}>
+    <button
+      ref={buttonRef}
+      type="button"
+      className={className}
+      {...buttonProps}
+    >
       <Badge size="sm" variant={statusCfg.badgeVariant}>
         {statusCfg.label}
       </Badge>
@@ -412,7 +438,9 @@ export function SubTicketRowButton({
     status: subTicket.status,
     buttonRef,
     className: `flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-      isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+      isSelected
+        ? "bg-primary/5 ring-1.5 ring-primary/40"
+        : "hover:bg-accent/30"
     } ${isDragging ? "opacity-40" : ""}`,
     onClick,
   });
@@ -421,7 +449,7 @@ export function SubTicketRowButton({
 export function resolveTicketDetailStreamEventAction(
   ticketId: TicketId,
   currentTicket: Ticket | null,
-  event: TicketingStreamEvent,
+  event: TicketingStreamEvent
 ): "back" | "refetch" | "ignore" {
   if (event.type === "ticket_deleted" && event.ticketId === ticketId) {
     return "back";
@@ -432,9 +460,11 @@ export function resolveTicketDetailStreamEventAction(
   }
 
   if (event.type === "ticket_deleted") {
-    return currentTicket.subTickets.some((subTicket) => subTicket.id === event.ticketId) ||
+    return currentTicket.subTickets.some(
+      (subTicket) => subTicket.id === event.ticketId
+    ) ||
       currentTicket.dependencies.some(
-        (dependency) => dependency.dependsOnTicketId === event.ticketId,
+        (dependency) => dependency.dependsOnTicketId === event.ticketId
       )
       ? "refetch"
       : "ignore";
@@ -444,11 +474,15 @@ export function resolveTicketDetailStreamEventAction(
     if (event.ticket.id === ticketId || event.ticket.parentId === ticketId) {
       return "refetch";
     }
-    if (currentTicket.subTickets.some((subTicket) => subTicket.id === event.ticket.id)) {
+    if (
+      currentTicket.subTickets.some(
+        (subTicket) => subTicket.id === event.ticket.id
+      )
+    ) {
       return "refetch";
     }
     return currentTicket.dependencies.some(
-      (dependency) => dependency.dependsOnTicketId === event.ticket.id,
+      (dependency) => dependency.dependsOnTicketId === event.ticket.id
     )
       ? "refetch"
       : "ignore";
@@ -478,7 +512,7 @@ function linkedThreadSignature(thread: TicketLinkedThread | null): string {
 
 function shouldRefetchThreadLinks(
   previousLinks: TicketThreadLinks | null,
-  nextLinks: TicketThreadLinks,
+  nextLinks: TicketThreadLinks
 ): boolean {
   if (previousLinks === null) {
     return true;
@@ -501,9 +535,13 @@ export function KanbanTicketDetail({
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [moveToBoardDialogOpen, setMoveToBoardDialogOpen] = useState(false);
-  const [moveToBoardTickets, setMoveToBoardTickets] = useState<readonly TicketSummary[]>([]);
+  const [moveToBoardTickets, setMoveToBoardTickets] = useState<
+    readonly TicketSummary[]
+  >([]);
   const [movingToBoard, setMovingToBoard] = useState(false);
-  const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
+  const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(
+    null
+  );
   const ticketRef = useRef<Ticket | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Saved scroll positions keyed by ticketId — used to restore on back navigation. */
@@ -515,7 +553,9 @@ export function KanbanTicketDetail({
   const [worktreeDraft, setWorktreeDraft] = useState("");
   /** Set to true when Escape is pressed so the blur handler skips saving. */
   const cancelEditRef = useRef(false);
-  const removeFromSelection = useTicketSelectionStore((s) => s.removeFromSelection);
+  const removeFromSelection = useTicketSelectionStore(
+    (s) => s.removeFromSelection
+  );
   const settings = useSettings();
   const serverProviders = useServerProviders();
 
@@ -529,22 +569,24 @@ export function KanbanTicketDetail({
       resolveAppModelSelectionState(
         {
           ...settings,
-          textGenerationModelSelection: settings.orchestrationImplementerModelSelection,
+          textGenerationModelSelection:
+            settings.orchestrationImplementerModelSelection,
         },
-        serverProviders,
+        serverProviders
       ),
-    [settings, serverProviders],
+    [settings, serverProviders]
   );
   const resolvedGlobalReviewer = useMemo(
     () =>
       resolveAppModelSelectionState(
         {
           ...settings,
-          textGenerationModelSelection: settings.orchestrationReviewerModelSelection,
+          textGenerationModelSelection:
+            settings.orchestrationReviewerModelSelection,
         },
-        serverProviders,
+        serverProviders
       ),
-    [settings, serverProviders],
+    [settings, serverProviders]
   );
   const reviewerSettingsLinkProps =
     settings.maxReviewIterations === 0
@@ -579,13 +621,17 @@ export function KanbanTicketDetail({
     try {
       const api = ensureNativeApi();
       const [data, nextThreadLinks] = await Promise.all([
-        api.ticketing.getById(buildTicketDetailLookupInput(ticketId, projectId)),
+        api.ticketing.getById(
+          buildTicketDetailLookupInput(ticketId, projectId)
+        ),
         api.ticketing.getThreadLinks({ ticketId }),
       ]);
       ticketRef.current = data;
       setTicket(data);
       setThreadLinks((currentLinks) =>
-        shouldRefetchThreadLinks(currentLinks, nextThreadLinks) ? nextThreadLinks : currentLinks,
+        shouldRefetchThreadLinks(currentLinks, nextThreadLinks)
+          ? nextThreadLinks
+          : currentLinks
       );
     } catch (error) {
       console.error("Failed to fetch ticket:", error);
@@ -603,7 +649,11 @@ export function KanbanTicketDetail({
   useEffect(() => {
     const api = ensureNativeApi();
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
-      const action = resolveTicketDetailStreamEventAction(ticketId, ticketRef.current, event);
+      const action = resolveTicketDetailStreamEventAction(
+        ticketId,
+        ticketRef.current,
+        event
+      );
       if (action === "back") {
         onBack();
       } else if (action === "refetch") {
@@ -654,7 +704,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update status:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handlePriorityChange = useCallback(
@@ -668,7 +718,7 @@ export function KanbanTicketDetail({
         console.error("Failed to update priority:", error);
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleTitleSave = useCallback(async () => {
@@ -731,7 +781,7 @@ export function KanbanTicketDetail({
         }
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleCriteriaChange = useCallback(
@@ -758,7 +808,7 @@ export function KanbanTicketDetail({
         }
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleWorktreeSave = useCallback(async () => {
@@ -797,7 +847,7 @@ export function KanbanTicketDetail({
   const handleModelOverrideChange = useCallback(
     async (
       field: "implementerModelOverride" | "reviewerModelOverride",
-      value: ModelSelection | null,
+      value: ModelSelection | null
     ) => {
       const previous = ticketRef.current;
       if (previous) {
@@ -821,7 +871,7 @@ export function KanbanTicketDetail({
         }
       }
     },
-    [ticketId],
+    [ticketId]
   );
 
   const handleDelete = useCallback(async () => {
@@ -834,11 +884,14 @@ export function KanbanTicketDetail({
     }
   }, [ticketId, onBack]);
 
-  const handleMoveToBoardRequest = useCallback((tickets: readonly TicketSummary[]) => {
-    if (tickets.length === 0) return;
-    setMoveToBoardTickets(tickets);
-    setMoveToBoardDialogOpen(true);
-  }, []);
+  const handleMoveToBoardRequest = useCallback(
+    (tickets: readonly TicketSummary[]) => {
+      if (tickets.length === 0) return;
+      setMoveToBoardTickets(tickets);
+      setMoveToBoardDialogOpen(true);
+    },
+    []
+  );
 
   const handleMoveCurrentTicketToBoard = useCallback(() => {
     if (!ticket || ticket.parentId === null) return;
@@ -855,8 +908,8 @@ export function KanbanTicketDetail({
           api.ticketing.update({
             id: ticket.id,
             parentId: null,
-          }),
-        ),
+          })
+        )
       );
       removeFromSelection(moveToBoardTickets.map((ticket) => ticket.id));
       setMoveToBoardDialogOpen(false);
@@ -900,19 +953,22 @@ export function KanbanTicketDetail({
   const statusCfg = STATUS_CONFIG[ticket.status];
 
   return (
-    <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div
+      ref={scrollContainerRef}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+    >
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
         {/* Header */}
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                <span className="shrink-0 font-mono text-md text-muted-foreground">
                   {ticket.identifier}
                 </span>
                 <input
                   type="text"
-                  className="min-w-0 flex-1 cursor-text bg-transparent font-[inherit]! text-sm font-medium text-foreground outline-none"
+                  className="min-w-0 flex-1 cursor-text bg-transparent font-[inherit]! text-lg font-medium text-foreground outline-none"
                   value={editingTitle ? titleDraft : ticket.title}
                   onFocus={() => {
                     setTitleDraft(ticket.title);
@@ -986,7 +1042,11 @@ export function KanbanTicketDetail({
               value={ticket.status}
               onValueChange={(v) => void handleStatusChange(v as TicketStatus)}
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-1.5 px-1.5 py-1"
+              >
                 <Badge size="sm" variant={statusCfg.badgeVariant}>
                   <SelectValue />
                 </Badge>
@@ -1008,17 +1068,29 @@ export function KanbanTicketDetail({
 
             <Select
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
+              onValueChange={(v) =>
+                void handlePriorityChange(v as TicketPriority)
+              }
             >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <PriorityIcon priority={ticket.priority} className="size-4 text-muted-foreground" />
+              <SelectTrigger
+                size="xs"
+                variant="ghost"
+                className="h-auto gap-1.5 px-1.5 py-1"
+              >
+                <PriorityIcon
+                  priority={ticket.priority}
+                  className="size-4 text-muted-foreground"
+                />
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup alignItemWithTrigger={false}>
                 {[...ALL_PRIORITIES].reverse().map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
+                      <PriorityIcon
+                        priority={p}
+                        className="size-4 text-muted-foreground"
+                      />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -1044,7 +1116,7 @@ export function KanbanTicketDetail({
                     ? "text-foreground"
                     : "italic text-muted-foreground/60"
                 }`}
-                value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
+                value={editingWorktree ? worktreeDraft : ticket.worktree ?? ""}
                 placeholder="No worktree specified"
                 onFocus={() => {
                   setWorktreeDraft(ticket.worktree ?? "");
@@ -1126,7 +1198,9 @@ export function KanbanTicketDetail({
           globalDefault={resolvedGlobalImplementer}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) => void handleModelOverrideChange("implementerModelOverride", value)}
+          onChange={(value) =>
+            void handleModelOverrideChange("implementerModelOverride", value)
+          }
         />
         <ModelOverrideRow
           label="Reviewer"
@@ -1135,7 +1209,9 @@ export function KanbanTicketDetail({
           {...reviewerSettingsLinkProps}
           serverProviders={serverProviders}
           settings={settings}
-          onChange={(value) => void handleModelOverrideChange("reviewerModelOverride", value)}
+          onChange={(value) =>
+            void handleModelOverrideChange("reviewerModelOverride", value)
+          }
         />
 
         {/* Sub-tickets */}
@@ -1176,8 +1252,8 @@ export function KanbanTicketDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
+              This will permanently delete "{ticket.identifier}: {ticket.title}"
+              and all its data. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1186,7 +1262,11 @@ export function KanbanTicketDetail({
                 Cancel
               </Button>
             </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDelete()}
+            >
               Delete
             </Button>
           </AlertDialogFooter>
@@ -1216,10 +1296,16 @@ export function SubTicketsList({
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
-  const subTicketIds = useMemo(() => new Set(subTickets.map((ticket) => ticket.id)), [subTickets]);
+  const subTicketIds = useMemo(
+    () => new Set(subTickets.map((ticket) => ticket.id)),
+    [subTickets]
+  );
   const selectedSubTickets = useMemo(
-    () => [...selectedTickets.values()].filter((ticket) => subTicketIds.has(ticket.id)),
-    [selectedTickets, subTicketIds],
+    () =>
+      [...selectedTickets.values()].filter((ticket) =>
+        subTicketIds.has(ticket.id)
+      ),
+    [selectedTickets, subTicketIds]
   );
 
   const handleSubTicketMultiSelectClick = useCallback(
@@ -1229,7 +1315,7 @@ export function SubTicketsList({
         rangeSelectTo,
       });
     },
-    [toggleTicket, rangeSelectTo, subTickets],
+    [toggleTicket, rangeSelectTo, subTickets]
   );
 
   // Hover-preview cache scoped to this list's lifetime
@@ -1266,7 +1352,7 @@ export function SubTicketsList({
       inflightRef.current.set(key, promise);
       return promise;
     },
-    [projectId],
+    [projectId]
   );
 
   const getCached = useCallback((id: TicketId): Ticket | undefined => {
@@ -1331,24 +1417,29 @@ function DraggableSubTicket({
       e.preventDefault();
       const api = ensureNativeApi();
       const selection =
-        selectedTicketIds.has(sub.id) && selectedTickets.length > 0 ? selectedTickets : [sub];
+        selectedTicketIds.has(sub.id) && selectedTickets.length > 0
+          ? selectedTickets
+          : [sub];
       const clicked = await api.contextMenu.show(
         [
           {
             id: "move-to-board",
-            label: selection.length > 1 ? "Move all tickets to the board" : "Move to board",
+            label:
+              selection.length > 1
+                ? "Move all tickets to the board"
+                : "Move to board",
           },
         ],
         {
           x: e.clientX,
           y: e.clientY,
-        },
+        }
       );
       if (clicked === "move-to-board") {
         onMoveToBoardRequest(selection);
       }
     },
-    [onMoveToBoardRequest, selectedTicketIds, selectedTickets, sub],
+    [onMoveToBoardRequest, selectedTicketIds, selectedTickets, sub]
   );
 
   return (
@@ -1448,9 +1539,10 @@ function ModelOverrideRow({
     settings,
     serverProviders,
     effectiveProvider,
-    effective.model,
+    effective.model
   );
-  const models = serverProviders.find((p) => p.provider === effectiveProvider)?.models ?? [];
+  const models =
+    serverProviders.find((p) => p.provider === effectiveProvider)?.models ?? [];
 
   return (
     <div className="flex flex-col gap-2">
