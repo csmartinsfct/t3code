@@ -15,7 +15,10 @@ import {
   modelSelectionProviderKind,
   type ProjectId,
 } from "@t3tools/contracts";
-import { DEFAULT_MAX_REVIEW_ITERATIONS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_MAX_REVIEW_ITERATIONS,
+  MAX_REVIEW_ITERATIONS_UI_MAX,
+} from "@t3tools/contracts/settings";
 import { Equal } from "effect";
 import {
   AlertTriangleIcon,
@@ -37,6 +40,7 @@ import { useServerProviders } from "../../rpc/serverState";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
 import { Switch } from "../ui/switch";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -44,6 +48,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { PromptEditorDialog } from "../settings/PromptEditorDialog";
 import { PromptList } from "../settings/PromptList";
 import { SettingsSection } from "../settings/SettingsPanels";
+import { clampReviewIterations } from "../settings/settingsPanelHelpers";
 import { STATUS_CONFIG } from "../settings/ticketUtils";
 import {
   getRunnableTicketIdentifiers,
@@ -147,6 +152,9 @@ export function OrchestrationSubpage({
   const [implementerSelection, setImplementerSelection] = useState<ModelSelection>(settingsImplSel);
   const [reviewerSelection, setReviewerSelection] = useState<ModelSelection>(settingsRevSel);
   const [skipReview, setSkipReview] = useState<boolean>(settingsMaxReview === 0);
+  const [maxReviewRounds, setMaxReviewRounds] = useState<number>(
+    settingsMaxReview > 0 ? settingsMaxReview : DEFAULT_MAX_REVIEW_ITERATIONS,
+  );
 
   const implementerIsOverride = !Equal.equals(implementerSelection, settingsImplSel);
   const reviewerIsOverride = !Equal.equals(reviewerSelection, settingsRevSel);
@@ -294,9 +302,9 @@ export function OrchestrationSubpage({
   // ── Submit ──────────────────────────────────────────────────────────
   const resolvedMaxReviewIterations = useMemo<number | undefined>(() => {
     if (skipReview) return 0;
-    if (settingsMaxReview === 0) return DEFAULT_MAX_REVIEW_ITERATIONS;
+    if (maxReviewRounds !== settingsMaxReview) return maxReviewRounds;
     return undefined;
-  }, [skipReview, settingsMaxReview]);
+  }, [skipReview, maxReviewRounds, settingsMaxReview]);
 
   const handleConfirm = useCallback(async () => {
     if (isOrchestrationSubmitDisabled({ plan, isSubmitting })) {
@@ -422,19 +430,45 @@ export function OrchestrationSubpage({
               serverProviders={serverProviders}
               settings={settings}
               disabled={skipReview}
-              trailingControl={
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span>{skipReview ? "Skip review" : "Review"}</span>
-                  <Switch
-                    checked={!skipReview}
-                    onCheckedChange={(checked) => setSkipReview(!checked)}
-                    aria-label={
-                      skipReview ? "Enable review for this run" : "Skip review for this run"
-                    }
-                  />
-                </label>
+              leadingControl={
+                <Switch
+                  checked={!skipReview}
+                  onCheckedChange={(checked) => setSkipReview(!checked)}
+                  aria-label={
+                    skipReview ? "Enable review for this run" : "Skip review for this run"
+                  }
+                />
               }
             />
+            <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-foreground/80 sm:px-5">
+              <span className="text-muted-foreground">Max review rounds</span>
+              <div
+                className={`flex items-center gap-1.5 transition-opacity ${
+                  skipReview ? "pointer-events-none opacity-40" : ""
+                }`}
+                aria-disabled={skipReview}
+              >
+                <Input
+                  aria-label="Max automated review rounds for this run"
+                  className="w-20"
+                  min={1}
+                  max={MAX_REVIEW_ITERATIONS_UI_MAX}
+                  step={1}
+                  type="number"
+                  value={maxReviewRounds}
+                  disabled={skipReview}
+                  onChange={(event) => {
+                    const rawValue = Number(event.target.value);
+                    if (!Number.isFinite(rawValue)) return;
+                    const next = Math.max(1, clampReviewIterations(rawValue));
+                    setMaxReviewRounds(next);
+                  }}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  of {MAX_REVIEW_ITERATIONS_UI_MAX}
+                </span>
+              </div>
+            </div>
             <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-foreground/80 sm:px-5">
               <span className="text-muted-foreground">Runtime</span>
               <span className="font-mono text-[11px]">
@@ -556,7 +590,7 @@ function RunModelRow({
   serverProviders,
   settings,
   disabled,
-  trailingControl,
+  leadingControl,
 }: {
   label: string;
   selection: ModelSelection;
@@ -566,7 +600,7 @@ function RunModelRow({
   serverProviders: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
   settings: import("@t3tools/contracts").UnifiedSettings;
   disabled: boolean;
-  trailingControl?: ReactNode;
+  leadingControl?: ReactNode;
 }) {
   const provider = modelSelectionProviderKind(selection);
   const optionsByProvider = getCustomModelOptionsByProvider(
@@ -579,8 +613,9 @@ function RunModelRow({
 
   return (
     <div className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs text-foreground/80 sm:px-5">
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
         <span className="text-muted-foreground">{label}</span>
+        {leadingControl}
         {hasOverride && !disabled && (
           <button
             type="button"
@@ -630,7 +665,6 @@ function RunModelRow({
             }}
           />
         </div>
-        {trailingControl}
       </div>
     </div>
   );
