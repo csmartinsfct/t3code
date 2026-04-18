@@ -210,6 +210,12 @@ function Sidebar({
     [resolvedResizable, side],
   );
 
+  const [suppressTransition, setSuppressTransition] = React.useState(true);
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => setSuppressTransition(false));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   if (collapsible === "none") {
     return (
       <SidebarInstanceContext.Provider value={instanceContextValue}>
@@ -271,7 +277,8 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+            "relative w-(--sidebar-width) bg-transparent",
+            !suppressTransition && "transition-[width] duration-200 ease-linear",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -282,7 +289,8 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
+            !suppressTransition && "transition-[left,right,width] duration-200 ease-linear",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
