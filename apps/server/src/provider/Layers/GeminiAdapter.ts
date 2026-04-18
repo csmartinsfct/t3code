@@ -1184,6 +1184,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                   adminPrompts: settings.prompts.admin,
                 }
               : undefined;
+          const mcpServers = buildGeminiMcpServers(serviceContext);
           const sessionContextPrompt = Option.isSome(checkpointContext)
             ? buildProviderSessionContextPrompt({
                 threadId: input.threadId,
@@ -1192,7 +1193,14 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 worktreePath: checkpointContext.value.worktreePath,
                 systemPrompt: checkpointContext.value.systemPrompt,
                 includeProjectContext: true,
-                ...(serviceContext ? { serviceContext } : {}),
+                ...(serviceContext
+                  ? {
+                      serviceContext: {
+                        ...serviceContext,
+                        nativeInternalTools: mcpServers.length > 0,
+                      },
+                    }
+                  : {}),
               })
             : undefined;
           const sessionContextPromptHash = sessionContextPrompt
@@ -1201,7 +1209,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           const sessionContextPromptInjected = sessionContextPromptHash
             ? resumeCursorHasInjectedContext(input.resumeCursor, sessionContextPromptHash)
             : true;
-          const mcpServers = buildGeminiMcpServers(serviceContext);
           let context: GeminiSessionContext | undefined;
           const pendingStderr: Array<string> = [];
           const connection = createConnection({

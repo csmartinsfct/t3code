@@ -42,13 +42,20 @@ export function buildEnvironmentHeader(params: {
  * Builds the system prompt that describes the T3 REST API endpoints.
  * Injected into AI sessions so agents can discover and call project services.
  */
-export function buildRestEndpointSystemPrompt(params: { port: number; token: string }): string {
+export function buildRestEndpointSystemPrompt(params: {
+  port: number;
+  token: string;
+  nativeInternalTools?: boolean;
+}): string {
   const { port, token } = params;
   const baseUrl = `http://127.0.0.1:${port}`;
+  const accessGuidance = params.nativeInternalTools
+    ? "You have access to four T3 project services. Dedicated T3 MCP tools may be registered for these services; use the native tools when available. The REST endpoints below remain available as fallback and explicit API context."
+    : "You have access to four T3 project services via REST HTTP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.";
 
   return `## T3 Project Services (REST API)
 
-You have access to four T3 project services via REST HTTP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.
+${accessGuidance}
 
 ### Available Services
 

@@ -541,6 +541,11 @@ it.effect("GeminiAdapterLive injects T3 session context on the first prompt", ()
     assert.equal(promptInput.embeddedContext?.mimeType, "text/markdown");
     assert.match(promptInput.embeddedContext?.text ?? "", /## T3 Project Context/);
     assert.match(promptInput.embeddedContext?.text ?? "", /Gemini Project/);
+    assert.match(
+      promptInput.embeddedContext?.text ?? "",
+      /Dedicated T3 MCP tools may be registered/,
+    );
+    assert.notMatch(promptInput.embeddedContext?.text ?? "", /no dedicated tools are registered/);
     assert.match(promptInput.embeddedContext?.text ?? "", /Authorization: Bearer test-token/);
     assert.match(
       promptInput.embeddedContext?.text ?? "",

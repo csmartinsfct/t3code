@@ -24,6 +24,7 @@ interface ProviderSessionContextPromptInput {
     readonly port: number;
     readonly isDev: boolean;
     readonly token: string;
+    readonly nativeInternalTools?: boolean;
     readonly adminPrompts: AdminPromptDocuments;
   };
 }
@@ -57,14 +58,18 @@ export function buildProviderSessionContextPrompt(
   }
 
   if (input.serviceContext && input.serviceContext.port > 0) {
-    const { port, isDev, token, adminPrompts } = input.serviceContext;
+    const { port, isDev, token, nativeInternalTools, adminPrompts } = input.serviceContext;
     sections.push(
       buildEnvironmentHeader({
         port,
         isDev,
         projectTitle: input.projectTitle,
       }),
-      buildRestEndpointSystemPrompt({ port, token }),
+      buildRestEndpointSystemPrompt({
+        port,
+        token,
+        ...(nativeInternalTools !== undefined ? { nativeInternalTools } : {}),
+      }),
       renderAdminPromptDocument(adminPrompts.managedRuns),
       renderAdminPromptDocument(adminPrompts.scheduledTasks),
       renderAdminPromptDocument(adminPrompts.ticketing),

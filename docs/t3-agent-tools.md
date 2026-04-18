@@ -62,9 +62,11 @@ No native tools are registered. Instead, the system prompt provides REST endpoin
 - **Codex**: No `configOverrides` for services. System prompt injected via `appendDeveloperInstructions`
 - **Claude**: No `mcpServers` or `allowedTools`. System prompt injected via `systemPrompt.append`
 - **Gemini**: ACP `session/new` and `session/load` do not accept a system-prompt
-  field, so T3 sends the REST guidance as an ACP embedded-context resource on
-  the first prompt. The Gemini resume cursor stores a context hash so unchanged
-  resumed sessions are not repeatedly primed.
+  field, so T3 sends service context as an ACP embedded-context resource on the
+  first prompt. In native-tool sessions this context tells Gemini to prefer the
+  registered T3 MCP tools while keeping REST endpoint details as fallback/API
+  context. The Gemini resume cursor stores a context hash so unchanged resumed
+  sessions are not repeatedly primed.
 - **System prompt**: Unified prompt from `buildMcpPromptModeSystemPrompt()` with endpoint table, token, and `GET /api/<service>` / `POST {"tool":"...", "input":{...}}` curl examples
 
 **Trade-offs:**

@@ -469,8 +469,10 @@ Unit tests:
 - Provider registry and adapter registry include Gemini.
 - Web model selection and store code do not coerce Gemini to Codex.
 - MCP config reader routes Gemini separately from Claude.
-- Gemini session startup resolves project context and injects the T3 prompt-mode
-  service context through ACP embedded context before the first user request.
+- Gemini session startup resolves project context and injects T3 service context
+  through ACP embedded context before the first user request. When the internal
+  T3 MCP bridge is registered, this context tells Gemini to prefer native tools
+  while retaining REST endpoint details as fallback/API context.
 
 Adapter and manager tests:
 
