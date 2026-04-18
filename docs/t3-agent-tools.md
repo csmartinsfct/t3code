@@ -138,6 +138,7 @@ apps/server/src/prompts/http.ts                         # Prompt-management REST
 apps/server/src/ticketing/http.ts                       # Ticketing REST route + thread-aware request context
 apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (both modes)
 apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (both modes)
+apps/server/src/provider/Layers/GeminiAdapter.ts        # Gemini ACP MCP bridge + embedded context injection
 apps/web/src/components/settings/SettingsPanels.tsx      # UI toggle in General settings
 ```
 
@@ -151,8 +152,9 @@ To add a new REST API service to both delivery modes:
 2. Create a `systemPrompt.ts` for "tools" mode
 3. **CodexAdapter**: Add `configOverrides` entries in the `"tools"` branch
 4. **ClaudeAdapter**: Add entry to `mcpServersConfig` and `mcpAllowedTools` in the `"tools"` branch
-5. Concatenate the new system prompt in both adapters' `"tools"` branch
-6. The `"prompt"` mode prompt (`mcpPromptModeSystemPrompt.ts`) picks up the new endpoint automatically if you add it to the services table — update the table and description there
-7. No UI changes needed — the setting toggle works for all services
+5. **GeminiAdapter**: Include the service in the `t3-code` bridge exposure and embedded service context
+6. Concatenate the new system prompt in provider `"tools"` injection paths
+7. The `"prompt"` mode prompt (`mcpPromptModeSystemPrompt.ts`) picks up the new endpoint automatically if you add it to the services table — update the table and description there
+8. No UI changes needed — the setting toggle works for all services
 
 If a service should stay HTTP-only, follow the same REST route and prompt-mode documentation path without adding native-tool registration in the provider adapters.

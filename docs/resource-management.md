@@ -111,7 +111,7 @@ Each thread's memory footprint is estimated from:
 
 ## Idle Session Timeout
 
-Provider sessions (Codex app-server processes, Claude SDK connections) consume system resources: child processes, MCP server connections, memory.
+Provider sessions (Codex app-server processes, Claude SDK connections, Gemini ACP processes) consume system resources: child processes, MCP server connections, memory.
 
 The **Idle session timeout** setting automatically stops sessions that have been inactive:
 

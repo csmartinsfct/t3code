@@ -1,16 +1,16 @@
 # Features
 
-T3 Code is a web GUI for AI coding agents. It wraps providers like Codex and Claude behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via REST API tools and WebSocket RPC).
+T3 Code is a web GUI for AI coding agents. It wraps providers like Codex, Claude, and Gemini behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via REST API tools and WebSocket RPC).
 
 ## Architecture
 
-| Package              | Role                                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK), serves the React app, manages sessions, and hosts REST API endpoints. |
-| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.                   |
-| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling.     |
-| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                         |
-| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                             |
+| Package              | Role                                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK, Gemini ACP), serves the React app, manages sessions, and hosts REST API endpoints. |
+| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.                               |
+| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling.                 |
+| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                                     |
+| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                                         |
 
 ---
 
@@ -624,7 +624,7 @@ Git-ref based snapshots that track file state before and after each agent turn.
 | `maxReviewIterations`      | Max review passes for tickets              | `3` (max 10)     |
 | `defaultThreadEnvMode`     | Thread workspace isolation                 | `"local"`        |
 | `mcpDeliveryMode`          | How service tools reach models             | `"tools"`        |
-| Provider settings          | Codex, Claude Agent, profiles              | Per-provider     |
+| Provider settings          | Codex, Claude Agent, Gemini, profiles      | Per-provider     |
 | Model selections           | Text gen, inference, implementer, reviewer | Per-use-case     |
 | Observability              | OTLP traces/metrics URLs                   | Disabled         |
 | Orchestration prompts      | Global prompt overrides                    | Shipped defaults |
