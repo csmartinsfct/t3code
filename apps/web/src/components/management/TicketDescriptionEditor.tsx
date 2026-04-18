@@ -141,7 +141,7 @@ export function TicketDescriptionEditor({
   if (!editor) return null;
 
   return (
-    <div className="ticket-description-editor">
+    <div className="ticket-description-editor max-w-3xl">
       <BubbleMenu editor={editor} options={{ placement: "top-start" }}>
         <div className="flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 shadow-sm">
           <ToolbarButton

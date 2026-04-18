@@ -19,6 +19,21 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export type ViewMode = "chat" | "management";
+export type BoardViewMode = "cards" | "list";
+
+export interface BoardFilters {
+  priorityFilter: string[];
+  labelFilter: string[];
+  searchQuery: string;
+  collapsedStatuses: string[];
+}
+
+export const DEFAULT_BOARD_FILTERS: BoardFilters = {
+  priorityFilter: [],
+  labelFilter: [],
+  searchQuery: "",
+  collapsedStatuses: [],
+};
 
 export interface BoardContext {
   projectId: ProjectId;
@@ -31,6 +46,16 @@ interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   viewMode?: ViewMode;
+  boardViewMode?: BoardViewMode;
+  boardFiltersByProjectId?: Record<
+    string,
+    {
+      priorityFilter?: string[];
+      labelFilter?: string[];
+      searchQuery?: string;
+      collapsedStatuses?: string[];
+    }
+  >;
   managementBoardContext?: {
     projectId?: string;
     ticketStack?: string[];
@@ -51,6 +76,8 @@ export interface UiThreadState {
 
 export interface UiBoardState {
   managementBoardContext: BoardContext | null;
+  boardViewMode: BoardViewMode;
+  boardFiltersByProjectId: Record<string, BoardFilters>;
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiBoardState {
@@ -73,12 +100,16 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   startupRecoveryStateByThreadId: {},
   managementBoardContext: null,
+  boardViewMode: "cards",
+  boardFiltersByProjectId: {},
   viewMode: "chat",
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 let persistedViewMode: ViewMode = "chat";
+let persistedBoardViewMode: BoardViewMode = "cards";
+let persistedBoardFiltersByProjectId: Record<string, BoardFilters> = {};
 let persistedManagementBoardContext: BoardContext | null = null;
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
@@ -101,6 +132,8 @@ function readPersistedState(): UiState {
         return {
           ...initialState,
           viewMode: persistedViewMode,
+          boardViewMode: persistedBoardViewMode,
+          boardFiltersByProjectId: persistedBoardFiltersByProjectId,
           managementBoardContext: persistedManagementBoardContext,
         };
       }
@@ -110,6 +143,8 @@ function readPersistedState(): UiState {
     return {
       ...initialState,
       viewMode: persistedViewMode,
+      boardViewMode: persistedBoardViewMode,
+      boardFiltersByProjectId: persistedBoardFiltersByProjectId,
       managementBoardContext: persistedManagementBoardContext,
     };
   } catch {
@@ -133,6 +168,28 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
   }
   persistedViewMode =
     parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
+  persistedBoardViewMode =
+    parsed.boardViewMode === "cards" || parsed.boardViewMode === "list"
+      ? parsed.boardViewMode
+      : "cards";
+  persistedBoardFiltersByProjectId = {};
+  if (parsed.boardFiltersByProjectId && typeof parsed.boardFiltersByProjectId === "object") {
+    for (const [projectId, raw] of Object.entries(parsed.boardFiltersByProjectId)) {
+      if (!raw || typeof raw !== "object") continue;
+      persistedBoardFiltersByProjectId[projectId] = {
+        priorityFilter: Array.isArray(raw.priorityFilter)
+          ? raw.priorityFilter.filter((v): v is string => typeof v === "string")
+          : [],
+        labelFilter: Array.isArray(raw.labelFilter)
+          ? raw.labelFilter.filter((v): v is string => typeof v === "string")
+          : [],
+        searchQuery: typeof raw.searchQuery === "string" ? raw.searchQuery : "",
+        collapsedStatuses: Array.isArray(raw.collapsedStatuses)
+          ? raw.collapsedStatuses.filter((v): v is string => typeof v === "string")
+          : [],
+      };
+    }
+  }
 
   const context = parsed.managementBoardContext;
   if (typeof context?.projectId === "string" && context.projectId.length > 0) {
@@ -175,6 +232,8 @@ function persistState(state: UiState): void {
         expandedProjectCwds,
         projectOrderCwds,
         viewMode: state.viewMode,
+        boardViewMode: state.boardViewMode,
+        boardFiltersByProjectId: state.boardFiltersByProjectId,
         managementBoardContext: state.managementBoardContext,
       } satisfies PersistedUiState),
     );
@@ -605,6 +664,42 @@ export function sanitizeManagementBoardContext(
   );
 }
 
+export function setBoardViewMode(state: UiState, mode: BoardViewMode): UiState {
+  if (state.boardViewMode === mode) return state;
+  return { ...state, boardViewMode: mode };
+}
+
+export function setBoardFilters(
+  state: UiState,
+  projectId: ProjectId,
+  updates: Partial<BoardFilters>,
+): UiState {
+  const current = state.boardFiltersByProjectId[projectId] ?? DEFAULT_BOARD_FILTERS;
+  const next = { ...current, ...updates };
+  return {
+    ...state,
+    boardFiltersByProjectId: { ...state.boardFiltersByProjectId, [projectId]: next },
+  };
+}
+
+export function toggleBoardCollapsedStatus(
+  state: UiState,
+  projectId: ProjectId,
+  status: string,
+): UiState {
+  const current = state.boardFiltersByProjectId[projectId] ?? DEFAULT_BOARD_FILTERS;
+  const collapsed = current.collapsedStatuses.includes(status)
+    ? current.collapsedStatuses.filter((s) => s !== status)
+    : [...current.collapsedStatuses, status];
+  return {
+    ...state,
+    boardFiltersByProjectId: {
+      ...state.boardFiltersByProjectId,
+      [projectId]: { ...current, collapsedStatuses: collapsed },
+    },
+  };
+}
+
 export function toggleProject(state: UiState, projectId: ProjectId): UiState {
   const expanded = state.projectExpandedById[projectId] ?? true;
   return {
@@ -681,6 +776,9 @@ interface UiStateStore extends UiState {
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
   setViewMode: (mode: ViewMode) => void;
+  setBoardViewMode: (mode: BoardViewMode) => void;
+  setBoardFilters: (projectId: ProjectId, updates: Partial<BoardFilters>) => void;
+  toggleBoardCollapsedStatus: (projectId: ProjectId, status: string) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -715,6 +813,11 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
   setViewMode: (mode) => set({ viewMode: mode }),
+  setBoardViewMode: (mode) => set((state) => setBoardViewMode(state, mode)),
+  setBoardFilters: (projectId, updates) =>
+    set((state) => setBoardFilters(state, projectId, updates)),
+  toggleBoardCollapsedStatus: (projectId, status) =>
+    set((state) => toggleBoardCollapsedStatus(state, projectId, status)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

@@ -2,7 +2,7 @@ import type { TicketStatus, TicketSummary } from "@t3tools/contracts";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { PRIORITY_CONFIG } from "../settings/ticketUtils";
+import { PriorityIcon } from "./PriorityIcon";
 
 export interface EpicProgress {
   completed: number;
@@ -17,6 +17,7 @@ interface KanbanCardProps {
   onMultiSelectClick?: ((e: React.MouseEvent, ticket: TicketSummary) => void) | undefined;
   onContextMenu?: ((e: React.MouseEvent, ticket: TicketSummary) => void) | undefined;
   onClick: () => void;
+  variant?: "card" | "list";
 }
 
 export function KanbanCard({
@@ -27,8 +28,8 @@ export function KanbanCard({
   onMultiSelectClick,
   onContextMenu,
   onClick,
+  variant = "card",
 }: KanbanCardProps) {
-  const priorityCfg = PRIORITY_CONFIG[ticket.priority];
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket, status },
@@ -38,6 +39,59 @@ export function KanbanCard({
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (onContextMenu) {
+      e.preventDefault();
+      onContextMenu(e, ticket);
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if ((e.altKey || e.metaKey || e.shiftKey) && onMultiSelectClick) {
+      onMultiSelectClick(e, ticket);
+      return;
+    }
+    onClick();
+  };
+
+  if (variant === "list") {
+    return (
+      <button
+        ref={setNodeRef}
+        type="button"
+        data-ticket-selectable
+        className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors ${
+          isSelected ? "bg-primary/5 text-foreground" : "text-foreground hover:bg-accent/50"
+        } ${isDragging ? "opacity-40" : ""}`}
+        style={style}
+        onContextMenu={handleContextMenu}
+        onClick={handleClick}
+        {...attributes}
+        {...listeners}
+      >
+        <PriorityIcon
+          priority={ticket.priority}
+          className="size-3.5 shrink-0 text-muted-foreground"
+        />
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+          {ticket.identifier}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[11px]">{ticket.title}</span>
+        {ticket.labels.length > 0 && (
+          <div className="flex shrink-0 gap-0.5">
+            {ticket.labels.slice(0, 2).map((label) => (
+              <div
+                key={label.id}
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: label.color }}
+              />
+            ))}
+          </div>
+        )}
+      </button>
+    );
+  }
 
   return (
     <button
@@ -50,30 +104,14 @@ export function KanbanCard({
           : "border-border/70 bg-card hover:bg-accent/50"
       } ${isDragging ? "opacity-40" : ""}`}
       style={style}
-      onContextMenu={(e) => {
-        if (onContextMenu) {
-          e.preventDefault();
-          onContextMenu(e, ticket);
-        }
-      }}
-      onClick={(e) => {
-        if ((e.altKey || e.metaKey || e.shiftKey) && onMultiSelectClick) {
-          onMultiSelectClick(e, ticket);
-          return;
-        }
-        onClick();
-      }}
+      onContextMenu={handleContextMenu}
+      onClick={handleClick}
       {...attributes}
       {...listeners}
     >
       <div className="flex items-center gap-1.5">
+        <PriorityIcon priority={ticket.priority} className="size-3.5 text-muted-foreground" />
         <span className="font-mono text-[10px] text-muted-foreground">{ticket.identifier}</span>
-        {ticket.priority !== "none" && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <div className={`size-1.5 rounded-full ${priorityCfg.dotClass}`} />
-            {priorityCfg.label.toLowerCase()}
-          </span>
-        )}
       </div>
       <span className="text-xs font-medium text-foreground">{ticket.title}</span>
       {ticket.labels.length > 0 && (

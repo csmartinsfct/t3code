@@ -26,6 +26,8 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     startupRecoveryStateByThreadId: {},
     managementBoardContext: null,
+    boardViewMode: "cards",
+    boardFiltersByProjectId: {},
     viewMode: "chat",
     ...overrides,
   };

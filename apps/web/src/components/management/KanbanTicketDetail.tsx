@@ -13,7 +13,14 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
-import { EllipsisVerticalIcon, ListTreeIcon, PlayIcon, TrashIcon, XIcon } from "lucide-react";
+import {
+  EllipsisVerticalIcon,
+  GitBranchIcon,
+  ListTreeIcon,
+  PlayIcon,
+  TrashIcon,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -65,6 +72,7 @@ import {
   STATUS_CONFIG,
   formatRelativeDate,
 } from "../settings/ticketUtils";
+import { PriorityIcon } from "./PriorityIcon";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 export const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
@@ -890,11 +898,10 @@ export function KanbanTicketDetail({
   }
 
   const statusCfg = STATUS_CONFIG[ticket.status];
-  const priorityCfg = PRIORITY_CONFIG[ticket.priority];
 
   return (
     <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
         {/* Header */}
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between">
@@ -956,21 +963,35 @@ export function KanbanTicketDetail({
           </div>
 
           {/* Status + Priority inline selectors */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {threadLinks?.originThread && (
+              <>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() =>
+                    void navigate({
+                      to: "/$threadId",
+                      params: { threadId: threadLinks.originThread!.threadId },
+                    })
+                  }
+                >
+                  Origin Thread
+                </Button>
+                <span className="text-border">|</span>
+              </>
+            )}
+
             <Select
               value={ticket.status}
               onValueChange={(v) => void handleStatusChange(v as TicketStatus)}
             >
-              <SelectTrigger
-                size="xs"
-                variant="ghost"
-                className="h-auto gap-0 border-none px-0 py-0 shadow-none"
-              >
+              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
                 <Badge size="sm" variant={statusCfg.badgeVariant}>
                   <SelectValue />
                 </Badge>
               </SelectTrigger>
-              <SelectPopup>
+              <SelectPopup alignItemWithTrigger={false}>
                 {ALL_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
                     <div className="flex items-center gap-2">
@@ -990,14 +1011,14 @@ export function KanbanTicketDetail({
               onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
             >
               <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <div className={`size-2 rounded-full ${priorityCfg.dotClass}`} />
+                <PriorityIcon priority={ticket.priority} className="size-4 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
-              <SelectPopup>
-                {ALL_PRIORITIES.map((p) => (
+              <SelectPopup alignItemWithTrigger={false}>
+                {[...ALL_PRIORITIES].reverse().map((p) => (
                   <SelectItem key={p} value={p}>
                     <div className="flex items-center gap-2">
-                      <div className={`size-2 rounded-full ${PRIORITY_CONFIG[p].dotClass}`} />
+                      <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
                       {PRIORITY_CONFIG[p].label}
                     </div>
                   </SelectItem>
@@ -1006,78 +1027,59 @@ export function KanbanTicketDetail({
             </Select>
 
             <span className="text-border">|</span>
+            <TicketLabelPicker
+              ticketId={ticketId}
+              projectId={projectId}
+              labels={ticket.labels}
+              onUpdated={() => void fetchTicket()}
+              inline
+            />
+            <span className="text-border">|</span>
+            <div className="flex items-center gap-1.5">
+              <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
+              <input
+                type="text"
+                className={`min-w-[120px] max-w-[200px] cursor-text bg-transparent font-[inherit]! text-[11px] outline-none ${
+                  editingWorktree || ticket.worktree
+                    ? "text-foreground"
+                    : "italic text-muted-foreground/60"
+                }`}
+                value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
+                placeholder="No worktree specified"
+                onFocus={() => {
+                  setWorktreeDraft(ticket.worktree ?? "");
+                  setEditingWorktree(true);
+                }}
+                onChange={(e) => setWorktreeDraft(e.target.value)}
+                onBlur={() => {
+                  const blurAction = resolveInlineEditBlurAction({
+                    cancelRequested: cancelEditRef.current,
+                    isEditing: editingWorktree,
+                  });
+                  if (blurAction === "cancel") {
+                    cancelEditRef.current = false;
+                    setEditingWorktree(false);
+                  } else if (blurAction === "save") {
+                    void handleWorktreeSave();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                  if (e.key === "Escape") {
+                    cancelEditRef.current = true;
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+            <span className="text-border">|</span>
             <span className="text-[11px] text-muted-foreground">
               Created {formatRelativeDate(ticket.createdAt)}
             </span>
-            {threadLinks?.originThread && (
-              <>
-                <span className="text-border">|</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void navigate({
-                      to: "/$threadId",
-                      params: { threadId: threadLinks.originThread!.threadId },
-                    })
-                  }
-                >
-                  <Badge size="sm" variant="outline" className="cursor-pointer">
-                    Origin Thread
-                  </Badge>
-                </button>
-              </>
-            )}
           </div>
-        </div>
-
-        {/* Labels */}
-        <TicketLabelPicker
-          ticketId={ticketId}
-          projectId={projectId}
-          labels={ticket.labels}
-          onUpdated={() => void fetchTicket()}
-        />
-
-        {/* Worktree */}
-        <div className="flex flex-col gap-2">
-          <h3 className="text-xs font-medium text-muted-foreground">Worktree</h3>
-          <input
-            type="text"
-            className={`w-full cursor-text bg-transparent font-[inherit]! text-xs outline-none ${
-              editingWorktree || ticket.worktree
-                ? "text-foreground"
-                : "italic text-muted-foreground/60"
-            }`}
-            value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
-            placeholder="No worktree specified"
-            onFocus={() => {
-              setWorktreeDraft(ticket.worktree ?? "");
-              setEditingWorktree(true);
-            }}
-            onChange={(e) => setWorktreeDraft(e.target.value)}
-            onBlur={() => {
-              const blurAction = resolveInlineEditBlurAction({
-                cancelRequested: cancelEditRef.current,
-                isEditing: editingWorktree,
-              });
-              if (blurAction === "cancel") {
-                cancelEditRef.current = false;
-                setEditingWorktree(false);
-              } else if (blurAction === "save") {
-                void handleWorktreeSave();
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-              if (e.key === "Escape") {
-                cancelEditRef.current = true;
-                e.currentTarget.blur();
-              }
-            }}
-          />
         </div>
 
         {/* Description */}

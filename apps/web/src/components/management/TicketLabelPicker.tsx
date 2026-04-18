@@ -45,6 +45,7 @@ interface TicketLabelPickerProps {
   projectId: string;
   labels: readonly Label[];
   onUpdated: () => void;
+  inline?: boolean;
 }
 
 export function TicketLabelPicker({
@@ -52,6 +53,7 @@ export function TicketLabelPicker({
   projectId,
   labels,
   onUpdated,
+  inline,
 }: TicketLabelPickerProps) {
   const [open, setOpen] = useState(false);
   const [allLabels, setAllLabels] = useState<readonly Label[]>([]);
@@ -142,96 +144,104 @@ export function TicketLabelPicker({
     [allLabels, search],
   );
 
+  const content = (
+    <>
+      {/* Add button — always first */}
+      <Menu open={open} onOpenChange={setOpen}>
+        <MenuTrigger
+          className="inline-flex size-5 items-center justify-center rounded-sm border border-dashed border-muted-foreground/25 text-muted-foreground/50 transition-colors hover:border-muted-foreground/40 hover:text-muted-foreground/80"
+          aria-label="Add label"
+        >
+          <PlusIcon className="size-3" />
+        </MenuTrigger>
+        <MenuPopup align="start">
+          {/* Search input */}
+          <div className="px-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && search.trim() && !exactNameExists) {
+                  void handleCreateLabel();
+                }
+              }}
+              placeholder="Search or create"
+              className="w-full bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/50 sm:text-sm"
+            />
+          </div>
+          <MenuSeparator />
+
+          {filtered.map((label) => {
+            const attached = isLabelAttached(attachedIds, label.id as string);
+            return (
+              <MenuItem
+                key={label.id}
+                closeOnClick={false}
+                onClick={() => void handleToggleLabel(label)}
+              >
+                <span
+                  className="size-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: label.color }}
+                />
+                <span className="flex-1 truncate">{label.name}</span>
+                {attached && <CheckIcon className="size-3 shrink-0 opacity-80" />}
+              </MenuItem>
+            );
+          })}
+          {/* Create new */}
+          {search.trim() && !exactNameExists && (
+            <>
+              {filtered.length > 0 && <MenuSeparator />}
+              <MenuItem
+                closeOnClick={false}
+                onClick={() => void handleCreateLabel()}
+                disabled={creating}
+              >
+                <PlusIcon className="size-3 shrink-0" />
+                <span className="text-muted-foreground">
+                  Create <span className="font-medium text-foreground">{search.trim()}</span>
+                </span>
+              </MenuItem>
+            </>
+          )}
+        </MenuPopup>
+      </Menu>
+
+      {/* Attached labels */}
+      {labels.map((label) => (
+        <span
+          key={label.id}
+          className="group/label inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] font-medium"
+          style={{
+            backgroundColor: `${label.color}14`,
+            color: label.color,
+          }}
+        >
+          {label.name}
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/label:opacity-70 hover:group-hover/label:opacity-100"
+            onClick={() => void handleRemoveLabel(label.id)}
+            aria-label={`Remove label ${label.name}`}
+          >
+            <XIcon className="size-3" />
+          </button>
+        </span>
+      ))}
+    </>
+  );
+
+  if (inline) {
+    return <div className="flex flex-wrap items-center gap-1.5">{content}</div>;
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* Add button — always first */}
-        <Menu open={open} onOpenChange={setOpen}>
-          <MenuTrigger
-            className="inline-flex size-5 items-center justify-center rounded-sm border border-dashed border-muted-foreground/25 text-muted-foreground/50 transition-colors hover:border-muted-foreground/40 hover:text-muted-foreground/80"
-            aria-label="Add label"
-          >
-            <PlusIcon className="size-3" />
-          </MenuTrigger>
-          <MenuPopup align="start">
-            {/* Search input */}
-            <div className="px-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter" && search.trim() && !exactNameExists) {
-                    void handleCreateLabel();
-                  }
-                }}
-                placeholder="Search or create"
-                className="w-full bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/50 sm:text-sm"
-              />
-            </div>
-            <MenuSeparator />
-
-            {filtered.map((label) => {
-              const attached = isLabelAttached(attachedIds, label.id as string);
-              return (
-                <MenuItem
-                  key={label.id}
-                  closeOnClick={false}
-                  onClick={() => void handleToggleLabel(label)}
-                >
-                  <span
-                    className="size-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: label.color }}
-                  />
-                  <span className="flex-1 truncate">{label.name}</span>
-                  {attached && <CheckIcon className="size-3 shrink-0 opacity-80" />}
-                </MenuItem>
-              );
-            })}
-            {/* Create new */}
-            {search.trim() && !exactNameExists && (
-              <>
-                {filtered.length > 0 && <MenuSeparator />}
-                <MenuItem
-                  closeOnClick={false}
-                  onClick={() => void handleCreateLabel()}
-                  disabled={creating}
-                >
-                  <PlusIcon className="size-3 shrink-0" />
-                  <span className="text-muted-foreground">
-                    Create <span className="font-medium text-foreground">{search.trim()}</span>
-                  </span>
-                </MenuItem>
-              </>
-            )}
-          </MenuPopup>
-        </Menu>
-
-        {/* Attached labels */}
-        {labels.map((label) => (
-          <span
-            key={label.id}
-            className="group/label inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] font-medium"
-            style={{
-              backgroundColor: `${label.color}14`,
-              color: label.color,
-            }}
-          >
-            {label.name}
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/label:opacity-70 hover:group-hover/label:opacity-100"
-              onClick={() => void handleRemoveLabel(label.id)}
-              aria-label={`Remove label ${label.name}`}
-            >
-              <XIcon className="size-3" />
-            </button>
-          </span>
-        ))}
-      </div>
+      <div className="flex flex-wrap items-center gap-1.5">{content}</div>
     </div>
   );
 }

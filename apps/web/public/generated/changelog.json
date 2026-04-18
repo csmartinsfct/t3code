@@ -1,11 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-17T20:40:47.249Z",
-  "lastProcessedCommit": "32c0b123d672f3d922cec567cde13c30b2495e08",
+  "generatedAt": "2026-04-17T22:02:55.479Z",
+  "lastProcessedCommit": "b8ddfcc6778acf6a5972370b8ccb434500a054c6",
   "groups": [
     {
       "date": "2026-04-17",
       "entries": [
+        {
+          "id": "f61de9c5bfb3332a",
+          "title": "Claude Opus 4.7 support",
+          "summary": "Added Claude Opus 4.7 as an available model option, including support for Opus aliases that resolve to the new model.",
+          "category": "feature",
+          "commitShas": ["b8ddfcc6778acf6a5972370b8ccb434500a054c6"]
+        },
         {
           "id": "a18de2599c6b62a2",
           "title": "Faster Orchestration Loading",
@@ -1696,6 +1703,16 @@
         "fromExclusiveCommit": "c22baeaa119b5156889055073d653b2da9f79cc6",
         "toInclusiveCommit": "32c0b123d672f3d922cec567cde13c30b2495e08",
         "commitShas": ["32c0b123d672f3d922cec567cde13c30b2495e08"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-17T22:02:55.473Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "32c0b123d672f3d922cec567cde13c30b2495e08",
+        "toInclusiveCommit": "b8ddfcc6778acf6a5972370b8ccb434500a054c6",
+        "commitShas": ["b8ddfcc6778acf6a5972370b8ccb434500a054c6"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true

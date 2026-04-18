@@ -29,16 +29,19 @@ import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
 import { useProjectById } from "../../storeSelectors";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
-import { useUiStateStore } from "../../uiStateStore";
+import { DEFAULT_BOARD_FILTERS, useUiStateStore } from "../../uiStateStore";
 import { ensureNativeApi } from "../../nativeApi";
 import { logWebTimeline } from "../../timelineLogger";
 import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { ALL_STATUSES } from "../settings/ticketUtils";
+import { BoardToolbar } from "./BoardToolbar";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
+import { KanbanListView } from "./KanbanListView";
 import { KanbanSelectionBar } from "./KanbanSelectionBar";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
 import { OrchestrationSubpage } from "./OrchestrationSubpage";
@@ -205,6 +208,38 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     tickets: ReadonlyMap<TicketId, TicketSummary>;
   } | null>(null);
 
+  const viewMode = useUiStateStore((s) => s.boardViewMode);
+  const setViewMode = useUiStateStore((s) => s.setBoardViewMode);
+  const boardFilters =
+    useUiStateStore((s) => s.boardFiltersByProjectId[typedProjectId]) ?? DEFAULT_BOARD_FILTERS;
+  const storeBoardFilters = useUiStateStore((s) => s.setBoardFilters);
+  const storeToggleCollapsed = useUiStateStore((s) => s.toggleBoardCollapsedStatus);
+
+  const searchQuery = boardFilters.searchQuery;
+  const priorityFilter = useMemo(
+    () => new Set(boardFilters.priorityFilter),
+    [boardFilters.priorityFilter],
+  );
+  const labelFilter = useMemo(() => new Set(boardFilters.labelFilter), [boardFilters.labelFilter]);
+  const collapsedStatuses = boardFilters.collapsedStatuses;
+
+  const setPriorityFilter = useCallback(
+    (filter: Set<string>) => storeBoardFilters(typedProjectId, { priorityFilter: [...filter] }),
+    [storeBoardFilters, typedProjectId],
+  );
+  const setLabelFilter = useCallback(
+    (filter: Set<string>) => storeBoardFilters(typedProjectId, { labelFilter: [...filter] }),
+    [storeBoardFilters, typedProjectId],
+  );
+  const setSearchQuery = useCallback(
+    (query: string) => storeBoardFilters(typedProjectId, { searchQuery: query }),
+    [storeBoardFilters, typedProjectId],
+  );
+  const toggleCollapsedStatus = useCallback(
+    (status: TicketStatus) => storeToggleCollapsed(typedProjectId, status),
+    [storeToggleCollapsed, typedProjectId],
+  );
+
   useEffect(() => {
     if (!managementBoardContext || managementBoardContext.projectId !== typedProjectId) {
       setManagementBoardRoot(typedProjectId);
@@ -235,6 +270,44 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     }
     return grouped;
   }, [tickets]);
+
+  const availableLabels = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; color: string }>();
+    for (const ticket of tickets) {
+      for (const label of ticket.labels) {
+        if (!map.has(label.id)) {
+          map.set(label.id, {
+            id: label.id,
+            name: label.name,
+            color: label.color,
+          });
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [tickets]);
+
+  const filteredTicketsByStatus = useMemo(() => {
+    const hasActiveFilters = searchQuery !== "" || priorityFilter.size > 0 || labelFilter.size > 0;
+    if (!hasActiveFilters) return ticketsByStatus;
+    const query = searchQuery.toLowerCase();
+    const result = {} as Record<TicketStatus, TicketSummary[]>;
+    for (const status of ALL_STATUSES) {
+      result[status] = ticketsByStatus[status].filter((ticket) => {
+        if (
+          query &&
+          !ticket.title.toLowerCase().includes(query) &&
+          !ticket.identifier.toLowerCase().includes(query)
+        ) {
+          return false;
+        }
+        if (priorityFilter.size > 0 && !priorityFilter.has(ticket.priority)) return false;
+        if (labelFilter.size > 0 && !ticket.labels.some((l) => labelFilter.has(l.id))) return false;
+        return true;
+      });
+    }
+    return result;
+  }, [ticketsByStatus, searchQuery, priorityFilter, labelFilter]);
 
   useEffect(() => {
     if (loading) return;
@@ -290,8 +363,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   ticketsRef.current = tickets;
 
   const flatOrderedTickets = useMemo(() => {
-    return ALL_STATUSES.flatMap((s) => ticketsByStatus[s]);
-  }, [ticketsByStatus]);
+    return ALL_STATUSES.flatMap((s) => filteredTicketsByStatus[s]);
+  }, [filteredTicketsByStatus]);
   const validTicketIds = useMemo(() => new Set(tickets.map((ticket) => ticket.id)), [tickets]);
 
   useEffect(() => {
@@ -478,7 +551,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       const target = ticketsByStatusRef.current[originalStatus];
       const movedTicket = source.find((t) => t.id === ticketId);
       if (!movedTicket) return;
-      const updates: Array<{ id: string; sortOrder: number; status?: string }> = [];
+      const updates: Array<{
+        id: string;
+        sortOrder: number;
+        status?: string;
+      }> = [];
       const sourceWithout = source.filter((t) => t.id !== ticketId);
       for (let i = 0; i < sourceWithout.length; i++) {
         updates.push({ id: sourceWithout[i]!.id, sortOrder: i * 1000 });
@@ -539,7 +616,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         if (insertIndex === -1) insertIndex = targetColumn.length;
       }
 
-      const updates: Array<{ id: string; sortOrder: number; status?: string }> = [];
+      const updates: Array<{
+        id: string;
+        sortOrder: number;
+        status?: string;
+      }> = [];
       const sourceWithout = sourceColumn.filter((t) => t.id !== activeId);
       for (let i = 0; i < sourceWithout.length; i++) {
         updates.push({ id: sourceWithout[i]!.id, sortOrder: i * 1000 });
@@ -598,7 +679,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       }
 
       // Persist column order
-      const items = finalColumn.map((t, i) => ({ id: t.id, sortOrder: i * 1000 }));
+      const items = finalColumn.map((t, i) => ({
+        id: t.id,
+        sortOrder: i * 1000,
+      }));
       applyLocalReorder(items);
       const api = ensureNativeApi();
       void api.ticketing.reorder({ items: items as never });
@@ -697,14 +781,14 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         <div className="flex min-w-0 items-center gap-2">
           <CollapsedSidebarTrigger className="size-7 shrink-0" />
           {selectedTicketId || orchestrationSubpage ? (
-            <button
-              type="button"
-              className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            <Button
+              variant="outline"
+              size="xs"
               onClick={orchestrationSubpage ? handleOrchestrationBack : handleBack}
             >
               <ArrowLeftIcon className="size-3" />
               Back
-            </button>
+            </Button>
           ) : (
             <h2 className="text-xs font-medium text-foreground">Board</h2>
           )}
@@ -737,27 +821,56 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           findTicketSummary={findTicketSummary}
         />
       ) : (
-        <div ref={boardBodyRef} className="relative flex min-h-0 flex-1 overflow-x-auto">
-          {ALL_STATUSES.map((status) => (
-            <KanbanColumn
-              key={status}
-              status={status}
-              tickets={ticketsByStatus[status]}
-              epicProgressMap={epicProgressMap}
-              selectedTicketIds={selectedTicketIds}
-              onMultiSelectClick={handleTicketMultiSelectClick}
-              onCardContextMenu={handleCardContextMenu}
-              onTicketClick={handleTicketClick}
-            />
-          ))}
-          {selectedTicketIds.size > 0 && (
-            <KanbanSelectionBar
-              selectedCount={selectedTicketIds.size}
-              onOrchestrate={openOrchestrateForSelection}
-              onClear={clearSelection}
-            />
-          )}
-        </div>
+        <>
+          <BoardToolbar
+            priorityFilter={priorityFilter}
+            onPriorityFilterChange={setPriorityFilter}
+            labelFilter={labelFilter}
+            onLabelFilterChange={setLabelFilter}
+            availableLabels={availableLabels}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
+          <div ref={boardBodyRef} className="relative flex min-h-0 flex-1">
+            {viewMode === "list" ? (
+              <KanbanListView
+                filteredTicketsByStatus={filteredTicketsByStatus}
+                epicProgressMap={epicProgressMap}
+                selectedTicketIds={selectedTicketIds}
+                collapsedStatuses={collapsedStatuses}
+                onToggleCollapsed={toggleCollapsedStatus}
+                onMultiSelectClick={handleTicketMultiSelectClick}
+                onCardContextMenu={handleCardContextMenu}
+                onTicketClick={handleTicketClick}
+              />
+            ) : (
+              <div className="flex flex-1 overflow-x-auto px-3 sm:px-4">
+                {ALL_STATUSES.map((status) => (
+                  <KanbanColumn
+                    key={status}
+                    status={status}
+                    tickets={filteredTicketsByStatus[status]}
+                    epicProgressMap={epicProgressMap}
+                    selectedTicketIds={selectedTicketIds}
+                    onMultiSelectClick={handleTicketMultiSelectClick}
+                    onCardContextMenu={handleCardContextMenu}
+                    onTicketClick={handleTicketClick}
+                    viewMode={viewMode}
+                  />
+                ))}
+              </div>
+            )}
+            {selectedTicketIds.size > 0 && (
+              <KanbanSelectionBar
+                selectedCount={selectedTicketIds.size}
+                onOrchestrate={openOrchestrateForSelection}
+                onClear={clearSelection}
+              />
+            )}
+          </div>
+        </>
       )}
     </div>
   );
