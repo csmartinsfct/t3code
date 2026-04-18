@@ -91,6 +91,10 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   disabled, and `approval-required` to Gemini's default approval mode.
 - Model selection: Gemini model family with no fake reasoning-effort or thinking
   controls. Unsupported advanced provider behaviors return explicit errors.
+- Context usage: T3 reports Gemini token usage from ACP quota metadata. It only
+  shows a max context/window denominator when Gemini emits an effective
+  `usage_update.size`, because the CLI's effective context window can vary by
+  account plan and is not safely derivable from model name alone.
 - Project title, T3 REST service guidance, and project system prompts are
   delivered through ACP embedded context on the first Gemini turn because Gemini
   ACP session creation does not accept a system-prompt parameter.

@@ -236,6 +236,143 @@ it.effect("GeminiAdapterLive starts an ACP session and sends a text turn", () =>
   );
 });
 
+it.effect("GeminiAdapterLive maps ACP quota token counts to token usage", () => {
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-gemini-quota-usage");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      modelSelection: { provider: "gemini", model: "gemini-2.5-flash" },
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Say hello",
+      modelSelection: { provider: "gemini", model: "gemini-2.5-flash" },
+    });
+    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+    const usageEvent = Array.from(events).find(
+      (event) => event.type === "thread.token-usage.updated",
+    );
+
+    assert.equal(usageEvent?.type, "thread.token-usage.updated");
+    if (usageEvent?.type === "thread.token-usage.updated") {
+      assert.deepEqual(usageEvent.payload.usage, {
+        usedTokens: 20,
+        totalProcessedTokens: 20,
+        lastUsedTokens: 20,
+        inputTokens: 14,
+        lastInputTokens: 14,
+        outputTokens: 6,
+        lastOutputTokens: 6,
+        compactsAutomatically: true,
+      });
+    }
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(async (input) => {
+            options.onNotification?.({
+              method: "session/update",
+              params: {
+                sessionId: input.sessionId,
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "Hello from Gemini" },
+                },
+              },
+            });
+            return {
+              stopReason: "end_turn",
+              _meta: {
+                quota: {
+                  token_count: {
+                    input_tokens: 14,
+                    output_tokens: 6,
+                  },
+                  model_usage: [
+                    {
+                      model: "gemini-2.5-flash",
+                      token_count: {
+                        input_tokens: 14,
+                        output_tokens: 6,
+                      },
+                    },
+                  ],
+                },
+              },
+            };
+          }),
+        };
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive maps ACP usage update size to max tokens", () => {
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-gemini-usage-update-size");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      modelSelection: { provider: "gemini", model: "gemini-2.5-flash" },
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Say hello",
+      modelSelection: { provider: "gemini", model: "gemini-2.5-flash" },
+    });
+    const events = yield* Stream.take(adapter.streamEvents, 9).pipe(Stream.runCollect);
+    const usageEvent = Array.from(events).find(
+      (event) => event.type === "thread.token-usage.updated",
+    );
+
+    assert.equal(usageEvent?.type, "thread.token-usage.updated");
+    if (usageEvent?.type === "thread.token-usage.updated") {
+      assert.deepEqual(usageEvent.payload.usage, {
+        usedTokens: 42_000,
+        maxTokens: 128_000,
+        compactsAutomatically: true,
+      });
+    }
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(async (input) => {
+            options.onNotification?.({
+              method: "session/update",
+              params: {
+                sessionId: input.sessionId,
+                update: {
+                  sessionUpdate: "usage_update",
+                  used: 42_000,
+                  size: 128_000,
+                },
+              },
+            });
+            return { stopReason: "end_turn" };
+          }),
+        };
+        return connection;
+      }),
+    ),
+  );
+});
+
 it.effect("GeminiAdapterLive maps runtime mode to Gemini approval and sandbox options", () => {
   const createdOptions: GeminiAcpConnectionOptions[] = [];
   return Effect.gen(function* () {
@@ -398,6 +535,7 @@ it.effect("GeminiAdapterLive injects T3 session context on the first prompt", ()
     const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
     assert.ok(promptInput);
     assert.match(promptInput.text ?? "", /Use the referenced T3 session context/);
+    assert.match(promptInput.text ?? "", /Do not cite, quote, link, or mention/);
     assert.match(promptInput.text ?? "", /User request:\nInspect the project\./);
     assert.equal(promptInput.embeddedContext?.uri, "t3://session/context");
     assert.equal(promptInput.embeddedContext?.mimeType, "text/markdown");

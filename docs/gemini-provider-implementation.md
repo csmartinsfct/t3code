@@ -217,7 +217,9 @@ Normalize Gemini ACP events into existing canonical events:
 - approval request opened/resolved events if ACP provides approvals
 - warning and config events for missing auth, unsupported settings, model
   fallback, and MCP failures
-- token usage events if ACP or telemetry exposes usage
+- token usage events from ACP usage updates or prompt-result quota metadata.
+  Only emit a max context/window size when ACP reports one, because Gemini CLI
+  plan/account limits can differ from static model limits.
 - raw debug events with Gemini-specific source labels
 
 Normalization rules:

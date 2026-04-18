@@ -19,6 +19,7 @@ import {
   type ProviderUserInputAnswers,
   type RuntimeMode,
   type RuntimeContentStreamKind,
+  type ThreadTokenUsageSnapshot,
   type UserInputQuestion,
 } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
@@ -256,6 +257,7 @@ function makeGeminiPromptInput(
   return {
     text:
       "Use the referenced T3 session context as persistent operating context for this conversation. " +
+      "Do not cite, quote, link, or mention the internal t3://session/context resource. " +
       (userText
         ? `Then answer the user request below.\n\nUser request:\n${userText}`
         : "Then respond to the attached user content."),
@@ -440,10 +442,27 @@ function userInputQuestionsFromParams(params: unknown): ReadonlyArray<UserInputQ
 }
 
 function numberFrom(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  }
+  return undefined;
 }
 
-function tokenUsageFromUpdate(update: Record<string, unknown>) {
+function firstNumberFrom(record: Record<string, unknown>, keys: ReadonlyArray<string>) {
+  for (const key of keys) {
+    const value = numberFrom(record[key]);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function tokenUsageFromUpdate(update: Record<string, unknown>): ThreadTokenUsageSnapshot | null {
   const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
   if (updateKind !== "usage_update") {
     return null;
@@ -460,19 +479,73 @@ function tokenUsageFromUpdate(update: Record<string, unknown>) {
   };
 }
 
-function tokenUsageFromPromptResult(result: unknown) {
-  const usage = isRecord(result) && isRecord(result.usage) ? result.usage : null;
+function promptResultUsageRecord(result: unknown): Record<string, unknown> | null {
+  if (!isRecord(result)) {
+    return null;
+  }
+  if (isRecord(result.usage)) {
+    return result.usage;
+  }
+  if (isRecord(result.usageMetadata)) {
+    return result.usageMetadata;
+  }
+  if (isRecord(result.usage_metadata)) {
+    return result.usage_metadata;
+  }
+
+  const meta = isRecord(result._meta) ? result._meta : null;
+  const quota = isRecord(meta?.quota) ? meta.quota : null;
+  if (quota) {
+    return quota;
+  }
+
+  return null;
+}
+
+function tokenUsageFromPromptResult(result: unknown): ThreadTokenUsageSnapshot | null {
+  const usage = promptResultUsageRecord(result);
   if (!usage) {
     return null;
   }
-  const totalTokens = numberFrom(usage.totalTokens);
-  if (totalTokens === undefined || totalTokens <= 0) {
+
+  const quotaTokenCount = isRecord(usage.token_count) ? usage.token_count : null;
+  const tokenSource = quotaTokenCount ?? usage;
+  const inputTokens = firstNumberFrom(tokenSource, [
+    "inputTokens",
+    "input_tokens",
+    "promptTokenCount",
+    "prompt_token_count",
+  ]);
+  const outputTokens = firstNumberFrom(tokenSource, [
+    "outputTokens",
+    "output_tokens",
+    "candidatesTokenCount",
+    "candidates_token_count",
+  ]);
+  const thoughtTokens = firstNumberFrom(tokenSource, [
+    "thoughtTokens",
+    "thought_tokens",
+    "thoughtsTokenCount",
+    "thoughts_token_count",
+  ]);
+  const cachedReadTokens = firstNumberFrom(tokenSource, [
+    "cachedReadTokens",
+    "cached_read_tokens",
+    "cachedContentTokenCount",
+    "cached_content_token_count",
+    "cache_read_input_tokens",
+  ]);
+  const totalTokens =
+    firstNumberFrom(tokenSource, [
+      "totalTokens",
+      "total_tokens",
+      "totalTokenCount",
+      "total_token_count",
+    ]) ?? (inputTokens ?? 0) + (outputTokens ?? 0) + (thoughtTokens ?? 0);
+  if (totalTokens <= 0) {
     return null;
   }
-  const inputTokens = numberFrom(usage.inputTokens);
-  const outputTokens = numberFrom(usage.outputTokens);
-  const thoughtTokens = numberFrom(usage.thoughtTokens);
-  const cachedReadTokens = numberFrom(usage.cachedReadTokens);
+
   return {
     usedTokens: Math.round(totalTokens),
     totalProcessedTokens: Math.round(totalTokens),
