@@ -190,7 +190,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   ? "Disabled"
                   : !liveProvider.installed
                     ? "Not installed"
-                    : "Unavailable";
+                    : liveProvider.auth.status === "unauthenticated"
+                      ? "Not authenticated"
+                      : liveProvider.status === "warning"
+                        ? "Needs attention"
+                        : "Unavailable";
                 return (
                   <MenuItem key={option.value} disabled>
                     <OptionIcon

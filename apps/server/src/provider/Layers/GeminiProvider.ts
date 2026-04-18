@@ -8,6 +8,7 @@ import type {
   ServerProvider,
   ServerProviderAuth,
   ServerProviderModel,
+  ServerProviderState,
 } from "@t3tools/contracts";
 import { ServerSettingsError } from "@t3tools/contracts";
 import { Effect, Equal, Layer, Result, Stream } from "effect";
@@ -238,7 +239,7 @@ export function resolveGeminiAuthFromEnvironment(settings: GeminiSettings): Serv
 
   if (hasOAuthCredentials) {
     return {
-      status: "unknown",
+      status: "authenticated",
       type: "google-login",
       label: googleAccountLabel ?? "Cached Google sign-in",
     };
@@ -255,6 +256,32 @@ export function resolveGeminiAuthFromEnvironment(settings: GeminiSettings): Serv
   return {
     status: "unauthenticated",
     label: "Run `gemini auth` or set GEMINI_API_KEY.",
+  };
+}
+
+function authDetailSuffix(auth: ServerProviderAuth): string {
+  const detail = auth.label ?? auth.type;
+  return detail ? ` (${detail})` : "";
+}
+
+export function resolveGeminiProviderProbeStatus(auth: ServerProviderAuth): {
+  readonly status: Exclude<ServerProviderState, "disabled">;
+  readonly message?: string;
+} {
+  if (auth.status === "authenticated") {
+    return { status: "ready" };
+  }
+
+  if (auth.status === "unauthenticated") {
+    return {
+      status: "error",
+      message: `Gemini CLI is installed but authentication is missing${authDetailSuffix(auth)}. Run \`gemini auth\` or set GEMINI_API_KEY.`,
+    };
+  }
+
+  return {
+    status: "warning",
+    message: `Gemini CLI is installed, but authentication could not be verified${authDetailSuffix(auth)}. Cached Google sign-in, ADC, or project credentials may still work.`,
   };
 }
 
@@ -366,6 +393,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
     }
 
     const auth = resolveGeminiAuthFromEnvironment(geminiSettings);
+    const authProbeStatus = resolveGeminiProviderProbeStatus(auth);
     return buildServerProvider({
       provider: PROVIDER,
       enabled: geminiSettings.enabled,
@@ -374,19 +402,9 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
       probe: {
         installed: true,
         version: parseGenericCliVersion(`${versionResult.stdout}\n${versionResult.stderr}`),
-        status: "ready",
+        status: authProbeStatus.status,
         auth,
-        ...(auth.status === "unknown"
-          ? {
-              message:
-                "Gemini CLI is installed. Authentication was not verified; cached Google sign-in may still work.",
-            }
-          : auth.status === "unauthenticated"
-            ? {
-                message:
-                  "Gemini CLI is installed but authentication is missing. Run `gemini auth` or set GEMINI_API_KEY.",
-              }
-            : {}),
+        ...(authProbeStatus.message ? { message: authProbeStatus.message } : {}),
       },
     });
   },
