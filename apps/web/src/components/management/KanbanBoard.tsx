@@ -38,6 +38,15 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { ALL_STATUSES } from "../settings/ticketUtils";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { BoardToolbar } from "./BoardToolbar";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
@@ -471,6 +480,38 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     });
   }, [selectedTickets]);
 
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<readonly TicketId[] | null>(null);
+  const [deletingSelection, setDeletingSelection] = useState(false);
+
+  const openDeleteConfirmForSelection = useCallback(() => {
+    if (selectedTicketIds.size === 0) return;
+    setPendingDeleteIds([...selectedTicketIds]);
+  }, [selectedTicketIds]);
+
+  const handleConfirmDeleteSelection = useCallback(async () => {
+    const ids = pendingDeleteIds;
+    if (!ids || ids.length === 0) {
+      setPendingDeleteIds(null);
+      return;
+    }
+    setDeletingSelection(true);
+    try {
+      const api = ensureNativeApi();
+      await Promise.all(ids.map((id) => api.ticketing.delete({ id })));
+      clearSelection();
+      setPendingDeleteIds(null);
+    } catch (error) {
+      console.error("Failed to delete tickets:", error);
+      toastManager.add({
+        type: "error",
+        title: "Delete failed",
+        description: "One or more tickets could not be deleted.",
+      });
+    } finally {
+      setDeletingSelection(false);
+    }
+  }, [clearSelection, pendingDeleteIds]);
+
   const handleOrchestrateFromDetail = useCallback(
     (ticket: Ticket) => {
       const resolution = resolveBoardOrchestrateSelectionFromDetail({
@@ -872,10 +913,38 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               <KanbanSelectionBar
                 selectedCount={selectedTicketIds.size}
                 onOrchestrate={openOrchestrateForSelection}
+                onDelete={openDeleteConfirmForSelection}
                 onClear={clearSelection}
               />
             )}
           </div>
+          <AlertDialog
+            open={pendingDeleteIds !== null}
+            onOpenChange={(open) => {
+              if (!open) setPendingDeleteIds(null);
+            }}
+          >
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {(pendingDeleteIds?.length ?? 0) === 1
+                    ? "Delete this ticket?"
+                    : `Delete ${pendingDeleteIds?.length ?? 0} tickets?`}
+                </AlertDialogTitle>
+                <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                <Button
+                  variant="destructive"
+                  onClick={handleConfirmDeleteSelection}
+                  disabled={deletingSelection}
+                >
+                  {deletingSelection ? "Deleting..." : "Delete"}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
         </>
       )}
     </div>
