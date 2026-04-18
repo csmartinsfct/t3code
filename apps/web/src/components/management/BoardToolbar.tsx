@@ -190,9 +190,7 @@ export function BoardToolbar({
         <div
           className={cn(
             "relative flex h-6 cursor-text items-center rounded-md border border-border transition-[width,color] duration-200 ease-out",
-            searchOpen
-              ? "w-44"
-              : "w-[5.5rem] text-muted-foreground hover:text-foreground",
+            searchOpen ? "w-44" : "w-[5.5rem] text-muted-foreground hover:text-foreground",
           )}
           onClick={() => {
             if (!searchOpen) {
@@ -201,7 +199,12 @@ export function BoardToolbar({
             }
           }}
         >
-          <SearchIcon className={cn("pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2", searchOpen ? "text-muted-foreground" : "text-current opacity-80")} />
+          <SearchIcon
+            className={cn(
+              "pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2",
+              searchOpen ? "text-muted-foreground" : "text-current opacity-80",
+            )}
+          />
           {searchOpen ? (
             <>
               <input

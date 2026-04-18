@@ -129,7 +129,8 @@ export function TicketAcceptanceCriteria({
       {/* Header */}
       <div className="flex items-center gap-2">
         <p className="text-[11px] font-medium text-muted-foreground">
-          Acceptance Criteria{criteria.length > 0 && ` (${metCount}/${criteria.length})`}
+          Acceptance Criteria
+          {criteria.length > 0 && ` (${metCount}/${criteria.length})`}
         </p>
         <button
           type="button"
@@ -243,7 +244,7 @@ function CriterionRow({
   return (
     <div className="group flex items-start gap-2 rounded-md px-2 py-1.5">
       {/* Status checkbox */}
-      <button type="button" className="mt-px shrink-0" onClick={onToggle}>
+      <button type="button" className="relative top-[0.5px] shrink-0" onClick={onToggle}>
         {criterion.status === "met" ? (
           <div className="flex size-4 items-center justify-center rounded-[.25rem] bg-emerald-500 text-white">
             <CheckIcon className="size-3" strokeWidth={3} />
@@ -259,9 +260,9 @@ function CriterionRow({
 
       {/* Always-editable text input */}
       <div className="min-w-0 flex-1">
-        <input
-          type="text"
-          className={`w-full cursor-text bg-transparent font-[inherit]! text-xs outline-none ${statusTextClass}`}
+        <textarea
+          rows={1}
+          className={`w-full resize-none cursor-text bg-transparent p-0 [field-sizing:content] font-[inherit]! text-sm leading-snug outline-none ${statusTextClass}`}
           value={localText}
           onFocus={() => {
             isEditing.current = true;
@@ -298,7 +299,7 @@ function CriterionRow({
         {criterion.reason && (
           <p className="mt-0.5 text-[11px] italic text-muted-foreground">{criterion.reason}</p>
         )}
-        {criterion.verifiedBy && (
+        {criterion.status === "met" && criterion.verifiedBy && (
           <p className="mt-0.5 text-[10px] text-muted-foreground/60">
             Verified by {criterion.verifiedBy}
             {criterion.verifiedAt && ` · ${formatRelativeDate(criterion.verifiedAt)}`}

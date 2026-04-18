@@ -115,8 +115,7 @@ export function useHandleNewThread() {
 
         const boardContext = useUiStateStore.getState().managementBoardContext;
         if (boardContext && boardContext.projectId === projectId) {
-          const viewedTicketId =
-            boardContext.ticketStack[boardContext.ticketStack.length - 1];
+          const viewedTicketId = boardContext.ticketStack[boardContext.ticketStack.length - 1];
           if (viewedTicketId) {
             const api = readNativeApi();
             if (api) {

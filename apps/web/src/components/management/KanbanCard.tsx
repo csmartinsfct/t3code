@@ -101,7 +101,7 @@ export function KanbanCard({
       className={`flex w-full flex-col gap-1.5 rounded-md border px-2.5 py-2 text-left transition-colors ${
         isSelected
           ? "border-primary/40 bg-primary/5 ring-1.5 ring-primary/40"
-          : "border-border/70 bg-card hover:bg-accent/50"
+          : "border-border/70 bg-card hover:bg-accent/80"
       } ${isDragging ? "opacity-40" : ""}`}
       style={style}
       onContextMenu={handleContextMenu}
