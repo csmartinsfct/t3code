@@ -560,6 +560,126 @@ it.effect("GeminiAdapterLive injects T3 session context on the first prompt", ()
   );
 });
 
+it.effect("GeminiAdapterLive removes internal context references from assistant output", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-context-leak");
+  const checkpointContext = makeCheckpointContext(threadId);
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/workspace/gemini-worktree",
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "reply with ok",
+    });
+    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+
+    const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
+    assert.equal(promptInput?.embeddedContext?.uri, "t3://session/context");
+
+    const deltaEvent = Array.from(events).find((event) => event.type === "content.delta");
+    assert.equal(deltaEvent?.type, "content.delta");
+    if (deltaEvent?.type === "content.delta") {
+      assert.equal(deltaEvent.payload.delta, "ok");
+      assert.equal(JSON.stringify(deltaEvent.raw).includes("t3://session/context"), false);
+    }
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(async (input) => {
+            options.onNotification?.({
+              method: "session/update",
+              params: {
+                sessionId: input.sessionId,
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "ok@t3://session/context" },
+                },
+              },
+            });
+            return { stopReason: "end_turn" };
+          }),
+        } satisfies GeminiAcpConnection;
+        createdConnections.push(connection);
+        return connection;
+      }, checkpointContext),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive removes internal context references after forking", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-fork-context-leak");
+  const checkpointContext = makeCheckpointContext(threadId);
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/workspace/gemini-worktree",
+      runtimeMode: "full-access",
+      resumeCursor: {
+        sessionId: "gemini-session-source",
+        cwd: "/workspace/gemini-worktree",
+        fork: true,
+      },
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "reply with ok",
+    });
+    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+
+    const forkInput = vi.mocked(createdConnections[0]!.forkSession).mock.calls[0]?.[0];
+    assert.equal(forkInput?.sessionId, "gemini-session-source");
+
+    const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
+    assert.equal(promptInput?.embeddedContext?.uri, "t3://session/context");
+
+    const deltaEvent = Array.from(events).find((event) => event.type === "content.delta");
+    assert.equal(deltaEvent?.type, "content.delta");
+    if (deltaEvent?.type === "content.delta") {
+      assert.equal(deltaEvent.payload.delta, "ok");
+      assert.equal(JSON.stringify(deltaEvent.raw).includes("t3://session/context"), false);
+    }
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(async (input) => {
+            options.onNotification?.({
+              method: "session/update",
+              params: {
+                sessionId: input.sessionId,
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "ok@t3://session/context" },
+                },
+              },
+            });
+            return { stopReason: "end_turn" };
+          }),
+        } satisfies GeminiAcpConnection;
+        createdConnections.push(connection);
+        return connection;
+      }, checkpointContext),
+    ),
+  );
+});
+
 it.effect("GeminiAdapterLive does not re-inject matching context on resume", () => {
   const createdConnections: GeminiAcpConnection[] = [];
   const threadId = ThreadId.makeUnsafe("thread-gemini-resume-context");

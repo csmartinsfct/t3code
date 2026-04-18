@@ -54,6 +54,8 @@ import {
 
 const PROVIDER = "gemini" as const;
 const GEMINI_SESSION_CONTEXT_URI = "t3://session/context";
+const GEMINI_SESSION_CONTEXT_MARKDOWN_LINK_RE = /\[([^\]]*)\]\(\s*t3:\/\/session\/context\s*\)/gi;
+const GEMINI_SESSION_CONTEXT_REFERENCE_RE = /@?<?t3:\/\/session\/context>?/gi;
 const T3_MCP_SERVER_NAME = "t3-code";
 const GEMINI_SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -233,6 +235,39 @@ function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: stri
     return false;
   }
   return cursor.contextPromptInjected === true && cursor.contextPromptHash === contextPromptHash;
+}
+
+function sanitizeGeminiInternalContextReference(text: string): string {
+  return text
+    .replace(GEMINI_SESSION_CONTEXT_MARKDOWN_LINK_RE, "$1")
+    .replace(GEMINI_SESSION_CONTEXT_REFERENCE_RE, "")
+    .replace(/[ \t]+([.,;:!?])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ");
+}
+
+function sanitizeGeminiInternalContextReferences(value: unknown): unknown {
+  if (typeof value === "string") {
+    return sanitizeGeminiInternalContextReference(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeGeminiInternalContextReferences(entry));
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      sanitizeGeminiInternalContextReferences(entry),
+    ]),
+  );
+}
+
+function sanitizeGeminiRawEvent(raw: ProviderRuntimeEvent["raw"]): ProviderRuntimeEvent["raw"] {
+  if (!raw) {
+    return raw;
+  }
+  return sanitizeGeminiInternalContextReferences(raw) as ProviderRuntimeEvent["raw"];
 }
 
 function makeGeminiPromptInput(
@@ -642,11 +677,15 @@ function textDeltaFromSessionUpdate(update: Record<string, unknown>): {
   if (!delta) {
     return null;
   }
+  const sanitizedDelta = sanitizeGeminiInternalContextReference(delta);
+  if (!sanitizedDelta) {
+    return null;
+  }
   if (updateKind === "agent_thought_chunk") {
-    return { streamKind: "reasoning_text", delta };
+    return { streamKind: "reasoning_text", delta: sanitizedDelta };
   }
   if (updateKind === "agent_message_chunk" || updateKind === "message" || updateKind === "") {
-    return { streamKind: "assistant_text", delta };
+    return { streamKind: "assistant_text", delta: sanitizedDelta };
   }
   return null;
 }
@@ -948,6 +987,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         if (!textDelta || !activeTurn) {
           return;
         }
+        const sanitizedRaw = sanitizeGeminiRawEvent(raw);
         ensureAssistantItemStarted(context, activeTurn);
         activeTurn.items.push({
           type: textDelta.streamKind,
@@ -955,7 +995,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           createdAt: nowIso(),
         });
         offerRuntimeEvent({
-          ...eventBase(context, raw),
+          ...eventBase(context, sanitizedRaw),
           type: "content.delta",
           itemId: activeTurn.assistantItemId,
           payload: textDelta,
