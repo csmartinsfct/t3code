@@ -15,8 +15,11 @@ import {
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
 } from "@t3tools/contracts";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Stream } from "effect";
 
+import { ServerConfig } from "../../config";
+import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ServerSettingsService } from "../../serverSettings";
 import {
   ProviderAdapterRequestError,
@@ -34,12 +37,19 @@ import {
   type GeminiAcpIncomingNotification,
   type GeminiAcpIncomingRequest,
 } from "../gemini/GeminiAcpConnection";
+import {
+  buildProviderSessionContextPrompt,
+  hashProviderSessionContextPrompt,
+} from "../sessionContextPrompt";
 
 const PROVIDER = "gemini" as const;
+const GEMINI_SESSION_CONTEXT_URI = "t3://session/context";
 
 interface GeminiResumeCursor {
   readonly sessionId: string;
   readonly cwd?: string;
+  readonly contextPromptHash?: string;
+  readonly contextPromptInjected?: boolean;
 }
 
 interface GeminiTurnState {
@@ -56,6 +66,9 @@ interface GeminiSessionContext {
   readonly connection: GeminiAcpConnection;
   readonly providerSessionId: string;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  readonly sessionContextPrompt?: string;
+  readonly sessionContextPromptHash?: string;
+  sessionContextPromptInjected: boolean;
   activeTurn: GeminiTurnState | undefined;
   stopped: boolean;
 }
@@ -102,10 +115,64 @@ function extractResumeSessionId(cursor: unknown): string | null {
   return typeof sessionId === "string" && sessionId.trim() ? sessionId : null;
 }
 
-function makeResumeCursor(sessionId: string, cwd: string | undefined): GeminiResumeCursor {
+function makeResumeCursor(
+  sessionId: string,
+  cwd: string | undefined,
+  contextPrompt:
+    | {
+        readonly hash: string;
+        readonly injected: boolean;
+      }
+    | undefined,
+): GeminiResumeCursor {
   return {
     sessionId,
     ...(cwd ? { cwd } : {}),
+    ...(contextPrompt
+      ? {
+          contextPromptHash: contextPrompt.hash,
+          contextPromptInjected: contextPrompt.injected,
+        }
+      : {}),
+  };
+}
+
+function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: string): boolean {
+  if (!isRecord(cursor)) {
+    return false;
+  }
+  return cursor.contextPromptInjected === true && cursor.contextPromptHash === contextPromptHash;
+}
+
+function makeGeminiPromptInput(
+  context: GeminiSessionContext,
+  userText: string,
+): {
+  readonly text: string;
+  readonly embeddedContext?: {
+    readonly uri: string;
+    readonly text: string;
+    readonly mimeType: string;
+  };
+} {
+  if (
+    !context.sessionContextPrompt ||
+    !context.sessionContextPromptHash ||
+    context.sessionContextPromptInjected
+  ) {
+    return { text: userText };
+  }
+
+  return {
+    text:
+      "Use the referenced T3 session context as persistent operating context for this conversation. " +
+      "Then answer the user request below.\n\n" +
+      `User request:\n${userText}`,
+    embeddedContext: {
+      uri: GEMINI_SESSION_CONTEXT_URI,
+      text: context.sessionContextPrompt,
+      mimeType: "text/markdown",
+    },
   };
 }
 
@@ -262,6 +329,9 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
     GeminiAdapter,
     Effect.gen(function* () {
       const settingsService = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+      const managedRunService = yield* ManagedRunService;
       const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, GeminiSessionContext>();
       const createConnection = options?.createConnection ?? createGeminiAcpConnection;
@@ -489,6 +559,38 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           const cwd = input.cwd;
           const model =
             input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
+          const checkpointContext = yield* projectionSnapshotQuery
+            .getThreadCheckpointContext(input.threadId)
+            .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+          const serviceContext =
+            Option.isSome(checkpointContext) && serverConfig.port > 0
+              ? {
+                  port: serverConfig.port,
+                  isDev: serverConfig.devUrl !== undefined,
+                  token: (yield* managedRunService.issueMcpAccess(
+                    checkpointContext.value.projectId,
+                    input.threadId,
+                  )).token,
+                  adminPrompts: settings.prompts.admin,
+                }
+              : undefined;
+          const sessionContextPrompt = Option.isSome(checkpointContext)
+            ? buildProviderSessionContextPrompt({
+                threadId: input.threadId,
+                projectTitle: checkpointContext.value.projectTitle,
+                workspaceRoot: checkpointContext.value.workspaceRoot,
+                worktreePath: checkpointContext.value.worktreePath,
+                systemPrompt: checkpointContext.value.systemPrompt,
+                includeProjectContext: true,
+                ...(serviceContext ? { serviceContext } : {}),
+              })
+            : undefined;
+          const sessionContextPromptHash = sessionContextPrompt
+            ? hashProviderSessionContextPrompt(sessionContextPrompt)
+            : undefined;
+          const sessionContextPromptInjected = sessionContextPromptHash
+            ? resumeCursorHasInjectedContext(input.resumeCursor, sessionContextPromptHash)
+            : true;
           let context: GeminiSessionContext | undefined;
           const connection = createConnection({
             binaryPath: geminiSettings.binaryPath,
@@ -545,7 +647,16 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               ...(cwd ? { cwd } : {}),
               ...(model ? { model } : {}),
               threadId: input.threadId,
-              resumeCursor: makeResumeCursor(sessionInfo.sessionId, cwd),
+              resumeCursor: makeResumeCursor(
+                sessionInfo.sessionId,
+                cwd,
+                sessionContextPromptHash
+                  ? {
+                      hash: sessionContextPromptHash,
+                      injected: sessionContextPromptInjected,
+                    }
+                  : undefined,
+              ),
               createdAt: startedAt,
               updatedAt: startedAt,
             };
@@ -555,6 +666,9 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               connection,
               providerSessionId: sessionInfo.sessionId,
               turns: [],
+              ...(sessionContextPrompt ? { sessionContextPrompt } : {}),
+              ...(sessionContextPromptHash ? { sessionContextPromptHash } : {}),
+              sessionContextPromptInjected,
               activeTurn: undefined,
               stopped: false,
             };
@@ -723,9 +837,26 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           payload: selectedModel ? { model: selectedModel } : {},
         });
 
+        const promptInput = makeGeminiPromptInput(context, text);
+        if (promptInput.embeddedContext && context.sessionContextPromptHash) {
+          context.sessionContextPromptInjected = true;
+          updateSession(context, {
+            resumeCursor: makeResumeCursor(context.providerSessionId, context.session.cwd, {
+              hash: context.sessionContextPromptHash,
+              injected: true,
+            }),
+          });
+        }
+
         Effect.runFork(
           Effect.tryPromise(() =>
-            context.connection.prompt({ sessionId: context.providerSessionId, text }),
+            context.connection.prompt({
+              sessionId: context.providerSessionId,
+              text: promptInput.text,
+              ...(promptInput.embeddedContext
+                ? { embeddedContext: promptInput.embeddedContext }
+                : {}),
+            }),
           ).pipe(
             Effect.match({
               onFailure: (cause) => {

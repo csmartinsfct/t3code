@@ -46,6 +46,12 @@ export interface GeminiAcpIncomingNotification {
   readonly params?: unknown;
 }
 
+export interface GeminiAcpEmbeddedContext {
+  readonly uri: string;
+  readonly text: string;
+  readonly mimeType?: string;
+}
+
 export interface GeminiAcpConnection {
   readonly childPid: number | undefined;
   initialize: () => Promise<unknown>;
@@ -63,7 +69,11 @@ export interface GeminiAcpConnection {
     sessionId: string;
     modeId: "default" | "auto_edit" | "yolo" | "plan";
   }) => Promise<void>;
-  prompt: (input: { sessionId: string; text: string }) => Promise<unknown>;
+  prompt: (input: {
+    sessionId: string;
+    text: string;
+    embeddedContext?: GeminiAcpEmbeddedContext;
+  }) => Promise<unknown>;
   cancel: (sessionId: string) => Promise<void>;
   close: () => void;
 }
@@ -332,9 +342,24 @@ export function createGeminiAcpConnection(
       await requestWithFallback("session/set_mode", "setSessionMode", params);
     },
     prompt: (input) => {
+      const prompt = input.embeddedContext
+        ? [
+            { type: "text", text: input.text },
+            {
+              type: "resource",
+              resource: {
+                uri: input.embeddedContext.uri,
+                text: input.embeddedContext.text,
+                ...(input.embeddedContext.mimeType
+                  ? { mimeType: input.embeddedContext.mimeType }
+                  : {}),
+              },
+            },
+          ]
+        : [{ type: "text", text: input.text }];
       const params = {
         sessionId: input.sessionId,
-        prompt: [{ type: "text", text: input.text }],
+        prompt,
       };
       return requestWithFallback("session/prompt", "prompt", params);
     },

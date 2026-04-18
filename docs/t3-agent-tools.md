@@ -23,6 +23,8 @@ The chat composer's MCP picker also mirrors provider-side config on disk so the 
 
 - Codex: global `~/.codex/config.toml` plus project-scoped `.codex/config.toml`
 - Claude: profile/global `.claude.json` plus project-local `.mcp.json`
+- Gemini: Gemini CLI settings are not mirrored yet; T3 prompt-mode service
+  context is delivered through ACP embedded context.
 
 For Codex, project-scoped config is still gated by Codex project trust. T3 Code now auto-trusts the active project path by writing the matching `[projects."<cwd>"] trust_level = "trusted"` entry into `~/.codex/config.toml` before resolving Codex MCP servers and before starting Codex sessions, so repo-local MCP config works without any manual terminal setup.
 
@@ -40,6 +42,8 @@ Managed runs, scheduled tasks, and ticketing are registered as native tool sets 
 
 - **Codex**: REST API services added via `configOverrides` (e.g. `mcp_servers.t3_managed_runs.url="..."`)
 - **Claude**: REST API services added via `mcpServers` option + `allowedTools` glob patterns (`mcp__t3_managed_runs__*`, etc.)
+- **Gemini**: native MCP/tool delivery is not implemented yet; Gemini receives
+  prompt-mode REST guidance instead.
 - **System prompt**: Per-service prompts appended explaining tool usage (`MANAGED_RUNS_SYSTEM_PROMPT`, `SCHEDULED_TASKS_SYSTEM_PROMPT`, `TICKETING_SYSTEM_PROMPT`)
 
 **Trade-offs:**
@@ -57,6 +61,10 @@ No native tools are registered. Instead, the system prompt provides REST endpoin
 
 - **Codex**: No `configOverrides` for services. System prompt injected via `appendDeveloperInstructions`
 - **Claude**: No `mcpServers` or `allowedTools`. System prompt injected via `systemPrompt.append`
+- **Gemini**: ACP `session/new` and `session/load` do not accept a system-prompt
+  field, so T3 sends the REST guidance as an ACP embedded-context resource on
+  the first prompt. The Gemini resume cursor stores a context hash so unchanged
+  resumed sessions are not repeatedly primed.
 - **System prompt**: Unified prompt from `buildMcpPromptModeSystemPrompt()` with endpoint table, token, and `GET /api/<service>` / `POST {"tool":"...", "input":{...}}` curl examples
 
 **Trade-offs:**
@@ -88,7 +96,7 @@ Thread start (with active project)
        │   Append unified prompt with endpoints + token  ││
        │                                                 ││
        ▼                                                 ▼▼
- Provider session starts (Codex or Claude)
+ Provider session starts (Codex, Claude, or Gemini)
 ```
 
 ### Token Lifecycle

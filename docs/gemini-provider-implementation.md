@@ -253,7 +253,12 @@ Required changes:
   CLI, including user-level and project `.gemini` settings when confirmed by the
   spike.
 - For `mcpDeliveryMode: "prompt"`, inject the same REST endpoint prompt into
-  Gemini prompts or session initialization context.
+  Gemini prompts or session initialization context. The current implementation
+  uses ACP `session/prompt` embedded context on the first turn because Gemini
+  ACP `session/new` and `session/load` do not accept a system-prompt field.
+  The resume cursor stores the context hash and injection state so unchanged
+  loaded sessions are not repeatedly primed, while changed context or fresh
+  per-process REST tokens are injected again.
 - For `mcpDeliveryMode: "tools"`, prefer ACP initialize with a T3 MCP server if
   the spike proves Gemini connects to client-provided MCP servers reliably.
 - If native tool injection is not reliable in the first milestone, expose Gemini
@@ -417,7 +422,9 @@ First milestone can defer:
 
 6. MCP and tool delivery
    - Add Gemini MCP config discovery.
-   - Add prompt-mode injection.
+   - Add prompt-mode injection. Initial prompt-mode context delivery is wired
+     through ACP embedded context on the first user turn; native MCP tool
+     delivery remains deferred.
    - Add native tool mode only if ACP initialize can connect to T3's MCP server
      reliably.
    - Update `docs/t3-agent-tools.md` after behavior is implemented.
@@ -460,12 +467,18 @@ Unit tests:
 - Provider registry and adapter registry include Gemini.
 - Web model selection and store code do not coerce Gemini to Codex.
 - MCP config reader routes Gemini separately from Claude.
+- Gemini session startup resolves project context and injects the T3 prompt-mode
+  service context through ACP embedded context before the first user request.
 
 Adapter and manager tests:
 
 - Fake ACP process initializes and creates a session.
 - `newSession` cursor is persisted into the returned `ProviderSession`.
 - `loadSession` uses the stored cursor.
+- The first Gemini prompt receives project context, T3 REST endpoint guidance,
+  and the project system prompt as embedded context.
+- Matching resumed context is not duplicated when the stored context hash
+  indicates it was already injected.
 - `prompt` emits canonical assistant text and turn lifecycle events.
 - `cancel` emits interrupted or failed lifecycle events consistently.
 - Tool calls normalize with stable item ids.

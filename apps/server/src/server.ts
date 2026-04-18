@@ -185,7 +185,10 @@ const ProviderLayerLive = Layer.unwrap(
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger, lifecycleLogger } : { lifecycleLogger },
     ).pipe(Layer.provide(managedRunDeps), Layer.provide(snapshotQueryDeps));
-    const geminiAdapterLayer = makeGeminiAdapterLive();
+    const geminiAdapterLayer = makeGeminiAdapterLive().pipe(
+      Layer.provide(managedRunDeps),
+      Layer.provide(snapshotQueryDeps),
+    );
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),

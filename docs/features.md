@@ -89,6 +89,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   model slugs.
 - Model selection: Gemini model family with no fake reasoning-effort or thinking
   controls. Unsupported advanced provider behaviors return explicit errors.
+- Project title, T3 REST service guidance, and project system prompts are
+  delivered through ACP embedded context on the first Gemini turn because Gemini
+  ACP session creation does not accept a system-prompt parameter.
 - See [Gemini Provider Implementation Specification](gemini-provider-implementation.md)
   for rollout risks and deferred capabilities.
 
