@@ -623,7 +623,6 @@ Git-ref based snapshots that track file state before and after each agent turn.
 | `resumeAgentsOnStartup`    | Auto-resume stale work on server restart   | `false`          |
 | `maxReviewIterations`      | Max review passes for tickets              | `3` (max 10)     |
 | `defaultThreadEnvMode`     | Thread workspace isolation                 | `"local"`        |
-| `mcpDeliveryMode`          | How service tools reach models             | `"tools"`        |
 | Provider settings          | Codex, Claude Agent, Gemini, profiles      | Per-provider     |
 | Model selections           | Text gen, inference, implementer, reviewer | Per-use-case     |
 | Observability              | OTLP traces/metrics URLs                   | Disabled         |
@@ -672,23 +671,13 @@ Limits: 256 rules max, 64-char key values, 256-char when expressions.
 
 ---
 
-## 16. Service Delivery Modes
+## 16. T3 Project Service Injection
 
-Controls how internal service tools are made available to AI providers. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
+Internal T3 project services are exposed to every provider the same way: REST endpoint URLs and a short-lived Bearer token are injected into the session-start prompt via the shared `buildT3ServiceInjectionPrompt` helper. The model calls them with its native shell/bash tool. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
 
-### "tools" mode (default)
-
-- Internal services are registered as native tool sets in the provider's tool list.
-- Each tool is directly callable by the model.
-- Per-service system prompts are injected alongside the tools.
-- Trade-off: 43+ tools injected upfront, consuming context window.
-
-### "prompt" mode
-
-- No native tool registration in the provider.
-- REST endpoint URLs and bearer tokens are injected into the system prompt.
-- The model uses code execution (e.g. `curl`) to discover and call tools on demand.
-- Trade-off: Extra round-trip per tool call; depends on the model's code execution capability.
+- Codex: appended through `appendDeveloperInstructions`.
+- Claude: appended through `systemPrompt.append`.
+- Gemini: sent as an ACP embedded-context resource on the first user turn; the resume cursor tracks a hash so unchanged prompts are not re-injected.
 
 ### Services exposed via REST API
 
@@ -699,7 +688,7 @@ Controls how internal service tools are made available to AI providers. See [t3-
 | Scheduled Tasks | `/api/scheduled-tasks` | 9          |
 | Prompts         | `/api/prompts`         | 5          |
 
-Configurable via `mcpDeliveryMode` in server settings.
+Trade-off: one extra round-trip for tool discovery (`GET` before `POST`) in exchange for no up-front tool-slot cost. A future native-MCP delivery mode would slot into the same shared helper.
 
 ---
 

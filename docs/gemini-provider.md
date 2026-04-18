@@ -26,19 +26,21 @@ launch:
 
 ## Project Tools
 
-Gemini sessions receive T3 project tools through ACP `mcpServers`. The server
-declares a local stdio MCP bridge named `t3-code` for checkpointed project
-threads. The bridge launches `t3 mcp-stdio` with a short-lived project token and
-exposes the REST-backed T3 services:
+T3 exposes its project services (managed runs, scheduled tasks, ticketing,
+prompts) to every provider the same way: the session-start injection includes a
+REST endpoint table and a short-lived Bearer token via
+`buildT3ServiceInjectionPrompt`. Gemini receives this as an ACP embedded-context
+resource on the first user turn; Codex receives it through
+`appendDeveloperInstructions`; Claude receives it through `systemPrompt.append`.
+All three providers call the endpoints with their native shell/bash tool.
 
-- ticketing
-- managed runs
-- scheduled tasks
-- prompts
+User-configured MCP servers discovered in `<GEMINI_CLI_HOME>/settings.json` and
+`<cwd>/.gemini/settings.json` are still surfaced in the composer MCP menu and
+loaded by the Gemini CLI itself. T3 does not write into those files. A future
+native-MCP delivery mode for any provider would route through the same helper.
 
-Tool discovery or call failures are written to MCP stderr with a `[t3-mcp]`
-prefix. The Gemini adapter reports configured MCP servers with
-`mcp.status.updated` and forwards MCP-related stderr as `runtime.warning`.
+MCP-related stderr from Gemini is still forwarded as `runtime.warning` so
+connection issues with user-registered MCP servers remain visible.
 
 ## Approvals And User Input
 

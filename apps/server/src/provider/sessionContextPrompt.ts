@@ -7,10 +7,34 @@ import {
   renderAdminPromptDocument,
 } from "./restEndpointSystemPrompt.ts";
 
-interface AdminPromptDocuments {
+export interface AdminPromptDocuments {
   readonly managedRuns: PromptDocumentV1;
   readonly scheduledTasks: PromptDocumentV1;
   readonly ticketing: PromptDocumentV1;
+}
+
+/**
+ * The single, provider-neutral block that tells an agent how to reach the T3
+ * project services. Codex, Claude, and Gemini all inject this identical text —
+ * Codex/Claude via `appendDeveloperInstructions` / `systemPrompt.append`,
+ * Gemini via ACP embedded context on the first user turn.
+ */
+export function buildT3ServiceInjectionPrompt(input: {
+  readonly port: number;
+  readonly isDev: boolean;
+  readonly projectTitle?: string;
+  readonly token: string;
+  readonly adminPrompts: AdminPromptDocuments;
+}): string {
+  const { port, isDev, projectTitle, token, adminPrompts } = input;
+  const sections: string[] = [
+    buildEnvironmentHeader({ port, isDev, ...(projectTitle ? { projectTitle } : {}) }),
+    buildRestEndpointSystemPrompt({ port, token }),
+    renderAdminPromptDocument(adminPrompts.managedRuns),
+    renderAdminPromptDocument(adminPrompts.scheduledTasks),
+    renderAdminPromptDocument(adminPrompts.ticketing),
+  ];
+  return sections.join("\n\n");
 }
 
 interface ProviderSessionContextPromptInput {
@@ -24,7 +48,6 @@ interface ProviderSessionContextPromptInput {
     readonly port: number;
     readonly isDev: boolean;
     readonly token: string;
-    readonly nativeInternalTools?: boolean;
     readonly adminPrompts: AdminPromptDocuments;
   };
 }
@@ -58,21 +81,14 @@ export function buildProviderSessionContextPrompt(
   }
 
   if (input.serviceContext && input.serviceContext.port > 0) {
-    const { port, isDev, token, nativeInternalTools, adminPrompts } = input.serviceContext;
     sections.push(
-      buildEnvironmentHeader({
-        port,
-        isDev,
+      buildT3ServiceInjectionPrompt({
+        port: input.serviceContext.port,
+        isDev: input.serviceContext.isDev,
         projectTitle: input.projectTitle,
+        token: input.serviceContext.token,
+        adminPrompts: input.serviceContext.adminPrompts,
       }),
-      buildRestEndpointSystemPrompt({
-        port,
-        token,
-        ...(nativeInternalTools !== undefined ? { nativeInternalTools } : {}),
-      }),
-      renderAdminPromptDocument(adminPrompts.managedRuns),
-      renderAdminPromptDocument(adminPrompts.scheduledTasks),
-      renderAdminPromptDocument(adminPrompts.ticketing),
     );
   }
 

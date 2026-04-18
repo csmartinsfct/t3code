@@ -74,11 +74,7 @@ import * as path from "node:path";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
-import {
-  buildEnvironmentHeader,
-  renderAdminPromptDocument,
-  buildRestEndpointSystemPrompt,
-} from "../restEndpointSystemPrompt.ts";
+import { buildT3ServiceInjectionPrompt } from "../sessionContextPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
@@ -3072,27 +3068,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           checkpointContext.value.projectId,
           input.threadId,
         );
-
-        const envHeader = buildEnvironmentHeader({
+        serviceSystemPrompt = buildT3ServiceInjectionPrompt({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
           projectTitle: checkpointContext.value.projectTitle,
+          token: access.token,
+          adminPrompts: allSettings.prompts.admin,
         });
-
-        const adminPrompts = allSettings.prompts.admin;
-        serviceSystemPrompt =
-          envHeader +
-          "\n\n" +
-          buildRestEndpointSystemPrompt({
-            port: serverConfig.port,
-            token: access.token,
-          }) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.managedRuns) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.scheduledTasks) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.ticketing);
       }
       // Inject project-specific system prompt (independent of services / port)
       if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {

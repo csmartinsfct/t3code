@@ -17,7 +17,12 @@ import type {
   GeminiAcpConnection,
   GeminiAcpConnectionOptions,
 } from "../gemini/GeminiAcpConnection";
-import { makeGeminiAdapterLive } from "./GeminiAdapter";
+import {
+  canonicalPermissionRequestType,
+  flushGeminiSanitizeTail,
+  makeGeminiAdapterLive,
+  sanitizeGeminiStreamChunk,
+} from "./GeminiAdapter";
 
 const serverConfigTestLayer = Layer.succeed(ServerConfig, {
   logLevel: "Error",
@@ -541,11 +546,12 @@ it.effect("GeminiAdapterLive injects T3 session context on the first prompt", ()
     assert.equal(promptInput.embeddedContext?.mimeType, "text/markdown");
     assert.match(promptInput.embeddedContext?.text ?? "", /## T3 Project Context/);
     assert.match(promptInput.embeddedContext?.text ?? "", /Gemini Project/);
-    assert.match(
+    // All providers now receive the same REST-via-curl guidance.
+    assert.match(promptInput.embeddedContext?.text ?? "", /no dedicated tools are registered/);
+    assert.notMatch(
       promptInput.embeddedContext?.text ?? "",
       /Dedicated T3 MCP tools may be registered/,
     );
-    assert.notMatch(promptInput.embeddedContext?.text ?? "", /no dedicated tools are registered/);
     assert.match(promptInput.embeddedContext?.text ?? "", /Authorization: Bearer test-token/);
     assert.match(
       promptInput.embeddedContext?.text ?? "",
@@ -584,7 +590,7 @@ it.effect("GeminiAdapterLive removes internal context references from assistant 
       threadId,
       input: "reply with ok",
     });
-    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+    const events = yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
 
     const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
     assert.equal(promptInput?.embeddedContext?.uri, "t3://session/context");
@@ -645,7 +651,7 @@ it.effect("GeminiAdapterLive removes internal context references after forking",
       threadId,
       input: "reply with ok",
     });
-    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+    const events = yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
 
     const forkInput = vi.mocked(createdConnections[0]!.forkSession).mock.calls[0]?.[0];
     assert.equal(forkInput?.sessionId, "gemini-session-source");
@@ -727,12 +733,9 @@ it.effect("GeminiAdapterLive does not re-inject matching context on resume", () 
     const loadInput = vi.mocked(resumedConnection.loadSession).mock.calls[0]?.[0];
     assert.equal(loadInput?.sessionId, "gemini-session-resumed");
     assert.equal(loadInput?.cwd, "/workspace/gemini-worktree");
-    assert.equal(loadInput?.mcpServers?.length, 1);
-    assert.deepEqual((loadInput?.mcpServers?.[0] as Record<string, unknown>)?.env, [
-      { name: "T3_MCP_BASE_URL", value: "http://127.0.0.1:3773" },
-      { name: "T3_MCP_PORT", value: "3773" },
-      { name: "T3_MCP_TOKEN", value: "test-token" },
-    ]);
+    // T3 does not register its own MCP bridge with Gemini; the REST-via-curl
+    // injection is the unified delivery path for project tools.
+    assert.equal(loadInput?.mcpServers, undefined);
     const promptInput = vi.mocked(resumedConnection.prompt).mock.calls[0]?.[0];
     assert.ok(promptInput);
     assert.equal(promptInput.text, "Continue.");
@@ -748,7 +751,7 @@ it.effect("GeminiAdapterLive does not re-inject matching context on resume", () 
   );
 });
 
-it.effect("GeminiAdapterLive declares the T3 MCP stdio server for checkpointed sessions", () => {
+it.effect("GeminiAdapterLive does not register its own MCP server with Gemini", () => {
   const createdConnections: GeminiAcpConnection[] = [];
   const threadId = ThreadId.makeUnsafe("thread-gemini-mcp");
   const checkpointContext = makeCheckpointContext(threadId);
@@ -763,16 +766,11 @@ it.effect("GeminiAdapterLive declares the T3 MCP stdio server for checkpointed s
       runtimeMode: "full-access",
     });
 
+    // Unified REST-via-curl injection: no MCP bridge is advertised by T3.
+    // Any MCP servers users configure in ~/.gemini/settings.json are still
+    // discovered by the Gemini CLI itself.
     const newSessionInput = vi.mocked(createdConnections[0]!.newSession).mock.calls[0]?.[0];
-    assert.equal(newSessionInput?.mcpServers?.length, 1);
-    const server = newSessionInput?.mcpServers?.[0] as Record<string, unknown>;
-    assert.equal(server.name, "t3-code");
-    assert.equal(server.command, process.execPath);
-    assert.deepEqual(server.env, [
-      { name: "T3_MCP_BASE_URL", value: "http://127.0.0.1:3773" },
-      { name: "T3_MCP_PORT", value: "3773" },
-      { name: "T3_MCP_TOKEN", value: "test-token" },
-    ]);
+    assert.equal(newSessionInput?.mcpServers, undefined);
   }).pipe(
     Effect.provide(
       makeGeminiTestLayer((options) => {
@@ -902,7 +900,10 @@ it.effect("GeminiAdapterLive classifies MCP list permissions from Gemini tool ti
     if (opened?.type !== "request.opened") {
       assert.fail("Expected Gemini MCP approval request event");
     }
-    assert.equal(opened.payload.requestType, "file_read_approval");
+    // Generic MCP tool call without a file-semantic ACP kind is classified as
+    // a dynamic tool call, not as a file read. Prior behavior scanned the
+    // `toolCallId` and incorrectly matched on `list_tickets`.
+    assert.equal(opened.payload.requestType, "dynamic_tool_call");
     assert.equal(opened.payload.detail, "ticketing__list_tickets (t3-code MCP Server)");
     resolvePrompt?.({ stopReason: "end_turn" });
   }).pipe(
@@ -1194,7 +1195,7 @@ it.effect("GeminiAdapterLive forks Gemini sessions when the resume cursor reques
     const forkInput = vi.mocked(createdConnections[0]!.forkSession).mock.calls[0]?.[0];
     assert.equal(forkInput?.sessionId, "gemini-session-source");
     assert.equal(forkInput?.cwd, "/workspace/gemini-worktree");
-    assert.equal(forkInput?.mcpServers?.length, 1);
+    assert.equal(forkInput?.mcpServers, undefined);
     const cursor = session.resumeCursor as {
       sessionId?: string;
       cwd?: string;
@@ -1215,4 +1216,333 @@ it.effect("GeminiAdapterLive forks Gemini sessions when the resume cursor reques
       }, checkpointContext),
     ),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Streaming sanitizer (FU-1)
+// ---------------------------------------------------------------------------
+
+function runStreamSanitize(chunks: ReadonlyArray<string>): string {
+  let tail = "";
+  let emitted = "";
+  for (const chunk of chunks) {
+    const result = sanitizeGeminiStreamChunk(tail, chunk);
+    tail = result.tail;
+    emitted += result.emit;
+  }
+  emitted += flushGeminiSanitizeTail(tail);
+  return emitted;
+}
+
+it("sanitizeGeminiStreamChunk strips the bare URI regardless of split boundary", () => {
+  const text = "ok@t3://session/context done";
+  for (let splitAt = 0; splitAt <= text.length; splitAt++) {
+    const a = text.slice(0, splitAt);
+    const b = text.slice(splitAt);
+    const result = runStreamSanitize([a, b]);
+    assert.equal(
+      result.includes("t3://"),
+      false,
+      `split at ${splitAt} leaked t3://: ${JSON.stringify(result)}`,
+    );
+    assert.equal(
+      result.includes("@"),
+      false,
+      `split at ${splitAt} leaked @: ${JSON.stringify(result)}`,
+    );
+    assert.equal(
+      result.includes("<"),
+      false,
+      `split at ${splitAt} leaked <: ${JSON.stringify(result)}`,
+    );
+    assert.equal(
+      result.includes(">"),
+      false,
+      `split at ${splitAt} leaked >: ${JSON.stringify(result)}`,
+    );
+    assert.match(result, /^ok\b/);
+    assert.match(result, /\bdone$/);
+  }
+});
+
+it("sanitizeGeminiStreamChunk handles the angle-bracketed form across boundaries", () => {
+  const text = "see @<t3://session/context> here";
+  for (let splitAt = 0; splitAt <= text.length; splitAt++) {
+    const a = text.slice(0, splitAt);
+    const b = text.slice(splitAt);
+    const result = runStreamSanitize([a, b]);
+    assert.equal(
+      result.includes("t3://"),
+      false,
+      `angle split at ${splitAt} leaked: ${JSON.stringify(result)}`,
+    );
+    assert.equal(result.includes("@<"), false, `angle split at ${splitAt} leaked: ${result}`);
+    assert.match(result, /^see\b/);
+    assert.match(result, /\bhere$/);
+  }
+});
+
+it("sanitizeGeminiStreamChunk collapses the markdown-link sentinel across boundaries", () => {
+  const text = "read [Context](t3://session/context) carefully";
+  for (let splitAt = 0; splitAt <= text.length; splitAt++) {
+    const a = text.slice(0, splitAt);
+    const b = text.slice(splitAt);
+    const result = runStreamSanitize([a, b]);
+    assert.equal(
+      result.includes("t3://"),
+      false,
+      `md split at ${splitAt} leaked URL: ${JSON.stringify(result)}`,
+    );
+    assert.match(result, /^read\b/);
+    assert.match(result, /\bcarefully$/);
+    assert.match(result, /\bContext\b/);
+    assert.equal(result.includes("]("), false, `md split at ${splitAt} left ']('`);
+    assert.equal(result.includes("[Context]"), false, `md split at ${splitAt} left '[Context]'`);
+  }
+});
+
+it("sanitizeGeminiStreamChunk preserves legit @ mentions and unrelated markdown links", () => {
+  const text = "hey @alice, see [docs](https://example.com) please";
+  for (let splitAt = 0; splitAt <= text.length; splitAt++) {
+    const a = text.slice(0, splitAt);
+    const b = text.slice(splitAt);
+    const result = runStreamSanitize([a, b]);
+    assert.equal(result, text, `split at ${splitAt} corrupted legit text: ${result}`);
+  }
+});
+
+it("sanitizeGeminiStreamChunk emits a trailing @ untouched when followed by non-sentinel", () => {
+  const result = runStreamSanitize(["Wait for response@", " thanks"]);
+  assert.equal(result, "Wait for response@ thanks");
+});
+
+it("sanitizeGeminiStreamChunk drops a full sentinel delivered in a single chunk", () => {
+  const result = runStreamSanitize(["@t3://session/context"]);
+  assert.equal(result, "");
+});
+
+it("flushGeminiSanitizeTail preserves residue when a sentinel URI remains incomplete", () => {
+  // If the stream ends with an incomplete URI it was never a real sentinel; the
+  // residue is emitted verbatim so user-typed content resembling the URI is not
+  // silently dropped.
+  const result = runStreamSanitize(["Partial ref @t3://session/cont"]);
+  assert.equal(result, "Partial ref @t3://session/cont");
+});
+
+it.effect(
+  "GeminiAdapterLive streams boundary-split context references without leaking characters",
+  () => {
+    const createdConnections: GeminiAcpConnection[] = [];
+    const threadId = ThreadId.makeUnsafe("thread-gemini-stream-leak");
+    const checkpointContext = makeCheckpointContext(threadId);
+
+    return Effect.gen(function* () {
+      const adapter = yield* GeminiAdapter;
+
+      yield* adapter.startSession({
+        threadId,
+        provider: "gemini",
+        cwd: "/workspace/gemini-worktree",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "reply with ok",
+      });
+      const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+      const deltaEvents = Array.from(events).filter((event) => event.type === "content.delta");
+      const joined = deltaEvents
+        .map((event) =>
+          event.type === "content.delta" && event.payload.streamKind === "assistant_text"
+            ? event.payload.delta
+            : "",
+        )
+        .join("");
+      assert.equal(joined.includes("t3://"), false, `leaked URL: ${JSON.stringify(joined)}`);
+      assert.equal(joined.includes("@"), false, `leaked @: ${JSON.stringify(joined)}`);
+      assert.match(joined, /^ok\b/);
+    }).pipe(
+      Effect.provide(
+        makeGeminiTestLayer((options) => {
+          const connection = {
+            ...makeFakeConnection(options),
+            prompt: vi.fn(async (input) => {
+              // Split the reply across delta boundaries exactly in the middle
+              // of the sentinel to reproduce the original leak.
+              for (const chunk of ["ok@", "t3://session/", "context done"]) {
+                options.onNotification?.({
+                  method: "session/update",
+                  params: {
+                    sessionId: input.sessionId,
+                    update: {
+                      sessionUpdate: "agent_message_chunk",
+                      content: { type: "text", text: chunk },
+                    },
+                  },
+                });
+              }
+              return { stopReason: "end_turn" };
+            }),
+          } satisfies GeminiAcpConnection;
+          createdConnections.push(connection);
+          return connection;
+        }, checkpointContext),
+      ),
+    );
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Permission request classification (FU-3)
+// ---------------------------------------------------------------------------
+
+it("canonicalPermissionRequestType prefers ACP kind over name heuristics", () => {
+  // ACP says execute; name looks like a file write. ACP kind wins.
+  assert.deepEqual(
+    canonicalPermissionRequestType({ kind: "execute", name: "fs-write", toolCallId: "xyz" }),
+    { canonicalRequestType: "command_execution_approval", providerRequestKind: "command" },
+  );
+  assert.deepEqual(canonicalPermissionRequestType({ kind: "read", name: "delete-all" }), {
+    canonicalRequestType: "file_read_approval",
+    providerRequestKind: "file-read",
+  });
+});
+
+it("canonicalPermissionRequestType uses word-boundary name matching when ACP kind is missing", () => {
+  // `patch-mcp-config` has no ACP kind; `patch` is a word, so we classify as file_change.
+  assert.deepEqual(canonicalPermissionRequestType({ name: "patch-mcp-config" }), {
+    canonicalRequestType: "file_change_approval",
+    providerRequestKind: "file-change",
+  });
+});
+
+it("canonicalPermissionRequestType ignores tokens inside snake_case identifiers", () => {
+  // `list_tickets` used to match the old `includes("list")` scan and falsely
+  // classify as file_read. Word-boundary regex + no `toolCallId` scanning
+  // leaves the call as `unknown` when nothing else provides a signal.
+  const classification = canonicalPermissionRequestType({
+    kind: "other",
+    toolName: "list_tickets",
+    toolCallId: "mcp_foo_list_tickets-1",
+  });
+  assert.equal(classification.canonicalRequestType, "unknown");
+  // A title that does contain a standalone `MCP` word lifts it to dynamic tool.
+  const withMcpTitle = canonicalPermissionRequestType({
+    kind: "other",
+    toolName: "list_tickets",
+    title: "Call ticketing via MCP",
+  });
+  assert.equal(withMcpTitle.canonicalRequestType, "dynamic_tool_call");
+});
+
+it("canonicalPermissionRequestType recognises MCP/tool tokens only by word boundary", () => {
+  assert.deepEqual(canonicalPermissionRequestType({ title: "Call MCP server" }), {
+    canonicalRequestType: "dynamic_tool_call",
+  });
+  // `toolCallId` alone is no longer scanned, so a `mcp` inside an id does not
+  // flip classification on its own.
+  assert.deepEqual(canonicalPermissionRequestType({ toolCallId: "abc-mcp-123" }), {
+    canonicalRequestType: "unknown",
+  });
+});
+
+it("canonicalPermissionRequestType returns unknown when nothing matches", () => {
+  assert.deepEqual(canonicalPermissionRequestType({ name: "frobulate" }), {
+    canonicalRequestType: "unknown",
+  });
+  assert.deepEqual(canonicalPermissionRequestType({}), { canonicalRequestType: "unknown" });
+  assert.deepEqual(canonicalPermissionRequestType(null), { canonicalRequestType: "unknown" });
+});
+
+it("canonicalPermissionRequestType treats ACP 'other' as fall-through, not automatic dynamic", () => {
+  // `other` is ACP's generic bucket; we should use name/title to refine. A
+  // plain "other" with a file-write name should classify as file_change.
+  assert.deepEqual(canonicalPermissionRequestType({ kind: "other", name: "write-file" }), {
+    canonicalRequestType: "file_change_approval",
+    providerRequestKind: "file-change",
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runtime-mode → process launch args (FU-4)
+// ---------------------------------------------------------------------------
+
+it.effect("GeminiAdapterLive launches Gemini with yolo + no-sandbox in full-access mode", () => {
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-runtime-full-access");
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    assert.equal(createdOptions.length, 1);
+    assert.equal(createdOptions[0]?.approvalMode, "yolo");
+    assert.equal(createdOptions[0]?.sandbox, false);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        return makeFakeConnection(options);
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive launches Gemini with approval-mode default in supervised mode", () => {
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-runtime-supervised");
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "approval-required",
+    });
+    assert.equal(createdOptions.length, 1);
+    assert.equal(createdOptions[0]?.approvalMode, "default");
+    // Sandbox is left unset so Gemini's own default (from settings.json or the
+    // installed CLI) is honored — T3 only forces sandbox off in full-access.
+    assert.equal(createdOptions[0]?.sandbox, undefined);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        return makeFakeConnection(options);
+      }),
+    ),
+  );
+});
+
+it("buildGeminiAcpArgs / buildGeminiAcpEnv enforce full-access vs supervised contract", async () => {
+  // Import locally so we don't add a top-level dependency just for this test.
+  const { buildGeminiAcpArgs, buildGeminiAcpEnv } = await import("../gemini/GeminiAcpConnection");
+
+  const fullAccessArgs = buildGeminiAcpArgs({
+    binaryPath: "gemini",
+    approvalMode: "yolo",
+    sandbox: false,
+  });
+  assert.deepEqual(fullAccessArgs, ["--acp", "--approval-mode", "yolo", "--no-sandbox"]);
+
+  const fullAccessEnv = buildGeminiAcpEnv(
+    { binaryPath: "gemini", sandbox: false },
+    { GEMINI_SANDBOX: "true" },
+  );
+  assert.equal(fullAccessEnv.GEMINI_SANDBOX, "false");
+
+  const supervisedArgs = buildGeminiAcpArgs({
+    binaryPath: "gemini",
+    approvalMode: "default",
+  });
+  assert.deepEqual(supervisedArgs, ["--acp", "--approval-mode", "default"]);
+
+  const supervisedEnv = buildGeminiAcpEnv({ binaryPath: "gemini" }, { PRESERVED: "ok" });
+  assert.equal(supervisedEnv.PRESERVED, "ok");
+  // Supervised mode should not force `GEMINI_SANDBOX=false`.
+  assert.equal(supervisedEnv.GEMINI_SANDBOX, undefined);
 });

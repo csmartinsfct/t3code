@@ -13,13 +13,11 @@ T3 Code exposes four internal REST API services that AI models can use during co
 | Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts     |
 | Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates    |
 
-Managed runs, scheduled tasks, and ticketing can be injected into provider sessions as native tools. Prompt management is currently an explicit HTTP management surface for the UI and REST API workflows rather than a native provider toolset.
-
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
 Ticketing REST API sessions can also be scoped to a live thread. When a provider session has thread context, T3 injects `threadId` alongside `projectId` into the ticketing endpoint URL / auth context so server-side ticket creation can persist an origin-thread relationship without exposing any extra public tool arguments.
 
-The chat composer's MCP picker also mirrors provider-side config on disk so the UI reflects what a session should be able to use:
+The chat composer's MCP picker mirrors provider-side config on disk so the UI reflects what a session can use:
 
 - Codex: global `~/.codex/config.toml` plus project-scoped `.codex/config.toml`
 - Claude: profile/global `.claude.json` plus project-local `.mcp.json`
@@ -30,52 +28,29 @@ For Codex, project-scoped config is still gated by Codex project trust. T3 Code 
 
 ---
 
-## Delivery Modes
+## Delivery Path: REST via Shell
 
-The `mcpDeliveryMode` server setting (Settings > General > "MCP delivery") controls **how** these services reach the AI model. This enables A/B testing between two approaches.
+Every supported provider (Codex, Claude, Gemini) reaches the four T3 services through the same prompt-injected REST path. The shared builder `buildT3ServiceInjectionPrompt` (in `apps/server/src/provider/sessionContextPrompt.ts`) assembles the environment header, the REST endpoint table, the per-session Bearer token, and the admin prompt documents. Each adapter hands this identical string to its CLI:
 
-### Native Tools (`"tools"` — default)
+- **Codex**: appended through `appendDeveloperInstructions` at session start.
+- **Claude**: appended through `systemPrompt.append` at session start.
+- **Gemini**: sent as an ACP embedded-context resource on the first user turn (ACP `session/new` and `session/load` do not accept a system-prompt field). The session-context hash is stored on the resume cursor so the prompt is only re-injected when it actually changes between process runs.
 
-Managed runs, scheduled tasks, and ticketing are registered as native tool sets in the provider session. Each tool appears individually in the model's tool list.
-
-**How it works:**
-
-- **Codex**: REST API services added via `configOverrides` (e.g. `mcp_servers.t3_managed_runs.url="..."`)
-- **Claude**: REST API services added via `mcpServers` option + `allowedTools` glob patterns (`mcp__t3_managed_runs__*`, etc.)
-- **Gemini**: T3 Code injects a stdio MCP bridge through ACP `mcpServers` for
-  internal project services.
-- **System prompt**: Per-service prompts appended explaining tool usage (`MANAGED_RUNS_SYSTEM_PROMPT`, `SCHEDULED_TASKS_SYSTEM_PROMPT`, `TICKETING_SYSTEM_PROMPT`)
+The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files and surfaced in the composer MCP menu.
 
 **Trade-offs:**
 
-- (+) Model has direct tool access — no extra round-trip
-- (+) Tool schemas visible in context — model knows exact inputs
-- (-) 43+ tools injected upfront — context overhead even when unused
-- (-) Each injected service adds more tools to every conversation
+- (+) One code path to maintain across all providers.
+- (+) Adding a new service is a prompt-table update.
+- (+) Zero up-front tool-slot cost; the model loads schemas on demand via `GET /api/<service>`.
+- (-) One extra round-trip for tool discovery (`GET` before `POST`).
+- (-) Depends on the model having a shell/code-execution tool available.
 
-### HTTP Endpoints (`"prompt"`)
+---
 
-No native tools are registered. Instead, the system prompt provides REST endpoint URLs, the auth token, and request format examples. The model uses `curl` / code execution to discover and call tools on demand, including the explicit prompt-management endpoint.
+## Future: Native-MCP Mode
 
-**How it works:**
-
-- **Codex**: No `configOverrides` for services. System prompt injected via `appendDeveloperInstructions`
-- **Claude**: No `mcpServers` or `allowedTools`. System prompt injected via `systemPrompt.append`
-- **Gemini**: ACP `session/new` and `session/load` do not accept a system-prompt
-  field, so T3 sends service context as an ACP embedded-context resource on the
-  first prompt. In native-tool sessions this context tells Gemini to prefer the
-  registered T3 MCP tools while keeping REST endpoint details as fallback/API
-  context. The Gemini resume cursor stores a context hash so unchanged resumed
-  sessions are not repeatedly primed.
-- **System prompt**: Unified prompt from `buildMcpPromptModeSystemPrompt()` with endpoint table, token, and `GET /api/<service>` / `POST {"tool":"...", "input":{...}}` curl examples
-
-**Trade-offs:**
-
-- (+) Zero tool bloat — model context stays clean
-- (+) On-demand discovery — model only loads tools it needs via `GET /api/<service>`
-- (+) Adding new services just requires a prompt update, not adapter changes
-- (-) Extra round-trip for tool discovery (model must `GET` the endpoint first)
-- (-) Depends on model having code execution capability
+A native-MCP delivery mode (one registered MCP server per service, tool schemas injected up-front) is a plausible future option. It would be added as a single shared seam: `buildT3ServiceInjectionPrompt` would either return the current REST guidance or a "these tools are registered; prefer them" variant, and each adapter would register the corresponding MCP servers before session start. Gate it behind a feature flag and a per-provider capability check when shipping.
 
 ---
 
@@ -87,37 +62,34 @@ No native tools are registered. Instead, the system prompt provides REST endpoin
 Thread start (with active project)
        │
        ▼
- Read mcpDeliveryMode from ServerSettings
+ Issue per-session Bearer token via managedRunService.issueMcpAccess()
        │
-       ├── "tools" ─────────────────────────────────────┐
-       │   Register native tool sets                     │
-       │   Append per-service system prompts             │
-       │                                                 │
-       ├── "prompt" ────────────────────────────────────┐│
-       │   No native tool registration                   ││
-       │   Append unified prompt with endpoints + token  ││
-       │                                                 ││
-       ▼                                                 ▼▼
- Provider session starts (Codex, Claude, or Gemini)
+       ▼
+ buildT3ServiceInjectionPrompt() assembles env header + REST table + admin prompts
+       │
+       ▼
+ Provider adapter injects the string into its session-start call:
+   - Codex: appendDeveloperInstructions
+   - Claude: systemPrompt.append
+   - Gemini: ACP embedded-context resource on the first prompt
 ```
 
 ### Token Lifecycle
 
 1. `managedRunService.issueMcpAccess(projectId, threadId)` generates a Bearer token
 2. Token is scoped to the project + thread
-3. In "tools" mode: token is set in service HTTP headers
-4. In "prompt" mode: token is embedded in the system prompt text
-5. All REST endpoints validate the token on each request
+3. Token is embedded in the injected prompt text
+4. All REST endpoints validate the token on each request
 
 For ticketing specifically, the validated session context may also include `threadId`. The ticketing REST route forwards that to the ticketing service so `create_ticket` can attach an `origin` ticket-thread link automatically.
 
-Ticket replies now have a small internal-link contract for chat output: when an agent references a ticket in prose, it should use markdown like `[T3CO-191](t3://ticket/T3CO-191)`. The reminder is injected briefly through the ticketing prompts and through selected ticket tool discovery descriptions. Ticket tool call responses remain JSON-only so they stay predictable for agents and REST clients.
+Ticket replies have a small internal-link contract for chat output: when an agent references a ticket in prose, it should use markdown like `[T3CO-191](t3://ticket/T3CO-191)`. The reminder is injected briefly through the ticketing prompts and through selected ticket tool discovery descriptions. Ticket tool call responses remain JSON-only so they stay predictable for agents and REST clients.
 
 For prompts, managed-run bearer tokens are restricted to the issuing `projectId` and may only access project scope. Global prompt scope is only available through privileged contexts such as the dev bypass token.
 
 ### Condition Gate
 
-Service injection (in either mode) only happens when:
+Service injection only happens when:
 
 - Thread has an active project context (checkpoint context exists)
 - Server is listening (`serverConfig.port > 0`)
@@ -129,32 +101,25 @@ If either condition is false, no internal services are exposed to the model.
 ## File Map
 
 ```
-packages/contracts/src/settings.ts                     # McpDeliveryMode type + ServerSettings field
-apps/server/src/provider/mcpPromptModeSystemPrompt.ts   # "prompt" mode system prompt builder
-apps/server/src/managedRuns/systemPrompt.ts             # Managed runs "tools" mode prompt
-apps/server/src/scheduledTasks/systemPrompt.ts          # Scheduled tasks "tools" mode prompt
-apps/server/src/ticketing/systemPrompt.ts               # Ticketing "tools" mode prompt
+packages/contracts/src/settings.ts                     # Server settings schema
+apps/server/src/provider/sessionContextPrompt.ts        # buildT3ServiceInjectionPrompt (shared helper)
+apps/server/src/provider/restEndpointSystemPrompt.ts    # REST endpoint table + env header
 apps/server/src/prompts/http.ts                         # Prompt-management REST route
 apps/server/src/ticketing/http.ts                       # Ticketing REST route + thread-aware request context
-apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (both modes)
-apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (both modes)
-apps/server/src/provider/Layers/GeminiAdapter.ts        # Gemini ACP MCP bridge + embedded context injection
-apps/web/src/components/settings/SettingsPanels.tsx      # UI toggle in General settings
+apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (REST via curl)
+apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (REST via curl)
+apps/server/src/provider/Layers/GeminiAdapter.ts        # Gemini injection (ACP embedded-context)
 ```
 
 ---
 
 ## Adding a New Service
 
-To add a new REST API service to both delivery modes:
+To add a new REST API service:
 
 1. Create the REST HTTP endpoint (e.g. `/api/new-service`)
-2. Create a `systemPrompt.ts` for "tools" mode
-3. **CodexAdapter**: Add `configOverrides` entries in the `"tools"` branch
-4. **ClaudeAdapter**: Add entry to `mcpServersConfig` and `mcpAllowedTools` in the `"tools"` branch
-5. **GeminiAdapter**: Include the service in the `t3-code` bridge exposure and embedded service context
-6. Concatenate the new system prompt in provider `"tools"` injection paths
-7. The `"prompt"` mode prompt (`mcpPromptModeSystemPrompt.ts`) picks up the new endpoint automatically if you add it to the services table — update the table and description there
-8. No UI changes needed — the setting toggle works for all services
+2. Add the service to the table in `buildRestEndpointSystemPrompt` (in `apps/server/src/provider/restEndpointSystemPrompt.ts`)
+3. If the service has its own admin prompt document, add it to `AdminPromptSettings` and include it in `buildT3ServiceInjectionPrompt`
+4. No adapter changes required — the shared helper handles all three providers
 
-If a service should stay HTTP-only, follow the same REST route and prompt-mode documentation path without adding native-tool registration in the provider adapters.
+If a service should stay HTTP-only and not be advertised to models, simply do not add it to the table.

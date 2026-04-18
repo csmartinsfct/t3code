@@ -56,7 +56,6 @@ const PROVIDER = "gemini" as const;
 const GEMINI_SESSION_CONTEXT_URI = "t3://session/context";
 const GEMINI_SESSION_CONTEXT_MARKDOWN_LINK_RE = /\[([^\]]*)\]\(\s*t3:\/\/session\/context\s*\)/gi;
 const GEMINI_SESSION_CONTEXT_REFERENCE_RE = /@?<?t3:\/\/session\/context>?/gi;
-const T3_MCP_SERVER_NAME = "t3-code";
 const GEMINI_SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -80,13 +79,14 @@ interface GeminiTurnState {
   cancelRequested: boolean;
   assistantStarted: boolean;
   completed: boolean;
+  pendingAssistantTail: string;
+  pendingReasoningTail: string;
 }
 
 interface GeminiSessionContext {
   session: ProviderSession;
   readonly connection: GeminiAcpConnection;
   readonly providerSessionId: string;
-  readonly mcpServers: ReadonlyArray<unknown>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingGeminiApprovalRequest>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingGeminiUserInputRequest>;
@@ -95,11 +95,6 @@ interface GeminiSessionContext {
   sessionContextPromptInjected: boolean;
   activeTurn: GeminiTurnState | undefined;
   stopped: boolean;
-}
-
-interface GeminiMcpServiceContext {
-  readonly port: number;
-  readonly token: string;
 }
 
 interface PendingGeminiApprovalRequest {
@@ -208,28 +203,6 @@ function shouldForkFromResumeCursor(cursor: unknown): boolean {
   return isRecord(cursor) && cursor.fork === true;
 }
 
-function buildGeminiMcpServers(serviceContext: GeminiMcpServiceContext | undefined) {
-  if (!serviceContext) {
-    return [];
-  }
-  const entrypoint = process.argv[1];
-  if (!entrypoint) {
-    return [];
-  }
-  return [
-    {
-      name: T3_MCP_SERVER_NAME,
-      command: process.execPath,
-      args: [entrypoint, "mcp-stdio"],
-      env: [
-        { name: "T3_MCP_BASE_URL", value: `http://127.0.0.1:${serviceContext.port}` },
-        { name: "T3_MCP_PORT", value: String(serviceContext.port) },
-        { name: "T3_MCP_TOKEN", value: serviceContext.token },
-      ],
-    },
-  ];
-}
-
 function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: string): boolean {
   if (!isRecord(cursor)) {
     return false;
@@ -243,6 +216,104 @@ function sanitizeGeminiInternalContextReference(text: string): string {
     .replace(GEMINI_SESSION_CONTEXT_REFERENCE_RE, "")
     .replace(/[ \t]+([.,;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ");
+}
+
+// Plain-URI sentinel prefixes whose partial suffix may appear at a delta boundary.
+// If any of these forms are in flight across two deltas, the non-streaming regex
+// above cannot match and will leak the orphan prefix. We hold back a matching
+// tail from emission until the next delta completes (or fails) the sentinel.
+const STREAM_SANITIZE_PLAIN_SENTINELS = [
+  "@<t3://session/context>",
+  "<t3://session/context>",
+  "@t3://session/context>",
+  "t3://session/context>",
+  "@<t3://session/context",
+  "<t3://session/context",
+  "@t3://session/context",
+  "t3://session/context",
+] as const;
+
+// Max bytes to look backward from an unclosed `[` when holding back a
+// potentially-forming markdown-link sentinel. Bounds the buffered tail so a
+// legit unclosed `[` never grows the hold indefinitely.
+const STREAM_SANITIZE_MARKDOWN_HOLDBACK_MAX = 128;
+
+function applyGeminiSentinelStrip(text: string): string {
+  return text
+    .replace(GEMINI_SESSION_CONTEXT_MARKDOWN_LINK_RE, "$1")
+    .replace(GEMINI_SESSION_CONTEXT_REFERENCE_RE, "");
+}
+
+function findPendingMarkdownLinkStart(text: string): number | null {
+  // Scan `[...](...` constructs. If the most recent such construct hasn't been
+  // closed by a `)`, return the index of the opening `[`. That span cannot be
+  // safely emitted because the next delta may complete the markdown-link
+  // sentinel and the bare-URI regex would otherwise strip the inner URI first,
+  // leaving orphan `[…]()` brackets behind.
+  const withinHoldback = (openBracket: number): number | null =>
+    text.length - openBracket <= STREAM_SANITIZE_MARKDOWN_HOLDBACK_MAX ? openBracket : null;
+  let i = 0;
+  while (i < text.length) {
+    const openBracket = text.indexOf("[", i);
+    if (openBracket < 0) return null;
+    const closeBracket = text.indexOf("]", openBracket + 1);
+    if (closeBracket < 0) return withinHoldback(openBracket);
+    if (closeBracket === text.length - 1) {
+      // Trailing `]` with no following char yet; the next chunk may begin with
+      // `(t3://session/context)` and complete a markdown-link sentinel.
+      return withinHoldback(openBracket);
+    }
+    if (text[closeBracket + 1] !== "(") {
+      i = closeBracket + 1;
+      continue;
+    }
+    const closeParen = text.indexOf(")", closeBracket + 2);
+    if (closeParen < 0) return withinHoldback(openBracket);
+    i = closeParen + 1;
+  }
+  return null;
+}
+
+function computeBareSentinelTailLen(text: string): number {
+  if (text.length === 0) return 0;
+  const lower = text.toLowerCase();
+  let tailLen = 0;
+  for (const pattern of STREAM_SANITIZE_PLAIN_SENTINELS) {
+    const lowerPattern = pattern.toLowerCase();
+    const maxLen = Math.min(lower.length, pattern.length - 1);
+    for (let len = maxLen; len >= 1 && len > tailLen; len--) {
+      if (lowerPattern.startsWith(lower.slice(lower.length - len))) {
+        tailLen = len;
+        break;
+      }
+    }
+  }
+  return tailLen;
+}
+
+export function sanitizeGeminiStreamChunk(
+  prev: string,
+  chunk: string,
+): { readonly emit: string; readonly tail: string } {
+  const combined = `${prev}${chunk}`;
+  if (!combined) return { emit: "", tail: "" };
+  const pendingMarkdownStart = findPendingMarkdownLinkStart(combined);
+  const safeEnd = pendingMarkdownStart ?? combined.length;
+  const safePortion = combined.slice(0, safeEnd);
+  const pendingPortion = combined.slice(safeEnd);
+  const strippedSafe = applyGeminiSentinelStrip(safePortion);
+  const bareTailLen = computeBareSentinelTailLen(strippedSafe);
+  const emit = strippedSafe.slice(0, strippedSafe.length - bareTailLen);
+  const heldFromSafe = strippedSafe.slice(strippedSafe.length - bareTailLen);
+  return {
+    emit,
+    tail: `${heldFromSafe}${pendingPortion}`,
+  };
+}
+
+export function flushGeminiSanitizeTail(prev: string): string {
+  if (!prev) return "";
+  return sanitizeGeminiInternalContextReference(prev);
 }
 
 function sanitizeGeminiInternalContextReferences(value: unknown): unknown {
@@ -304,7 +375,7 @@ function makeGeminiPromptInput(
   };
 }
 
-function canonicalPermissionRequestType(toolCall: unknown): {
+type PermissionClassification = {
   readonly canonicalRequestType:
     | "command_execution_approval"
     | "file_read_approval"
@@ -312,37 +383,67 @@ function canonicalPermissionRequestType(toolCall: unknown): {
     | "dynamic_tool_call"
     | "unknown";
   readonly providerRequestKind?: ProviderRequestKind;
-} {
+};
+
+const COMMAND_CLASSIFICATION: PermissionClassification = {
+  canonicalRequestType: "command_execution_approval",
+  providerRequestKind: "command",
+};
+const FILE_CHANGE_CLASSIFICATION: PermissionClassification = {
+  canonicalRequestType: "file_change_approval",
+  providerRequestKind: "file-change",
+};
+const FILE_READ_CLASSIFICATION: PermissionClassification = {
+  canonicalRequestType: "file_read_approval",
+  providerRequestKind: "file-read",
+};
+const DYNAMIC_TOOL_CLASSIFICATION: PermissionClassification = {
+  canonicalRequestType: "dynamic_tool_call",
+};
+
+// ACP declares the semantic kind of a tool via `toolCall.kind`. This is the
+// authoritative signal — prefer it over any heuristic name matching.
+const ACP_KIND_CLASSIFICATION: Readonly<Record<string, PermissionClassification>> = {
+  execute: COMMAND_CLASSIFICATION,
+  shell: COMMAND_CLASSIFICATION,
+  command: COMMAND_CLASSIFICATION,
+  write: FILE_CHANGE_CLASSIFICATION,
+  edit: FILE_CHANGE_CLASSIFICATION,
+  patch: FILE_CHANGE_CLASSIFICATION,
+  delete: FILE_CHANGE_CLASSIFICATION,
+  move: FILE_CHANGE_CLASSIFICATION,
+  read: FILE_READ_CLASSIFICATION,
+  fetch: FILE_READ_CLASSIFICATION,
+  search: FILE_READ_CLASSIFICATION,
+  think: DYNAMIC_TOOL_CLASSIFICATION,
+  // `other` intentionally falls through to name/title heuristics; ACP uses it
+  // as the generic bucket for tools that do not fit the standard verbs.
+};
+
+// Word-boundary name/title heuristics are only consulted when the ACP kind is
+// missing or unrecognized. `toolCallId` is intentionally excluded because it
+// frequently embeds tokens like `write`, `read`, or `mcp` inside provider-
+// generated identifiers that have no bearing on the call's semantics.
+const COMMAND_NAME_RE = /\b(exec|execute|shell|bash|zsh|sh|run|command)\b/i;
+const FILE_CHANGE_NAME_RE = /\b(write|edit|patch|delete|remove|move|rename|update|create)\b/i;
+const FILE_READ_NAME_RE = /\b(read|list|search|find|grep|glob|view|show|get|fetch|stat)\b/i;
+const DYNAMIC_TOOL_NAME_RE = /\b(tool|mcp)\b/i;
+
+export function canonicalPermissionRequestType(toolCall: unknown): PermissionClassification {
   const record = isRecord(toolCall) ? toolCall : {};
-  const rawKind = [
-    record.kind,
-    record.type,
-    record.name,
-    record.toolName,
-    record.title,
-    record.toolCallId,
-  ]
-    .filter((value): value is string => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
-  if (rawKind.includes("execute") || rawKind.includes("shell") || rawKind.includes("command")) {
-    return { canonicalRequestType: "command_execution_approval", providerRequestKind: "command" };
-  }
-  if (
-    rawKind.includes("write") ||
-    rawKind.includes("edit") ||
-    rawKind.includes("patch") ||
-    rawKind.includes("delete") ||
-    rawKind.includes("move")
-  ) {
-    return { canonicalRequestType: "file_change_approval", providerRequestKind: "file-change" };
-  }
-  if (rawKind.includes("read") || rawKind.includes("list") || rawKind.includes("search")) {
-    return { canonicalRequestType: "file_read_approval", providerRequestKind: "file-read" };
-  }
-  if (rawKind.includes("tool") || rawKind.includes("mcp")) {
-    return { canonicalRequestType: "dynamic_tool_call" };
-  }
+  const acpKind = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
+  const byAcpKind = acpKind ? ACP_KIND_CLASSIFICATION[acpKind] : undefined;
+  if (byAcpKind) return byAcpKind;
+
+  const name = typeof record.name === "string" ? record.name : "";
+  const toolName = typeof record.toolName === "string" ? record.toolName : "";
+  const title = typeof record.title === "string" ? record.title : "";
+  const haystack = `${name} ${toolName} ${title}`.trim();
+
+  if (haystack && COMMAND_NAME_RE.test(haystack)) return COMMAND_CLASSIFICATION;
+  if (haystack && FILE_CHANGE_NAME_RE.test(haystack)) return FILE_CHANGE_CLASSIFICATION;
+  if (haystack && FILE_READ_NAME_RE.test(haystack)) return FILE_READ_CLASSIFICATION;
+  if (haystack && DYNAMIC_TOOL_NAME_RE.test(haystack)) return DYNAMIC_TOOL_CLASSIFICATION;
   return { canonicalRequestType: "unknown" };
 }
 
@@ -677,15 +778,11 @@ function textDeltaFromSessionUpdate(update: Record<string, unknown>): {
   if (!delta) {
     return null;
   }
-  const sanitizedDelta = sanitizeGeminiInternalContextReference(delta);
-  if (!sanitizedDelta) {
-    return null;
-  }
   if (updateKind === "agent_thought_chunk") {
-    return { streamKind: "reasoning_text", delta: sanitizedDelta };
+    return { streamKind: "reasoning_text", delta };
   }
   if (updateKind === "agent_message_chunk" || updateKind === "message" || updateKind === "") {
-    return { streamKind: "assistant_text", delta: sanitizedDelta };
+    return { streamKind: "assistant_text", delta };
   }
   return null;
 }
@@ -879,6 +976,31 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         });
       };
 
+      const flushPendingTail = (
+        context: GeminiSessionContext,
+        turn: GeminiTurnState,
+        streamKind: RuntimeContentStreamKind,
+      ) => {
+        const buffered =
+          streamKind === "reasoning_text" ? turn.pendingReasoningTail : turn.pendingAssistantTail;
+        if (!buffered) return;
+        if (streamKind === "reasoning_text") {
+          turn.pendingReasoningTail = "";
+        } else {
+          turn.pendingAssistantTail = "";
+        }
+        const residue = flushGeminiSanitizeTail(buffered);
+        if (!residue) return;
+        ensureAssistantItemStarted(context, turn);
+        turn.items.push({ type: streamKind, delta: residue, createdAt: nowIso() });
+        offerRuntimeEvent({
+          ...eventBase(context),
+          type: "content.delta",
+          itemId: turn.assistantItemId,
+          payload: { streamKind, delta: residue },
+        });
+      };
+
       const finishTurn = (
         context: GeminiSessionContext,
         state: "completed" | "failed" | "interrupted",
@@ -888,6 +1010,8 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         if (!turn || turn.completed) {
           return;
         }
+        flushPendingTail(context, turn, "reasoning_text");
+        flushPendingTail(context, turn, "assistant_text");
         turn.completed = true;
         if (turn.assistantStarted) {
           offerRuntimeEvent({
@@ -987,18 +1111,31 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         if (!textDelta || !activeTurn) {
           return;
         }
+        const prevTail =
+          textDelta.streamKind === "reasoning_text"
+            ? activeTurn.pendingReasoningTail
+            : activeTurn.pendingAssistantTail;
+        const { emit, tail } = sanitizeGeminiStreamChunk(prevTail, textDelta.delta);
+        if (textDelta.streamKind === "reasoning_text") {
+          activeTurn.pendingReasoningTail = tail;
+        } else {
+          activeTurn.pendingAssistantTail = tail;
+        }
+        if (!emit) {
+          return;
+        }
         const sanitizedRaw = sanitizeGeminiRawEvent(raw);
         ensureAssistantItemStarted(context, activeTurn);
         activeTurn.items.push({
           type: textDelta.streamKind,
-          delta: textDelta.delta,
+          delta: emit,
           createdAt: nowIso(),
         });
         offerRuntimeEvent({
           ...eventBase(context, sanitizedRaw),
           type: "content.delta",
           itemId: activeTurn.assistantItemId,
-          payload: textDelta,
+          payload: { streamKind: textDelta.streamKind, delta: emit },
         });
       };
 
@@ -1184,7 +1321,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                   adminPrompts: settings.prompts.admin,
                 }
               : undefined;
-          const mcpServers = buildGeminiMcpServers(serviceContext);
           const sessionContextPrompt = Option.isSome(checkpointContext)
             ? buildProviderSessionContextPrompt({
                 threadId: input.threadId,
@@ -1193,14 +1329,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 worktreePath: checkpointContext.value.worktreePath,
                 systemPrompt: checkpointContext.value.systemPrompt,
                 includeProjectContext: true,
-                ...(serviceContext
-                  ? {
-                      serviceContext: {
-                        ...serviceContext,
-                        nativeInternalTools: mcpServers.length > 0,
-                      },
-                    }
-                  : {}),
+                ...(serviceContext ? { serviceContext } : {}),
               })
             : undefined;
           const sessionContextPromptHash = sessionContextPrompt
@@ -1257,7 +1386,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                     connection.forkSession({
                       sessionId: resumeSessionId,
                       cwd: cwd ?? process.cwd(),
-                      mcpServers,
                     }),
                   ).pipe(
                     Effect.mapError(
@@ -1273,7 +1401,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 : resumeSessionId
                   ? { sessionId: resumeSessionId, result: input.resumeCursor }
                   : yield* Effect.tryPromise(() =>
-                      connection.newSession({ cwd: cwd ?? process.cwd(), mcpServers }),
+                      connection.newSession({ cwd: cwd ?? process.cwd() }),
                     ).pipe(
                       Effect.mapError(
                         (cause) =>
@@ -1311,7 +1439,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               session,
               connection,
               providerSessionId: sessionInfo.sessionId,
-              mcpServers,
               turns: [],
               pendingApprovals: new Map(),
               pendingUserInputs: new Map(),
@@ -1331,7 +1458,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 connection.loadSession({
                   sessionId: resumeSessionId,
                   cwd: cwd ?? process.cwd(),
-                  mcpServers,
                 }),
               ).pipe(
                 Effect.mapError(
@@ -1377,22 +1503,6 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               type: "session.state.changed",
               payload: { state: "ready" },
             });
-            if (mcpServers.length > 0) {
-              offerRuntimeEvent({
-                ...eventBase(context),
-                type: "mcp.status.updated",
-                payload: {
-                  status: {
-                    provider: PROVIDER,
-                    servers: mcpServers.map((server) =>
-                      isRecord(server)
-                        ? { name: server.name, status: "configured" }
-                        : { status: "configured" },
-                    ),
-                  },
-                },
-              });
-            }
             offerRuntimeEvent({
               ...eventBase(context),
               type: "account.rate-limits.updated",
@@ -1492,6 +1602,8 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           assistantStarted: false,
           cancelRequested: false,
           completed: false,
+          pendingAssistantTail: "",
+          pendingReasoningTail: "",
         };
         context.activeTurn = activeTurn;
         updateSession(context, {
@@ -1698,7 +1810,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           offerRuntimeEvent({
             ...eventBase(context),
             type: "session.exited",
-            payload: { exitKind: "graceful", recoverable: true },
+            payload: { exitKind: "graceful" },
           });
         },
       );
