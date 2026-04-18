@@ -4,6 +4,15 @@ Gemini support is ACP-first. T3 starts Gemini CLI in ACP mode, creates or loads
 an ACP session, and forwards canonical provider runtime events into the same
 orchestration pipeline used by Codex and Claude.
 
+## Provider Parity Checklist
+
+Future provider additions and parity audits should start from the
+[provider-integration skill](../.claude/skills/provider-integration.md). That
+checklist captures the model selection, session lifecycle, tool delivery,
+approval, attachment, structured-output, usage, checkpoint, documentation, and
+Chrome DevTools MCP verification surfaces validated while bringing Gemini to
+parity.
+
 ## Runtime Access
 
 T3 maps the provider-neutral runtime mode to Gemini CLI approval flags at process
