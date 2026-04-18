@@ -17,6 +17,7 @@ import {
   type ProviderSessionStartInput,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
+  type RuntimeMode,
   type RuntimeContentStreamKind,
   type UserInputQuestion,
 } from "@t3tools/contracts";
@@ -510,6 +511,15 @@ function geminiModeFromInteractionMode(
     case undefined:
       return null;
   }
+}
+
+function geminiLaunchOptionsFromRuntimeMode(
+  runtimeMode: RuntimeMode,
+): Pick<GeminiAcpConnectionOptions, "approvalMode" | "sandbox"> {
+  if (runtimeMode === "full-access") {
+    return { approvalMode: "yolo", sandbox: false };
+  }
+  return { approvalMode: "default" };
 }
 
 function extractTextContent(content: unknown): string | null {
@@ -1084,6 +1094,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
             binaryPath: geminiSettings.binaryPath,
             ...(cwd ? { cwd } : {}),
             ...(geminiSettings.homePath ? { homePath: geminiSettings.homePath } : {}),
+            ...geminiLaunchOptionsFromRuntimeMode(input.runtimeMode),
             onNotification: (notification) => {
               if (context) {
                 handleNotification(context, notification);

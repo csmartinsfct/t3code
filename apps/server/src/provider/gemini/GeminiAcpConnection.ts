@@ -98,6 +98,8 @@ export interface GeminiAcpConnectionOptions {
   readonly binaryPath: string;
   readonly cwd?: string;
   readonly homePath?: string;
+  readonly approvalMode?: "default" | "auto_edit" | "yolo" | "plan";
+  readonly sandbox?: boolean;
   readonly requestTimeoutMs?: number;
   readonly promptRequestTimeoutMs?: number;
   readonly onNotification?: (notification: GeminiAcpIncomingNotification) => void;
@@ -171,15 +173,40 @@ function sessionIdFromResult(result: unknown): string | null {
   return null;
 }
 
+export function buildGeminiAcpArgs(options: GeminiAcpConnectionOptions): ReadonlyArray<string> {
+  const args = ["--acp"];
+  if (options.approvalMode) {
+    args.push("--approval-mode", options.approvalMode);
+  }
+  if (options.sandbox === true) {
+    args.push("--sandbox");
+  } else if (options.sandbox === false) {
+    args.push("--no-sandbox");
+  }
+  return args;
+}
+
+export function buildGeminiAcpEnv(
+  options: GeminiAcpConnectionOptions,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    ...(options.homePath ? { GEMINI_CLI_HOME: options.homePath } : {}),
+    ...(options.sandbox === true
+      ? { GEMINI_SANDBOX: "true" }
+      : options.sandbox === false
+        ? { GEMINI_SANDBOX: "false" }
+        : {}),
+  };
+}
+
 export function createGeminiAcpConnection(
   options: GeminiAcpConnectionOptions,
 ): GeminiAcpConnection {
-  const child = spawn(options.binaryPath, ["--acp"], {
+  const child = spawn(options.binaryPath, buildGeminiAcpArgs(options), {
     cwd: options.cwd,
-    env: {
-      ...process.env,
-      ...(options.homePath ? { GEMINI_CLI_HOME: options.homePath } : {}),
-    },
+    env: buildGeminiAcpEnv(options),
     shell: process.platform === "win32",
     stdio: ["pipe", "pipe", "pipe"],
   });

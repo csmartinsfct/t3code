@@ -1,8 +1,19 @@
 # Gemini Provider Integration
 
-Gemini support is ACP-first. T3 starts `gemini --acp`, creates or loads an ACP
-session, and forwards canonical provider runtime events into the same
+Gemini support is ACP-first. T3 starts Gemini CLI in ACP mode, creates or loads
+an ACP session, and forwards canonical provider runtime events into the same
 orchestration pipeline used by Codex and Claude.
+
+## Runtime Access
+
+T3 maps the provider-neutral runtime mode to Gemini CLI approval flags at process
+launch:
+
+- `full-access` starts Gemini with `--approval-mode yolo --no-sandbox` and
+  `GEMINI_SANDBOX=false`, so tool calls are auto-approved and inherited sandbox
+  settings do not unexpectedly constrain the session.
+- `approval-required` starts Gemini with `--approval-mode default`, so Gemini
+  prompts through ACP `session/request_permission` when tools need approval.
 
 ## Project Tools
 

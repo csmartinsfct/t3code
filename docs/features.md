@@ -82,11 +82,13 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 
 ### Gemini (Google)
 
-- Uses Gemini CLI ACP mode (`gemini --acp`) through a provider adapter.
+- Uses Gemini CLI ACP mode through a provider adapter.
 - Authentication is delegated to Gemini CLI and inherited Google/API-key
   environment configuration.
 - Configuration: enabled/disabled, binary path, `GEMINI_CLI_HOME`, and custom
   model slugs.
+- Runtime access: T3 maps `full-access` to Gemini YOLO mode with sandboxing
+  disabled, and `approval-required` to Gemini's default approval mode.
 - Model selection: Gemini model family with no fake reasoning-effort or thinking
   controls. Unsupported advanced provider behaviors return explicit errors.
 - Project title, T3 REST service guidance, and project system prompts are

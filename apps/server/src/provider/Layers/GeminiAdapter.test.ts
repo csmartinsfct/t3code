@@ -236,6 +236,38 @@ it.effect("GeminiAdapterLive starts an ACP session and sends a text turn", () =>
   );
 });
 
+it.effect("GeminiAdapterLive maps runtime mode to Gemini approval and sandbox options", () => {
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId: ThreadId.makeUnsafe("thread-gemini-full-access"),
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.startSession({
+      threadId: ThreadId.makeUnsafe("thread-gemini-supervised"),
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "approval-required",
+    });
+
+    assert.equal(createdOptions[0]?.approvalMode, "yolo");
+    assert.equal(createdOptions[0]?.sandbox, false);
+    assert.equal(createdOptions[1]?.approvalMode, "default");
+    assert.equal(createdOptions[1]?.sandbox, undefined);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        return makeFakeConnection(options);
+      }),
+    ),
+  );
+});
+
 it.effect("GeminiAdapterLive injects T3 session context on the first prompt", () => {
   const createdConnections: GeminiAcpConnection[] = [];
   const threadId = ThreadId.makeUnsafe("thread-gemini-context");
