@@ -4,11 +4,14 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   modelSelectionProviderKind,
   type ModelSelection,
-  providerProfileId,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  makeProviderModelSelection,
+  normalizeModelSlug,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
@@ -192,18 +195,7 @@ export function makeAppModelSelection(
   model: string,
   options?: ModelSelection["options"],
 ): ModelSelection {
-  const baseProvider = baseProviderKind(provider);
-  const profileId =
-    baseProvider === "claudeAgent" || baseProvider === "gemini"
-      ? providerProfileId(provider)
-      : undefined;
-
-  return {
-    provider: baseProvider,
-    model,
-    ...(profileId ? { profileId } : {}),
-    ...(options ? { options } : {}),
-  } as ModelSelection;
+  return makeProviderModelSelection(provider, model, options);
 }
 
 export function resolveAppModelSelectionState(

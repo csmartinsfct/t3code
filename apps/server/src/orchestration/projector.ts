@@ -12,6 +12,7 @@ import {
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
+import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
 import { Effect, Schema } from "effect";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
@@ -287,7 +288,7 @@ export function projectStartupSnapshotEvent(
           id: payload.threadId,
           projectId: payload.projectId,
           title: payload.title,
-          modelSelection: payload.modelSelection,
+          modelSelection: normalizeModelSelectionProvider(payload.modelSelection),
           runtimeMode: payload.runtimeMode,
           interactionMode: payload.interactionMode,
           branch: payload.branch,
@@ -359,7 +360,7 @@ export function projectStartupSnapshotEvent(
           threads: updateMetadataThread(nextBase.threads, payload.threadId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
+              ? { modelSelection: normalizeModelSelectionProvider(payload.modelSelection) }
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
@@ -709,7 +710,7 @@ export function projectEvent(
             id: payload.threadId,
             projectId: payload.projectId,
             title: payload.title,
-            modelSelection: payload.modelSelection,
+            modelSelection: normalizeModelSelectionProvider(payload.modelSelection),
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
             branch: payload.branch,
@@ -780,7 +781,7 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
+              ? { modelSelection: normalizeModelSelectionProvider(payload.modelSelection) }
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),

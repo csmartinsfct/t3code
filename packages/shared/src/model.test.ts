@@ -8,9 +8,12 @@ import {
   getDefaultEffort,
   hasContextWindowOption,
   hasEffortLevel,
+  inferBaseProviderKindFromModelSlug,
   isClaudeUltrathinkPrompt,
+  makeProviderModelSelection,
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeModelSelectionProvider,
   normalizeModelSlug,
   resolveApiModelId,
   resolveContextWindow,
@@ -49,10 +52,26 @@ const claudeCaps: ModelCapabilities = {
   promptInjectedEffortLevels: ["ultrathink"],
 };
 
+describe("makeProviderModelSelection", () => {
+  it("preserves provider profiles for Claude and Gemini selections", () => {
+    expect(makeProviderModelSelection("claudeAgent:metric", "claude-opus-4-6")).toEqual({
+      provider: "claudeAgent",
+      profileId: "metric",
+      model: "claude-opus-4-6",
+    });
+    expect(makeProviderModelSelection("gemini:preview", "gemini-2.5-pro")).toEqual({
+      provider: "gemini",
+      profileId: "preview",
+      model: "gemini-2.5-pro",
+    });
+  });
+});
+
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
   });
 
   it("returns null for empty or missing values", () => {
@@ -60,6 +79,29 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("   ")).toBeNull();
     expect(normalizeModelSlug(null)).toBeNull();
     expect(normalizeModelSlug(undefined)).toBeNull();
+  });
+});
+
+describe("model provider inference", () => {
+  it("recognizes built-in provider slugs and aliases", () => {
+    expect(inferBaseProviderKindFromModelSlug("gemini-2.5-pro")).toBe("gemini");
+    expect(inferBaseProviderKindFromModelSlug("2.5-pro")).toBe("gemini");
+    expect(inferBaseProviderKindFromModelSlug("claude-opus-4-6")).toBe("claudeAgent");
+    expect(inferBaseProviderKindFromModelSlug("gpt-5.4")).toBe("codex");
+  });
+
+  it("repairs known provider/model mismatches without carrying stale options", () => {
+    expect(
+      normalizeModelSelectionProvider({
+        provider: "claudeAgent",
+        profileId: "metric",
+        model: "gemini-2.5-pro",
+        options: { effort: "max" },
+      }),
+    ).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
   });
 });
 

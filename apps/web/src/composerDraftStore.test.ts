@@ -80,13 +80,13 @@ function resetComposerDraftStore() {
 }
 
 function modelSelection(
-  provider: "codex" | "claudeAgent",
+  provider: "codex" | "claudeAgent" | "gemini",
   model: string,
   profileIdOrOptions?: string | ModelSelection["options"],
   options?: ModelSelection["options"],
 ): ModelSelection {
   const profileId =
-    provider === "claudeAgent" && typeof profileIdOrOptions === "string"
+    (provider === "claudeAgent" || provider === "gemini") && typeof profileIdOrOptions === "string"
       ? profileIdOrOptions
       : undefined;
   const resolvedOptions = typeof profileIdOrOptions === "string" ? options : profileIdOrOptions;
@@ -873,6 +873,20 @@ describe("composerDraftStore modelSelection", () => {
         fastMode: true,
       }),
     );
+  });
+
+  it("stores older Gemini fork selections under Gemini when provider was stale", () => {
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(
+      threadId,
+      modelSelection("claudeAgent", "gemini-2.5-pro", "metric", { effort: "max" }),
+    );
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider,
+    ).toEqual({
+      gemini: modelSelection("gemini", "gemini-2.5-pro"),
+    });
   });
 
   it("keeps default-only model selections on the draft", () => {

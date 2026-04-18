@@ -45,18 +45,18 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  baseProviderKind,
   type ContextMenuItem,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
+  type ModelSelection,
   ProjectId,
   providerDisplayName,
-  providerProfileId,
   type ProviderKind,
   type ServerProvider,
   ThreadId,
   type GitStatusResult,
 } from "@t3tools/contracts";
+import { makeProviderModelSelection } from "@t3tools/shared/model";
 import { useQueries } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
@@ -226,6 +226,10 @@ export function buildThreadContextMenuItems(input: {
     { id: "copy-thread-id", label: "Copy Thread ID" },
     { id: "delete", label: "Delete", destructive: true },
   ];
+}
+
+export function buildForkModelSelection(provider: ProviderKind, model: string): ModelSelection {
+  return makeProviderModelSelection(provider, model);
 }
 
 export function buildMoveThreadConfirmationMessage(input: {
@@ -1301,17 +1305,7 @@ export default function Sidebar() {
         const sepIdx = rest.indexOf("::");
         const provider = rest.slice(0, sepIdx) as ProviderKind;
         const model = rest.slice(sepIdx + 2);
-        const base = baseProviderKind(provider);
-        const profileId = providerProfileId(provider);
-
-        const modelSelection =
-          base === "codex"
-            ? { provider: "codex" as const, model }
-            : {
-                provider: "claudeAgent" as const,
-                model,
-                ...(profileId ? { profileId } : {}),
-              };
+        const modelSelection = buildForkModelSelection(provider, model);
 
         const forkThreadId = newThreadId();
         try {

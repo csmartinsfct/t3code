@@ -9,7 +9,6 @@ import {
   modelSelectionProviderKind,
   ProjectId,
   ProviderInteractionMode,
-  providerProfileId,
   isValidProviderKind,
   ProviderKind,
   ProviderModelOptions,
@@ -20,7 +19,11 @@ import {
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { DeepMutable } from "effect/Types";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  inferBaseProviderKindFromModelSlug,
+  makeProviderModelSelection,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { resolveAppModelSelection } from "./modelSelection";
@@ -509,14 +512,7 @@ function makeProviderScopedModelSelection(
   model: string,
   options?: ModelSelection["options"],
 ): ModelSelection {
-  const base = baseProviderKind(provider);
-  const profileId = providerProfileId(provider);
-  return {
-    provider: base,
-    model,
-    ...(profileId ? { profileId } : {}),
-    ...(options ? { options } : {}),
-  } as ModelSelection;
+  return makeProviderModelSelection(provider, model, options);
 }
 
 type PersistedModelSelectionByProvider = NonNullable<
@@ -698,17 +694,23 @@ function normalizeModelSelection(
   if (providerKind === null) {
     return null;
   }
-  const provider = baseProviderKind(providerKind);
+  const requestedProvider = baseProviderKind(providerKind);
   const rawModel = candidate?.model ?? legacy?.model;
   if (typeof rawModel !== "string") {
     return null;
   }
+  const provider = inferBaseProviderKindFromModelSlug(rawModel) ?? requestedProvider;
   const model = normalizeModelSlug(rawModel, provider);
   if (!model) {
     return null;
   }
+  const shouldPreserveProviderScopedState = provider === requestedProvider;
   const modelOptions = normalizeProviderModelOptions(
-    candidate?.options ? { [provider]: candidate.options } : legacy?.modelOptions,
+    shouldPreserveProviderScopedState && candidate?.options
+      ? { [provider]: candidate.options }
+      : shouldPreserveProviderScopedState
+        ? legacy?.modelOptions
+        : undefined,
     provider,
     provider === "codex" ? legacy?.legacyCodex : undefined,
   );
@@ -717,7 +719,9 @@ function normalizeModelSelection(
   return {
     provider,
     model,
-    ...(typeof profileId === "string" && profileId ? { profileId } : {}),
+    ...(shouldPreserveProviderScopedState && typeof profileId === "string" && profileId
+      ? { profileId }
+      : {}),
     ...(options ? { options } : {}),
   } as ModelSelection;
 }
