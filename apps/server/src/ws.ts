@@ -85,6 +85,8 @@ import {
   resolveCodexMcpServerNames,
   resolveCodexProjectTrusted,
   resolveCodexProjectConfigPaths,
+  resolveGeminiMcpServerNames,
+  resolveGeminiSettingsPaths,
   trustCodexProject,
 } from "./mcpConfigReader";
 import { resolveSkills } from "./skillsReader";
@@ -638,6 +640,18 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 }
               }
               const serverNames = yield* resolveCodexMcpServerNames(codexHome, input.cwd);
+              return { serverNames };
+            }
+            if (base === "gemini") {
+              const settings = yield* serverSettings.getSettings;
+              const geminiHome =
+                settings.providers.gemini.homePath.trim() ||
+                process.env.GEMINI_CLI_HOME ||
+                nodePath.join(os.homedir(), ".gemini");
+              for (const configPath of resolveGeminiSettingsPaths(geminiHome, input.cwd)) {
+                yield* ensureWatchDirForFile(nodePath.dirname(configPath), "settings.json");
+              }
+              const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, input.cwd);
               return { serverNames };
             }
             // Claude (default or profile)

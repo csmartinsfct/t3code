@@ -98,6 +98,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Rate limits: for Google-login Code Assist accounts, T3 polls the Gemini Code
   Assist quota endpoint through cached Gemini CLI OAuth credentials and displays
   per-model quota usage as percentage used plus reset time when available.
+- MCP discovery: the chat MCP menu mirrors Gemini CLI user settings
+  (`<GEMINI_CLI_HOME>/settings.json`) and project settings
+  (`.gemini/settings.json`), including `mcp.allowed` / `mcp.excluded` filters.
 - Project title, T3 REST service guidance, and project system prompts are
   delivered through ACP embedded context on the first Gemini turn because Gemini
   ACP session creation does not accept a system-prompt parameter.

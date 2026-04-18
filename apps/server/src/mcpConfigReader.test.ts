@@ -5,6 +5,7 @@ import { Effect, FileSystem, Path } from "effect";
 import {
   resolveCodexMcpServerNames,
   resolveCodexProjectTrusted,
+  resolveGeminiMcpServerNames,
   trustCodexProject,
 } from "./mcpConfigReader.ts";
 
@@ -83,6 +84,84 @@ url = "https://example.com/global"
       const serverNames = yield* resolveCodexMcpServerNames(codexHome);
 
       assert.deepEqual(serverNames, ["global-only"]);
+    }),
+  );
+
+  it.effect("merges user and project-scoped Gemini MCP server names", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const geminiHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-gemini-home-" });
+      const projectRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-gemini-project-",
+      });
+      const projectGeminiDir = path.join(projectRoot, ".gemini");
+
+      yield* fileSystem.makeDirectory(projectGeminiDir, { recursive: true });
+
+      yield* fileSystem.writeFileString(
+        path.join(geminiHome, "settings.json"),
+        JSON.stringify({
+          mcpServers: {
+            "global-docs": { url: "https://example.com/docs" },
+            "shared-server": { command: "node", args: ["global.js"] },
+          },
+        }),
+      );
+
+      yield* fileSystem.writeFileString(
+        path.join(projectGeminiDir, "settings.json"),
+        JSON.stringify({
+          mcpServers: {
+            "local-devtools": { command: "npx", args: ["chrome-devtools-mcp"] },
+            "shared-server": { command: "node", args: ["local.js"] },
+          },
+        }),
+      );
+
+      const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, projectRoot);
+
+      assert.deepEqual(serverNames, ["global-docs", "local-devtools", "shared-server"]);
+    }),
+  );
+
+  it.effect("applies Gemini MCP allow and exclude filters", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const geminiHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-gemini-home-" });
+      const projectRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-gemini-project-",
+      });
+      const projectGeminiDir = path.join(projectRoot, ".gemini");
+
+      yield* fileSystem.makeDirectory(projectGeminiDir, { recursive: true });
+
+      yield* fileSystem.writeFileString(
+        path.join(geminiHome, "settings.json"),
+        JSON.stringify({
+          mcp: { allowed: ["global-docs", "local-devtools", "shared-server"] },
+          mcpServers: {
+            "global-docs": { url: "https://example.com/docs" },
+            "hidden-global": { command: "node", args: ["hidden.js"] },
+          },
+        }),
+      );
+
+      yield* fileSystem.writeFileString(
+        path.join(projectGeminiDir, "settings.json"),
+        JSON.stringify({
+          mcp: { excluded: ["shared-server"] },
+          mcpServers: {
+            "local-devtools": { command: "npx", args: ["chrome-devtools-mcp"] },
+            "shared-server": { command: "node", args: ["shared.js"] },
+          },
+        }),
+      );
+
+      const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, projectRoot);
+
+      assert.deepEqual(serverNames, ["global-docs", "local-devtools"]);
     }),
   );
 
