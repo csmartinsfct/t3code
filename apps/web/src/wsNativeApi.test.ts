@@ -1,7 +1,6 @@
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
-  type DesktopBridge,
   EventId,
   ProjectId,
   type OrchestrationEvent,
@@ -14,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
 
-const showContextMenuFallbackMock =
+const contextMenuShowMock =
   vi.fn<
     <T extends string>(
       items: readonly ContextMenuItem<T>[],
@@ -161,8 +160,8 @@ vi.mock("./wsRpcClient", () => {
   };
 });
 
-vi.mock("./contextMenuFallback", () => ({
-  showContextMenuFallback: showContextMenuFallbackMock,
+vi.mock("./contextMenuStore", () => ({
+  useContextMenuStore: { getState: () => ({ show: contextMenuShowMock }) },
 }));
 
 function emitEvent<T>(listeners: Set<(event: T) => void>, event: T) {
@@ -179,32 +178,6 @@ function getWindowForTest(): Window & typeof globalThis & { desktopBridge?: unkn
     testGlobal.window = {} as Window & typeof globalThis & { desktopBridge?: unknown };
   }
   return testGlobal.window;
-}
-
-function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
-  return {
-    getWsUrl: () => null,
-    pickFolder: async () => null,
-    confirm: async () => true,
-    setTheme: async () => undefined,
-    showContextMenu: async () => null,
-    openExternal: async () => true,
-    onMenuAction: () => () => undefined,
-    getUpdateState: async () => {
-      throw new Error("getUpdateState not implemented in test");
-    },
-    checkForUpdate: async () => {
-      throw new Error("checkForUpdate not implemented in test");
-    },
-    downloadUpdate: async () => {
-      throw new Error("downloadUpdate not implemented in test");
-    },
-    installUpdate: async () => {
-      throw new Error("installUpdate not implemented in test");
-    },
-    onUpdateState: () => () => undefined,
-    ...overrides,
-  };
 }
 
 const defaultProviders: ReadonlyArray<ServerProvider> = [
@@ -239,7 +212,7 @@ const baseServerConfig: ServerConfig = {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  showContextMenuFallbackMock.mockReset();
+  contextMenuShowMock.mockReset();
   terminalEventListeners.clear();
   orchestrationEventListeners.clear();
   Reflect.deleteProperty(getWindowForTest(), "desktopBridge");
@@ -521,26 +494,25 @@ describe("wsNativeApi", () => {
     });
   });
 
-  it("forwards context menu metadata to the desktop bridge", async () => {
-    const showContextMenu = vi.fn().mockResolvedValue("delete");
-    getWindowForTest().desktopBridge = makeDesktopBridge({ showContextMenu });
+  it("delegates context menu to the context menu store", async () => {
+    contextMenuShowMock.mockResolvedValue("delete");
 
     const { createWsNativeApi } = await import("./wsNativeApi");
     const api = createWsNativeApi();
     const items = [{ id: "delete", label: "Delete" }] as const;
 
     await expect(api.contextMenu.show(items)).resolves.toBe("delete");
-    expect(showContextMenu).toHaveBeenCalledWith(items, undefined);
+    expect(contextMenuShowMock).toHaveBeenCalledWith(items, undefined);
   });
 
-  it("falls back to the browser context menu helper when the desktop bridge is missing", async () => {
-    showContextMenuFallbackMock.mockResolvedValue("rename");
+  it("passes position to the context menu store", async () => {
+    contextMenuShowMock.mockResolvedValue("rename");
     const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     const items = [{ id: "rename", label: "Rename" }] as const;
 
     await expect(api.contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe("rename");
-    expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
+    expect(contextMenuShowMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
   });
 });

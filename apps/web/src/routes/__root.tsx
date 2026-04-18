@@ -17,6 +17,7 @@ import { Throttler } from "@tanstack/react-pacer";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { Button } from "../components/ui/button";
+import { ContextMenuPortal } from "../components/ui/context-menu";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
@@ -75,6 +76,7 @@ export function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <ContextMenuPortal />
         <ServerStateBootstrap />
         <EventRouter />
         <AppSidebarLayout>

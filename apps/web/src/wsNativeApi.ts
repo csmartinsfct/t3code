@@ -1,6 +1,6 @@
 import { type ContextMenuItem, type NativeApi } from "@t3tools/contracts";
 
-import { showContextMenuFallback } from "./contextMenuFallback";
+import { useContextMenuStore } from "./contextMenuStore";
 import { resetServerStateForTests } from "./rpc/serverState";
 import { __resetWsRpcClientForTests, getWsRpcClient } from "./wsRpcClient";
 
@@ -140,14 +140,11 @@ export function createWsNativeApi(): NativeApi {
       discoverRepos: rpcClient.git.discoverRepos,
     },
     contextMenu: {
-      show: async <T extends string>(
+      show: <T extends string>(
         items: readonly ContextMenuItem<T>[],
         position?: { x: number; y: number },
       ): Promise<T | null> => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
-        }
-        return showContextMenuFallback(items, position);
+        return useContextMenuStore.getState().show(items, position);
       },
     },
     server: {
