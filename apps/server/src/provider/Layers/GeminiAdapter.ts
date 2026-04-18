@@ -501,13 +501,14 @@ function tokenUsageFromPromptResult(result: unknown) {
 
 function geminiModeFromInteractionMode(
   interactionMode: ProviderSendTurnInput["interactionMode"],
-): "default" | "plan" | null {
+  runtimeMode: RuntimeMode,
+): "default" | "yolo" | "plan" | null {
   switch (interactionMode) {
     case "plan":
     case "plan-accept":
       return "plan";
     case "default":
-      return "default";
+      return runtimeMode === "full-access" ? "yolo" : "default";
     case undefined:
       return null;
   }
@@ -1339,7 +1340,10 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           updateSession(context, { model: selectedModel });
         }
 
-        const mode = geminiModeFromInteractionMode(input.interactionMode);
+        const mode = geminiModeFromInteractionMode(
+          input.interactionMode,
+          context.session.runtimeMode,
+        );
         if (mode) {
           yield* Effect.tryPromise(() =>
             context.connection.setMode({

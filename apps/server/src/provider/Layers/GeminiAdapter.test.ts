@@ -268,6 +268,105 @@ it.effect("GeminiAdapterLive maps runtime mode to Gemini approval and sandbox op
   );
 });
 
+it.effect("GeminiAdapterLive restores yolo mode for full-access default turns", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-gemini-full-access-default-mode");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Use default chat behavior.",
+      interactionMode: "default",
+    });
+
+    assert.deepEqual(vi.mocked(createdConnections[0]!.setMode).mock.calls[0]?.[0], {
+      sessionId: "gemini-session-1",
+      modeId: "yolo",
+    });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive restores default mode for supervised default turns", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-gemini-supervised-default-mode");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "approval-required",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Use supervised chat behavior.",
+      interactionMode: "default",
+    });
+
+    assert.deepEqual(vi.mocked(createdConnections[0]!.setMode).mock.calls[0]?.[0], {
+      sessionId: "gemini-session-1",
+      modeId: "default",
+    });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive keeps Gemini plan mode above full-access turns", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-gemini-full-access-plan-mode");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Plan this change first.",
+      interactionMode: "plan",
+    });
+
+    assert.deepEqual(vi.mocked(createdConnections[0]!.setMode).mock.calls[0]?.[0], {
+      sessionId: "gemini-session-1",
+      modeId: "plan",
+    });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
 it.effect("GeminiAdapterLive injects T3 session context on the first prompt", () => {
   const createdConnections: GeminiAcpConnection[] = [];
   const threadId = ThreadId.makeUnsafe("thread-gemini-context");
