@@ -103,6 +103,18 @@ describe("derivePendingApprovals", () => {
           detail: "pwd",
         },
       }),
+      makeActivity({
+        id: "approval-open-dynamic-tool",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "approval.requested",
+        summary: "Tool approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-dynamic-tool",
+          requestType: "dynamic_tool_call",
+          detail: "ticketing__list_tickets",
+        },
+      }),
     ];
 
     expect(derivePendingApprovals(activities)).toEqual([
@@ -111,6 +123,12 @@ describe("derivePendingApprovals", () => {
         requestKind: "command",
         createdAt: "2026-02-23T00:00:01.000Z",
         detail: "pwd",
+      },
+      {
+        requestId: "req-dynamic-tool",
+        requestKind: "tool",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        detail: "ticketing__list_tickets",
       },
     ]);
   });
@@ -1161,17 +1179,24 @@ describe("deriveActiveWorkStartedAt", () => {
 });
 
 describe("PROVIDER_OPTIONS", () => {
-  it("advertises Claude as available while keeping Cursor as a placeholder", () => {
+  it("advertises supported providers while keeping Cursor as a placeholder", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
+    const gemini = PROVIDER_OPTIONS.find((option) => option.value === "gemini");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
+      { value: "gemini", label: "Gemini", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
       label: "Claude",
+      available: true,
+    });
+    expect(gemini).toEqual({
+      value: "gemini",
+      label: "Gemini",
       available: true,
     });
     expect(cursor).toEqual({

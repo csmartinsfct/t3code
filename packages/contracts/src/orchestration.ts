@@ -1,5 +1,5 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
-import { ClaudeModelOptions, CodexModelOptions } from "./model";
+import { ClaudeModelOptions, CodexModelOptions, GeminiModelOptions } from "./model";
 import {
   OrchestrationPromptId,
   OrchestrationPromptOverrides,
@@ -42,7 +42,7 @@ export const ORCHESTRATION_WS_METHODS = {
   startRun: "orchestration.startRun",
 } as const;
 
-export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent"] as const;
+export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent", "gemini"] as const;
 export type BaseProviderKind = (typeof BASE_PROVIDER_KINDS)[number];
 export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
 
@@ -55,9 +55,13 @@ export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
  * through schema-validated boundaries.
  */
 export const ProviderKind = Schema.String.check(
-  Schema.isPattern(/^(codex|claudeAgent)(:[a-zA-Z0-9_-]+)?$/),
+  Schema.isPattern(/^(codex|claudeAgent|gemini)(:[a-zA-Z0-9_-]+)?$/),
 ) as unknown as typeof BaseProviderKind;
-export type ProviderKind = BaseProviderKind | `codex:${string}` | `claudeAgent:${string}`;
+export type ProviderKind =
+  | BaseProviderKind
+  | `codex:${string}`
+  | `claudeAgent:${string}`
+  | `gemini:${string}`;
 
 /**
  * Safely narrow a full ProviderKind (possibly profiled) for use as a
@@ -90,8 +94,10 @@ export function isValidProviderKind(value: string): value is ProviderKind {
   return (
     value === "codex" ||
     value === "claudeAgent" ||
+    value === "gemini" ||
     value.startsWith("codex:") ||
-    value.startsWith("claudeAgent:")
+    value.startsWith("claudeAgent:") ||
+    value.startsWith("gemini:")
   );
 }
 
@@ -126,13 +132,29 @@ export const ClaudeModelSelection = Schema.Struct({
 });
 export type ClaudeModelSelection = typeof ClaudeModelSelection.Type;
 
-export const ModelSelection = Schema.Union([CodexModelSelection, ClaudeModelSelection]);
+export const GeminiModelSelection = Schema.Struct({
+  provider: Schema.Literal("gemini"),
+  profileId: Schema.optionalKey(Schema.String),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(GeminiModelOptions),
+});
+export type GeminiModelSelection = typeof GeminiModelSelection.Type;
+
+export const ModelSelection = Schema.Union([
+  CodexModelSelection,
+  ClaudeModelSelection,
+  GeminiModelSelection,
+]);
 export type ModelSelection = typeof ModelSelection.Type;
 
 /** Get the full ProviderKind (including profile) from a ModelSelection. */
 export function modelSelectionProviderKind(sel: ModelSelection): ProviderKind {
-  if (sel.provider === "claudeAgent" && "profileId" in sel && sel.profileId) {
-    return makeProviderKind("claudeAgent", sel.profileId);
+  if (
+    (sel.provider === "claudeAgent" || sel.provider === "gemini") &&
+    "profileId" in sel &&
+    sel.profileId
+  ) {
+    return makeProviderKind(sel.provider, sel.profileId);
   }
   return sel.provider;
 }

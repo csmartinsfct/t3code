@@ -3,6 +3,7 @@ import {
   type ChatAttachment,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
+import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -454,7 +455,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             projectId: event.payload.projectId,
             title: event.payload.title,
-            modelSelection: event.payload.modelSelection,
+            modelSelection: normalizeModelSelectionProvider(event.payload.modelSelection),
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
@@ -519,7 +520,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
             ...(event.payload.modelSelection !== undefined
-              ? { modelSelection: event.payload.modelSelection }
+              ? { modelSelection: normalizeModelSelectionProvider(event.payload.modelSelection) }
               : {}),
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             ...(event.payload.worktreePath !== undefined

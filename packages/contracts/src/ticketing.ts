@@ -4,7 +4,7 @@ import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseS
 
 // ModelSelection is re-declared here to avoid a circular import with orchestration.ts
 // (orchestration.ts imports TicketId from this file). The shape must stay in sync.
-const TicketModelSelection = Schema.Union([
+export const TicketModelSelection = Schema.Union([
   Schema.Struct({
     provider: Schema.Literal("codex"),
     model: TrimmedNonEmptyString,
@@ -16,7 +16,14 @@ const TicketModelSelection = Schema.Union([
     model: TrimmedNonEmptyString,
     options: Schema.optionalKey(Schema.Unknown),
   }),
+  Schema.Struct({
+    provider: Schema.Literal("gemini"),
+    profileId: Schema.optionalKey(Schema.String),
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(Schema.Unknown),
+  }),
 ]);
+export type TicketModelSelection = typeof TicketModelSelection.Type;
 
 // ---------------------------------------------------------------------------
 // Branded IDs

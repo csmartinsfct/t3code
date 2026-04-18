@@ -1,16 +1,15 @@
 /**
  * RoutingTextGeneration – Dispatches text generation requests to either the
- * Codex CLI or Claude CLI implementation based on the provider in each
+ * Codex, Claude, or Gemini CLI implementation based on the provider in each
  * request input.
  *
- * When `modelSelection.provider` is `"claudeAgent"` the request is forwarded to
- * the Claude layer; for any other value (including the default `undefined`) it
- * falls through to the Codex layer.
+ * Requests are routed explicitly by provider so a newly supported chat provider
+ * cannot silently fall through to Codex for secondary inference.
  *
  * @module RoutingTextGeneration
  */
 import { Effect, Layer, ServiceMap } from "effect";
-import { baseProviderKind } from "@t3tools/contracts";
+import { baseProviderKind, TextGenerationError } from "@t3tools/contracts";
 
 import {
   TextGeneration,
@@ -19,6 +18,7 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { GeminiTextGenerationLive } from "./GeminiTextGeneration.ts";
 
 // ---------------------------------------------------------------------------
 // Internal service tags so both concrete layers can coexist.
@@ -32,6 +32,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
+class GeminiTextGen extends ServiceMap.Service<GeminiTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/GeminiTextGen",
+) {}
+
 // ---------------------------------------------------------------------------
 // Routing implementation
 // ---------------------------------------------------------------------------
@@ -39,17 +43,60 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const gemini = yield* GeminiTextGen;
 
-  const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider && baseProviderKind(provider) === "claudeAgent" ? claude : codex;
+  const route = (provider?: TextGenerationProvider): TextGenerationShape | null => {
+    switch (provider ? baseProviderKind(provider) : "codex") {
+      case "codex":
+        return codex;
+      case "claudeAgent":
+        return claude;
+      case "gemini":
+        return gemini;
+    }
+  };
 
   return {
     generateCommitMessage: (input) =>
-      route(input.modelSelection.provider).generateCommitMessage(input),
-    generatePrContent: (input) => route(input.modelSelection.provider).generatePrContent(input),
-    generateBranchName: (input) => route(input.modelSelection.provider).generateBranchName(input),
-    generateThreadTitle: (input) => route(input.modelSelection.provider).generateThreadTitle(input),
-    enhanceSystemPrompt: (input) => route(input.modelSelection.provider).enhanceSystemPrompt(input),
+      route(input.modelSelection.provider)?.generateCommitMessage(input) ??
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateCommitMessage",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
+    generatePrContent: (input) =>
+      route(input.modelSelection.provider)?.generatePrContent(input) ??
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generatePrContent",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
+    generateBranchName: (input) =>
+      route(input.modelSelection.provider)?.generateBranchName(input) ??
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateBranchName",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
+    generateThreadTitle: (input) =>
+      route(input.modelSelection.provider)?.generateThreadTitle(input) ??
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateThreadTitle",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
+    enhanceSystemPrompt: (input) =>
+      route(input.modelSelection.provider)?.enhanceSystemPrompt(input) ??
+      Effect.fail(
+        new TextGenerationError({
+          operation: "enhanceSystemPrompt",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
   } satisfies TextGenerationShape;
 });
 
@@ -69,7 +116,19 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalGeminiLayer = Layer.effect(
+  GeminiTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(GeminiTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalGeminiLayer),
+);

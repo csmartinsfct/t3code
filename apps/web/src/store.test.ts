@@ -260,6 +260,27 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.modelSelection.model).toBe("claude-opus-4-6");
   });
 
+  it("repairs provider/model mismatches from older Gemini fork commands", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        modelSelection: {
+          provider: "claudeAgent",
+          profileId: "metric",
+          model: "gemini-2.5-pro",
+          options: { effort: "max" },
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.modelSelection).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
+  });
+
   it("resolves claude aliases when session provider is claudeAgent", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(

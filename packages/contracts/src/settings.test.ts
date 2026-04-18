@@ -27,6 +27,18 @@ describe("settings defaults", () => {
     expect(DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup).toBe(false);
   });
 
+  it("includes Gemini provider defaults", () => {
+    expect(DEFAULT_SERVER_SETTINGS.providers.gemini).toEqual({
+      enabled: true,
+      binaryPath: "gemini",
+      homePath: "",
+      customModels: [],
+    });
+    expect(DEFAULT_UNIFIED_SETTINGS.providers.gemini).toEqual(
+      DEFAULT_SERVER_SETTINGS.providers.gemini,
+    );
+  });
+
   it("resolves orchestration prompts and immutable shipped defaults by default", () => {
     expect(DEFAULT_SERVER_SETTINGS.prompts.orchestration).toEqual(
       ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
@@ -52,6 +64,40 @@ describe("settings defaults", () => {
         provider: "claudeAgent",
         profileId: "metric",
         model: "claude-opus-4-6",
+      },
+    });
+  });
+
+  it("accepts Gemini provider and model selection patches", () => {
+    const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        providers: {
+          gemini: {
+            enabled: true,
+            binaryPath: "/opt/bin/gemini",
+            homePath: "/tmp/gemini",
+            customModels: ["gemini-custom"],
+          },
+        },
+        orchestrationImplementerModelSelection: {
+          provider: "gemini",
+          model: "gemini-3.1-pro-preview",
+        },
+      }),
+    ).toEqual({
+      providers: {
+        gemini: {
+          enabled: true,
+          binaryPath: "/opt/bin/gemini",
+          homePath: "/tmp/gemini",
+          customModels: ["gemini-custom"],
+        },
+      },
+      orchestrationImplementerModelSelection: {
+        provider: "gemini",
+        model: "gemini-3.1-pro-preview",
       },
     });
   });

@@ -461,6 +461,54 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("surfaces unauthenticated providers clearly in the picker", async () => {
+    const unauthenticatedGemini: ServerProvider = {
+      provider: "gemini",
+      enabled: true,
+      installed: true,
+      version: "0.38.2",
+      status: "error",
+      auth: { status: "unauthenticated", type: "api-key", label: "Missing GEMINI_API_KEY" },
+      message:
+        "Gemini CLI is installed but authentication is missing. Run `gemini auth` or set GEMINI_API_KEY.",
+      checkedAt: new Date().toISOString(),
+      models: [
+        {
+          slug: "gemini-2.5-flash",
+          name: "Gemini 2.5 Flash",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            supportsPlan: true,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ],
+    };
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: [...TEST_PROVIDERS, unauthenticatedGemini],
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Gemini");
+        expect(text).toContain("Not authenticated");
+        expect(text).not.toContain("Gemini 2.5 Flash");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("accepts outline trigger styling", async () => {
     const mounted = await mountPicker({
       provider: "codex",

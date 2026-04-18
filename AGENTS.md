@@ -7,7 +7,7 @@
 
 ## Project Snapshot
 
-T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
+T3 Code is a minimal web GUI for using coding agents like Codex, Claude, and Gemini.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
@@ -38,14 +38,14 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
+- `apps/server`: Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK, Gemini ACP), serves the React web app, and manages provider sessions.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 
 ## Codex App Server (Important)
 
-T3 Code is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.
+Codex support starts `codex app-server` (JSON-RPC over stdio) for Codex sessions, then streams structured events to the browser through WebSocket push messages. Claude and Gemini use their own provider adapters but flow through the same provider/orchestration pipeline.
 
 How we use it in this codebase:
 
@@ -80,6 +80,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Visibility](docs/visibility.md) — Practical debugging guide: lifecycle logs, timeline logs, provider event logs, log file locations, context-loss investigation workflow, and logging best practices.
 - [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.
 - [Resource Management](docs/resource-management.md) — Lazy loading, shallow startup snapshot, thread content cache (LRU eviction, configurable size), idle session timeout, and memory optimization.
+- [Gemini Provider](docs/gemini-provider.md) — Gemini ACP integration, T3 MCP tool delivery, approvals/user input, usage telemetry, fork/resume limitations, attachments, structured output, and auth detection.
 
 These docs must be kept up to date as related code changes.
 

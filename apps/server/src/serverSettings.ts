@@ -103,7 +103,7 @@ export class ServerSettingsService extends ServiceMap.Service<
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
-const PROVIDER_ORDER: readonly BaseProviderKind[] = ["codex", "claudeAgent"];
+const PROVIDER_ORDER: readonly BaseProviderKind[] = ["codex", "claudeAgent", "gemini"];
 
 function resolveModelSelectionProvider(
   settings: ServerSettings,

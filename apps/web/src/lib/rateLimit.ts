@@ -59,6 +59,13 @@ const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
   seven_day_sonnet: "Weekly (Sonnet)",
   seven_day_oauth_apps: "Weekly (OAuth apps)",
   seven_day_cowork: "Weekly (Cowork)",
+  "gemini-2.5-flash": "2.5 Flash",
+  "gemini-2.5-flash-lite": "2.5 Flash-Lite",
+  "gemini-2.5-pro": "2.5 Pro",
+  "gemini-3-flash-preview": "3 Flash",
+  "gemini-3-pro-preview": "3 Pro",
+  "gemini-3.1-flash-lite-preview": "3.1 Flash-Lite",
+  "gemini-3.1-pro-preview": "3.1 Pro",
   overage: "Overage",
   extra_usage: "Extra usage",
 };

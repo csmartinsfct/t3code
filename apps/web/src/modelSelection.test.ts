@@ -1,8 +1,12 @@
+import { BASE_PROVIDER_KINDS, type ServerProvider } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import type { ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { getCustomModelOptionsByProvider, resolveAppModelSelectionState } from "./modelSelection";
+import {
+  getCustomModelOptionsByProvider,
+  MODEL_PROVIDER_SETTINGS,
+  resolveAppModelSelectionState,
+} from "./modelSelection";
 
 const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
   {
@@ -83,6 +87,12 @@ describe("resolveAppModelSelectionState", () => {
 });
 
 describe("getCustomModelOptionsByProvider", () => {
+  it("covers every base provider in custom model settings", () => {
+    const configuredProviders = MODEL_PROVIDER_SETTINGS.map((entry) => entry.provider);
+
+    expect(configuredProviders.toSorted()).toEqual([...BASE_PROVIDER_KINDS].toSorted());
+  });
+
   it("treats profiled Claude providers as Claude when preserving ad hoc selections", () => {
     const options = getCustomModelOptionsByProvider(
       DEFAULT_UNIFIED_SETTINGS,

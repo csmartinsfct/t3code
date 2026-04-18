@@ -16,7 +16,7 @@ The system has five main moving parts:
 
 ```
 ┌───────────────────────────────────────────────┐
-│  AI Provider (Claude Code / Codex)            │
+│  AI Provider (Codex / Claude / Gemini)        │
 │  Uses REST API tools to create/manage tickets │
 └──────────────┬────────────────────────────────┘
                │ POST /api/ticketing

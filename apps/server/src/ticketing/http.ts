@@ -275,14 +275,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           provider: {
             type: "string",
-            enum: ["codex", "claudeAgent"],
+            enum: ["codex", "claudeAgent", "gemini"],
             description: "Provider kind.",
           },
           model: { type: "string", description: "Model slug." },
           profileId: {
             type: "string",
             optional: true,
-            description: "Claude profile ID (if applicable).",
+            description: "Provider profile ID (if applicable).",
           },
         },
         description: "Optional model override for the implementer agent during orchestration.",
@@ -293,14 +293,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           provider: {
             type: "string",
-            enum: ["codex", "claudeAgent"],
+            enum: ["codex", "claudeAgent", "gemini"],
             description: "Provider kind.",
           },
           model: { type: "string", description: "Model slug." },
           profileId: {
             type: "string",
             optional: true,
-            description: "Claude profile ID (if applicable).",
+            description: "Provider profile ID (if applicable).",
           },
         },
         description: "Optional model override for the reviewer agent during orchestration.",
@@ -370,14 +370,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           provider: {
             type: "string",
-            enum: ["codex", "claudeAgent"],
+            enum: ["codex", "claudeAgent", "gemini"],
             description: "Provider kind.",
           },
           model: { type: "string", description: "Model slug." },
           profileId: {
             type: "string",
             optional: true,
-            description: "Claude profile ID (if applicable).",
+            description: "Provider profile ID (if applicable).",
           },
         },
         description: "Model override for the implementer agent. Pass null to clear.",
@@ -389,14 +389,14 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           provider: {
             type: "string",
-            enum: ["codex", "claudeAgent"],
+            enum: ["codex", "claudeAgent", "gemini"],
             description: "Provider kind.",
           },
           model: { type: "string", description: "Model slug." },
           profileId: {
             type: "string",
             optional: true,
-            description: "Claude profile ID (if applicable).",
+            description: "Provider profile ID (if applicable).",
           },
         },
         description: "Model override for the reviewer agent. Pass null to clear.",

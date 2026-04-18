@@ -4,11 +4,14 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   modelSelectionProviderKind,
   type ModelSelection,
-  providerProfileId,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  makeProviderModelSelection,
+  normalizeModelSlug,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
@@ -48,6 +51,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModel
     description: "Save additional Claude model slugs for the picker and `/model` command.",
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
+  },
+  gemini: {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model slugs for the picker and `/model` command.",
+    placeholder: "your-gemini-model-slug",
+    example: "gemini-3.1-pro-preview",
   },
 };
 
@@ -171,6 +181,12 @@ export function getCustomModelOptionsByProvider(
       "claudeAgent",
       selectedBaseProvider === "claudeAgent" ? selectedModel : undefined,
     ).map(({ slug, name }) => ({ slug, name })),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedBaseProvider === "gemini" ? selectedModel : undefined,
+    ).map(({ slug, name }) => ({ slug, name })),
   };
 }
 
@@ -179,15 +195,7 @@ export function makeAppModelSelection(
   model: string,
   options?: ModelSelection["options"],
 ): ModelSelection {
-  const baseProvider = baseProviderKind(provider);
-  const profileId = baseProvider === "claudeAgent" ? providerProfileId(provider) : undefined;
-
-  return {
-    provider: baseProvider,
-    model,
-    ...(profileId ? { profileId } : {}),
-    ...(options ? { options } : {}),
-  } as ModelSelection;
+  return makeProviderModelSelection(provider, model, options);
 }
 
 export function resolveAppModelSelectionState(

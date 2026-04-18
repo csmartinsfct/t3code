@@ -9,7 +9,27 @@ export function createReadyServerProvider(input: {
   defaultCodexModelName?: string;
   defaultClaudeModelSlug?: string;
   defaultClaudeModelName?: string;
+  defaultGeminiModelSlug?: string;
+  defaultGeminiModelName?: string;
 }): ServerProvider {
+  const baseProvider = input.provider.includes(":")
+    ? input.provider.slice(0, input.provider.indexOf(":"))
+    : input.provider;
+  const defaultModel =
+    baseProvider === "codex"
+      ? {
+          slug: input.defaultCodexModelSlug ?? "gpt-5.4",
+          name: input.defaultCodexModelName ?? "GPT-5.4",
+        }
+      : baseProvider === "gemini"
+        ? {
+            slug: input.defaultGeminiModelSlug ?? "gemini-3.1-pro-preview",
+            name: input.defaultGeminiModelName ?? "Gemini 3.1 Pro Preview",
+          }
+        : {
+            slug: input.defaultClaudeModelSlug ?? "claude-opus-4-6",
+            name: input.defaultClaudeModelName ?? "Claude Opus 4.6",
+          };
   return {
     provider: input.provider as never,
     ...(input.displayName ? { displayName: input.displayName } : {}),
@@ -21,14 +41,8 @@ export function createReadyServerProvider(input: {
     checkedAt: input.checkedAt,
     models: input.models ?? [
       {
-        slug:
-          input.provider === "codex"
-            ? (input.defaultCodexModelSlug ?? "gpt-5.4")
-            : (input.defaultClaudeModelSlug ?? "claude-opus-4-6"),
-        name:
-          input.provider === "codex"
-            ? (input.defaultCodexModelName ?? "GPT-5.4")
-            : (input.defaultClaudeModelName ?? "Claude Opus 4.6"),
+        slug: defaultModel.slug,
+        name: defaultModel.name,
         isCustom: false,
         capabilities: null,
       },

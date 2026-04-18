@@ -1,4 +1,9 @@
-import { DEFAULT_MODEL_BY_PROVIDER, ModelSelection, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  ThreadId,
+  type ModelSelection,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 import "../../index.css";
 
 import { page } from "vitest/browser";
@@ -11,6 +16,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 
 async function mountMenu(props?: {
   interactionMode?: "default" | "plan" | "plan-accept";
+  runtimeMode?: RuntimeMode;
   modelSelection?: ModelSelection;
   prompt?: string;
   supportsPlan?: boolean;
@@ -51,6 +57,7 @@ async function mountMenu(props?: {
   document.body.append(host);
   const onPromptChange = vi.fn();
   const onInteractionModeChange = vi.fn();
+  const onRuntimeModeChange = vi.fn();
   const providerOptions = props?.modelSelection?.options;
   const models =
     provider === "claudeAgent"
@@ -127,6 +134,7 @@ async function mountMenu(props?: {
   const screen = await render(
     <CompactComposerControlsMenu
       interactionMode={props?.interactionMode ?? "default"}
+      runtimeMode={props?.runtimeMode ?? "full-access"}
       supportsPlan={props?.supportsPlan ?? true}
       traitsMenuContent={
         <TraitsMenuContent
@@ -140,6 +148,7 @@ async function mountMenu(props?: {
         />
       }
       onInteractionModeChange={onInteractionModeChange}
+      onRuntimeModeChange={onRuntimeModeChange}
     />,
     { container: host },
   );
@@ -153,6 +162,7 @@ async function mountMenu(props?: {
     [Symbol.asyncDispose]: cleanup,
     cleanup,
     onInteractionModeChange,
+    onRuntimeModeChange,
   };
 }
 
@@ -320,6 +330,36 @@ describe("CompactComposerControlsMenu", () => {
     }
   });
 
+  it("changes runtime access from the menu", async () => {
+    const supervisedMounted = await mountMenu({
+      runtimeMode: "approval-required",
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+    });
+
+    try {
+      await page.getByLabelText("More composer controls").click();
+      (await waitForMenuRadioItem("Full access")).click();
+
+      expect(supervisedMounted.onRuntimeModeChange).toHaveBeenCalledWith("full-access");
+    } finally {
+      await supervisedMounted.cleanup();
+    }
+
+    const fullAccessMounted = await mountMenu({
+      runtimeMode: "full-access",
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+    });
+
+    try {
+      await page.getByLabelText("More composer controls").click();
+      (await waitForMenuRadioItem("Supervised")).click();
+
+      expect(fullAccessMounted.onRuntimeModeChange).toHaveBeenCalledWith("approval-required");
+    } finally {
+      await fullAccessMounted.cleanup();
+    }
+  });
+
   it("hides plan-only controls when the selected model does not support planning", async () => {
     const mounted = await mountMenu({
       interactionMode: "default",
@@ -333,10 +373,10 @@ describe("CompactComposerControlsMenu", () => {
 
     await vi.waitFor(() => {
       const text = document.body.textContent ?? "";
+      expect(text).toContain("Access");
+      expect(text).toContain("Full access");
       expect(text).toContain("Chat");
       expect(text).not.toContain("Plan + Accept");
-      expect(text).not.toContain("Runtime access");
-      expect(text).not.toContain("Full access");
     });
   });
 });

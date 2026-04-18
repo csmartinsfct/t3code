@@ -24,6 +24,7 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as Transformation from "effect/SchemaTransformation";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -1134,7 +1135,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             id: row.projectId,
             title: row.title,
             workspaceRoot: row.workspaceRoot,
-            defaultModelSelection: row.defaultModelSelection,
+            defaultModelSelection:
+              row.defaultModelSelection === null
+                ? null
+                : normalizeModelSelectionProvider(row.defaultModelSelection),
             systemPrompt: row.systemPrompt,
             promptOverrides: row.promptOverrides,
             scripts: row.scripts,
@@ -1147,7 +1151,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             id: row.threadId,
             projectId: row.projectId,
             title: row.title,
-            modelSelection: row.modelSelection,
+            modelSelection: normalizeModelSelectionProvider(row.modelSelection),
             runtimeMode: row.runtimeMode,
             interactionMode: row.interactionMode,
             branch: row.branch,
@@ -1374,7 +1378,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             id: row.projectId,
             title: row.title,
             workspaceRoot: row.workspaceRoot,
-            defaultModelSelection: row.defaultModelSelection,
+            defaultModelSelection:
+              row.defaultModelSelection === null
+                ? null
+                : normalizeModelSelectionProvider(row.defaultModelSelection),
             systemPrompt: row.systemPrompt,
             promptOverrides: row.promptOverrides,
             scripts: row.scripts,
@@ -1399,7 +1406,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               id: row.threadId,
               projectId: row.projectId,
               title: row.title,
-              modelSelection: row.modelSelection,
+              modelSelection: normalizeModelSelectionProvider(row.modelSelection),
               runtimeMode: row.runtimeMode,
               interactionMode: row.interactionMode,
               branch: row.branch,

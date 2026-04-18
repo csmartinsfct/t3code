@@ -1,7 +1,7 @@
 /**
  * MCP config file reader.
  *
- * Reads MCP server names from Claude and Codex configuration files on disk.
+ * Reads MCP server names from Claude, Codex, and Gemini configuration files on disk.
  * Pure file-system reads — no runtime sessions required.
  *
  * @module mcpConfigReader
@@ -93,6 +93,53 @@ export const resolveCodexMcpServerNames = Effect.fn("resolveCodexMcpServerNames"
   return [...names].toSorted();
 });
 
+// ---------------------------------------------------------------------------
+// Gemini MCP resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve MCP server names from Gemini CLI settings.
+ *
+ * Gemini CLI supports user-level `settings.json` at `<geminiHome>/settings.json`
+ * and project-local settings at `<cwd>/.gemini/settings.json`. MCP servers live
+ * under top-level `mcpServers`, with optional global filters in `mcp.allowed`
+ * and `mcp.excluded`.
+ */
+export const resolveGeminiMcpServerNames = Effect.fn("resolveGeminiMcpServerNames")(function* (
+  geminiHome: string,
+  cwd?: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const names = new Set<string>();
+  let allowedNames: Set<string> | undefined;
+  let excludedNames = new Set<string>();
+
+  for (const configPath of resolveGeminiSettingsPaths(geminiHome, cwd)) {
+    const settings = yield* readJsonFile(fileSystem, configPath);
+    if (settings === undefined) continue;
+
+    collectMcpServerKeys(settings, "mcpServers", names);
+
+    const mcp = settings.mcp;
+    if (!isRecord(mcp)) continue;
+
+    const allowed = readStringArray(mcp.allowed);
+    if (allowed !== undefined) {
+      allowedNames = new Set(allowed);
+    }
+
+    const excluded = readStringArray(mcp.excluded);
+    if (excluded !== undefined) {
+      excludedNames = new Set(excluded);
+    }
+  }
+
+  return [...names]
+    .filter((name) => allowedNames === undefined || allowedNames.has(name))
+    .filter((name) => !excludedNames.has(name))
+    .toSorted();
+});
+
 /**
  * Resolve whether Codex trusts the exact project cwd.
  *
@@ -162,6 +209,16 @@ export function resolveCodexProjectConfigPaths(cwd: string): readonly string[] {
   return directories.map((dir) => path.join(dir, ".codex", "config.toml"));
 }
 
+export function resolveGeminiSettingsPaths(geminiHome: string, cwd?: string): readonly string[] {
+  const configPaths = new Set<string>([path.join(geminiHome, "settings.json")]);
+
+  if (cwd) {
+    configPaths.add(path.join(cwd, ".gemini", "settings.json"));
+  }
+
+  return [...configPaths];
+}
+
 /** Extract the keys of a nested `mcpServers` record and add them to `out`. */
 function collectMcpServerKeys(obj: Record<string, unknown>, key: string, out: Set<string>): void {
   const servers = obj[key];
@@ -189,6 +246,16 @@ function readJsonFile(
     }),
     Effect.orElseSucceed(() => undefined),
   );
+}
+
+function readStringArray(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
 }
 
 function resolveCodexConfigPaths(codexHome: string, cwd?: string): readonly string[] {

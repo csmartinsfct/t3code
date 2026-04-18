@@ -101,6 +101,46 @@ describe("orchestration projector", () => {
     ]);
   });
 
+  it("normalizes known model/provider mismatches while projecting", async () => {
+    const now = new Date().toISOString();
+    const model = createEmptyReadModel(now);
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "claudeAgent",
+              profileId: "metric",
+              model: "gemini-2.5-pro",
+              options: { effort: "max" },
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.modelSelection).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
+  });
+
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = new Date().toISOString();
     const model = createEmptyReadModel(now);

@@ -41,6 +41,10 @@ export function buildEnvironmentHeader(params: {
 /**
  * Builds the system prompt that describes the T3 REST API endpoints.
  * Injected into AI sessions so agents can discover and call project services.
+ *
+ * All supported providers currently reach the T3 services through this
+ * REST-via-shell path. A future native-MCP mode would be wired through the
+ * same seam (`buildT3ServiceInjectionPrompt` + per-provider session setup).
  */
 export function buildRestEndpointSystemPrompt(params: { port: number; token: string }): string {
   const { port, token } = params;

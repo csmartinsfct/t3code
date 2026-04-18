@@ -1,10 +1,13 @@
 import {
   baseProviderKind,
+  type BaseProviderKind,
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
+  providerProfileId,
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type GeminiModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
@@ -13,6 +16,22 @@ import {
 export interface SelectableModelOption {
   slug: string;
   name: string;
+}
+
+export function makeProviderModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ModelSelection["options"],
+): ModelSelection {
+  const base = baseProviderKind(provider);
+  const profileId = providerProfileId(provider);
+
+  return {
+    provider: base,
+    model,
+    ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
+    ...(options ? { options } : {}),
+  } as ModelSelection;
 }
 
 // ── Effort helpers ────────────────────────────────────────────────────
@@ -137,6 +156,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeGeminiModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  modelOptions: GeminiModelOptions | null | undefined,
+): GeminiModelOptions | undefined {
+  return modelOptions && Object.keys(modelOptions).length > 0 ? modelOptions : undefined;
+}
+
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -162,6 +188,59 @@ export function normalizeModelSlug(
     ? aliases[trimmed]
     : undefined;
   return typeof aliased === "string" ? aliased : trimmed;
+}
+
+export function inferBaseProviderKindFromModelSlug(
+  model: string | null | undefined,
+): BaseProviderKind | null {
+  if (typeof model !== "string") {
+    return null;
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const lower = trimmed.toLowerCase();
+  for (const provider of Object.keys(MODEL_SLUG_ALIASES_BY_PROVIDER) as BaseProviderKind[]) {
+    const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
+    for (const [alias, canonical] of Object.entries(aliases)) {
+      if (alias.toLowerCase() === lower || canonical.toLowerCase() === lower) {
+        return provider;
+      }
+    }
+  }
+
+  if (lower.startsWith("gemini-") || lower.startsWith("auto-gemini-")) {
+    return "gemini";
+  }
+  if (lower.startsWith("claude-")) {
+    return "claudeAgent";
+  }
+  if (lower.startsWith("gpt-") || lower.startsWith("codex-") || lower.includes("-codex")) {
+    return "codex";
+  }
+
+  return null;
+}
+
+export function normalizeModelSelectionProvider(selection: ModelSelection): ModelSelection {
+  const inferredProvider = inferBaseProviderKindFromModelSlug(selection.model);
+  const provider = inferredProvider ?? selection.provider;
+  const model = resolveModelSlugForProvider(provider, selection.model);
+
+  if (provider === selection.provider) {
+    return {
+      ...selection,
+      model,
+    } as ModelSelection;
+  }
+
+  return {
+    provider,
+    model,
+  } as ModelSelection;
 }
 
 export function resolveSelectableModel(

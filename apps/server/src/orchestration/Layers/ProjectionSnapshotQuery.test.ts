@@ -19,6 +19,95 @@ const projectionSnapshotLayer = it.layer(
 );
 
 projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
+  it.effect("normalizes provider/model mismatches from persisted projection rows", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-gemini',
+          'Gemini Project',
+          '/tmp/project-gemini',
+          '{"provider":"claudeAgent","model":"gemini-2.5-pro"}',
+          '[]',
+          '2026-02-24T00:00:00.000Z',
+          '2026-02-24T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-gemini',
+          'project-gemini',
+          'Gemini Thread',
+          '{"provider":"claudeAgent","model":"gemini-2.5-pro"}',
+          NULL,
+          NULL,
+          NULL,
+          '2026-02-24T00:00:02.000Z',
+          '2026-02-24T00:00:03.000Z',
+          NULL
+        )
+      `;
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      const startupSnapshot = yield* snapshotQuery.getStartupSnapshot();
+
+      assert.deepEqual(snapshot.projects[0]?.defaultModelSelection, {
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+      });
+      assert.deepEqual(snapshot.threads[0]?.modelSelection, {
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+      });
+      assert.deepEqual(startupSnapshot.projects[0]?.defaultModelSelection, {
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+      });
+      assert.deepEqual(startupSnapshot.threads[0]?.modelSelection, {
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+      });
+
+      yield* sql`DELETE FROM projection_threads WHERE thread_id = 'thread-gemini'`;
+      yield* sql`DELETE FROM projection_projects WHERE project_id = 'project-gemini'`;
+    }),
+  );
+
   it.effect("hydrates read model from projection tables and computes snapshot sequence", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

@@ -886,6 +886,7 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;
+  if (workEntry.requestKind === "tool") return WrenchIcon;
 
   if (workEntry.itemType === "command_execution" || workEntry.command) {
     return TerminalIcon;

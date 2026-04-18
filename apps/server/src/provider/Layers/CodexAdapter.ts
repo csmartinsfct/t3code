@@ -41,11 +41,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { trustCodexProject } from "../../mcpConfigReader.ts";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
-import {
-  buildEnvironmentHeader,
-  buildRestEndpointSystemPrompt,
-  renderAdminPromptDocument,
-} from "../restEndpointSystemPrompt.ts";
+import { buildT3ServiceInjectionPrompt } from "../sessionContextPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1440,27 +1436,13 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           checkpointContext.value.projectId,
           input.threadId,
         );
-
-        const envHeader = buildEnvironmentHeader({
+        appendDeveloperInstructions = buildT3ServiceInjectionPrompt({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
           projectTitle: checkpointContext.value.projectTitle,
+          token: access.token,
+          adminPrompts: allCodexSettings.prompts.admin,
         });
-
-        const adminPrompts = allCodexSettings.prompts.admin;
-        appendDeveloperInstructions =
-          envHeader +
-          "\n\n" +
-          buildRestEndpointSystemPrompt({
-            port: serverConfig.port,
-            token: access.token,
-          }) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.managedRuns) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.scheduledTasks) +
-          "\n\n" +
-          renderAdminPromptDocument(adminPrompts.ticketing);
       }
       // Inject project-specific system prompt (independent of services / port)
       if (Option.isSome(checkpointContext) && checkpointContext.value.systemPrompt) {
@@ -1687,6 +1669,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      conversationRollback: "provider",
     },
     startSession,
     sendTurn,

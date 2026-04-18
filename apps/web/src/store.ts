@@ -14,8 +14,9 @@ import {
   type OrchestrationThreadMetadata,
   type OrchestrationSessionStatus,
   type OrchestrationRunStatus,
+  type ModelSelection,
 } from "@t3tools/contracts";
-import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
 import { summarizeTimelineText } from "@t3tools/shared/timeline";
 import { create } from "zustand";
 import {
@@ -120,13 +121,8 @@ function updateProject(
   return changed ? next : projects;
 }
 
-function normalizeModelSelection<T extends { provider: "codex" | "claudeAgent"; model: string }>(
-  selection: T,
-): T {
-  return {
-    ...selection,
-    model: resolveModelSlugForProvider(selection.provider, selection.model),
-  };
+function normalizeModelSelection(selection: ModelSelection): ModelSelection {
+  return normalizeModelSelectionProvider(selection);
 }
 
 function mapProjectScripts(scripts: ReadonlyArray<Project["scripts"][number]>): Project["scripts"] {
@@ -864,7 +860,7 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex" || providerName === "claudeAgent") {
+  if (providerName === "codex" || providerName === "claudeAgent" || providerName === "gemini") {
     return providerName;
   }
   return "codex";

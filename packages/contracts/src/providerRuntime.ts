@@ -24,6 +24,9 @@ const RuntimeEventRawSource = Schema.Literals([
   "claude.sdk.message",
   "claude.sdk.permission",
   "codex.sdk.thread-event",
+  "gemini.acp.notification",
+  "gemini.acp.request",
+  "gemini.acp.response",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 

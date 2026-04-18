@@ -6,6 +6,7 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  GeminiModelOptions,
 } from "./model";
 import { ModelSelection } from "./orchestration";
 import {
@@ -79,6 +80,14 @@ export const ClaudeSettings = Schema.Struct({
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
+
+export const GeminiSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("gemini"),
+  homePath: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type GeminiSettings = typeof GeminiSettings.Type;
 
 export const ClaudeProfileSettings = Schema.Struct({
   profileId: TrimmedNonEmptyString,
@@ -179,6 +188,7 @@ export const ServerSettings = Schema.Struct({
   providers: Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    gemini: GeminiSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeProfiles: Schema.Array(ClaudeProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
@@ -229,6 +239,8 @@ const ClaudeModelOptionsPatch = Schema.Struct({
   contextWindow: Schema.optionalKey(ClaudeModelOptions.fields.contextWindow),
 });
 
+const GeminiModelOptionsPatch = GeminiModelOptions;
+
 const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
@@ -240,6 +252,12 @@ const ModelSelectionPatch = Schema.Union([
     profileId: Schema.optionalKey(TrimmedNonEmptyString),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("gemini")),
+    profileId: Schema.optionalKey(TrimmedNonEmptyString),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(GeminiModelOptionsPatch),
   }),
 ]);
 
@@ -254,6 +272,13 @@ const ClaudeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
   configDir: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
+const GeminiSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  homePath: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
@@ -280,6 +305,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      gemini: Schema.optionalKey(GeminiSettingsPatch),
       claudeProfiles: Schema.optionalKey(Schema.Array(ClaudeProfileSettings)),
     }),
   ),

@@ -57,6 +57,13 @@ These are the most important logs for debugging context loss, session failures, 
 | `turn.complete`                  | Turn finished                            | `status`, `turnCount`, `errorMessage` (truncated)                                            |
 | `thread-id.resolved`             | Provider thread ID received from SDK     | `providerThreadId`, `isNew`                                                                  |
 
+#### `gemini-adapter` — Session lifecycle within the Gemini ACP adapter
+
+Gemini sessions flow through the same lifecycle logger as Claude and Codex, but
+provider-native events are ACP JSON-RPC messages. Look for session start/load,
+prompt, permission, usage, model, MCP status, fork, and unsupported rollback
+events when debugging Gemini-specific behavior.
+
 #### `reactor` — Session decision logic in ProviderCommandReactor
 
 | Event                        | When                                         | Key Details                                                                                             |
@@ -264,6 +271,7 @@ For events that span client-server boundaries or orchestration layers, use `form
 ### Scope naming conventions
 
 - `claude-adapter` — Claude SDK adapter internals
+- `gemini-adapter` — Gemini ACP adapter internals
 - `reactor` — ProviderCommandReactor session decisions
 - `provider-service` — ProviderService turn routing
 - `directory` — ProviderSessionDirectory persistence

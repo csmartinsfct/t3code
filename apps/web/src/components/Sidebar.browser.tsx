@@ -1,6 +1,6 @@
 import "../index.css";
 
-import type { NativeApi, ProjectId, ServerProvider, ThreadId } from "@t3tools/contracts";
+import type { NativeApi, ProjectId, ServerProvider } from "@t3tools/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -97,6 +97,7 @@ vi.mock("../hooks/useSettings", () => settingsHookMock);
 vi.mock("../hooks/useSettings.ts", () => settingsHookMock);
 
 vi.mock("../rpc/serverState", () => ({
+  resetServerStateForTests: vi.fn(),
   useServerKeybindings: () => [],
   useServerProviders: () => [],
 }));
@@ -114,6 +115,7 @@ vi.mock("./ui/toast", () => ({
 }));
 
 const {
+  buildForkModelSelection,
   buildMoveThreadConfirmationMessage,
   buildThreadContextMenuItems,
   default: Sidebar,
@@ -190,6 +192,25 @@ describe("Sidebar thread context menu helpers", () => {
             },
           ],
         }),
+        createProvider({
+          provider: "gemini",
+          displayName: "Gemini",
+          models: [
+            {
+              slug: "gemini-2.5-pro",
+              name: "Gemini 2.5 Pro",
+              isCustom: false,
+              capabilities: {
+                reasoningEffortLevels: [],
+                supportsFastMode: false,
+                supportsThinkingToggle: false,
+                supportsPlan: true,
+                contextWindowOptions: [],
+                promptInjectedEffortLevels: [],
+              },
+            },
+          ],
+        }),
       ],
       projects: [
         { id: "project-1" as ProjectId, name: "Alpha" },
@@ -208,9 +229,29 @@ describe("Sidebar thread context menu helpers", () => {
         id: "fork::claudeAgent:metric::claude-opus-4-6",
         label: "Claude (metric) — Claude Opus 4.6",
       },
+      {
+        id: "fork::gemini::gemini-2.5-pro",
+        label: "Gemini — Gemini 2.5 Pro",
+      },
     ]);
     expect(moveItem?.disabled).toBe(false);
     expect(moveItem?.children).toEqual([{ id: "move::project-2", label: "Beta" }]);
+  });
+
+  it("builds fork model selections for each provider family", () => {
+    expect(buildForkModelSelection("codex", "gpt-5.4")).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+    });
+    expect(buildForkModelSelection("claudeAgent:metric", "claude-opus-4-6")).toEqual({
+      provider: "claudeAgent",
+      profileId: "metric",
+      model: "claude-opus-4-6",
+    });
+    expect(buildForkModelSelection("gemini", "gemini-2.5-pro")).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
   });
 
   it("disables Move to when no target project exists or the thread is active", () => {

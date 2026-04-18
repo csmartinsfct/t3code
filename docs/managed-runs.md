@@ -13,8 +13,8 @@ The system has four main moving parts:
 
 ```
 ┌───────────────────────────────────────────────┐
-│  AI Provider (Claude Code / Codex)            │
-│  System prompt tells it to use REST API tools │
+│  AI Provider (Codex / Claude / Gemini)        │
+│  Injected guidance tells it to use T3 tools   │
 └──────────────┬────────────────────────────────┘
                │ POST /api/managed-runs
                ▼
@@ -109,6 +109,7 @@ When a provider session starts and the thread belongs to a project:
 
 - **Claude adapter** (`apps/server/src/provider/Layers/ClaudeAdapter.ts`): Passes `mcpServers` config with the `t3_managed_runs` server URL + bearer token, auto-allows `mcp__t3_managed_runs__*` tools, and appends the system prompt.
 - **Codex adapter** (`apps/server/src/provider/Layers/CodexAdapter.ts`): Sets `mcp_servers.t3_managed_runs.url` and `http_headers.Authorization` via config overrides, and appends the system prompt via `appendDeveloperInstructions`.
+- **Gemini adapter** (`apps/server/src/provider/Layers/GeminiAdapter.ts`): Injects the shared `t3-code` stdio MCP bridge through ACP `mcpServers` and primes service guidance through embedded context on the first turn.
 
 ---
 
@@ -280,6 +281,7 @@ The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 | **SQL layer**             | `apps/server/src/persistence/Layers/ManagedRuns.ts`                 | SQLite persistence for runs, evidence, and inference audit records     |
 | **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                  | Service config + prompt injection for Claude                           |
 | **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                   | Service config + prompt injection for Codex                            |
+| **Provider injection**    | `apps/server/src/provider/Layers/GeminiAdapter.ts`                  | ACP MCP bridge + embedded context injection for Gemini                 |
 | **Runs UI**               | `apps/web/src/components/ManagedRunsControl.tsx`                    | Runs dropdown with service health                                      |
 | **Runs settings UI**      | `apps/web/src/components/settings/RunsSettingsPanel.tsx`            | Read-only inference audit surface                                      |
 | **Propose card**          | `apps/web/src/components/chat/ProposeActionCard.tsx`                | Interactive action proposal card                                       |

@@ -98,7 +98,7 @@ type InstallProviderSettings = {
   title: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
-  homePathKey?: "codexHomePath";
+  homePathKey?: "codexHomePath" | "geminiHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
   _profileProviderKind?: ProviderKind;
@@ -119,6 +119,15 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "Claude",
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
+  },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    binaryPlaceholder: "Gemini binary path",
+    binaryDescription: "Path to the Gemini CLI binary",
+    homePathKey: "geminiHomePath",
+    homePlaceholder: "GEMINI_CLI_HOME",
+    homeDescription: "Optional custom Gemini CLI home and config directory.",
   },
 ] as const;
 
@@ -563,12 +572,19 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    gemini: Boolean(
+      settings.providers.gemini.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.gemini.binaryPath ||
+      settings.providers.gemini.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.gemini.homePath ||
+      settings.providers.gemini.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Partial<Record<ProviderKind, string>>
   >({
     codex: "",
     claudeAgent: "",
+    gemini: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -595,7 +611,6 @@ export function GeneralSettingsPanel() {
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
-  const codexHomePath = settings.providers.codex.homePath;
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
   const diagnosticsDescription = (() => {
     const exports: string[] = [];
@@ -847,6 +862,8 @@ export function GeneralSettingsPanel() {
     );
     const providerConfig = settings.providers[providerSettings.provider];
     const defaultProviderConfig = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
+    const homePathValue =
+      providerSettings.homePathKey && "homePath" in providerConfig ? providerConfig.homePath : "";
     const statusKey = liveProvider?.status ?? (providerConfig.enabled ? "warning" : "disabled");
     const summary = getProviderSummary(liveProvider);
     const models: ReadonlyArray<ServerProviderModel> =
@@ -867,6 +884,7 @@ export function GeneralSettingsPanel() {
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
+      homePathValue,
       binaryPathValue: providerConfig.binaryPath,
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
@@ -1743,18 +1761,18 @@ export function GeneralSettingsPanel() {
                           className="block"
                         >
                           <span className="text-xs font-medium text-foreground">
-                            CODEX_HOME path
+                            {providerDisplayName} home path
                           </span>
                           <Input
                             id={`provider-install-${providerCard.homePathKey}`}
                             className="mt-1.5"
-                            value={codexHomePath}
+                            value={providerCard.homePathValue}
                             onChange={(event) =>
                               updateSettings({
                                 providers: {
                                   ...settings.providers,
-                                  codex: {
-                                    ...settings.providers.codex,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
                                     homePath: event.target.value,
                                   },
                                 },
@@ -1888,7 +1906,9 @@ export function GeneralSettingsPanel() {
                           placeholder={
                             providerCard.provider === "codex"
                               ? "gpt-6.7-codex-ultra-preview"
-                              : "claude-sonnet-5-0"
+                              : providerCard.provider === "gemini"
+                                ? "gemini-3.1-pro-preview"
+                                : "claude-sonnet-5-0"
                           }
                           spellCheck={false}
                         />

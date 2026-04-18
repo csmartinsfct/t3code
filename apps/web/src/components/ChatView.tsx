@@ -125,6 +125,8 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   Loader2Icon,
+  LockIcon,
+  LockOpenIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -702,6 +704,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
@@ -1510,7 +1513,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return {
       provider: base,
       model: selectedModel,
-      ...(base === "claudeAgent" && profileId ? { profileId } : {}),
+      ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
       ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
     } as ModelSelection;
   }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
@@ -1934,6 +1937,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
+      gemini: providerStatuses.find((provider) => provider.provider === "gemini")?.models ?? [],
     }),
     [providerStatuses],
   );
@@ -1958,7 +1962,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             searchProvider: option.label.toLowerCase(),
           })),
         ),
-    [lockedProvider, modelOptionsByProvider],
+    [lockedProvider, modelOptionsByProvider, providerStatuses],
   );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
@@ -2775,6 +2779,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+  const handleRuntimeModeChange = useCallback(
+    (mode: RuntimeMode) => {
+      if (mode === runtimeMode) return;
+      setComposerDraftRuntimeMode(threadId, mode);
+      if (isLocalDraftThread) {
+        setDraftThreadContext(threadId, { runtimeMode: mode });
+      }
+      scheduleComposerFocus();
+    },
+    [
+      isLocalDraftThread,
+      runtimeMode,
+      scheduleComposerFocus,
+      setComposerDraftRuntimeMode,
+      setDraftThreadContext,
+      threadId,
+    ],
+  );
   const toggleInteractionMode = useCallback(() => {
     if (!supportsPlan) {
       handleInteractionModeChange("default");
@@ -2785,6 +2807,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const nextIndex = (currentIndex + 1) % cycle.length;
     handleInteractionModeChange(cycle[nextIndex]!);
   }, [handleInteractionModeChange, interactionMode, supportsPlan]);
+  const toggleRuntimeMode = useCallback(() => {
+    handleRuntimeModeChange(runtimeMode === "full-access" ? "approval-required" : "full-access");
+  }, [handleRuntimeModeChange, runtimeMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
@@ -4166,7 +4191,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           selectedModel ||
           activeProject.defaultModelSelection?.model ||
           DEFAULT_MODEL_BY_PROVIDER[threadCreateBase],
-        ...(threadCreateBase === "claudeAgent" && threadCreateProfileId
+        ...((threadCreateBase === "claudeAgent" || threadCreateBase === "gemini") &&
+        threadCreateProfileId
           ? { profileId: threadCreateProfileId }
           : {}),
         ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
@@ -4757,7 +4783,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const nextModelSelection: ModelSelection = {
         provider: base,
         model: resolvedModel,
-        ...(base === "claudeAgent" && profileId ? { profileId } : {}),
+        ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
       } as ModelSelection;
       setComposerDraftModelSelection(activeThread.id, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);
@@ -5617,9 +5643,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 />
                                 <CompactComposerControlsMenu
                                   interactionMode={interactionMode}
+                                  runtimeMode={runtimeMode}
                                   supportsPlan={supportsPlan}
                                   traitsMenuContent={providerTraitsMenuContent}
                                   onInteractionModeChange={handleInteractionModeChange}
+                                  onRuntimeModeChange={handleRuntimeModeChange}
                                 />
                               </>
                             ) : (
@@ -5664,6 +5692,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                     </span>
                                   </Button>
                                 ) : null}
+
+                                <Button
+                                  variant="ghost"
+                                  className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                                  size="sm"
+                                  type="button"
+                                  onClick={toggleRuntimeMode}
+                                  title={
+                                    runtimeMode === "full-access"
+                                      ? "Full access — click to require approvals"
+                                      : "Supervised — click for full access"
+                                  }
+                                >
+                                  {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
+                                  <span className="sr-only sm:not-sr-only">
+                                    {runtimeMode === "full-access" ? "Full access" : "Supervised"}
+                                  </span>
+                                </Button>
 
                                 <Separator
                                   orientation="vertical"

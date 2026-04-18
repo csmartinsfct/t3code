@@ -1,16 +1,16 @@
 # Features
 
-T3 Code is a web GUI for AI coding agents. It wraps providers like Codex and Claude behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via REST API tools and WebSocket RPC).
+T3 Code is a web GUI for AI coding agents. It wraps providers like Codex, Claude, and Gemini behind a unified orchestration layer and exposes every feature to both human users (via a React UI) and AI agents (via REST API tools and WebSocket RPC).
 
 ## Architecture
 
-| Package              | Role                                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK), serves the React app, manages sessions, and hosts REST API endpoints. |
-| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.                   |
-| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling.     |
-| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                         |
-| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                             |
+| Package              | Role                                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`        | Node.js WebSocket server. Wraps provider processes (Codex app-server, Claude Agent SDK, Gemini ACP), serves the React app, manages sessions, and hosts REST API endpoints. |
+| `apps/web`           | React/Vite UI. Session UX, conversation rendering, ticketing board, file explorer, terminal, settings. Connects to the server via WebSocket.                               |
+| `apps/desktop`       | Electron shell. Embeds the server + web app into a native macOS/Linux/Windows desktop application with auto-update, native dialogs, and protocol handling.                 |
+| `packages/contracts` | Shared Effect/Schema schemas and TypeScript contracts. Schema-only — no runtime logic.                                                                                     |
+| `packages/shared`    | Shared runtime utilities. Explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.                                                                         |
 
 ---
 
@@ -80,6 +80,33 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - **Profiles:** Multiple named profiles supported. Each profile can have its own binary path, config directory, and custom models. Profiles appear as separate provider entries.
 - Model selection: full Claude model family with per-session model and reasoning effort options.
 
+### Gemini (Google)
+
+- Uses Gemini CLI ACP mode through a provider adapter.
+- Authentication is delegated to Gemini CLI and inherited Google/API-key
+  environment configuration.
+- Configuration: enabled/disabled, binary path, `GEMINI_CLI_HOME`, and custom
+  model slugs.
+- Runtime access: T3 maps `full-access` to Gemini YOLO mode with sandboxing
+  disabled, and `approval-required` to Gemini's default approval mode.
+- Model selection: Gemini model family with no fake reasoning-effort or thinking
+  controls. Unsupported advanced provider behaviors return explicit errors.
+- Context usage: T3 reports Gemini token usage from ACP quota metadata. It only
+  shows a max context/window denominator when Gemini emits an effective
+  `usage_update.size`, because the CLI's effective context window can vary by
+  account plan and is not safely derivable from model name alone.
+- Rate limits: for Google-login Code Assist accounts, T3 polls the Gemini Code
+  Assist quota endpoint through cached Gemini CLI OAuth credentials and displays
+  per-model quota usage as percentage used plus reset time when available.
+- MCP discovery: the chat MCP menu mirrors Gemini CLI user settings
+  (`<GEMINI_CLI_HOME>/settings.json`) and project settings
+  (`.gemini/settings.json`), including `mcp.allowed` / `mcp.excluded` filters.
+- Project title, T3 REST service guidance, and project system prompts are
+  delivered through ACP embedded context on the first Gemini turn because Gemini
+  ACP session creation does not accept a system-prompt parameter.
+- See [Gemini Provider Implementation Specification](gemini-provider-implementation.md)
+  for rollout risks and deferred capabilities.
+
 ### Provider configuration
 
 Server settings expose per-provider configuration:
@@ -87,6 +114,7 @@ Server settings expose per-provider configuration:
 - `providers.codex` — enabled/disabled, binaryPath, homePath, customModels.
 - `providers.claudeAgent` — enabled/disabled, binaryPath, configDir, customModels.
 - `providers.claudeProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, configDir, customModels).
+- `providers.gemini` — enabled/disabled, binaryPath, homePath, customModels.
 
 Model selection settings (each can target a specific provider + model):
 
@@ -595,8 +623,7 @@ Git-ref based snapshots that track file state before and after each agent turn.
 | `resumeAgentsOnStartup`    | Auto-resume stale work on server restart   | `false`          |
 | `maxReviewIterations`      | Max review passes for tickets              | `3` (max 10)     |
 | `defaultThreadEnvMode`     | Thread workspace isolation                 | `"local"`        |
-| `mcpDeliveryMode`          | How service tools reach models             | `"tools"`        |
-| Provider settings          | Codex, Claude Agent, profiles              | Per-provider     |
+| Provider settings          | Codex, Claude Agent, Gemini, profiles      | Per-provider     |
 | Model selections           | Text gen, inference, implementer, reviewer | Per-use-case     |
 | Observability              | OTLP traces/metrics URLs                   | Disabled         |
 | Orchestration prompts      | Global prompt overrides                    | Shipped defaults |
@@ -644,23 +671,13 @@ Limits: 256 rules max, 64-char key values, 256-char when expressions.
 
 ---
 
-## 16. Service Delivery Modes
+## 16. T3 Project Service Injection
 
-Controls how internal service tools are made available to AI providers. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
+Internal T3 project services are exposed to every provider the same way: REST endpoint URLs and a short-lived Bearer token are injected into the session-start prompt via the shared `buildT3ServiceInjectionPrompt` helper. The model calls them with its native shell/bash tool. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
 
-### "tools" mode (default)
-
-- Internal services are registered as native tool sets in the provider's tool list.
-- Each tool is directly callable by the model.
-- Per-service system prompts are injected alongside the tools.
-- Trade-off: 43+ tools injected upfront, consuming context window.
-
-### "prompt" mode
-
-- No native tool registration in the provider.
-- REST endpoint URLs and bearer tokens are injected into the system prompt.
-- The model uses code execution (e.g. `curl`) to discover and call tools on demand.
-- Trade-off: Extra round-trip per tool call; depends on the model's code execution capability.
+- Codex: appended through `appendDeveloperInstructions`.
+- Claude: appended through `systemPrompt.append`.
+- Gemini: sent as an ACP embedded-context resource on the first user turn; the resume cursor tracks a hash so unchanged prompts are not re-injected.
 
 ### Services exposed via REST API
 
@@ -671,7 +688,7 @@ Controls how internal service tools are made available to AI providers. See [t3-
 | Scheduled Tasks | `/api/scheduled-tasks` | 9          |
 | Prompts         | `/api/prompts`         | 5          |
 
-Configurable via `mcpDeliveryMode` in server settings.
+Trade-off: one extra round-trip for tool discovery (`GET` before `POST`) in exchange for no up-front tool-slot cost. A future native-MCP delivery mode would slot into the same shared helper.
 
 ---
 

@@ -234,6 +234,26 @@ const makeManagedRunInference = Effect.gen(function* () {
       const provider = baseProviderKind(modelSelection.provider);
       const prompt = buildPrompt(input);
 
+      if (provider === "gemini") {
+        return {
+          provider,
+          model: modelSelection.model,
+          status: "failed" as const,
+          rawPayload: {
+            error: "Gemini does not support managed-run structured inference yet.",
+          },
+          normalizedPayload: {
+            summary: "Managed run inference failed.",
+            notes: [],
+            runtimeServices: [],
+          },
+          runtimeServices: [],
+          inferenceError: "Gemini does not support managed-run structured inference yet.",
+          groundingFailures: [],
+          evidenceExcerpt: input.evidenceExcerpt,
+        } satisfies ManagedRunInferenceResult;
+      }
+
       const rawPayload =
         provider === "claudeAgent"
           ? yield* runClaudeStructuredOutput({
@@ -259,7 +279,9 @@ const makeManagedRunInference = Effect.gen(function* () {
               typeof modelSelection.options.thinking === "boolean"
                 ? { thinking: modelSelection.options.thinking }
                 : {}),
-              ...(modelSelection.options && typeof modelSelection.options.fastMode === "boolean"
+              ...(modelSelection.options &&
+              "fastMode" in modelSelection.options &&
+              typeof modelSelection.options.fastMode === "boolean"
                 ? { fastMode: modelSelection.options.fastMode }
                 : {}),
             })
@@ -285,7 +307,9 @@ const makeManagedRunInference = Effect.gen(function* () {
                 typeof modelSelection.options.reasoningEffort === "string"
                   ? modelSelection.options.reasoningEffort
                   : "low",
-              ...(modelSelection.options && typeof modelSelection.options.fastMode === "boolean"
+              ...(modelSelection.options &&
+              "fastMode" in modelSelection.options &&
+              typeof modelSelection.options.fastMode === "boolean"
                 ? { fastMode: modelSelection.options.fastMode }
                 : {}),
             });
