@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import type {
   GeminiSettings,
   ModelCapabilities,
@@ -23,6 +27,7 @@ import {
 import { GeminiProvider } from "../Services/GeminiProvider";
 
 const PROVIDER = "gemini" as const;
+const GEMINI_CLI_HOME_DIRNAME = ".gemini";
 
 const GEMINI_MODEL_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [],
@@ -98,18 +103,159 @@ export function getGeminiModelCapabilities(model: string | null | undefined): Mo
   );
 }
 
-function resolveGeminiAuthFromEnvironment(): ServerProviderAuth {
-  if (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.GOOGLE_APPLICATION_CREDENTIALS
-  ) {
-    return { status: "authenticated", type: "api-key", label: "Environment credentials" };
+function readJsonFile(filePath: string): unknown {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+  } catch {
+    return null;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveGeminiHomePath(settings: GeminiSettings): string {
+  return (
+    settings.homePath.trim() ||
+    process.env.GEMINI_CLI_HOME ||
+    join(homedir(), GEMINI_CLI_HOME_DIRNAME)
+  );
+}
+
+function selectedAuthTypeFromSettings(geminiHomePath: string): string | null {
+  const settings = readJsonFile(join(geminiHomePath, "settings.json"));
+  if (!isRecord(settings)) {
+    return null;
+  }
+  const security = settings.security;
+  const auth = isRecord(security) ? security.auth : undefined;
+  const selectedType = isRecord(auth) ? auth.selectedType : undefined;
+  return typeof selectedType === "string" && selectedType.trim() ? selectedType : null;
+}
+
+function cachedGoogleAccountLabel(geminiHomePath: string): string | null {
+  const accounts = readJsonFile(join(geminiHomePath, "google_accounts.json"));
+  if (Array.isArray(accounts)) {
+    const first = accounts.find((account) => isRecord(account));
+    for (const key of ["email", "account", "login"]) {
+      const value = isRecord(first) ? first[key] : undefined;
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+  }
+  if (isRecord(accounts)) {
+    for (const key of ["email", "account", "login", "active"]) {
+      const value = accounts[key];
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+export function resolveGeminiAuthFromEnvironment(settings: GeminiSettings): ServerProviderAuth {
+  const geminiHomePath = resolveGeminiHomePath(settings);
+  const selectedAuthType = selectedAuthTypeFromSettings(geminiHomePath);
+  const hasOAuthCredentials = existsSync(join(geminiHomePath, "oauth_creds.json"));
+  const googleAccountLabel = cachedGoogleAccountLabel(geminiHomePath);
+
+  if (process.env.GEMINI_API_KEY) {
+    return {
+      status: "authenticated",
+      type: "api-key",
+      label: selectedAuthType === "USE_GEMINI" ? "Gemini API key" : "GEMINI_API_KEY",
+    };
+  }
+
+  if (selectedAuthType === "USE_GEMINI") {
+    return {
+      status: "unauthenticated",
+      type: "api-key",
+      label: "Missing GEMINI_API_KEY",
+    };
+  }
+
+  if (selectedAuthType === "LOGIN_WITH_GOOGLE") {
+    return hasOAuthCredentials
+      ? {
+          status: "authenticated",
+          type: "google-login",
+          label: googleAccountLabel ?? "Cached Google sign-in",
+        }
+      : {
+          status: "unauthenticated",
+          type: "google-login",
+          label: "Run `gemini auth`",
+        };
+  }
+
+  if (selectedAuthType === "USE_VERTEX_AI") {
+    const hasVertexProjectLocation =
+      Boolean(process.env.GOOGLE_CLOUD_PROJECT) && Boolean(process.env.GOOGLE_CLOUD_LOCATION);
+    if (hasVertexProjectLocation || process.env.GOOGLE_API_KEY) {
+      return {
+        status: "authenticated",
+        type: "vertex-ai",
+        label: hasVertexProjectLocation ? "Vertex AI project" : "GOOGLE_API_KEY",
+      };
+    }
+    return {
+      status: "unauthenticated",
+      type: "vertex-ai",
+      label: "Missing Vertex AI environment",
+    };
+  }
+
+  if (selectedAuthType === "COMPUTE_ADC") {
+    return {
+      status:
+        process.env.GEMINI_CLI_USE_COMPUTE_ADC === "true" || process.env.CLOUD_SHELL === "true"
+          ? "authenticated"
+          : "unknown",
+      type: "compute-adc",
+      label: "Compute ADC",
+    };
+  }
+
+  if (process.env.GOOGLE_API_KEY) {
+    return { status: "authenticated", type: "api-key", label: "GOOGLE_API_KEY" };
+  }
+
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return {
+      status: "unknown",
+      type: "google-application-credentials",
+      label: "Google Application Credentials",
+    };
+  }
+
   if (process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID) {
     return { status: "unknown", type: "google-cloud", label: "Google Cloud project" };
   }
-  return { status: "unknown" };
+
+  if (hasOAuthCredentials) {
+    return {
+      status: "unknown",
+      type: "google-login",
+      label: googleAccountLabel ?? "Cached Google sign-in",
+    };
+  }
+
+  if (selectedAuthType) {
+    return {
+      status: "unknown",
+      type: selectedAuthType.toLowerCase().replaceAll("_", "-"),
+      label: selectedAuthType,
+    };
+  }
+
+  return {
+    status: "unauthenticated",
+    label: "Run `gemini auth` or set GEMINI_API_KEY.",
+  };
 }
 
 const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (args: ReadonlyArray<string>) {
@@ -219,7 +365,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
       });
     }
 
-    const auth = resolveGeminiAuthFromEnvironment();
+    const auth = resolveGeminiAuthFromEnvironment(geminiSettings);
     return buildServerProvider({
       provider: PROVIDER,
       enabled: geminiSettings.enabled,
@@ -235,7 +381,12 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
               message:
                 "Gemini CLI is installed. Authentication was not verified; cached Google sign-in may still work.",
             }
-          : {}),
+          : auth.status === "unauthenticated"
+            ? {
+                message:
+                  "Gemini CLI is installed but authentication is missing. Run `gemini auth` or set GEMINI_API_KEY.",
+              }
+            : {}),
       },
     });
   },

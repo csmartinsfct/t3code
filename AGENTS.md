@@ -80,6 +80,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Visibility](docs/visibility.md) — Practical debugging guide: lifecycle logs, timeline logs, provider event logs, log file locations, context-loss investigation workflow, and logging best practices.
 - [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.
 - [Resource Management](docs/resource-management.md) — Lazy loading, shallow startup snapshot, thread content cache (LRU eviction, configurable size), idle session timeout, and memory optimization.
+- [Gemini Provider](docs/gemini-provider.md) — Gemini ACP integration, T3 MCP tool delivery, approvals/user input, usage telemetry, fork/resume limitations, attachments, structured output, and auth detection.
 
 These docs must be kept up to date as related code changes.
 

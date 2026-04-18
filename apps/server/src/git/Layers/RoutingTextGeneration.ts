@@ -1,6 +1,6 @@
 /**
  * RoutingTextGeneration – Dispatches text generation requests to either the
- * Codex CLI or Claude CLI implementation based on the provider in each
+ * Codex, Claude, or Gemini CLI implementation based on the provider in each
  * request input.
  *
  * Requests are routed explicitly by provider so a newly supported chat provider
@@ -18,6 +18,7 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { GeminiTextGenerationLive } from "./GeminiTextGeneration.ts";
 
 // ---------------------------------------------------------------------------
 // Internal service tags so both concrete layers can coexist.
@@ -31,6 +32,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
+class GeminiTextGen extends ServiceMap.Service<GeminiTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/GeminiTextGen",
+) {}
+
 // ---------------------------------------------------------------------------
 // Routing implementation
 // ---------------------------------------------------------------------------
@@ -38,6 +43,7 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const gemini = yield* GeminiTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape | null => {
     switch (provider ? baseProviderKind(provider) : "codex") {
@@ -46,34 +52,51 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
       case "claudeAgent":
         return claude;
       case "gemini":
-        return null;
+        return gemini;
     }
   };
-
-  const unsupported = (operation: string, provider: TextGenerationProvider) =>
-    Effect.fail(
-      new TextGenerationError({
-        operation,
-        detail: `${provider} does not support structured secondary text generation yet.`,
-      }),
-    );
 
   return {
     generateCommitMessage: (input) =>
       route(input.modelSelection.provider)?.generateCommitMessage(input) ??
-      unsupported("generateCommitMessage", input.modelSelection.provider),
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateCommitMessage",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
     generatePrContent: (input) =>
       route(input.modelSelection.provider)?.generatePrContent(input) ??
-      unsupported("generatePrContent", input.modelSelection.provider),
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generatePrContent",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
     generateBranchName: (input) =>
       route(input.modelSelection.provider)?.generateBranchName(input) ??
-      unsupported("generateBranchName", input.modelSelection.provider),
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateBranchName",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
     generateThreadTitle: (input) =>
       route(input.modelSelection.provider)?.generateThreadTitle(input) ??
-      unsupported("generateThreadTitle", input.modelSelection.provider),
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateThreadTitle",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
     enhanceSystemPrompt: (input) =>
       route(input.modelSelection.provider)?.enhanceSystemPrompt(input) ??
-      unsupported("enhanceSystemPrompt", input.modelSelection.provider),
+      Effect.fail(
+        new TextGenerationError({
+          operation: "enhanceSystemPrompt",
+          detail: `${input.modelSelection.provider} does not support structured secondary text generation.`,
+        }),
+      ),
   } satisfies TextGenerationShape;
 });
 
@@ -93,7 +116,19 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalGeminiLayer = Layer.effect(
+  GeminiTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(GeminiTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalGeminiLayer),
+);

@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 
-type JsonRpcId = string | number;
+export type JsonRpcId = string | number;
 
-interface JsonRpcError {
-  code?: number;
-  message?: string;
+export interface JsonRpcError {
+  readonly code?: number;
+  readonly message?: string;
 }
 
 interface JsonRpcRequest {
@@ -52,6 +52,12 @@ export interface GeminiAcpEmbeddedContext {
   readonly mimeType?: string;
 }
 
+export interface GeminiAcpImageContent {
+  readonly data: string;
+  readonly mimeType: string;
+  readonly uri?: string;
+}
+
 export interface GeminiAcpConnection {
   readonly childPid: number | undefined;
   initialize: () => Promise<unknown>;
@@ -64,6 +70,14 @@ export interface GeminiAcpConnection {
     cwd: string;
     mcpServers?: ReadonlyArray<unknown>;
   }) => Promise<unknown>;
+  forkSession: (input: {
+    sessionId: string;
+    cwd: string;
+    mcpServers?: ReadonlyArray<unknown>;
+  }) => Promise<{
+    readonly sessionId: string;
+    readonly result: unknown;
+  }>;
   setModel: (input: { sessionId: string; modelId: string }) => Promise<void>;
   setMode: (input: {
     sessionId: string;
@@ -71,9 +85,11 @@ export interface GeminiAcpConnection {
   }) => Promise<void>;
   prompt: (input: {
     sessionId: string;
-    text: string;
+    text?: string;
     embeddedContext?: GeminiAcpEmbeddedContext;
+    images?: ReadonlyArray<GeminiAcpImageContent>;
   }) => Promise<unknown>;
+  respond: (input: { id: JsonRpcId; result?: unknown; error?: JsonRpcError }) => void;
   cancel: (sessionId: string) => Promise<void>;
   close: () => void;
 }
@@ -83,12 +99,14 @@ export interface GeminiAcpConnectionOptions {
   readonly cwd?: string;
   readonly homePath?: string;
   readonly requestTimeoutMs?: number;
+  readonly promptRequestTimeoutMs?: number;
   readonly onNotification?: (notification: GeminiAcpIncomingNotification) => void;
   readonly onRequest?: (request: GeminiAcpIncomingRequest) => void;
   readonly onStderr?: (line: string) => void;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_PROMPT_REQUEST_TIMEOUT_MS = 30 * 60_000;
 const CLIENT_INFO = {
   name: "t3-code",
   title: "T3 Code",
@@ -169,6 +187,8 @@ export function createGeminiAcpConnection(
   const errorOutput = readline.createInterface({ input: child.stderr });
   const pending = new Map<JsonRpcId, PendingRequest>();
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const promptRequestTimeoutMs =
+    options.promptRequestTimeoutMs ?? DEFAULT_PROMPT_REQUEST_TIMEOUT_MS;
   let nextRequestId = 1;
   let closed = false;
 
@@ -187,18 +207,31 @@ export function createGeminiAcpConnection(
     child.stdin.write(`${JSON.stringify(message)}\n`);
   };
 
-  const respondToAgentRequest = (id: JsonRpcId, error: JsonRpcError) => {
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, error })}\n`);
+  const respondToAgentRequest = (input: {
+    id: JsonRpcId;
+    result?: unknown;
+    error?: JsonRpcError;
+  }) => {
+    const message = {
+      jsonrpc: "2.0",
+      id: input.id,
+      ...(input.error ? { error: input.error } : { result: input.result ?? null }),
+    };
+    child.stdin.write(`${JSON.stringify(message)}\n`);
   };
 
-  const request = (method: string, params?: unknown): Promise<unknown> => {
+  const request = (
+    method: string,
+    params?: unknown,
+    timeoutMs = requestTimeoutMs,
+  ): Promise<unknown> => {
     const id = nextRequestId++;
     const message: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`Timed out waiting for Gemini ACP response to ${method}.`));
-      }, requestTimeoutMs);
+      }, timeoutMs);
       pending.set(id, { method, timeout, resolve, reject });
       try {
         writeMessage(message);
@@ -214,14 +247,15 @@ export function createGeminiAcpConnection(
     primaryMethod: string,
     fallbackMethod: string,
     params: unknown,
+    timeoutMs?: number,
   ): Promise<unknown> => {
     try {
-      return await request(primaryMethod, params);
+      return await request(primaryMethod, params, timeoutMs);
     } catch (error) {
       if (!isMethodNotFound(error)) {
         throw error;
       }
-      return await request(fallbackMethod, params);
+      return await request(fallbackMethod, params, timeoutMs);
     }
   };
 
@@ -251,14 +285,20 @@ export function createGeminiAcpConnection(
     }
 
     if (isJsonRpcRequest(parsed)) {
-      options.onRequest?.({
+      if (options.onRequest) {
+        options.onRequest({
+          id: parsed.id,
+          method: parsed.method,
+          ...(parsed.params !== undefined ? { params: parsed.params } : {}),
+        });
+        return;
+      }
+      respondToAgentRequest({
         id: parsed.id,
-        method: parsed.method,
-        ...(parsed.params !== undefined ? { params: parsed.params } : {}),
-      });
-      respondToAgentRequest(parsed.id, {
-        code: -32601,
-        message: `${parsed.method} is not implemented by T3 Code yet.`,
+        error: {
+          code: -32601,
+          message: `${parsed.method} is not implemented by T3 Code yet.`,
+        },
       });
       return;
     }
@@ -327,6 +367,19 @@ export function createGeminiAcpConnection(
       };
       return requestWithFallback("session/load", "loadSession", params);
     },
+    forkSession: async (input) => {
+      const params = {
+        sessionId: input.sessionId,
+        cwd: input.cwd,
+        mcpServers: [...(input.mcpServers ?? [])],
+      };
+      const result = await requestWithFallback("session/fork", "forkSession", params);
+      const sessionId = sessionIdFromResult(result);
+      if (!sessionId) {
+        throw new Error("Gemini ACP fork did not return a sessionId.");
+      }
+      return { sessionId, result };
+    },
     setModel: async (input) => {
       const params = {
         sessionId: input.sessionId,
@@ -342,26 +395,42 @@ export function createGeminiAcpConnection(
       await requestWithFallback("session/set_mode", "setSessionMode", params);
     },
     prompt: (input) => {
-      const prompt = input.embeddedContext
-        ? [
-            { type: "text", text: input.text },
-            {
-              type: "resource",
-              resource: {
-                uri: input.embeddedContext.uri,
-                text: input.embeddedContext.text,
-                ...(input.embeddedContext.mimeType
-                  ? { mimeType: input.embeddedContext.mimeType }
-                  : {}),
+      const prompt = [
+        ...(input.text ? [{ type: "text", text: input.text }] : []),
+        ...(input.embeddedContext
+          ? [
+              {
+                type: "resource",
+                resource: {
+                  uri: input.embeddedContext.uri,
+                  text: input.embeddedContext.text,
+                  ...(input.embeddedContext.mimeType
+                    ? { mimeType: input.embeddedContext.mimeType }
+                    : {}),
+                },
               },
-            },
-          ]
-        : [{ type: "text", text: input.text }];
+            ]
+          : []),
+        ...(input.images ?? []).map((image) => {
+          const block: Record<string, string> = {
+            type: "image",
+            data: image.data,
+            mimeType: image.mimeType,
+          };
+          if (image.uri) {
+            block.uri = image.uri;
+          }
+          return block;
+        }),
+      ];
       const params = {
         sessionId: input.sessionId,
         prompt,
       };
-      return requestWithFallback("session/prompt", "prompt", params);
+      return requestWithFallback("session/prompt", "prompt", params, promptRequestTimeoutMs);
+    },
+    respond: (input) => {
+      respondToAgentRequest(input);
     },
     cancel: async (sessionId) => {
       const notification = { jsonrpc: "2.0", method: "session/cancel", params: { sessionId } };

@@ -499,10 +499,10 @@ const make = Effect.gen(function* () {
         : undefined;
       const sameProfile = sourceProfileId === targetProfileId;
 
-      // SDK-level fork: ONLY Claude same-profile (SDK natively copies transcript).
+      // SDK-level fork: same-profile providers whose native protocol copies transcript.
       if (
-        sourceBase === "claudeAgent" &&
-        targetBase === "claudeAgent" &&
+        ((sourceBase === "claudeAgent" && targetBase === "claudeAgent") ||
+          (sourceBase === "gemini" && targetBase === "gemini")) &&
         sameProfile &&
         forkSource.resumeCursor
       ) {

@@ -13,6 +13,7 @@ import {
   type ServerConfigShape,
 } from "./config";
 import { readBootstrapEnvelope } from "./bootstrap";
+import { runT3GeminiMcpStdio } from "./geminiMcpStdio";
 import { resolveBaseDir } from "./os-jank";
 import { runServer } from "./server";
 
@@ -351,8 +352,13 @@ const runRootCommand = (flags: CliServerFlags) =>
     return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
   });
 
+const mcpStdioCommand = Command.make("mcp-stdio", {}, () =>
+  Effect.promise(() => runT3GeminiMcpStdio()),
+).pipe(Command.withDescription("Run the T3 MCP stdio bridge for provider clients."));
+
 const rootCommand = Command.make("t3", commandFlags, runRootCommand).pipe(
   Command.withDescription("Run the T3 Code server."),
+  Command.withSubcommands([mcpStdioCommand]),
 );
 
 export const cli = rootCommand;

@@ -1,6 +1,9 @@
+import { mkdir, writeFile } from "node:fs/promises";
+
 import { it, assert, vi } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Layer, Option, Stream } from "effect";
-import { ThreadId } from "@t3tools/contracts";
+import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 
 import { ServerConfig, type ServerConfigShape } from "../../config";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
@@ -94,6 +97,7 @@ function makeGeminiTestLayer(
     Layer.provideMerge(serverConfigTestLayer),
     Layer.provideMerge(managedRunServiceTestLayer),
     Layer.provideMerge(makeProjectionSnapshotQueryTestLayer(context)),
+    Layer.provideMerge(NodeServices.layer),
   );
 }
 
@@ -120,6 +124,10 @@ function makeFakeConnection(options: GeminiAcpConnectionOptions): GeminiAcpConne
       result: { sessionId: "gemini-session-1" },
     })),
     loadSession: vi.fn(async () => null),
+    forkSession: vi.fn(async () => ({
+      sessionId: "gemini-session-forked",
+      result: { sessionId: "gemini-session-forked" },
+    })),
     setModel: vi.fn(async () => undefined),
     setMode: vi.fn(async () => undefined),
     prompt: vi.fn(async (input) => {
@@ -133,8 +141,17 @@ function makeFakeConnection(options: GeminiAcpConnectionOptions): GeminiAcpConne
           },
         },
       });
-      return { stopReason: "end_turn" };
+      return {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens: 12,
+          outputTokens: 8,
+          thoughtTokens: 2,
+          totalTokens: 22,
+        },
+      };
     }),
+    respond: vi.fn(),
     cancel: vi.fn(async () => undefined),
     close: vi.fn(),
   };
@@ -165,7 +182,7 @@ it.effect("GeminiAdapterLive starts an ACP session and sends a text turn", () =>
       input: "Say hello",
       modelSelection: { provider: "gemini", model: "gemini-3.1-pro-preview" },
     });
-    const events = yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
+    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
     const eventTypes = Array.from(events).map((event) => event.type);
 
     assert.equal(turn.threadId, threadId);
@@ -174,14 +191,34 @@ it.effect("GeminiAdapterLive starts an ACP session and sends a text turn", () =>
       "session.started",
       "thread.started",
       "session.state.changed",
+      "account.rate-limits.updated",
       "session.state.changed",
       "turn.started",
       "item.started",
       "content.delta",
+      "thread.token-usage.updated",
       "item.completed",
       "turn.completed",
       "session.state.changed",
     ]);
+    const usageEvent = Array.from(events).find(
+      (event) => event.type === "thread.token-usage.updated",
+    );
+    assert.equal(usageEvent?.type, "thread.token-usage.updated");
+    if (usageEvent?.type === "thread.token-usage.updated") {
+      assert.deepEqual(usageEvent.payload.usage, {
+        usedTokens: 22,
+        totalProcessedTokens: 22,
+        lastUsedTokens: 22,
+        inputTokens: 12,
+        lastInputTokens: 12,
+        outputTokens: 8,
+        lastOutputTokens: 8,
+        reasoningOutputTokens: 2,
+        lastReasoningOutputTokens: 2,
+        compactsAutomatically: true,
+      });
+    }
     assert.equal(createdConnections.length, 1);
     assert.deepEqual(vi.mocked(createdConnections[0]!.setModel).mock.calls[0]?.[0], {
       sessionId: "gemini-session-1",
@@ -225,12 +262,12 @@ it.effect("GeminiAdapterLive injects T3 session context on the first prompt", ()
       threadId,
       input: "Inspect the project.",
     });
-    yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
+    yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
 
     const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
     assert.ok(promptInput);
-    assert.match(promptInput.text, /Use the referenced T3 session context/);
-    assert.match(promptInput.text, /User request:\nInspect the project\./);
+    assert.match(promptInput.text ?? "", /Use the referenced T3 session context/);
+    assert.match(promptInput.text ?? "", /User request:\nInspect the project\./);
     assert.equal(promptInput.embeddedContext?.uri, "t3://session/context");
     assert.equal(promptInput.embeddedContext?.mimeType, "text/markdown");
     assert.match(promptInput.embeddedContext?.text ?? "", /## T3 Project Context/);
@@ -293,15 +330,466 @@ it.effect("GeminiAdapterLive does not re-inject matching context on resume", () 
     yield* Stream.take(adapter.streamEvents, 15).pipe(Stream.runCollect);
 
     const resumedConnection = createdConnections[1]!;
-    assert.deepEqual(vi.mocked(resumedConnection.loadSession).mock.calls[0]?.[0], {
-      sessionId: "gemini-session-resumed",
-      cwd: "/workspace/gemini-worktree",
-      mcpServers: [],
-    });
+    const loadInput = vi.mocked(resumedConnection.loadSession).mock.calls[0]?.[0];
+    assert.equal(loadInput?.sessionId, "gemini-session-resumed");
+    assert.equal(loadInput?.cwd, "/workspace/gemini-worktree");
+    assert.equal(loadInput?.mcpServers?.length, 1);
+    assert.deepEqual((loadInput?.mcpServers?.[0] as Record<string, unknown>)?.env, [
+      { name: "T3_MCP_BASE_URL", value: "http://127.0.0.1:3773" },
+      { name: "T3_MCP_PORT", value: "3773" },
+      { name: "T3_MCP_TOKEN", value: "test-token" },
+    ]);
     const promptInput = vi.mocked(resumedConnection.prompt).mock.calls[0]?.[0];
     assert.ok(promptInput);
     assert.equal(promptInput.text, "Continue.");
     assert.equal(promptInput.embeddedContext, undefined);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }, checkpointContext),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive declares the T3 MCP stdio server for checkpointed sessions", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-mcp");
+  const checkpointContext = makeCheckpointContext(threadId);
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/workspace/gemini-worktree",
+      runtimeMode: "full-access",
+    });
+
+    const newSessionInput = vi.mocked(createdConnections[0]!.newSession).mock.calls[0]?.[0];
+    assert.equal(newSessionInput?.mcpServers?.length, 1);
+    const server = newSessionInput?.mcpServers?.[0] as Record<string, unknown>;
+    assert.equal(server.name, "t3-code");
+    assert.equal(server.command, process.execPath);
+    assert.deepEqual(server.env, [
+      { name: "T3_MCP_BASE_URL", value: "http://127.0.0.1:3773" },
+      { name: "T3_MCP_PORT", value: "3773" },
+      { name: "T3_MCP_TOKEN", value: "test-token" },
+    ]);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }, checkpointContext),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive maps Gemini permission requests to approval events", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-approval");
+  let resolvePrompt: ((value: unknown) => void) | undefined;
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "approval-required",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Need approval",
+      modelSelection: { provider: "gemini", model: "gemini-3.1-pro-preview" },
+    });
+
+    createdOptions[0]!.onRequest?.({
+      id: 77,
+      method: "session/request_permission",
+      params: {
+        toolCall: { kind: "execute", title: "Run npm install" },
+        options: [
+          { optionId: "allow-once", kind: "allow_once", name: "Allow once" },
+          { optionId: "allow-always", kind: "allow_always", name: "Allow always" },
+          { optionId: "reject-once", kind: "reject_once", name: "Reject" },
+        ],
+      },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const opened = Array.from(events).find((event) => event.type === "request.opened");
+    assert.equal(opened?.type, "request.opened");
+    if (opened?.type !== "request.opened" || !opened.requestId) {
+      assert.fail("Expected Gemini approval request event");
+    }
+    assert.equal(opened.payload.requestType, "command_execution_approval");
+    assert.equal(opened.payload.detail, "Run npm install");
+
+    yield* adapter.respondToRequest(
+      threadId,
+      ApprovalRequestId.makeUnsafe(opened.requestId),
+      "acceptForSession",
+    );
+    const response = vi.mocked(createdConnections[0]!.respond).mock.calls[0]?.[0] as {
+      id?: number;
+      result?: { outcome?: { outcome?: string; optionId?: string } };
+    };
+    assert.equal(response.id, 77);
+    assert.equal(response.result?.outcome?.outcome, "selected");
+    assert.equal(response.result?.outcome?.optionId, "allow-always");
+
+    const resolved = yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runCollect);
+    assert.equal(Array.from(resolved)[0]?.type, "request.resolved");
+    resolvePrompt?.({ stopReason: "end_turn" });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(
+            () =>
+              new Promise<unknown>((resolve) => {
+                resolvePrompt = resolve;
+              }),
+          ),
+        };
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive classifies MCP list permissions from Gemini tool titles", () => {
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-mcp-approval");
+  let resolvePrompt: ((value: unknown) => void) | undefined;
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "approval-required",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Need MCP approval",
+      modelSelection: { provider: "gemini", model: "gemini-3.1-pro-preview" },
+    });
+
+    createdOptions[0]!.onRequest?.({
+      id: 78,
+      method: "session/request_permission",
+      params: {
+        toolCall: {
+          kind: "other",
+          title: "ticketing__list_tickets (t3-code MCP Server)",
+          toolCallId: "mcp_t3-code_ticketing__list_tickets-1",
+        },
+        options: [{ optionId: "proceed_once", kind: "allow_once", name: "Allow" }],
+      },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const opened = Array.from(events).find((event) => event.type === "request.opened");
+    assert.equal(opened?.type, "request.opened");
+    if (opened?.type !== "request.opened") {
+      assert.fail("Expected Gemini MCP approval request event");
+    }
+    assert.equal(opened.payload.requestType, "file_read_approval");
+    assert.equal(opened.payload.detail, "ticketing__list_tickets (t3-code MCP Server)");
+    resolvePrompt?.({ stopReason: "end_turn" });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        return {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(
+            () =>
+              new Promise<unknown>((resolve) => {
+                resolvePrompt = resolve;
+              }),
+          ),
+        };
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive fails unsupported ACP client requests without hanging", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-unsupported-request");
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    createdOptions[0]!.onRequest?.({
+      id: 88,
+      method: "session/unsupported_client_request",
+      params: { ok: false },
+    });
+
+    assert.deepEqual(vi.mocked(createdConnections[0]!.respond).mock.calls[0]?.[0], {
+      id: 88,
+      error: {
+        code: -32601,
+        message: "Unsupported Gemini ACP client request: session/unsupported_client_request.",
+      },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 5).pipe(Stream.runCollect);
+    assert.equal(Array.from(events).at(-1)?.type, "runtime.warning");
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive cancels late Gemini permission requests after a failed turn", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-late-request");
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Trigger a failed turn",
+      modelSelection: { provider: "gemini", model: "gemini-3.1-pro-preview" },
+    });
+    yield* Stream.take(adapter.streamEvents, 9).pipe(Stream.runCollect);
+
+    createdOptions[0]!.onRequest?.({
+      id: 77,
+      method: "session/request_permission",
+      params: {
+        toolCall: {
+          kind: "execute",
+          title: "echo late",
+        },
+        options: [{ optionId: "proceed_once", kind: "allow_once" }],
+      },
+    });
+
+    assert.deepEqual(vi.mocked(createdConnections[0]!.respond).mock.calls.at(-1)?.[0], {
+      id: 77,
+      result: { outcome: { outcome: "cancelled" } },
+    });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(async () => {
+            throw new Error("simulated Gemini prompt failure");
+          }),
+        };
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive replies to Gemini user-input requests", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const createdOptions: GeminiAcpConnectionOptions[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-user-input");
+  let resolvePrompt: ((value: unknown) => void) | undefined;
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Need user input",
+      modelSelection: { provider: "gemini", model: "gemini-3.1-pro-preview" },
+    });
+
+    createdOptions[0]!.onRequest?.({
+      id: 99,
+      method: "item/tool/requestUserInput",
+      params: {
+        questions: [
+          {
+            id: "choice",
+            header: "Choice",
+            question: "Pick one",
+            options: [{ label: "A", description: "Choose A" }],
+          },
+        ],
+      },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const requested = Array.from(events).find((event) => event.type === "user-input.requested");
+    assert.equal(requested?.type, "user-input.requested");
+    if (requested?.type !== "user-input.requested" || !requested.requestId) {
+      assert.fail("Expected Gemini user-input request event");
+    }
+    assert.equal(requested.payload.questions[0]?.id, "choice");
+
+    yield* adapter.respondToUserInput(threadId, ApprovalRequestId.makeUnsafe(requested.requestId), {
+      choice: "A",
+    });
+    assert.deepEqual(vi.mocked(createdConnections[0]!.respond).mock.calls[0]?.[0], {
+      id: 99,
+      result: { answers: { choice: "A" } },
+    });
+
+    const resolved = yield* Stream.take(adapter.streamEvents, 1).pipe(Stream.runCollect);
+    assert.equal(Array.from(resolved)[0]?.type, "user-input.resolved");
+    resolvePrompt?.({ stopReason: "end_turn" });
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        createdOptions.push(options);
+        const connection = {
+          ...makeFakeConnection(options),
+          prompt: vi.fn(
+            () =>
+              new Promise<unknown>((resolve) => {
+                resolvePrompt = resolve;
+              }),
+          ),
+        };
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive forwards supported image attachments to ACP prompts", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-image");
+  const attachmentId = "thread-gemini-image-00000000-0000-4000-8000-000000000001";
+
+  return Effect.gen(function* () {
+    yield* Effect.promise(async () => {
+      await mkdir("/tmp/t3/dev/attachments", { recursive: true });
+      await writeFile(
+        "/tmp/t3/dev/attachments/thread-gemini-image-00000000-0000-4000-8000-000000000001.png",
+        Buffer.from([1, 2, 3, 4]),
+      );
+    });
+
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Describe this image.",
+      attachments: [
+        {
+          type: "image",
+          id: attachmentId,
+          name: "sample.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        },
+      ],
+    });
+    yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+
+    const promptInput = vi.mocked(createdConnections[0]!.prompt).mock.calls[0]?.[0];
+    assert.equal(promptInput?.images?.length, 1);
+    assert.equal(promptInput?.images?.[0]?.mimeType, "image/png");
+    assert.equal(promptInput?.images?.[0]?.data, Buffer.from([1, 2, 3, 4]).toString("base64"));
+    assert.equal(promptInput?.images?.[0]?.uri, `t3://attachment/${attachmentId}`);
+  }).pipe(
+    Effect.provide(
+      makeGeminiTestLayer((options) => {
+        const connection = makeFakeConnection(options);
+        createdConnections.push(connection);
+        return connection;
+      }),
+    ),
+  );
+});
+
+it.effect("GeminiAdapterLive forks Gemini sessions when the resume cursor requests a fork", () => {
+  const createdConnections: GeminiAcpConnection[] = [];
+  const threadId = ThreadId.makeUnsafe("thread-gemini-fork");
+  const checkpointContext = makeCheckpointContext(threadId);
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    const session = yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/workspace/gemini-worktree",
+      runtimeMode: "full-access",
+      resumeCursor: {
+        sessionId: "gemini-session-source",
+        cwd: "/workspace/gemini-worktree",
+        fork: true,
+      },
+    });
+
+    const forkInput = vi.mocked(createdConnections[0]!.forkSession).mock.calls[0]?.[0];
+    assert.equal(forkInput?.sessionId, "gemini-session-source");
+    assert.equal(forkInput?.cwd, "/workspace/gemini-worktree");
+    assert.equal(forkInput?.mcpServers?.length, 1);
+    const cursor = session.resumeCursor as {
+      sessionId?: string;
+      cwd?: string;
+      contextPromptHash?: string;
+      contextPromptInjected?: boolean;
+    };
+    assert.equal(cursor.sessionId, "gemini-session-forked");
+    assert.equal(cursor.cwd, "/workspace/gemini-worktree");
+    assert.equal(typeof cursor.contextPromptHash, "string");
+    assert.equal(cursor.contextPromptInjected, false);
+    assert.equal(vi.mocked(createdConnections[0]!.loadSession).mock.calls.length, 0);
   }).pipe(
     Effect.provide(
       makeGeminiTestLayer((options) => {

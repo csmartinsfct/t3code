@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import {
+  ApprovalRequestId,
   asProviderInput,
   baseProviderKind,
+  type ChatAttachment,
   EventId,
   RuntimeItemId,
+  RuntimeRequestId,
   ThreadId,
   TurnId,
   type ProviderApprovalDecision,
+  type ProviderRequestKind,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
@@ -14,9 +18,11 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
 
+import { resolveAttachmentPath } from "../../attachmentStore";
 import { ServerConfig } from "../../config";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
@@ -33,9 +39,11 @@ import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter";
 import {
   createGeminiAcpConnection,
   type GeminiAcpConnection,
+  type GeminiAcpImageContent,
   type GeminiAcpConnectionOptions,
   type GeminiAcpIncomingNotification,
   type GeminiAcpIncomingRequest,
+  type JsonRpcId,
 } from "../gemini/GeminiAcpConnection";
 import {
   buildProviderSessionContextPrompt,
@@ -44,10 +52,19 @@ import {
 
 const PROVIDER = "gemini" as const;
 const GEMINI_SESSION_CONTEXT_URI = "t3://session/context";
+const T3_MCP_SERVER_NAME = "t3-code";
+const GEMINI_SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+]);
 
 interface GeminiResumeCursor {
   readonly sessionId: string;
   readonly cwd?: string;
+  readonly fork?: boolean;
   readonly contextPromptHash?: string;
   readonly contextPromptInjected?: boolean;
 }
@@ -65,12 +82,42 @@ interface GeminiSessionContext {
   session: ProviderSession;
   readonly connection: GeminiAcpConnection;
   readonly providerSessionId: string;
+  readonly mcpServers: ReadonlyArray<unknown>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  readonly pendingApprovals: Map<ApprovalRequestId, PendingGeminiApprovalRequest>;
+  readonly pendingUserInputs: Map<ApprovalRequestId, PendingGeminiUserInputRequest>;
   readonly sessionContextPrompt?: string;
   readonly sessionContextPromptHash?: string;
   sessionContextPromptInjected: boolean;
   activeTurn: GeminiTurnState | undefined;
   stopped: boolean;
+}
+
+interface GeminiMcpServiceContext {
+  readonly port: number;
+  readonly token: string;
+}
+
+interface PendingGeminiApprovalRequest {
+  readonly jsonRpcId: JsonRpcId;
+  readonly canonicalRequestType:
+    | "command_execution_approval"
+    | "file_read_approval"
+    | "file_change_approval"
+    | "dynamic_tool_call"
+    | "unknown";
+  readonly providerRequestKind?: ProviderRequestKind;
+  readonly options: ReadonlyArray<GeminiPermissionOption>;
+}
+
+interface PendingGeminiUserInputRequest {
+  readonly jsonRpcId: JsonRpcId;
+}
+
+interface GeminiPermissionOption {
+  readonly optionId: string;
+  readonly kind?: string;
+  readonly name?: string;
 }
 
 export interface GeminiAdapterLiveOptions {
@@ -93,9 +140,25 @@ function makeRuntimeItemId(prefix: string): RuntimeItemId {
   return RuntimeItemId.makeUnsafe(`${prefix}-${randomUUID()}`);
 }
 
+function asRuntimeRequestId(requestId: ApprovalRequestId): RuntimeRequestId {
+  return RuntimeRequestId.makeUnsafe(requestId);
+}
+
 function toMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error && cause.message.length > 0) {
     return cause.message;
+  }
+  if (isRecord(cause)) {
+    const nestedError = cause.error;
+    if (nestedError instanceof Error && nestedError.message.length > 0) {
+      return nestedError.message;
+    }
+    if (isRecord(nestedError) && typeof nestedError.message === "string") {
+      return nestedError.message;
+    }
+    if (typeof cause.message === "string" && cause.message.length > 0) {
+      return cause.message;
+    }
   }
   return fallback;
 }
@@ -137,6 +200,32 @@ function makeResumeCursor(
   };
 }
 
+function shouldForkFromResumeCursor(cursor: unknown): boolean {
+  return isRecord(cursor) && cursor.fork === true;
+}
+
+function buildGeminiMcpServers(serviceContext: GeminiMcpServiceContext | undefined) {
+  if (!serviceContext) {
+    return [];
+  }
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return [];
+  }
+  return [
+    {
+      name: T3_MCP_SERVER_NAME,
+      command: process.execPath,
+      args: [entrypoint, "mcp-stdio"],
+      env: [
+        { name: "T3_MCP_BASE_URL", value: `http://127.0.0.1:${serviceContext.port}` },
+        { name: "T3_MCP_PORT", value: String(serviceContext.port) },
+        { name: "T3_MCP_TOKEN", value: serviceContext.token },
+      ],
+    },
+  ];
+}
+
 function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: string): boolean {
   if (!isRecord(cursor)) {
     return false;
@@ -146,9 +235,9 @@ function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: stri
 
 function makeGeminiPromptInput(
   context: GeminiSessionContext,
-  userText: string,
+  userText: string | undefined,
 ): {
-  readonly text: string;
+  readonly text?: string;
   readonly embeddedContext?: {
     readonly uri: string;
     readonly text: string;
@@ -160,19 +249,252 @@ function makeGeminiPromptInput(
     !context.sessionContextPromptHash ||
     context.sessionContextPromptInjected
   ) {
-    return { text: userText };
+    return userText ? { text: userText } : {};
   }
 
   return {
     text:
       "Use the referenced T3 session context as persistent operating context for this conversation. " +
-      "Then answer the user request below.\n\n" +
-      `User request:\n${userText}`,
+      (userText
+        ? `Then answer the user request below.\n\nUser request:\n${userText}`
+        : "Then respond to the attached user content."),
     embeddedContext: {
       uri: GEMINI_SESSION_CONTEXT_URI,
       text: context.sessionContextPrompt,
       mimeType: "text/markdown",
     },
+  };
+}
+
+function canonicalPermissionRequestType(toolCall: unknown): {
+  readonly canonicalRequestType:
+    | "command_execution_approval"
+    | "file_read_approval"
+    | "file_change_approval"
+    | "dynamic_tool_call"
+    | "unknown";
+  readonly providerRequestKind?: ProviderRequestKind;
+} {
+  const record = isRecord(toolCall) ? toolCall : {};
+  const rawKind = [
+    record.kind,
+    record.type,
+    record.name,
+    record.toolName,
+    record.title,
+    record.toolCallId,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  if (rawKind.includes("execute") || rawKind.includes("shell") || rawKind.includes("command")) {
+    return { canonicalRequestType: "command_execution_approval", providerRequestKind: "command" };
+  }
+  if (
+    rawKind.includes("write") ||
+    rawKind.includes("edit") ||
+    rawKind.includes("patch") ||
+    rawKind.includes("delete") ||
+    rawKind.includes("move")
+  ) {
+    return { canonicalRequestType: "file_change_approval", providerRequestKind: "file-change" };
+  }
+  if (rawKind.includes("read") || rawKind.includes("list") || rawKind.includes("search")) {
+    return { canonicalRequestType: "file_read_approval", providerRequestKind: "file-read" };
+  }
+  if (rawKind.includes("tool") || rawKind.includes("mcp")) {
+    return { canonicalRequestType: "dynamic_tool_call" };
+  }
+  return { canonicalRequestType: "unknown" };
+}
+
+function permissionOptionsFromParams(params: unknown): ReadonlyArray<GeminiPermissionOption> {
+  const options = isRecord(params) && Array.isArray(params.options) ? params.options : [];
+  return options
+    .map((option): GeminiPermissionOption | null => {
+      if (!isRecord(option) || typeof option.optionId !== "string") {
+        return null;
+      }
+      const mapped: GeminiPermissionOption = {
+        optionId: option.optionId,
+      };
+      if (typeof option.kind === "string") {
+        Object.assign(mapped, { kind: option.kind });
+      }
+      if (typeof option.name === "string") {
+        Object.assign(mapped, { name: option.name });
+      }
+      return mapped;
+    })
+    .filter((option): option is GeminiPermissionOption => option !== null);
+}
+
+function permissionDetailFromParams(params: unknown): string | undefined {
+  if (!isRecord(params)) {
+    return undefined;
+  }
+  const toolCall = isRecord(params.toolCall) ? params.toolCall : {};
+  for (const value of [toolCall.title, toolCall.name, toolCall.kind]) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function optionForDecision(
+  options: ReadonlyArray<GeminiPermissionOption>,
+  decision: ProviderApprovalDecision,
+): GeminiPermissionOption | undefined {
+  const byKind = (kinds: ReadonlyArray<string>) => {
+    for (const kind of kinds) {
+      const option = options.find((candidate) => candidate.kind === kind);
+      if (option) {
+        return option;
+      }
+    }
+    return undefined;
+  };
+  switch (decision) {
+    case "accept":
+      return byKind(["allow_once", "allow_always"]);
+    case "acceptForSession":
+      return byKind(["allow_always", "allow_once"]);
+    case "decline":
+      return byKind(["reject_once", "reject_always"]);
+    case "cancel":
+      return undefined;
+  }
+}
+
+function userInputQuestionsFromParams(params: unknown): ReadonlyArray<UserInputQuestion> | null {
+  const rawQuestions =
+    isRecord(params) && Array.isArray(params.questions) ? params.questions : null;
+  if (!rawQuestions) {
+    return null;
+  }
+  const questions = rawQuestions
+    .map((question, index): UserInputQuestion | null => {
+      if (!isRecord(question)) {
+        return null;
+      }
+      const id =
+        typeof question.id === "string" && question.id.trim()
+          ? question.id
+          : `gemini-question-${index + 1}`;
+      const text =
+        typeof question.question === "string" && question.question.trim()
+          ? question.question
+          : typeof question.prompt === "string" && question.prompt.trim()
+            ? question.prompt
+            : null;
+      if (!text) {
+        return null;
+      }
+      const options = Array.isArray(question.options)
+        ? question.options
+            .map((option): { label: string; description: string } | null => {
+              if (typeof option === "string" && option.trim()) {
+                return { label: option, description: option };
+              }
+              if (!isRecord(option)) {
+                return null;
+              }
+              const label =
+                typeof option.label === "string" && option.label.trim()
+                  ? option.label
+                  : typeof option.value === "string" && option.value.trim()
+                    ? option.value
+                    : null;
+              if (!label) {
+                return null;
+              }
+              return {
+                label,
+                description:
+                  typeof option.description === "string" && option.description.trim()
+                    ? option.description
+                    : label,
+              };
+            })
+            .filter((option): option is { label: string; description: string } => option !== null)
+        : [];
+      const mapped: UserInputQuestion = {
+        id,
+        header:
+          typeof question.header === "string" && question.header.trim()
+            ? question.header
+            : "Gemini",
+        question: text,
+        options,
+      };
+      if (question.multiSelect === true) {
+        return Object.assign(mapped, { multiSelect: true });
+      }
+      return mapped;
+    })
+    .filter((question): question is UserInputQuestion => question !== null);
+
+  return questions.length > 0 ? questions : null;
+}
+
+function numberFrom(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function tokenUsageFromUpdate(update: Record<string, unknown>) {
+  const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
+  if (updateKind !== "usage_update") {
+    return null;
+  }
+  const used = numberFrom(update.used);
+  if (used === undefined) {
+    return null;
+  }
+  const size = numberFrom(update.size);
+  return {
+    usedTokens: Math.round(used),
+    ...(size !== undefined && size > 0 ? { maxTokens: Math.round(size) } : {}),
+    compactsAutomatically: true,
+  };
+}
+
+function tokenUsageFromPromptResult(result: unknown) {
+  const usage = isRecord(result) && isRecord(result.usage) ? result.usage : null;
+  if (!usage) {
+    return null;
+  }
+  const totalTokens = numberFrom(usage.totalTokens);
+  if (totalTokens === undefined || totalTokens <= 0) {
+    return null;
+  }
+  const inputTokens = numberFrom(usage.inputTokens);
+  const outputTokens = numberFrom(usage.outputTokens);
+  const thoughtTokens = numberFrom(usage.thoughtTokens);
+  const cachedReadTokens = numberFrom(usage.cachedReadTokens);
+  return {
+    usedTokens: Math.round(totalTokens),
+    totalProcessedTokens: Math.round(totalTokens),
+    lastUsedTokens: Math.round(totalTokens),
+    ...(inputTokens !== undefined
+      ? { inputTokens: Math.round(inputTokens), lastInputTokens: Math.round(inputTokens) }
+      : {}),
+    ...(outputTokens !== undefined
+      ? { outputTokens: Math.round(outputTokens), lastOutputTokens: Math.round(outputTokens) }
+      : {}),
+    ...(thoughtTokens !== undefined
+      ? {
+          reasoningOutputTokens: Math.round(thoughtTokens),
+          lastReasoningOutputTokens: Math.round(thoughtTokens),
+        }
+      : {}),
+    ...(cachedReadTokens !== undefined
+      ? {
+          cachedInputTokens: Math.round(cachedReadTokens),
+          lastCachedInputTokens: Math.round(cachedReadTokens),
+        }
+      : {}),
+    compactsAutomatically: true,
   };
 }
 
@@ -332,12 +654,13 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
       const serverConfig = yield* ServerConfig;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const managedRunService = yield* ManagedRunService;
+      const fs = yield* FileSystem.FileSystem;
       const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, GeminiSessionContext>();
       const createConnection = options?.createConnection ?? createGeminiAcpConnection;
 
       const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
-        Effect.runFork(Queue.offer(runtimeEventQueue, event));
+        Queue.offerUnsafe(runtimeEventQueue, event);
       };
 
       const eventBase = (
@@ -397,6 +720,22 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           ...eventBase(context, raw),
           type: "runtime.warning",
           payload: { message },
+        });
+      };
+
+      const handleStderr = (context: GeminiSessionContext, line: string) => {
+        if (!line.toLowerCase().includes("mcp")) {
+          return;
+        }
+        offerRuntimeEvent({
+          ...eventBase(context, {
+            source: "gemini.acp.notification",
+            payload: { line },
+          }),
+          type: "runtime.warning",
+          payload: {
+            message: line,
+          },
         });
       };
 
@@ -479,6 +818,16 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           return;
         }
 
+        const tokenUsage = tokenUsageFromUpdate(update);
+        if (tokenUsage) {
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "thread.token-usage.updated",
+            payload: { usage: tokenUsage },
+          });
+          return;
+        }
+
         const title = sessionTitleFromUpdate(update);
         if (title) {
           offerRuntimeEvent({
@@ -530,28 +879,165 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
       };
 
       const handleRequest = (context: GeminiSessionContext, request: GeminiAcpIncomingRequest) => {
-        emitRawWarning(
-          context,
-          `Gemini requested ACP client method ${request.method}, which T3 Code does not implement yet.`,
-          {
-            source: "gemini.acp.request",
-            method: request.method,
-            payload: request.params,
+        const raw = {
+          source: "gemini.acp.request",
+          method: request.method,
+          payload: request.params,
+        } satisfies ProviderRuntimeEvent["raw"];
+
+        if (request.method === "session/request_permission") {
+          if (!context.activeTurn) {
+            context.connection.respond({
+              id: request.id,
+              result: { outcome: { outcome: "cancelled" } },
+            });
+            emitRawWarning(
+              context,
+              `Gemini requested permission ${request.method} after the active turn ended; cancelled it.`,
+              raw,
+            );
+            return;
+          }
+          const requestId = ApprovalRequestId.makeUnsafe(`gemini-request-${randomUUID()}`);
+          const params = isRecord(request.params) ? request.params : {};
+          const options = permissionOptionsFromParams(params);
+          const classification = canonicalPermissionRequestType(params.toolCall);
+          context.pendingApprovals.set(requestId, {
+            jsonRpcId: request.id,
+            canonicalRequestType: classification.canonicalRequestType,
+            ...(classification.providerRequestKind
+              ? { providerRequestKind: classification.providerRequestKind }
+              : {}),
+            options,
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "request.opened",
+            requestId: asRuntimeRequestId(requestId),
+            payload: {
+              requestType: classification.canonicalRequestType,
+              ...(permissionDetailFromParams(params)
+                ? { detail: permissionDetailFromParams(params) }
+                : {}),
+              args: params,
+            },
+          });
+          return;
+        }
+
+        if (request.method.includes("requestUserInput") || request.method.includes("user_input")) {
+          if (!context.activeTurn) {
+            context.connection.respond({
+              id: request.id,
+              error: {
+                code: -32000,
+                message: `Gemini user-input request ${request.method} arrived after the active turn ended.`,
+              },
+            });
+            emitRawWarning(
+              context,
+              `Gemini requested user input ${request.method} after the active turn ended; rejected it.`,
+              raw,
+            );
+            return;
+          }
+          const questions = userInputQuestionsFromParams(request.params);
+          if (!questions) {
+            context.connection.respond({
+              id: request.id,
+              error: {
+                code: -32602,
+                message: `Gemini user-input request ${request.method} did not include supported questions.`,
+              },
+            });
+            emitRawWarning(
+              context,
+              `Gemini user-input request ${request.method} did not include supported questions.`,
+              raw,
+            );
+            return;
+          }
+          const requestId = ApprovalRequestId.makeUnsafe(`gemini-user-input-${randomUUID()}`);
+          context.pendingUserInputs.set(requestId, { jsonRpcId: request.id });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "user-input.requested",
+            requestId: asRuntimeRequestId(requestId),
+            payload: { questions },
+          });
+          return;
+        }
+
+        context.connection.respond({
+          id: request.id,
+          error: {
+            code: -32601,
+            message: `Unsupported Gemini ACP client request: ${request.method}.`,
           },
-        );
+        });
+        emitRawWarning(context, `Unsupported Gemini ACP client request: ${request.method}.`, raw);
       };
+
+      const loadGeminiImages = (attachments: ReadonlyArray<ChatAttachment> | undefined) =>
+        Effect.gen(function* () {
+          const images: Array<GeminiAcpImageContent> = [];
+          for (const attachment of attachments ?? []) {
+            const mimeType = attachment.mimeType.toLowerCase();
+            if (!GEMINI_SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Gemini does not support ${attachment.mimeType} attachments yet. Supported image types: PNG, JPEG, WebP, and GIF.`,
+              });
+            }
+            const resolvedPath = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment,
+            });
+            if (!resolvedPath) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Gemini could not resolve attachment ${attachment.name}.`,
+              });
+            }
+            const exists = yield* fs.exists(resolvedPath).pipe(Effect.orElseSucceed(() => false));
+            if (!exists) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Gemini attachment file is missing: ${attachment.name}.`,
+              });
+            }
+            const bytes = yield* fs.readFile(resolvedPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "attachment/read",
+                    detail: toMessage(cause, `Failed to read attachment ${attachment.name}.`),
+                    cause,
+                  }),
+              ),
+            );
+            images.push({
+              data: Buffer.from(bytes).toString("base64"),
+              mimeType,
+              uri: `t3://attachment/${attachment.id}`,
+            });
+          }
+          return images;
+        });
 
       const startSession: GeminiAdapterShape["startSession"] = Effect.fn("startGeminiSession")(
         function* (input: ProviderSessionStartInput) {
           const requestedProvider = input.provider ?? PROVIDER;
           if (baseProviderKind(requestedProvider) !== PROVIDER) {
-            return yield* Effect.fail(
-              new ProviderAdapterValidationError({
-                provider: PROVIDER,
-                operation: "startSession",
-                issue: `GeminiAdapter cannot start provider ${requestedProvider}.`,
-              }),
-            );
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `GeminiAdapter cannot start provider ${requestedProvider}.`,
+            });
           }
 
           const settings = yield* settingsService.getSettings.pipe(Effect.orDie);
@@ -591,7 +1077,9 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           const sessionContextPromptInjected = sessionContextPromptHash
             ? resumeCursorHasInjectedContext(input.resumeCursor, sessionContextPromptHash)
             : true;
+          const mcpServers = buildGeminiMcpServers(serviceContext);
           let context: GeminiSessionContext | undefined;
+          const pendingStderr: Array<string> = [];
           const connection = createConnection({
             binaryPath: geminiSettings.binaryPath,
             ...(cwd ? { cwd } : {}),
@@ -606,12 +1094,19 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 handleRequest(context, request);
               }
             },
+            onStderr: (line) => {
+              if (context) {
+                handleStderr(context, line);
+              } else {
+                pendingStderr.push(line);
+              }
+            },
           });
 
           const startedAt = nowIso();
           const resumeSessionId = extractResumeSessionId(input.resumeCursor);
 
-          try {
+          return yield* Effect.gen(function* () {
             yield* Effect.tryPromise(() => connection.initialize()).pipe(
               Effect.mapError(
                 (cause) =>
@@ -624,21 +1119,40 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               ),
             );
 
-            const sessionInfo = resumeSessionId
-              ? { sessionId: resumeSessionId, result: input.resumeCursor }
-              : yield* Effect.tryPromise(() =>
-                  connection.newSession({ cwd: cwd ?? process.cwd(), mcpServers: [] }),
-                ).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ProviderAdapterRequestError({
-                        provider: PROVIDER,
-                        method: "session/new",
-                        detail: toMessage(cause, "Gemini ACP new session failed."),
-                        cause,
-                      }),
-                  ),
-                );
+            const sessionInfo =
+              resumeSessionId && shouldForkFromResumeCursor(input.resumeCursor)
+                ? yield* Effect.tryPromise(() =>
+                    connection.forkSession({
+                      sessionId: resumeSessionId,
+                      cwd: cwd ?? process.cwd(),
+                      mcpServers,
+                    }),
+                  ).pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProviderAdapterRequestError({
+                          provider: PROVIDER,
+                          method: "session/fork",
+                          detail: toMessage(cause, "Gemini ACP session fork failed."),
+                          cause,
+                        }),
+                    ),
+                  )
+                : resumeSessionId
+                  ? { sessionId: resumeSessionId, result: input.resumeCursor }
+                  : yield* Effect.tryPromise(() =>
+                      connection.newSession({ cwd: cwd ?? process.cwd(), mcpServers }),
+                    ).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new ProviderAdapterRequestError({
+                            provider: PROVIDER,
+                            method: "session/new",
+                            detail: toMessage(cause, "Gemini ACP new session failed."),
+                            cause,
+                          }),
+                      ),
+                    );
 
             const session: ProviderSession = {
               provider: asProviderInput(PROVIDER),
@@ -665,7 +1179,10 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               session,
               connection,
               providerSessionId: sessionInfo.sessionId,
+              mcpServers,
               turns: [],
+              pendingApprovals: new Map(),
+              pendingUserInputs: new Map(),
               ...(sessionContextPrompt ? { sessionContextPrompt } : {}),
               ...(sessionContextPromptHash ? { sessionContextPromptHash } : {}),
               sessionContextPromptInjected,
@@ -673,13 +1190,16 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               stopped: false,
             };
             sessions.set(input.threadId, context);
+            for (const line of pendingStderr) {
+              handleStderr(context, line);
+            }
 
-            if (resumeSessionId) {
+            if (resumeSessionId && !shouldForkFromResumeCursor(input.resumeCursor)) {
               yield* Effect.tryPromise(() =>
                 connection.loadSession({
                   sessionId: resumeSessionId,
                   cwd: cwd ?? process.cwd(),
-                  mcpServers: [],
+                  mcpServers,
                 }),
               ).pipe(
                 Effect.mapError(
@@ -725,13 +1245,43 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               type: "session.state.changed",
               payload: { state: "ready" },
             });
+            if (mcpServers.length > 0) {
+              offerRuntimeEvent({
+                ...eventBase(context),
+                type: "mcp.status.updated",
+                payload: {
+                  status: {
+                    provider: PROVIDER,
+                    servers: mcpServers.map((server) =>
+                      isRecord(server)
+                        ? { name: server.name, status: "configured" }
+                        : { status: "configured" },
+                    ),
+                  },
+                },
+              });
+            }
+            offerRuntimeEvent({
+              ...eventBase(context),
+              type: "account.rate-limits.updated",
+              payload: {
+                rateLimits: {
+                  provider: PROVIDER,
+                  status: "unknown",
+                  reason: "Gemini ACP/CLI does not expose account rate-limit state.",
+                },
+              },
+            });
 
             return session;
-          } catch (error) {
-            sessions.delete(input.threadId);
-            connection.close();
-            throw error;
-          }
+          }).pipe(
+            Effect.tapError(() =>
+              Effect.sync(() => {
+                sessions.delete(input.threadId);
+                connection.close();
+              }),
+            ),
+          );
         },
       );
 
@@ -740,33 +1290,21 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
       ) {
         const context = yield* getContext(input.threadId, "sendTurn");
         if (context.activeTurn) {
-          return yield* Effect.fail(
-            new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "sendTurn",
-              issue: "Gemini session already has an active turn.",
-            }),
-          );
-        }
-        if (input.attachments && input.attachments.length > 0) {
-          return yield* Effect.fail(
-            new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "sendTurn",
-              issue: "Gemini ACP image attachments are not implemented yet.",
-            }),
-          );
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "sendTurn",
+            issue: "Gemini session already has an active turn.",
+          });
         }
         const text = input.input?.trim();
-        if (!text) {
-          return yield* Effect.fail(
-            new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "sendTurn",
-              issue: "Gemini turns require text input.",
-            }),
-          );
+        if (!text && (!input.attachments || input.attachments.length === 0)) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "sendTurn",
+            issue: "Gemini turns require text input or at least one supported image attachment.",
+          });
         }
+        const images = yield* loadGeminiImages(input.attachments);
 
         const selectedModel =
           input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
@@ -848,14 +1386,15 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
           });
         }
 
-        Effect.runFork(
+        yield* Effect.forkDetach(
           Effect.tryPromise(() =>
             context.connection.prompt({
               sessionId: context.providerSessionId,
-              text: promptInput.text,
+              ...(promptInput.text ? { text: promptInput.text } : {}),
               ...(promptInput.embeddedContext
                 ? { embeddedContext: promptInput.embeddedContext }
                 : {}),
+              ...(images.length > 0 ? { images } : {}),
             }),
           ).pipe(
             Effect.match({
@@ -872,6 +1411,17 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 finishTurn(context, "failed", { errorMessage: message });
               },
               onSuccess: (result) => {
+                const usage = tokenUsageFromPromptResult(result);
+                if (usage) {
+                  offerRuntimeEvent({
+                    ...eventBase(context, {
+                      source: "gemini.acp.response",
+                      payload: result,
+                    }),
+                    type: "thread.token-usage.updated",
+                    payload: { usage },
+                  });
+                }
                 const stopReason =
                   isRecord(result) && typeof result.stopReason === "string"
                     ? result.stopReason
@@ -920,14 +1470,82 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         },
       );
 
-      const unsupportedRequest = (method: string) =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
+      const respondToRequest: GeminiAdapterShape["respondToRequest"] = Effect.fn(
+        "respondToGeminiRequest",
+      )(function* (threadId: ThreadId, requestId, decision: ProviderApprovalDecision) {
+        const context = yield* getContext(threadId, "respondToRequest");
+        const pending = context.pendingApprovals.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method,
-            detail: "Gemini ACP interactive approvals are not implemented yet.",
+            method: "respondToRequest",
+            detail: `Unknown pending Gemini approval request: ${requestId}`,
+          });
+        }
+
+        if (decision === "cancel") {
+          context.connection.respond({
+            id: pending.jsonRpcId,
+            result: { outcome: { outcome: "cancelled" } },
+          });
+        } else {
+          const option = optionForDecision(pending.options, decision);
+          if (!option) {
+            return yield* new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "respondToRequest",
+              detail: `Gemini approval request ${requestId} does not support decision ${decision}.`,
+            });
+          }
+          context.connection.respond({
+            id: pending.jsonRpcId,
+            result: { outcome: { outcome: "selected", optionId: option.optionId } },
+          });
+        }
+
+        context.pendingApprovals.delete(requestId);
+        offerRuntimeEvent({
+          ...eventBase(context, {
+            source: "gemini.acp.response",
+            payload: { requestId, decision },
           }),
-        );
+          type: "request.resolved",
+          requestId: asRuntimeRequestId(requestId),
+          payload: {
+            requestType: pending.canonicalRequestType,
+            decision,
+            resolution: { decision },
+          },
+        });
+      });
+
+      const respondToUserInput: GeminiAdapterShape["respondToUserInput"] = Effect.fn(
+        "respondToGeminiUserInput",
+      )(function* (threadId: ThreadId, requestId, answers: ProviderUserInputAnswers) {
+        const context = yield* getContext(threadId, "respondToUserInput");
+        const pending = context.pendingUserInputs.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "respondToUserInput",
+            detail: `Unknown pending Gemini user-input request: ${requestId}`,
+          });
+        }
+        context.connection.respond({
+          id: pending.jsonRpcId,
+          result: { answers },
+        });
+        context.pendingUserInputs.delete(requestId);
+        offerRuntimeEvent({
+          ...eventBase(context, {
+            source: "gemini.acp.response",
+            payload: { requestId, answers },
+          }),
+          type: "user-input.resolved",
+          requestId: asRuntimeRequestId(requestId),
+          payload: { answers },
+        });
+      });
 
       const stopSession: GeminiAdapterShape["stopSession"] = Effect.fn("stopGeminiSession")(
         function* (threadId) {
@@ -972,10 +1590,8 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         startSession,
         sendTurn,
         interruptTurn,
-        respondToRequest: (_threadId: ThreadId, _requestId, _decision: ProviderApprovalDecision) =>
-          unsupportedRequest("respondToRequest"),
-        respondToUserInput: (_threadId: ThreadId, _requestId, _answers: ProviderUserInputAnswers) =>
-          unsupportedRequest("respondToUserInput"),
+        respondToRequest,
+        respondToUserInput,
         stopSession,
         listSessions: () => Effect.succeed(Array.from(sessions.values()).map((ctx) => ctx.session)),
         hasSession: (threadId) => Effect.succeed(sessions.has(threadId)),
