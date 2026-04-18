@@ -1722,6 +1722,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
         provider: PROVIDER,
         capabilities: {
           sessionModelSwitch: "in-session",
+          conversationRollback: "unsupported",
         },
         startSession,
         sendTurn,
@@ -1737,7 +1738,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
             new ProviderAdapterRequestError({
               provider: PROVIDER,
               method: "rollbackThread",
-              detail: "Gemini ACP rollback is not implemented yet.",
+              detail: "Gemini ACP does not expose a non-interactive rewind or rollback method.",
             }),
           ),
         stopAll,

@@ -966,6 +966,28 @@ it.effect("GeminiAdapterLive fails unsupported ACP client requests without hangi
   );
 });
 
+it.effect("GeminiAdapterLive reports rollback as unsupported by ACP", () => {
+  const threadId = ThreadId.makeUnsafe("thread-gemini-rollback");
+
+  return Effect.gen(function* () {
+    const adapter = yield* GeminiAdapter;
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "gemini",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    const failure = yield* Effect.flip(adapter.rollbackThread(threadId, 1));
+    if (failure._tag !== "ProviderAdapterRequestError") {
+      assert.fail(`Expected ProviderAdapterRequestError, got ${failure._tag}`);
+    }
+    assert.include(failure.detail, "Gemini ACP");
+    assert.include(failure.detail, "rewind");
+  }).pipe(Effect.provide(makeGeminiTestLayer((options) => makeFakeConnection(options))));
+});
+
 it.effect("GeminiAdapterLive cancels late Gemini permission requests after a failed turn", () => {
   const createdConnections: GeminiAcpConnection[] = [];
   const createdOptions: GeminiAcpConnectionOptions[] = [];

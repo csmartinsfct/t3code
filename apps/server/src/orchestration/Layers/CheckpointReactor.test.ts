@@ -67,6 +67,7 @@ function createProviderServiceHarness(
   hasSession = true,
   sessionCwd = cwd,
   providerName: ProviderSession["provider"] = "codex",
+  conversationRollback: "provider" | "unsupported" = "provider",
 ) {
   const now = new Date().toISOString();
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
@@ -98,7 +99,11 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions,
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    getCapabilities: () =>
+      Effect.succeed({
+        sessionModelSwitch: "in-session",
+        conversationRollback,
+      }),
     rollbackConversation,
     probeAllRateLimits: () => Effect.succeed([]),
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
@@ -207,6 +212,26 @@ async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 15_000)
   return poll();
 }
 
+async function waitForAnyGitRefExists(
+  cwd: string,
+  refs: ReadonlyArray<string>,
+  timeoutMs = 15_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const poll = async (): Promise<string> => {
+    const found = refs.find((ref) => gitRefExists(cwd, ref));
+    if (found) {
+      return found;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for any git ref: ${refs.join(", ")}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return poll();
+  };
+  return poll();
+}
+
 describe("CheckpointReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
     OrchestrationEngineService | CheckpointReactor | CheckpointStore | ProjectionSnapshotQuery,
@@ -239,6 +264,7 @@ describe("CheckpointReactor", () => {
     readonly threadWorktreePath?: string | null;
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderKind;
+    readonly conversationRollback?: "provider" | "unsupported";
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -247,6 +273,7 @@ describe("CheckpointReactor", () => {
       options?.hasSession ?? true,
       options?.providerSessionCwd ?? cwd,
       baseProviderKind(options?.providerName ?? "codex"),
+      options?.conversationRollback ?? "provider",
     );
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -796,12 +823,13 @@ describe("CheckpointReactor", () => {
       turnId: asTurnId("turn-after-runtime-failure"),
     });
 
-    await waitForGitRefExists(
-      harness.cwd,
+    const possibleBaselineRefs = [
       checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 0),
-    );
+      checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 1),
+    ];
+    const baselineRef = await waitForAnyGitRefExists(harness.cwd, possibleBaselineRefs);
     expect(
-      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 0)),
+      possibleBaselineRefs.some((ref) => ref === baselineRef && gitRefExists(harness.cwd, ref)),
     ).toBe(true);
   });
 
@@ -950,6 +978,84 @@ describe("CheckpointReactor", () => {
       threadId: ThreadId.makeUnsafe("thread-1"),
       numTurns: 1,
     });
+  });
+
+  it("fails checkpoint revert before restoring files when conversation rollback is unsupported", async () => {
+    const harness = await createHarness({
+      providerName: "gemini",
+      conversationRollback: "unsupported",
+    });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-gemini"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "gemini",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-diff-gemini-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: asTurnId("turn-gemini-1"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 1),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 1,
+        createdAt,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-diff-gemini-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: asTurnId("turn-gemini-2"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 2),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 2,
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.makeUnsafe("cmd-revert-request-gemini"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnCount: 1,
+        createdAt,
+      }),
+    );
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some((activity: any) => activity.kind === "checkpoint.revert.failed"),
+    );
+    const failure = thread.activities.find(
+      (activity: any) => activity.kind === "checkpoint.revert.failed",
+    );
+    expect(failure?.payload?.detail).toContain("conversation rollback is unsupported");
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 2)),
+    ).toBe(true);
   });
 
   it("processes consecutive revert requests with deterministic rollback sequencing", async () => {

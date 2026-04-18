@@ -1687,6 +1687,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      conversationRollback: "provider",
     },
     startSession,
     sendTurn,

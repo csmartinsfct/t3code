@@ -79,6 +79,26 @@ Gemini ACP does not expose rollback. T3 therefore reports rollback as an
 explicit product limitation instead of trimming local state while provider state
 continues from a different point.
 
+Gemini CLI does expose an interactive `/rewind` command in the terminal UI, but
+that command is not available through ACP. The installed CLI implements rewind
+by opening an interactive picker, rewriting Gemini's recorded conversation file,
+and calling an internal `setHistory(...)` method. ACP 0.38.2 exposes session
+new/load/fork, prompt, cancel, mode, and model control, but no stable
+non-interactive rewind or rollback request. Because T3 checkpoint revert must
+restore filesystem state and provider conversation state together, the Gemini
+adapter declares conversation rollback as unsupported and the checkpoint reactor
+fails Gemini revert requests before restoring files.
+
+## Turn Diffs
+
+Gemini emits canonical `turn.started` and `turn.completed` runtime events with a
+T3 turn id for each prompt. T3's Diff panel is driven by provider-neutral git
+checkpoints captured from those turn lifecycle events, so Gemini does not need a
+provider-native diff stream for per-turn file diffs. ACP `turn.diff.updated`
+events are still supported as placeholder checkpoints when a provider emits
+them, but Gemini parity relies on the same checkpoint reactor path used by the
+other providers.
+
 ## Attachments
 
 Gemini chat turns accept image attachments through ACP image content blocks. T3

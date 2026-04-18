@@ -180,8 +180,9 @@ First milestone capability declarations:
 
 - `sessionModelSwitch`: `in-session` through ACP `session/set_model`, falling
   back to `unstable_setSessionModel` for current Gemini CLI builds.
-- `rollbackThread`: unsupported or generic-history-only. Return a clear
-  provider unsupported error if Gemini cannot rewind through ACP.
+- `rollbackThread`: unsupported. Gemini's interactive `/rewind` command rewrites
+  local CLI history and calls internal client APIs; ACP does not expose a stable
+  non-interactive rewind or rollback method.
 - `respondToRequest`: supported only if ACP exposes approval requests with
   stable ids. Otherwise initial Gemini support must require a mode that avoids
   interactive provider approvals.
@@ -378,7 +379,7 @@ First milestone can defer:
 
 - Provider approval UX if ACP approvals are not proven.
 - `respondToUserInput` mapping.
-- Rollback and fork through Gemini checkpoints or rewind.
+- Rollback through Gemini checkpoints or rewind.
 - Image and binary attachment support.
 - Native MCP tool mode if prompt mode is reliable.
 - Account-specific live model listing.

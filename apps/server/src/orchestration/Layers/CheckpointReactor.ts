@@ -3,6 +3,7 @@ import {
   EventId,
   MessageId,
   type ProjectId,
+  type ProviderKind,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
@@ -34,6 +35,12 @@ type ReactorInput =
       readonly source: "domain";
       readonly event: OrchestrationEvent;
     };
+
+interface SessionRuntime {
+  readonly threadId: ThreadId;
+  readonly cwd: string;
+  readonly provider: ProviderKind;
+}
 
 function toTurnId(value: string | undefined): TurnId | null {
   return value === undefined ? null : TurnId.makeUnsafe(String(value));
@@ -122,7 +129,7 @@ const make = Effect.gen(function* () {
 
   const resolveSessionRuntimeForThread = Effect.fn("resolveSessionRuntimeForThread")(function* (
     threadId: ThreadId,
-  ): Effect.fn.Return<Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>> {
+  ): Effect.fn.Return<Option.Option<SessionRuntime>> {
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === threadId);
 
@@ -130,11 +137,15 @@ const make = Effect.gen(function* () {
 
     const findSessionWithCwd = (
       session: (typeof sessions)[number] | undefined,
-    ): Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }> => {
+    ): Option.Option<SessionRuntime> => {
       if (!session?.cwd) {
         return Option.none();
       }
-      return Option.some({ threadId: session.threadId, cwd: session.cwd });
+      return Option.some({
+        threadId: session.threadId,
+        cwd: session.cwd,
+        provider: session.provider,
+      });
     };
 
     if (thread) {
@@ -673,6 +684,20 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
+    if (rolledBackTurns > 0) {
+      const capabilities = yield* providerService.getCapabilities(sessionRuntime.value.provider);
+      if (capabilities.conversationRollback === "unsupported") {
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail: `Checkpoint revert is unavailable for ${sessionRuntime.value.provider} because provider conversation rollback is unsupported.`,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+        return;
+      }
+    }
+
     // Resolve all repo cwds for multi-repo restore
     const revertCwds = yield* resolveCheckpointCwds({
       threadId: event.payload.threadId,
@@ -708,7 +733,6 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {
       yield* providerService.rollbackConversation({
         threadId: sessionRuntime.value.threadId,
