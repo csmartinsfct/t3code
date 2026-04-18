@@ -80,6 +80,13 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - **Profiles:** Multiple named profiles supported. Each profile can have its own binary path, config directory, and custom models. Profiles appear as separate provider entries.
 - Model selection: full Claude model family with per-session model and reasoning effort options.
 
+### Gemini (Google)
+
+Gemini provider support is planned through Gemini CLI ACP mode. See
+[Gemini Provider Implementation Specification](gemini-provider-implementation.md)
+for the implementation plan, first milestone scope, deferred capabilities, and
+rollout risks.
+
 ### Provider configuration
 
 Server settings expose per-provider configuration:
