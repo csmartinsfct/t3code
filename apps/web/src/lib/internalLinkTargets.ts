@@ -1,15 +1,17 @@
 export type InternalLinkTarget = { kind: "ticket"; identifier: string };
 
 /**
- * Models sometimes wrap ticket markdown links in backticks, e.g.
- *   `[METR-39](t3://ticket/METR-39)`
- * which react-markdown treats as inline code (literal text) instead of a link.
- * Strip the surrounding backticks so the link syntax is parsed normally.
+ * Models sometimes wrap ticket markdown links in backticks, which react-markdown
+ * then renders as inline code instead of a link. Backticks may appear:
+ *   - around the whole link:        `[ID](t3://ticket/ID)`
+ *   - between the text and url:     `[ID]`(t3://ticket/ID)  |  `[ID]``(t3://ticket/ID)`
+ *   - around just the url:          [ID](`t3://ticket/ID`)
+ * Strip any such backticks so the link syntax parses normally.
  */
-const BACKTICKED_TICKET_LINK_RE = /`(\[[^\]]+\]\(t3:\/\/ticket\/[^)]+\))`/g;
+const BACKTICKED_TICKET_LINK_RE = /`?(\[[^\]`]+\])`*\(`?(t3:\/\/ticket\/[^)`]+)`?\)`?/g;
 
 export function unwrapBacktickedTicketLinks(text: string): string {
-  return text.replace(BACKTICKED_TICKET_LINK_RE, "$1");
+  return text.replace(BACKTICKED_TICKET_LINK_RE, "$1($2)");
 }
 
 export function parseInternalLinkTarget(href: string | undefined): InternalLinkTarget | null {

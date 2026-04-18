@@ -63,4 +63,27 @@ describe("unwrapBacktickedTicketLinks", () => {
     const input = "[METR-39](t3://ticket/METR-39)";
     expect(unwrapBacktickedTicketLinks(input)).toBe(input);
   });
+
+  it("strips backticks between the text and url", () => {
+    expect(unwrapBacktickedTicketLinks("`[T3CO-309]`(t3://ticket/T3CO-309)")).toBe(
+      "[T3CO-309](t3://ticket/T3CO-309)",
+    );
+  });
+
+  it("strips adjacent backtick pairs around split link", () => {
+    expect(unwrapBacktickedTicketLinks("`[T3CO-309]``(t3://ticket/T3CO-309)`")).toBe(
+      "[T3CO-309](t3://ticket/T3CO-309)",
+    );
+  });
+
+  it("strips backticks wrapping just the url", () => {
+    expect(unwrapBacktickedTicketLinks("[T3CO-309](`t3://ticket/T3CO-309`)")).toBe(
+      "[T3CO-309](t3://ticket/T3CO-309)",
+    );
+  });
+
+  it("leaves markdown links with inline-code link text alone", () => {
+    const input = "[`T3CO-309`](t3://ticket/T3CO-309)";
+    expect(unwrapBacktickedTicketLinks(input)).toBe(input);
+  });
 });
