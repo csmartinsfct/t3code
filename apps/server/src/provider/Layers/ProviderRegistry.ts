@@ -8,10 +8,10 @@ import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive, makeClaudeProfileProvider } from "./ClaudeProvider";
 import { CodexProviderLive } from "./CodexProvider";
-import type { ClaudeProviderShape } from "../Services/ClaudeProvider";
+import { GeminiProviderLive } from "./GeminiProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
-import type { CodexProviderShape } from "../Services/CodexProvider";
 import { CodexProvider } from "../Services/CodexProvider";
+import { GeminiProvider } from "../Services/GeminiProvider";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry";
 import type { ServerProviderShape } from "../Services/ServerProvider";
 import { discoverClaudeProfiles, mergeClaudeProfiles } from "../claudeProfileDiscovery";
@@ -27,6 +27,7 @@ export const ProviderRegistryLive = Layer.effect(
   Effect.gen(function* () {
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
+    const geminiProvider = yield* GeminiProvider;
     const serverSettings = yield* ServerSettingsService;
 
     // ── Discover Claude profiles ───────────────────────────────────
@@ -45,6 +46,7 @@ export const ProviderRegistryLive = Layer.effect(
     const allProviders: Array<{ kind: ProviderKind; provider: ServerProviderShape }> = [
       { kind: "codex", provider: codexProvider },
       { kind: "claudeAgent", provider: claudeProvider },
+      { kind: "gemini", provider: geminiProvider },
       ...profileProviders,
     ];
 
@@ -114,4 +116,8 @@ export const ProviderRegistryLive = Layer.effect(
       },
     } satisfies ProviderRegistryShape;
   }),
-).pipe(Layer.provideMerge(CodexProviderLive), Layer.provideMerge(ClaudeProviderLive));
+).pipe(
+  Layer.provideMerge(CodexProviderLive),
+  Layer.provideMerge(ClaudeProviderLive),
+  Layer.provideMerge(GeminiProviderLive),
+);

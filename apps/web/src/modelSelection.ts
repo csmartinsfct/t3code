@@ -49,6 +49,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModel
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  gemini: {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model slugs for the picker and `/model` command.",
+    placeholder: "your-gemini-model-slug",
+    example: "gemini-3.1-pro-preview",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -171,6 +178,12 @@ export function getCustomModelOptionsByProvider(
       "claudeAgent",
       selectedBaseProvider === "claudeAgent" ? selectedModel : undefined,
     ).map(({ slug, name }) => ({ slug, name })),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedBaseProvider === "gemini" ? selectedModel : undefined,
+    ).map(({ slug, name }) => ({ slug, name })),
   };
 }
 
@@ -180,7 +193,10 @@ export function makeAppModelSelection(
   options?: ModelSelection["options"],
 ): ModelSelection {
   const baseProvider = baseProviderKind(provider);
-  const profileId = baseProvider === "claudeAgent" ? providerProfileId(provider) : undefined;
+  const profileId =
+    baseProvider === "claudeAgent" || baseProvider === "gemini"
+      ? providerProfileId(provider)
+      : undefined;
 
   return {
     provider: baseProvider,

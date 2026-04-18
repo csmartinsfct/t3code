@@ -1510,7 +1510,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return {
       provider: base,
       model: selectedModel,
-      ...(base === "claudeAgent" && profileId ? { profileId } : {}),
+      ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
       ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
     } as ModelSelection;
   }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
@@ -1934,6 +1934,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
+      gemini: providerStatuses.find((provider) => provider.provider === "gemini")?.models ?? [],
     }),
     [providerStatuses],
   );
@@ -1958,7 +1959,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             searchProvider: option.label.toLowerCase(),
           })),
         ),
-    [lockedProvider, modelOptionsByProvider],
+    [lockedProvider, modelOptionsByProvider, providerStatuses],
   );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
@@ -4166,7 +4167,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           selectedModel ||
           activeProject.defaultModelSelection?.model ||
           DEFAULT_MODEL_BY_PROVIDER[threadCreateBase],
-        ...(threadCreateBase === "claudeAgent" && threadCreateProfileId
+        ...((threadCreateBase === "claudeAgent" || threadCreateBase === "gemini") &&
+        threadCreateProfileId
           ? { profileId: threadCreateProfileId }
           : {}),
         ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
@@ -4757,7 +4759,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const nextModelSelection: ModelSelection = {
         provider: base,
         model: resolvedModel,
-        ...(base === "claudeAgent" && profileId ? { profileId } : {}),
+        ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
       } as ModelSelection;
       setComposerDraftModelSelection(activeThread.id, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);

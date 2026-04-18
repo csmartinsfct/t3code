@@ -68,6 +68,24 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
     expect(parsed.runtimeMode).toBe("full-access");
   });
+
+  it("accepts Gemini-compatible payloads", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "gemini",
+      cwd: "/tmp/workspace",
+      modelSelection: {
+        provider: "gemini",
+        model: "gemini-3.1-pro-preview",
+      },
+      runtimeMode: "full-access",
+    });
+
+    expect(parsed.provider).toBe("gemini");
+    expect(parsed.modelSelection?.provider).toBe("gemini");
+    expect(parsed.modelSelection?.model).toBe("gemini-3.1-pro-preview");
+    expect(parsed.runtimeMode).toBe("full-access");
+  });
 });
 
 describe("ProviderSendTurnInput", () => {
@@ -112,5 +130,18 @@ describe("ProviderSendTurnInput", () => {
     }
     expect(parsed.modelSelection.options?.effort).toBe("ultrathink");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
+  });
+
+  it("accepts gemini modelSelection", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      modelSelection: {
+        provider: "gemini",
+        model: "gemini-3-flash-preview",
+      },
+    });
+
+    expect(parsed.modelSelection?.provider).toBe("gemini");
+    expect(parsed.modelSelection?.model).toBe("gemini-3-flash-preview");
   });
 });

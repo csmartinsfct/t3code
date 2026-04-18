@@ -5,6 +5,7 @@ import {
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type GeminiModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
@@ -135,6 +136,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeGeminiModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  modelOptions: GeminiModelOptions | null | undefined,
+): GeminiModelOptions | undefined {
+  return modelOptions && Object.keys(modelOptions).length > 0 ? modelOptions : undefined;
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {

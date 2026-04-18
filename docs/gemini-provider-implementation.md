@@ -52,8 +52,8 @@ References:
 - Do not implement terminal UI automation.
 - Do not rely on headless mode for normal multi-turn chat sessions.
 - Do not ship Gemini as a fallback to Codex or Claude code paths.
-- Do not expose rollback, fork, approval UX, image attachments, structured
-  output, or in-session model switching until the ACP spike proves each behavior.
+- Do not expose rollback, fork, approval UX, image attachments, or structured
+  output until the ACP spike proves each behavior.
 - Do not generalize provider profiles beyond the minimum needed for Gemini's
   base provider unless multiple Gemini accounts/profiles become a product
   requirement.
@@ -178,8 +178,8 @@ Recommended shape:
 
 First milestone capability declarations:
 
-- `sessionModelSwitch`: `restart-session` unless `unstable_setSessionModel`
-  proves reliable across active sessions.
+- `sessionModelSwitch`: `in-session` through ACP `session/set_model`, falling
+  back to `unstable_setSessionModel` for current Gemini CLI builds.
 - `rollbackThread`: unsupported or generic-history-only. Return a clear
   provider unsupported error if Gemini cannot rewind through ACP.
 - `respondToRequest`: supported only if ACP exposes approval requests with
@@ -369,7 +369,6 @@ Must ship:
 
 First milestone can defer:
 
-- In-session model switching.
 - Provider approval UX if ACP approvals are not proven.
 - `respondToUserInput` mapping.
 - Rollback and fork through Gemini checkpoints or rewind.
@@ -470,8 +469,8 @@ Adapter and manager tests:
 - `prompt` emits canonical assistant text and turn lifecycle events.
 - `cancel` emits interrupted or failed lifecycle events consistently.
 - Tool calls normalize with stable item ids.
-- Unsupported approval, rollback, user input, and model switching paths fail with
-  provider unsupported errors.
+- Unsupported approval, rollback, and user input paths fail with provider
+  unsupported errors.
 - Child process exit during a turn emits a provider error and leaves the binding
   recoverable.
 
@@ -545,8 +544,9 @@ Update `docs/visibility.md` with Gemini log examples when the adapter lands.
 - Gemini session ids are project-scoped. Mitigation: include cwd/project hash
   context in logs and reject resume when the cwd differs from the original
   binding.
-- `unstable_setSessionModel` may change or be unreliable. Mitigation: declare
-  restart-session model switching for milestone one.
+- `unstable_setSessionModel` may change or be unreliable. Mitigation: use the
+  stable `session/set_model` method first, keep the fallback isolated in the ACP
+  connection, and surface explicit provider errors if both method names fail.
 - Native MCP over ACP may not match T3's current service injection. Mitigation:
   keep prompt-mode support as the first milestone baseline.
 - Gemini auth can come from Google login, API key, Vertex AI, or ADC. Mitigation:

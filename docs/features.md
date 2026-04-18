@@ -82,10 +82,15 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 
 ### Gemini (Google)
 
-Gemini provider support is planned through Gemini CLI ACP mode. See
-[Gemini Provider Implementation Specification](gemini-provider-implementation.md)
-for the implementation plan, first milestone scope, deferred capabilities, and
-rollout risks.
+- Uses Gemini CLI ACP mode (`gemini --acp`) through a provider adapter.
+- Authentication is delegated to Gemini CLI and inherited Google/API-key
+  environment configuration.
+- Configuration: enabled/disabled, binary path, `GEMINI_CLI_HOME`, and custom
+  model slugs.
+- Model selection: Gemini model family with no fake reasoning-effort or thinking
+  controls. Unsupported advanced provider behaviors return explicit errors.
+- See [Gemini Provider Implementation Specification](gemini-provider-implementation.md)
+  for rollout risks and deferred capabilities.
 
 ### Provider configuration
 
@@ -94,6 +99,7 @@ Server settings expose per-provider configuration:
 - `providers.codex` — enabled/disabled, binaryPath, homePath, customModels.
 - `providers.claudeAgent` — enabled/disabled, binaryPath, configDir, customModels.
 - `providers.claudeProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, configDir, customModels).
+- `providers.gemini` — enabled/disabled, binaryPath, homePath, customModels.
 
 Model selection settings (each can target a specific provider + model):
 

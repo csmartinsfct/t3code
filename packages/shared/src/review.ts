@@ -257,10 +257,10 @@ function pickLowestUtilizationClaudeProfile(
 
 function toModelSelection(provider: ProviderKind, model: string): ModelSelection {
   const base = baseProviderKind(provider);
-  if (base === "claudeAgent") {
+  if (base === "claudeAgent" || base === "gemini") {
     const profileId = providerProfileId(provider);
     return {
-      provider: "claudeAgent",
+      provider: base,
       ...(profileId ? { profileId } : {}),
       model,
     };

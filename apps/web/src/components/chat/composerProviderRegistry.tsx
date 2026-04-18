@@ -13,6 +13,7 @@ import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 import {
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeGeminiModelOptionsWithCapabilities,
 } from "@t3tools/shared/model";
 
 export type ComposerProviderStateInput = {
@@ -71,10 +72,16 @@ function getProviderStateFromCapabilities(
   const promptEffort = resolveEffort(caps, rawEffort) ?? null;
 
   // Normalize options for dispatch
-  const normalizedOptions =
-    provider === "codex"
-      ? normalizeCodexModelOptionsWithCapabilities(caps, providerOptions)
-      : normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
+  const normalizedOptions = (() => {
+    switch (baseProviderKind(provider)) {
+      case "codex":
+        return normalizeCodexModelOptionsWithCapabilities(caps, providerOptions);
+      case "claudeAgent":
+        return normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
+      case "gemini":
+        return normalizeGeminiModelOptionsWithCapabilities(caps, providerOptions);
+    }
+  })();
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -156,6 +163,11 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
         onPromptChange={onPromptChange}
       />
     ),
+  },
+  gemini: {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: () => null,
+    renderTraitsPicker: () => null,
   },
 };
 

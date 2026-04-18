@@ -3,14 +3,13 @@
  * Codex CLI or Claude CLI implementation based on the provider in each
  * request input.
  *
- * When `modelSelection.provider` is `"claudeAgent"` the request is forwarded to
- * the Claude layer; for any other value (including the default `undefined`) it
- * falls through to the Codex layer.
+ * Requests are routed explicitly by provider so a newly supported chat provider
+ * cannot silently fall through to Codex for secondary inference.
  *
  * @module RoutingTextGeneration
  */
 import { Effect, Layer, ServiceMap } from "effect";
-import { baseProviderKind } from "@t3tools/contracts";
+import { baseProviderKind, TextGenerationError } from "@t3tools/contracts";
 
 import {
   TextGeneration,
@@ -40,16 +39,41 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
 
-  const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider && baseProviderKind(provider) === "claudeAgent" ? claude : codex;
+  const route = (provider?: TextGenerationProvider): TextGenerationShape | null => {
+    switch (provider ? baseProviderKind(provider) : "codex") {
+      case "codex":
+        return codex;
+      case "claudeAgent":
+        return claude;
+      case "gemini":
+        return null;
+    }
+  };
+
+  const unsupported = (operation: string, provider: TextGenerationProvider) =>
+    Effect.fail(
+      new TextGenerationError({
+        operation,
+        detail: `${provider} does not support structured secondary text generation yet.`,
+      }),
+    );
 
   return {
     generateCommitMessage: (input) =>
-      route(input.modelSelection.provider).generateCommitMessage(input),
-    generatePrContent: (input) => route(input.modelSelection.provider).generatePrContent(input),
-    generateBranchName: (input) => route(input.modelSelection.provider).generateBranchName(input),
-    generateThreadTitle: (input) => route(input.modelSelection.provider).generateThreadTitle(input),
-    enhanceSystemPrompt: (input) => route(input.modelSelection.provider).enhanceSystemPrompt(input),
+      route(input.modelSelection.provider)?.generateCommitMessage(input) ??
+      unsupported("generateCommitMessage", input.modelSelection.provider),
+    generatePrContent: (input) =>
+      route(input.modelSelection.provider)?.generatePrContent(input) ??
+      unsupported("generatePrContent", input.modelSelection.provider),
+    generateBranchName: (input) =>
+      route(input.modelSelection.provider)?.generateBranchName(input) ??
+      unsupported("generateBranchName", input.modelSelection.provider),
+    generateThreadTitle: (input) =>
+      route(input.modelSelection.provider)?.generateThreadTitle(input) ??
+      unsupported("generateThreadTitle", input.modelSelection.provider),
+    enhanceSystemPrompt: (input) =>
+      route(input.modelSelection.provider)?.enhanceSystemPrompt(input) ??
+      unsupported("enhanceSystemPrompt", input.modelSelection.provider),
   } satisfies TextGenerationShape;
 });
 
