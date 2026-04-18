@@ -20,7 +20,7 @@ export const ADMIN_PROMPT_GROUP_ID = "admin" as const;
 export const AdminPromptGroupId = Schema.Literal(ADMIN_PROMPT_GROUP_ID);
 export type AdminPromptGroupId = typeof AdminPromptGroupId.Type;
 
-export const ADMIN_PROMPT_IDS = ["managedRuns", "scheduledTasks", "ticketing"] as const;
+export const ADMIN_PROMPT_IDS = ["general", "managedRuns", "scheduledTasks", "ticketing"] as const;
 export type AdminPromptId = (typeof ADMIN_PROMPT_IDS)[number];
 export const AdminPromptId = Schema.Literals(ADMIN_PROMPT_IDS);
 
@@ -249,6 +249,15 @@ export const ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS = {
 // Admin prompt shipped defaults
 // ---------------------------------------------------------------------------
 
+const GENERAL_DEFAULT_TEXT = `## Session Restart
+
+If the underlying agent process needs to be restarted — for example, because you installed a new MCP server that only loads at startup, or because a tool call (commonly \`chrome-devtools\`) has deadlocked and is not recoverable — call \`restart_session\` on the session-restart endpoint.
+
+1. Call \`POST /api/session-restart\` with tool \`restart_session\`. No arguments are required.
+2. The tool returns immediately. Your current turn will end, the underlying session will be stopped and resumed, and you will receive a short continuation prompt telling you to continue your work.
+3. Prior conversation context is preserved via the session resume cursor — you will still have the full history.
+4. Do NOT call this casually. Every call costs a real stop/start cycle (usually a few seconds of latency). Only use it when you have a concrete reason (newly installed MCP, stuck tool, known-bad session state).`;
+
 const MANAGED_RUNS_DEFAULT_TEXT = `## T3 Managed Runs
 
 This project has T3 managed runs support via the T3 managed runs REST API. When you need to start a long-running service (dev server, build watcher, docker compose, etc.):
@@ -337,6 +346,10 @@ When the user asks about tickets, tasks, issues, or project tracking:
 12. Tickets can optionally have a \`worktree\` field storing the git worktree/branch name for isolated development. Set it via create_ticket or update_ticket. Set to null to clear.`;
 
 export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
+  general: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [{ when: null, text: GENERAL_DEFAULT_TEXT }],
+  },
   managedRuns: {
     version: PROMPT_TEMPLATE_VERSION,
     blocks: [{ when: null, text: MANAGED_RUNS_DEFAULT_TEXT }],

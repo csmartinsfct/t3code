@@ -1,10 +1,10 @@
 # T3 Agent Tools
 
-How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, and prompt management) to AI provider sessions.
+How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, prompt management, and session restart) to AI provider sessions.
 
 ## Overview
 
-T3 Code exposes four internal REST API services that AI models can use during conversations:
+T3 Code exposes several internal REST API services that AI models can use during conversations:
 
 | Service         | Endpoint               | Tools | Purpose                                                        |
 | --------------- | ---------------------- | ----- | -------------------------------------------------------------- |
@@ -12,6 +12,7 @@ T3 Code exposes four internal REST API services that AI models can use during co
 | Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                           |
 | Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts     |
 | Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates    |
+| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session           |
 
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 

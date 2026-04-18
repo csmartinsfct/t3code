@@ -52,7 +52,7 @@ export function buildRestEndpointSystemPrompt(params: { port: number; token: str
 
   return `## T3 Project Services (REST API)
 
-You have access to four T3 project services via REST HTTP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.
+You have access to several T3 project services via REST HTTP endpoints. Call these endpoints directly using curl or code execution — no dedicated tools are registered for them.
 
 ### Available Services
 
@@ -62,6 +62,7 @@ You have access to four T3 project services via REST HTTP endpoints. Call these 
 | Scheduled Tasks | ${baseUrl}/api/scheduled-tasks | Create, manage, and monitor recurring scheduled tasks and cron jobs |
 | Ticketing | ${baseUrl}/api/ticketing | Project issue tracking: tickets, labels, comments, dependencies, artifacts |
 | Prompts | ${baseUrl}/api/prompts | Prompt definitions, validation, preview rendering, and explicit prompt updates |
+| Session Restart | ${baseUrl}/api/session-restart | Restart the current agent session (after installing an MCP or when a tool is stuck) |
 
 ### Authentication
 

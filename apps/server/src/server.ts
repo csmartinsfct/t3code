@@ -63,6 +63,8 @@ import { TicketingServiceLive } from "./ticketing/Layers/Ticketing";
 import { ticketingRouteLayer } from "./ticketing/http";
 import { PromptManagementLive } from "./prompts/Layers/PromptManagement";
 import { promptsRouteLayer } from "./prompts/http";
+import { SessionRestartServiceLive } from "./sessionRestart/Layers/SessionRestart";
+import { sessionRestartRouteLayer } from "./sessionRestart/http";
 import { OrchestrationRunRepositoryLive } from "./persistence/Layers/OrchestrationRuns";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads";
 
@@ -199,7 +201,7 @@ const ProviderLayerLive = Layer.unwrap(
       canonicalEventLogger ? { canonicalEventLogger, lifecycleLogger } : { lifecycleLogger },
     ).pipe(
       Layer.provide(adapterRegistryLayer),
-      Layer.provide(providerSessionDirectoryLayer),
+      Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(lifecycleLoggerLayer),
     );
   }),
@@ -290,6 +292,7 @@ const RuntimeCoreServicesLive = Layer.empty.pipe(
 const RuntimeServicesLive = Layer.mergeAll(
   RuntimeCoreServicesLive,
   PromptManagementLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
+  SessionRestartServiceLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
@@ -299,6 +302,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   scheduledTasksRouteLayer,
   ticketingRouteLayer,
   promptsRouteLayer,
+  sessionRestartRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 );

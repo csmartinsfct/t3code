@@ -115,6 +115,11 @@ const ORCHESTRATION_PROMPT_METADATA = {
 } as const satisfies Record<OrchestrationPromptId, Pick<PromptDefinition, "label" | "description">>;
 
 const ADMIN_PROMPT_METADATA = {
+  general: {
+    label: "General",
+    description:
+      "General-purpose T3 Code capabilities exposed to agents (e.g. session restart) that are not tied to a specific resource.",
+  },
   managedRuns: {
     label: "Managed Runs",
     description: "Instructions for using the T3 managed runs API to start and monitor services.",

@@ -311,6 +311,7 @@ export type OrchestrationPromptMessageOrigin = typeof OrchestrationPromptMessage
 
 export const OrchestrationMessageMetadata = Schema.Struct({
   origin: Schema.optionalKey(OrchestrationPromptMessageOrigin),
+  internal: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationMessageMetadata = typeof OrchestrationMessageMetadata.Type;
 

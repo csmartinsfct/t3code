@@ -8,6 +8,7 @@ import {
 } from "./restEndpointSystemPrompt.ts";
 
 export interface AdminPromptDocuments {
+  readonly general: PromptDocumentV1;
   readonly managedRuns: PromptDocumentV1;
   readonly scheduledTasks: PromptDocumentV1;
   readonly ticketing: PromptDocumentV1;
@@ -30,6 +31,7 @@ export function buildT3ServiceInjectionPrompt(input: {
   const sections: string[] = [
     buildEnvironmentHeader({ port, isDev, ...(projectTitle ? { projectTitle } : {}) }),
     buildRestEndpointSystemPrompt({ port, token }),
+    renderAdminPromptDocument(adminPrompts.general),
     renderAdminPromptDocument(adminPrompts.managedRuns),
     renderAdminPromptDocument(adminPrompts.scheduledTasks),
     renderAdminPromptDocument(adminPrompts.ticketing),

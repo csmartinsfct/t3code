@@ -128,6 +128,9 @@ export const OrchestrationPromptSettings = Schema.Struct({
 export type OrchestrationPromptSettings = typeof OrchestrationPromptSettings.Type;
 
 export const AdminPromptSettings = Schema.Struct({
+  general: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.general),
+  ),
   managedRuns: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.managedRuns),
   ),
@@ -323,6 +326,7 @@ export const ServerSettingsPatch = Schema.Struct({
       ),
       admin: Schema.optionalKey(
         Schema.Struct({
+          general: Schema.optionalKey(PromptDocumentPatch),
           managedRuns: Schema.optionalKey(PromptDocumentPatch),
           scheduledTasks: Schema.optionalKey(PromptDocumentPatch),
           ticketing: Schema.optionalKey(PromptDocumentPatch),

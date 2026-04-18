@@ -50,6 +50,7 @@ import {
   type PromptManagementShape,
 } from "./prompts/Services/PromptManagement.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
+import { SessionRestartService } from "./sessionRestart/Services/SessionRestart.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
 import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner.ts";
@@ -409,6 +410,11 @@ const buildAppUnderTest = (options?: {
           deleteTemplate: () => Effect.void,
           ensureShippedDefaults: () => Effect.void,
           streamEvents: Stream.empty,
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(SessionRestartService, {
+          scheduleRestart: () => Effect.void,
         }),
       ),
       Layer.provide(
