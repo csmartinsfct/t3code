@@ -7,6 +7,7 @@ import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseS
 export const TicketModelSelection = Schema.Union([
   Schema.Struct({
     provider: Schema.Literal("codex"),
+    profileId: Schema.optionalKey(Schema.String),
     model: TrimmedNonEmptyString,
     options: Schema.optionalKey(Schema.Unknown),
   }),

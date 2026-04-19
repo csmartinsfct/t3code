@@ -2035,7 +2035,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const stamp = yield* makeEventStamp();
     const base = {
       eventId: stamp.eventId,
-      provider: PROVIDER,
+      provider: context.session.provider,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
       ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -2231,7 +2231,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const stamp = yield* makeEventStamp();
     const base = {
       eventId: stamp.eventId,
-      provider: PROVIDER,
+      provider: context.session.provider,
       createdAt: stamp.createdAt,
       threadId: context.session.threadId,
       ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -2767,7 +2767,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* offerRuntimeEvent({
           type: "user-input.requested",
           eventId: requestedStamp.eventId,
-          provider: PROVIDER,
+          provider: context.session.provider,
           createdAt: requestedStamp.createdAt,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -2805,7 +2805,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* offerRuntimeEvent({
           type: "user-input.resolved",
           eventId: resolvedStamp.eventId,
-          provider: PROVIDER,
+          provider: context.session.provider,
           createdAt: resolvedStamp.createdAt,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -2904,7 +2904,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* offerRuntimeEvent({
           type: "request.opened",
           eventId: requestedStamp.eventId,
-          provider: PROVIDER,
+          provider: context.session.provider,
           createdAt: requestedStamp.createdAt,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -2952,7 +2952,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* offerRuntimeEvent({
           type: "request.resolved",
           eventId: resolvedStamp.eventId,
-          provider: PROVIDER,
+          provider: context.session.provider,
           createdAt: resolvedStamp.createdAt,
           threadId: context.session.threadId,
           ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
@@ -3226,7 +3226,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* offerRuntimeEvent({
         type: "session.started",
         eventId: sessionStartedStamp.eventId,
-        provider: PROVIDER,
+        provider: session.provider,
         createdAt: sessionStartedStamp.createdAt,
         threadId,
         payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
@@ -3237,7 +3237,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* offerRuntimeEvent({
         type: "session.configured",
         eventId: configuredStamp.eventId,
-        provider: PROVIDER,
+        provider: session.provider,
         createdAt: configuredStamp.createdAt,
         threadId,
         payload: {
@@ -3256,7 +3256,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* offerRuntimeEvent({
         type: "session.state.changed",
         eventId: readyStamp.eventId,
-        provider: PROVIDER,
+        provider: session.provider,
         createdAt: readyStamp.createdAt,
         threadId,
         payload: {
@@ -3400,7 +3400,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* offerRuntimeEvent({
       type: "turn.started",
       eventId: turnStartedStamp.eventId,
-      provider: PROVIDER,
+      provider: context.session.provider,
       createdAt: turnStartedStamp.createdAt,
       threadId: context.session.threadId,
       turnId,

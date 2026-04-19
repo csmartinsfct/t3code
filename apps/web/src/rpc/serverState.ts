@@ -1,6 +1,5 @@
 import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import {
-  baseProviderKind,
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
   type ProviderKind,
@@ -378,27 +377,17 @@ export function useProviderRateLimits(): ReadonlyArray<ProviderRateLimitsSnapsho
   return useAtomValue(providerRateLimitsAtom) ?? EMPTY_RATE_LIMITS;
 }
 
+export function selectProviderRateLimitSnapshot(
+  all: ReadonlyArray<ProviderRateLimitsSnapshot>,
+  provider: ProviderKind | null,
+): ProviderRateLimitsSnapshot | null {
+  if (!provider) return null;
+  return all.find((entry) => entry.provider === provider) ?? null;
+}
+
 export function useProviderRateLimit(
   provider: ProviderKind | null,
 ): ProviderRateLimitsSnapshot | null {
   const all = useProviderRateLimits();
-  return useMemo(() => {
-    if (!provider) return null;
-    // Exact match first.
-    const exact = all.find((entry) => entry.provider === provider);
-    if (exact) return exact;
-    // Fallback: if the requested provider is a base kind (e.g. "claudeAgent"),
-    // find a profiled entry that shares the same base (e.g. "claudeAgent:zbd").
-    // If the requested provider is profiled but has no entry, try the base entry.
-    const base = baseProviderKind(provider);
-    if (base === provider) {
-      return (
-        all.find(
-          (entry) =>
-            entry.provider !== base && baseProviderKind(entry.provider as ProviderKind) === base,
-        ) ?? null
-      );
-    }
-    return all.find((entry) => entry.provider === base) ?? null;
-  }, [all, provider]);
+  return useMemo(() => selectProviderRateLimitSnapshot(all, provider), [all, provider]);
 }

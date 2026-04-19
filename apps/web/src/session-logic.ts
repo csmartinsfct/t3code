@@ -40,7 +40,7 @@ export const PROVIDER_OPTIONS: Array<ProviderOption> = [
 
 /**
  * Build the provider picker options from server-provided snapshots.
- * Includes all server-registered providers (including Claude profiles)
+ * Includes all server-registered providers (including provider profiles)
  * plus the static "coming soon" entries.
  */
 export function buildProviderOptions(

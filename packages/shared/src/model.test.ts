@@ -53,7 +53,12 @@ const claudeCaps: ModelCapabilities = {
 };
 
 describe("makeProviderModelSelection", () => {
-  it("preserves provider profiles for Claude and Gemini selections", () => {
+  it("preserves provider profiles for Codex, Claude, and Gemini selections", () => {
+    expect(makeProviderModelSelection("codex:metric", "gpt-5.4")).toEqual({
+      provider: "codex",
+      profileId: "metric",
+      model: "gpt-5.4",
+    });
     expect(makeProviderModelSelection("claudeAgent:metric", "claude-opus-4-6")).toEqual({
       provider: "claudeAgent",
       profileId: "metric",

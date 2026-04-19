@@ -54,6 +54,31 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     ],
   },
   {
+    provider: "codex:metric" as never,
+    displayName: "Codex (metric)",
+    enabled: true,
+    installed: true,
+    version: "0.116.0",
+    status: "ready",
+    auth: { status: "unauthenticated" },
+    checkedAt: new Date().toISOString(),
+    models: [
+      {
+        slug: "gpt-5.4",
+        name: "GPT-5.4",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
+          supportsFastMode: true,
+          supportsThinkingToggle: false,
+          supportsPlan: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
+  {
     provider: "claudeAgent",
     enabled: true,
     installed: true,
@@ -158,6 +183,24 @@ function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   };
 }
 
+function getMenuRadioItemByText(label: string): HTMLElement {
+  const element = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')).find(
+    (candidate) => candidate.textContent?.includes(label),
+  );
+
+  if (!element) {
+    throw new Error(`Expected menu radio item ${label} to be mounted.`);
+  }
+
+  return element;
+}
+
+function expectMenuRadioItemDisabled(label: string): HTMLElement {
+  const element = getMenuRadioItemByText(label);
+  expect(element.matches('[data-disabled], [aria-disabled="true"]')).toBe(true);
+  return element;
+}
+
 async function mountPicker(props: {
   provider: ProviderKind;
   model: string;
@@ -215,6 +258,7 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Codex");
+        expect(text).toContain("Codex (metric)");
         expect(text).toContain("Claude");
         expect(text).toContain("Claude (metric)");
         expect(text).not.toContain("Claude Sonnet 4.6");
@@ -233,7 +277,7 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      const providerTrigger = page.getByRole("menuitem", { name: "Codex" });
+      const providerTrigger = page.getByRole("menuitem", { name: "Codex", exact: true });
       await providerTrigger.hover();
 
       await vi.waitFor(() => {
@@ -291,6 +335,10 @@ describe("ProviderModelPicker", () => {
   });
 
   it("only shows codex spark when the server reports it for the account", async () => {
+    const claudeProvider = TEST_PROVIDERS.find((provider) => provider.provider === "claudeAgent");
+    if (!claudeProvider) {
+      throw new Error("Expected Claude test provider to exist.");
+    }
     const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
       buildCodexProvider([
         {
@@ -307,7 +355,7 @@ describe("ProviderModelPicker", () => {
           },
         },
       ]),
-      TEST_PROVIDERS[1]!,
+      claudeProvider,
     ];
     const providersWithSpark: ReadonlyArray<ServerProvider> = [
       buildCodexProvider([
@@ -338,7 +386,7 @@ describe("ProviderModelPicker", () => {
           },
         },
       ]),
-      TEST_PROVIDERS[1]!,
+      claudeProvider,
     ];
 
     const hidden = await mountPicker({
@@ -350,7 +398,7 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
+      await page.getByRole("menuitem", { name: "Codex", exact: true }).hover();
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
@@ -370,7 +418,7 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
+      await page.getByRole("menuitem", { name: "Codex", exact: true }).hover();
 
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("GPT-5.3 Codex Spark");
@@ -427,6 +475,29 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("keeps discovered Codex profiles as distinct provider selections", async () => {
+    const mounted = await mountPicker({
+      provider: "codex:metric",
+      model: "gpt-5.4",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(page.getByRole("button").element().textContent).toContain("GPT-5.4");
+        expect(page.getByRole("button").element().textContent).toContain("metric");
+      });
+
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Codex (metric)" }).hover();
+      await page.getByRole("menuitemradio", { name: "GPT-5.4" }).click();
+
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith("codex:metric", "gpt-5.4");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows disabled providers as non-selectable entries", async () => {
     const disabledProviders = TEST_PROVIDERS.slice();
     const claudeIndex = disabledProviders.findIndex(
@@ -449,13 +520,17 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Claude", exact: true }).hover();
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude");
         expect(text).toContain("Disabled");
-        expect(text).not.toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Claude Sonnet 4.6");
       });
+      const disabledModel = expectMenuRadioItemDisabled("Claude Sonnet 4.6");
+      disabledModel.click();
+      expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }
@@ -497,13 +572,65 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Gemini" }).hover();
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Gemini");
         expect(text).toContain("Not authenticated");
-        expect(text).not.toContain("Gemini 2.5 Flash");
+        expect(text).toContain("Gemini 2.5 Flash");
       });
+      const disabledModel = expectMenuRadioItemDisabled("Gemini 2.5 Flash");
+      disabledModel.click();
+      expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surfaces missing Claude profile config distinctly", async () => {
+    const claudeProvider = TEST_PROVIDERS.find((provider) => provider.provider === "claudeAgent");
+    const claudeProfileProvider = TEST_PROVIDERS.find(
+      (provider) => String(provider.provider) === "claudeAgent:metric",
+    );
+    if (!claudeProvider) {
+      throw new Error("Expected Claude test provider to exist.");
+    }
+    if (!claudeProfileProvider) {
+      throw new Error("Expected Claude profile test provider to exist.");
+    }
+    const missingConfigClaudeProvider: ServerProvider = {
+      ...claudeProvider,
+      status: "error",
+      installed: true,
+      auth: { status: "unauthenticated" },
+      message:
+        "Claude profile is not configured. Run `claude auth login` for this profile and try again.",
+    };
+    const missingConfigProviders: ReadonlyArray<ServerProvider> = [
+      TEST_PROVIDERS[0]!,
+      missingConfigClaudeProvider,
+      claudeProfileProvider,
+    ];
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: missingConfigProviders,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Claude", exact: true }).hover();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Not configured");
+        expect(text).toContain("Claude Opus 4.6");
+      });
+      const disabledModel = expectMenuRadioItemDisabled("Claude Opus 4.6");
+      disabledModel.click();
+      expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }

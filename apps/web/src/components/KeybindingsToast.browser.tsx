@@ -72,6 +72,7 @@ function createBaseServerConfig(): ServerConfig {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         claudeAgent: { enabled: true, binaryPath: "", configDir: "", customModels: [] },
         gemini: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
+        codexProfiles: [],
         claudeProfiles: [],
       },
     },

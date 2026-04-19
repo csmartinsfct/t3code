@@ -48,8 +48,24 @@ describe("settings defaults", () => {
     );
   });
 
-  it("accepts Claude profile ids in model selection patches", () => {
+  it("accepts Codex and Claude profile ids in model selection patches", () => {
     const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        orchestrationImplementerModelSelection: {
+          provider: "codex",
+          profileId: "metric",
+          model: "gpt-5.4",
+        },
+      }),
+    ).toEqual({
+      orchestrationImplementerModelSelection: {
+        provider: "codex",
+        profileId: "metric",
+        model: "gpt-5.4",
+      },
+    });
 
     expect(
       decodePatch({

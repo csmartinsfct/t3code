@@ -7,7 +7,7 @@ import { baseProviderKind, type ProviderKind, type ServerProvider } from "@t3too
 import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive, makeClaudeProfileProvider } from "./ClaudeProvider";
-import { CodexProviderLive } from "./CodexProvider";
+import { CodexProviderLive, makeCodexProfileProvider } from "./CodexProvider";
 import { GeminiProviderLive } from "./GeminiProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { CodexProvider } from "../Services/CodexProvider";
@@ -15,6 +15,7 @@ import { GeminiProvider } from "../Services/GeminiProvider";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry";
 import type { ServerProviderShape } from "../Services/ServerProvider";
 import { discoverClaudeProfiles, mergeClaudeProfiles } from "../claudeProfileDiscovery";
+import { discoverCodexProfiles, mergeCodexProfiles } from "../codexProfileDiscovery";
 import { ServerSettingsService } from "../../serverSettings";
 
 export const haveProvidersChanged = (
@@ -30,13 +31,19 @@ export const ProviderRegistryLive = Layer.effect(
     const geminiProvider = yield* GeminiProvider;
     const serverSettings = yield* ServerSettingsService;
 
-    // ── Discover Claude profiles ───────────────────────────────────
-    const discovered = yield* discoverClaudeProfiles();
+    // ── Discover provider profiles ─────────────────────────────────
+    const discoveredCodex = yield* discoverCodexProfiles();
+    const discoveredClaude = yield* discoverClaudeProfiles();
     const settings = yield* serverSettings.getSettings;
-    const profiles = mergeClaudeProfiles(discovered, settings.providers.claudeProfiles);
-    // Create a managed provider shape for each profile
+    const codexProfiles = mergeCodexProfiles(discoveredCodex, settings.providers.codexProfiles);
+    const claudeProfiles = mergeClaudeProfiles(discoveredClaude, settings.providers.claudeProfiles);
+
     const profileProviders: Array<{ kind: ProviderKind; provider: ServerProviderShape }> = [];
-    for (const profile of profiles) {
+    for (const profile of codexProfiles) {
+      const provider = yield* makeCodexProfileProvider(profile);
+      profileProviders.push({ kind: profile.providerKind, provider });
+    }
+    for (const profile of claudeProfiles) {
       const provider = yield* makeClaudeProfileProvider(profile);
       profileProviders.push({ kind: profile.providerKind, provider });
     }
@@ -88,6 +95,8 @@ export const ProviderRegistryLive = Layer.effect(
         const entry = allProviders.find(({ kind }) => kind === provider);
         if (entry) {
           yield* entry.provider.refresh;
+        } else if (baseProviderKind(provider) === "codex") {
+          yield* codexProvider.refresh;
         } else if (baseProviderKind(provider) === "claudeAgent") {
           // Refresh the default Claude provider for unknown Claude profiles
           yield* claudeProvider.refresh;

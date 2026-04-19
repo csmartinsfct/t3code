@@ -7,6 +7,9 @@ import type {
   ServerProviderAuth,
   ServerProviderState,
 } from "@t3tools/contracts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   Cache,
   Duration,
@@ -42,6 +45,24 @@ import type { ServerProviderShape } from "../Services/ServerProvider";
 import type { DiscoveredClaudeProfile } from "../claudeProfileDiscovery";
 
 const PROVIDER = "claudeAgent" as const;
+const CLAUDE_CONFIG_FILE_NAME = ".claude.json";
+
+function resolveClaudeConfigDir(configDir: string | undefined): string {
+  return configDir && configDir.trim().length > 0 ? configDir : path.join(os.homedir(), ".claude");
+}
+
+function resolveClaudeConfigFilePath(configDir: string | undefined): string {
+  return path.join(resolveClaudeConfigDir(configDir), CLAUDE_CONFIG_FILE_NAME);
+}
+
+function hasClaudeProfileConfig(configDir: string | undefined): boolean {
+  try {
+    return fs.statSync(resolveClaudeConfigFilePath(configDir)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "claude-opus-4-7",
@@ -512,6 +533,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     ));
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, claudeSettings.customModels);
+  const effectiveConfigDir = configDir || claudeSettings.configDir;
 
   if (!claudeSettings.enabled) {
     return buildServerProvider({
@@ -530,7 +552,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
-  const cmdOpts = configDir ? { configDir } : undefined;
+  const cmdOpts = effectiveConfigDir ? { configDir: effectiveConfigDir } : undefined;
   const versionProbe = yield* runClaudeCommand(["--version"], cmdOpts).pipe(
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.result,
@@ -592,6 +614,24 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         message: detail
           ? `Claude Agent CLI is installed but failed to run. ${detail}`
           : "Claude Agent CLI is installed but failed to run.",
+      },
+    });
+  }
+
+  if (!hasClaudeProfileConfig(effectiveConfigDir)) {
+    return buildServerProvider({
+      provider: providerKind,
+      ...displayNameProp,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "error",
+        auth: { status: "unauthenticated" },
+        message:
+          "Claude profile is not configured. Run `claude auth login` for this profile and try again.",
       },
     });
   }

@@ -5250,6 +5250,74 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("creates new drafts from sticky profiled Codex selections and keeps the trigger label", async () => {
+    useComposerDraftStore.setState({
+      stickyModelSelectionByProvider: {
+        "codex:metric": {
+          provider: "codex",
+          profileId: "metric",
+          model: "gpt-5",
+          options: {
+            reasoningEffort: "high",
+          },
+        },
+      },
+      stickyActiveProvider: "codex:metric",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sticky-profiled-codex-test" as MessageId,
+        targetText: "sticky profiled codex test",
+      }),
+      configureFixture: (fixture) => {
+        fixture.serverConfig = {
+          ...fixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({
+              provider: "codex:metric",
+              displayName: "Codex (metric)",
+            }),
+            createProvider({ provider: "claudeAgent", displayName: "Claude" }),
+          ],
+        };
+      },
+    });
+
+    try {
+      await page.getByTestId("new-thread-button").click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new profiled codex draft thread UUID.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      expect(useComposerDraftStore.getState().draftsByThreadId[newThreadId]).toMatchObject({
+        modelSelectionByProvider: {
+          "codex:metric": {
+            provider: "codex",
+            profileId: "metric",
+            model: "gpt-5",
+            options: {
+              reasoningEffort: "high",
+            },
+          },
+        },
+        activeProvider: "codex:metric",
+      });
+
+      await vi.waitFor(() => {
+        expect(findComposerProviderModelPicker()?.textContent).toContain("metric");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("rehydrates an existing profiled Claude draft selection into the picker label", async () => {
     const profiledDraftThreadId = "2ac8e396-e55f-4f16-9a4a-9deae2dc8b3a" as ThreadId;
     useComposerDraftStore.setState({
@@ -5323,6 +5391,88 @@ describe("ChatView timeline estimator parity (full app)", () => {
         mounted.router,
         (path) => path === `/${profiledDraftThreadId}`,
         "Route should bootstrap into the profiled claude draft thread.",
+      );
+      await vi.waitFor(() => {
+        expect(findComposerProviderModelPicker()?.textContent).toContain("metric");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("rehydrates an existing profiled Codex draft selection into the picker label", async () => {
+    const profiledDraftThreadId = "5ac8e396-e55f-4f16-9a4a-9deae2dc8b3a" as ThreadId;
+    useComposerDraftStore.setState({
+      draftsByThreadId: {
+        [profiledDraftThreadId]: {
+          prompt: "",
+          images: [],
+          nonPersistedImageIds: [],
+          persistedAttachments: [],
+          terminalContexts: [],
+          codeSnippets: [],
+          skills: [],
+          modelSelectionByProvider: {
+            "codex:metric": {
+              provider: "codex",
+              profileId: "metric",
+              model: "gpt-5",
+            },
+          },
+          activeProvider: "codex:metric",
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          ticketAttachments: [],
+        },
+      },
+      draftThreadsByThreadId: {
+        [profiledDraftThreadId]: {
+          projectId: PROJECT_ID,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      projectDraftThreadIdByProjectId: {
+        [PROJECT_ID]: profiledDraftThreadId,
+      },
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-profiled-codex-draft-rehydration-test" as MessageId,
+        targetText: "profiled codex draft rehydration test",
+      }),
+      configureFixture: (fixture) => {
+        fixture.serverConfig = {
+          ...fixture.serverConfig,
+          providers: [
+            createProvider({ provider: "codex" }),
+            createProvider({
+              provider: "codex:metric",
+              displayName: "Codex (metric)",
+            }),
+            createProvider({ provider: "claudeAgent", displayName: "Claude" }),
+          ],
+        };
+      },
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: profiledDraftThreadId },
+      });
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${profiledDraftThreadId}`,
+        "Route should bootstrap into the profiled codex draft thread.",
       );
       await vi.waitFor(() => {
         expect(findComposerProviderModelPicker()?.textContent).toContain("metric");

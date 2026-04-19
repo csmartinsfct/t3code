@@ -70,6 +70,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Runs `codex app-server` as a child process communicating via JSON-RPC over stdio.
 - Authentication via `codex login` CLI.
 - Configuration: global `~/.codex/config.toml` + project-scoped `.codex/config.toml`.
+- **Profiles:** Multiple named profiles supported. T3 auto-discovers `~/.codex-*`
+  homes such as `~/.codex-metric`; profiles appear as separate provider entries
+  and run Codex with profile-scoped `CODEX_HOME`.
 - Project trust: the server auto-trusts the active project path.
 
 ### Claude Agent (Anthropic)
@@ -112,6 +115,7 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 Server settings expose per-provider configuration:
 
 - `providers.codex` — enabled/disabled, binaryPath, homePath, customModels.
+- `providers.codexProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, homePath, customModels). T3 also auto-discovers `~/.codex-*` directories as Codex profiles.
 - `providers.claudeAgent` — enabled/disabled, binaryPath, configDir, customModels.
 - `providers.claudeProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, configDir, customModels).
 - `providers.gemini` — enabled/disabled, binaryPath, homePath, customModels.
@@ -125,7 +129,7 @@ Model selection settings (each can target a specific provider + model):
 
 ### Rate limits
 
-Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and 7-day windows, per-model breakdowns). Rate limit state is streamed to the UI via `subscribeServerConfig`.
+Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and 7-day windows, per-model breakdowns). Rate limit snapshots are keyed by the exact provider kind, including profile suffixes such as `codex:metric`, so profile accounts never inherit the base provider's usage data. Rate limit state is streamed to the UI via `subscribeServerConfig`.
 
 **User interaction:**
 

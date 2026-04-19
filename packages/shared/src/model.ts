@@ -29,7 +29,9 @@ export function makeProviderModelSelection(
   return {
     provider: base,
     model,
-    ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
+    ...((base === "codex" || base === "claudeAgent" || base === "gemini") && profileId
+      ? { profileId }
+      : {}),
     ...(options ? { options } : {}),
   } as ModelSelection;
 }

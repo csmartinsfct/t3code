@@ -73,6 +73,16 @@ export const CodexSettings = Schema.Struct({
 });
 export type CodexSettings = typeof CodexSettings.Type;
 
+export const CodexProfileSettings = Schema.Struct({
+  profileId: TrimmedNonEmptyString,
+  displayName: TrimmedNonEmptyString,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("codex"),
+  homePath: TrimmedNonEmptyString,
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type CodexProfileSettings = typeof CodexProfileSettings.Type;
+
 export const ClaudeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   binaryPath: makeBinaryPathSetting("claude"),
@@ -195,6 +205,7 @@ export const ServerSettings = Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     gemini: GeminiSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    codexProfiles: Schema.Array(CodexProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
     claudeProfiles: Schema.Array(ClaudeProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
@@ -250,6 +261,7 @@ const GeminiModelOptionsPatch = GeminiModelOptions;
 const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
+    profileId: Schema.optionalKey(TrimmedNonEmptyString),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(CodexModelOptionsPatch),
   }),
@@ -312,6 +324,7 @@ export const ServerSettingsPatch = Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       gemini: Schema.optionalKey(GeminiSettingsPatch),
+      codexProfiles: Schema.optionalKey(Schema.Array(CodexProfileSettings)),
       claudeProfiles: Schema.optionalKey(Schema.Array(ClaudeProfileSettings)),
     }),
   ),

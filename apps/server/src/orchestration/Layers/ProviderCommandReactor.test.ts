@@ -131,8 +131,25 @@ describe("ProviderCommandReactor", () => {
         typeof input.threadId === "string"
           ? ThreadId.makeUnsafe(input.threadId)
           : ThreadId.makeUnsafe(`thread-${sessionIndex}`);
+      const requestedProvider =
+        typeof input === "object" &&
+        input !== null &&
+        "provider" in input &&
+        typeof input.provider === "string"
+          ? (input.provider as ProviderSession["provider"])
+          : modelSelection.provider;
+      const requestedModelSelection =
+        typeof input === "object" &&
+        input !== null &&
+        "modelSelection" in input &&
+        typeof input.modelSelection === "object" &&
+        input.modelSelection !== null &&
+        "model" in input.modelSelection &&
+        typeof input.modelSelection.model === "string"
+          ? (input.modelSelection as ModelSelection)
+          : modelSelection;
       const session: ProviderSession = {
-        provider: modelSelection.provider,
+        provider: requestedProvider,
         status: "ready" as const,
         runtimeMode:
           typeof input === "object" &&
@@ -141,7 +158,9 @@ describe("ProviderCommandReactor", () => {
           (input.runtimeMode === "approval-required" || input.runtimeMode === "full-access")
             ? input.runtimeMode
             : "full-access",
-        ...(modelSelection.model !== undefined ? { model: modelSelection.model } : {}),
+        ...(requestedModelSelection.model !== undefined
+          ? { model: requestedModelSelection.model }
+          : {}),
         ...(typeof input === "object" &&
         input !== null &&
         "cwd" in input &&
@@ -898,6 +917,67 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.startSession.mock.calls.length).toBe(1);
     expect(harness.stopSession.mock.calls.length).toBe(0);
+  });
+
+  it("restarts the provider session when a same-base provider profile changes", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-profile-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-profile-1"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-profile-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-profile-2"),
+          role: "user",
+          text: "second",
+          attachments: [],
+        },
+        modelSelection: {
+          provider: "codex",
+          profileId: "metric",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "codex:metric",
+      modelSelection: {
+        provider: "codex",
+        profileId: "metric",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+    });
+    expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
   });
 
   it("restarts the provider session when the thread cwd changes", async () => {

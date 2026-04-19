@@ -134,6 +134,7 @@ describe("WsRpcAtomClient", () => {
           ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent,
           enabled: false,
         },
+        codexProfiles: [],
         claudeProfiles: [],
       },
     };
@@ -185,6 +186,7 @@ describe("WsRpcAtomClient", () => {
           ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent,
           enabled: false,
         },
+        codexProfiles: [],
         claudeProfiles: [],
       },
     };

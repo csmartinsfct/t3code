@@ -336,15 +336,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
     const hasRequestedSession = yield* adapter.hasSession(input.threadId);
     if (hasRequestedSession) {
-      return { adapter, threadId: input.threadId, isActive: true } as const;
+      return {
+        adapter,
+        provider: binding.provider,
+        threadId: input.threadId,
+        isActive: true,
+      } as const;
     }
 
     if (!input.allowRecovery) {
-      return { adapter, threadId: input.threadId, isActive: false } as const;
+      return {
+        adapter,
+        provider: binding.provider,
+        threadId: input.threadId,
+        isActive: false,
+      } as const;
     }
 
     const recovered = yield* recoverSessionForThread({ binding, operation: input.operation });
-    return { adapter: recovered.adapter, threadId: input.threadId, isActive: true } as const;
+    return {
+      adapter: recovered.adapter,
+      provider: recovered.session.provider,
+      threadId: input.threadId,
+      isActive: true,
+    } as const;
   });
 
   const startSession: ProviderServiceShape["startSession"] = Effect.fn("startSession")(
@@ -385,8 +400,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
         const effectiveResumeCursor =
           input.resumeCursor ??
-          (persistedBinding &&
-          baseProviderKind(persistedBinding.provider) === baseProviderKind(input.provider)
+          (persistedBinding?.provider === input.provider
             ? persistedBinding.resumeCursor
             : undefined);
         yield* lfcyl(threadId, {
@@ -486,24 +500,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.sendTurn",
         allowRecovery: true,
       });
-      metricProvider = routed.adapter.provider;
+      metricProvider = routed.provider;
       metricModel = input.modelSelection?.model;
       yield* lfcyl(input.threadId, {
         scope: "provider-service",
         event: "turn.send",
         details: {
-          provider: routed.adapter.provider,
+          provider: routed.provider,
           model: input.modelSelection?.model ?? null,
         },
       });
       yield* Effect.annotateCurrentSpan({
-        "provider.kind": routed.adapter.provider,
+        "provider.kind": routed.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
       const turn = yield* routed.adapter.sendTurn(input);
       yield* directory.upsert({
         threadId: input.threadId,
-        provider: routed.adapter.provider,
+        provider: routed.provider,
         status: "running",
         ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
         runtimePayload: {
@@ -514,7 +528,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         },
       });
       yield* analytics.record("provider.turn.sent", {
-        provider: routed.adapter.provider,
+        provider: routed.provider,
         model: input.modelSelection?.model,
         interactionMode: input.interactionMode,
         attachmentCount: input.attachments.length,
@@ -523,7 +537,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* Effect.logInfo(
         formatTimelineLog("server.provider", "send-turn.success", {
           threadId: input.threadId,
-          provider: routed.adapter.provider,
+          provider: routed.provider,
           turnId: turn.turnId,
           resumeCursor: turn.resumeCursor ?? null,
         }),
@@ -569,16 +583,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           operation: "ProviderService.interruptTurn",
           allowRecovery: true,
         });
-        metricProvider = routed.adapter.provider;
+        metricProvider = routed.provider;
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "interrupt-turn",
-          "provider.kind": routed.adapter.provider,
+          "provider.kind": routed.provider,
           "provider.thread_id": input.threadId,
           "provider.turn_id": input.turnId,
         });
         yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
         yield* analytics.record("provider.turn.interrupted", {
-          provider: routed.adapter.provider,
+          provider: routed.provider,
         });
       }).pipe(
         withMetrics({
@@ -606,16 +620,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           operation: "ProviderService.respondToRequest",
           allowRecovery: true,
         });
-        metricProvider = routed.adapter.provider;
+        metricProvider = routed.provider;
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "respond-to-request",
-          "provider.kind": routed.adapter.provider,
+          "provider.kind": routed.provider,
           "provider.thread_id": input.threadId,
           "provider.request_id": input.requestId,
         });
         yield* routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision);
         yield* analytics.record("provider.request.responded", {
-          provider: routed.adapter.provider,
+          provider: routed.provider,
           decision: input.decision,
         });
       }).pipe(
@@ -645,10 +659,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.respondToUserInput",
         allowRecovery: true,
       });
-      metricProvider = routed.adapter.provider;
+      metricProvider = routed.provider;
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "respond-to-user-input",
-        "provider.kind": routed.adapter.provider,
+        "provider.kind": routed.provider,
         "provider.thread_id": input.threadId,
         "provider.request_id": input.requestId,
       });
@@ -678,18 +692,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           operation: "ProviderService.stopSession",
           allowRecovery: false,
         });
-        metricProvider = routed.adapter.provider;
+        metricProvider = routed.provider;
         yield* lfcyl(input.threadId, {
           scope: "provider-service",
           event: "session.stop",
           details: {
-            provider: routed.adapter.provider ?? null,
+            provider: routed.provider,
             sessionWasActive: routed.isActive,
           },
         });
         yield* Effect.annotateCurrentSpan({
           "provider.operation": "stop-session",
-          "provider.kind": routed.adapter.provider,
+          "provider.kind": routed.provider,
           "provider.thread_id": input.threadId,
         });
         if (routed.isActive) {
@@ -697,7 +711,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         yield* directory.upsert({
           threadId: input.threadId,
-          provider: routed.adapter.provider,
+          provider: routed.provider,
           status: "stopped",
           runtimePayload: {
             activeTurnId: null,
@@ -706,7 +720,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           },
         });
         yield* analytics.record("provider.session.stopped", {
-          provider: routed.adapter.provider,
+          provider: routed.provider,
         });
       }).pipe(
         withMetrics({
@@ -789,16 +803,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         operation: "ProviderService.rollbackConversation",
         allowRecovery: true,
       });
-      metricProvider = routed.adapter.provider;
+      metricProvider = routed.provider;
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "rollback-conversation",
-        "provider.kind": routed.adapter.provider,
+        "provider.kind": routed.provider,
         "provider.thread_id": input.threadId,
         "provider.rollback_turns": input.numTurns,
       });
       yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
       yield* analytics.record("provider.conversation.rolled_back", {
-        provider: routed.adapter.provider,
+        provider: routed.provider,
         turns: input.numTurns,
       });
     }).pipe(
@@ -884,7 +898,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 Effect.tap(() =>
                   directory.upsert({
                     threadId: session.threadId,
-                    provider: adapter.provider,
+                    provider: session.provider,
                     status: "stopped",
                     runtimePayload: {
                       activeTurnId: null,

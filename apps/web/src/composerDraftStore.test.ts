@@ -86,7 +86,8 @@ function modelSelection(
   options?: ModelSelection["options"],
 ): ModelSelection {
   const profileId =
-    (provider === "claudeAgent" || provider === "gemini") && typeof profileIdOrOptions === "string"
+    (provider === "codex" || provider === "claudeAgent" || provider === "gemini") &&
+    typeof profileIdOrOptions === "string"
       ? profileIdOrOptions
       : undefined;
   const resolvedOptions = typeof profileIdOrOptions === "string" ? options : profileIdOrOptions;
@@ -560,7 +561,7 @@ describe("composerDraftStore terminal contexts", () => {
     expect(mergedState.projectDraftThreadIdByProjectId).toEqual({});
   });
 
-  it("rehydrates profiled Claude drafts and sticky state from persisted storage", () => {
+  it("rehydrates profiled provider drafts and sticky state from persisted storage", () => {
     // Audit traceability: e1077b5, 7d6be28.
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {
@@ -579,6 +580,14 @@ describe("composerDraftStore terminal contexts", () => {
             prompt: "",
             attachments: [],
             modelSelectionByProvider: {
+              "codex:metric": {
+                provider: "codex",
+                profileId: "metric",
+                model: "gpt-5.4",
+                options: {
+                  reasoningEffort: "high",
+                },
+              },
               "claudeAgent:metric": {
                 provider: "claudeAgent",
                 profileId: "metric",
@@ -594,6 +603,11 @@ describe("composerDraftStore terminal contexts", () => {
         draftThreadsByThreadId: {},
         projectDraftThreadIdByProjectId: {},
         stickyModelSelectionByProvider: {
+          "codex:metric": {
+            provider: "codex",
+            profileId: "metric",
+            model: "gpt-5.4",
+          },
           "claudeAgent:metric": {
             provider: "claudeAgent",
             profileId: "metric",
@@ -607,6 +621,9 @@ describe("composerDraftStore terminal contexts", () => {
 
     expect(mergedState.draftsByThreadId[profiledThreadId]).toMatchObject({
       modelSelectionByProvider: {
+        "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
+          reasoningEffort: "high",
+        }),
         "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
           effort: "max",
         }),
@@ -614,6 +631,7 @@ describe("composerDraftStore terminal contexts", () => {
       activeProvider: "claudeAgent:metric",
     });
     expect(mergedState.stickyModelSelectionByProvider).toMatchObject({
+      "codex:metric": modelSelection("codex", "gpt-5.4", "metric"),
       "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric"),
     });
     expect(mergedState.stickyActiveProvider).toBe("claudeAgent:metric");
@@ -984,6 +1002,40 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("keeps Codex profile options scoped to the profiled provider", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadId, modelSelection("codex", "gpt-5.4", "metric"));
+
+    store.setProviderModelOptions(
+      threadId,
+      "codex:metric",
+      {
+        reasoningEffort: "high",
+        fastMode: true,
+      },
+      { persistSticky: true },
+    );
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider[
+        "codex:metric"
+      ],
+    ).toEqual(
+      modelSelection("codex", "gpt-5.4", "metric", {
+        reasoningEffort: "high",
+        fastMode: true,
+      }),
+    );
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toMatchObject({
+      "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
+        reasoningEffort: "high",
+        fastMode: true,
+      }),
+    });
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex:metric");
+  });
+
   it("updates only the draft when sticky persistence is omitted", () => {
     const store = useComposerDraftStore.getState();
 
@@ -1150,8 +1202,21 @@ describe("composerDraftStore sticky composer settings", () => {
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex");
   });
 
-  it("stores profiled Claude sticky selections with the full provider kind", () => {
+  it("stores profiled sticky selections with the full provider kind", () => {
     const store = useComposerDraftStore.getState();
+
+    store.setStickyModelSelection(
+      modelSelection("codex", "gpt-5.4", "metric", {
+        reasoningEffort: "high",
+      }),
+    );
+
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toMatchObject({
+      "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
+        reasoningEffort: "high",
+      }),
+    });
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex:metric");
 
     store.setStickyModelSelection(
       modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
@@ -1160,6 +1225,9 @@ describe("composerDraftStore sticky composer settings", () => {
     );
 
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toMatchObject({
+      "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
+        reasoningEffort: "high",
+      }),
       "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
         effort: "max",
       }),

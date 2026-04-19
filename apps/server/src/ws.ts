@@ -39,6 +39,7 @@ import {
   WsRpcGroup,
   baseProviderKind,
   providerProfileId,
+  type ProviderKind,
 } from "@t3tools/contracts";
 import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
 import { clamp } from "effect/Number";
@@ -89,6 +90,10 @@ import {
   resolveGeminiSettingsPaths,
   trustCodexProject,
 } from "./mcpConfigReader";
+import {
+  resolveCodexHomePath,
+  resolveCodexHomePathForProvider,
+} from "./provider/codexProfileDiscovery";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -214,25 +219,29 @@ const WsRpcLayer = WsRpcGroup.toLayer(
 
     // Watch ~/.codex/ for config.toml
     const currentSettings = yield* serverSettings.getSettings;
-    const codexHome =
-      currentSettings.providers.codex.homePath ||
-      process.env.CODEX_HOME ||
-      nodePath.join(home, ".codex");
+    const codexHome = resolveCodexHomePath(currentSettings);
     const resolveCodexHome = serverSettings.getSettings.pipe(
-      Effect.map(
-        (settings) =>
-          settings.providers.codex.homePath ||
-          process.env.CODEX_HOME ||
-          nodePath.join(os.homedir(), ".codex"),
-      ),
+      Effect.map((settings) => resolveCodexHomePath(settings)),
     );
+    const resolveCodexHomeForProvider = (provider: ProviderKind) =>
+      serverSettings.getSettings.pipe(
+        Effect.map((settings) => resolveCodexHomePathForProvider(settings, provider)),
+      );
     yield* ensureWatchDirForFile(codexHome, "config.toml");
 
-    // Watch each ~/.claude-{profile}/ dir for .claude.json
+    // Watch each ~/.codex-{profile}/ and ~/.claude-{profile}/ directory
     const homeEntries = yield* fs
       .readDirectory(home)
       .pipe(Effect.orElseSucceed(() => [] as string[]));
     for (const entry of homeEntries) {
+      if (entry.startsWith(".codex-")) {
+        const profileDir = nodePath.join(home, entry);
+        const stat = yield* fs.stat(profileDir).pipe(Effect.orElseSucceed(() => undefined));
+        if (stat?.type === "Directory") {
+          yield* ensureWatchDirForFile(profileDir, "config.toml");
+        }
+        continue;
+      }
       if (!entry.startsWith(".claude-")) continue;
       const profileDir = nodePath.join(home, entry);
       const stat = yield* fs.stat(profileDir).pipe(Effect.orElseSucceed(() => undefined));
@@ -632,7 +641,8 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           Effect.gen(function* () {
             const base = baseProviderKind(input.provider);
             if (base === "codex") {
-              const codexHome = yield* resolveCodexHome;
+              const codexHome = yield* resolveCodexHomeForProvider(input.provider);
+              yield* ensureWatchDirForFile(codexHome, "config.toml");
               if (input.cwd) {
                 yield* trustCodexProject(codexHome, input.cwd);
                 for (const configPath of resolveCodexProjectConfigPaths(input.cwd)) {

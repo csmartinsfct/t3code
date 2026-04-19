@@ -1,8 +1,44 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-18T19:18:49.256Z",
-  "lastProcessedCommit": "d5baae1c3fa433dbb33353b754413377ca49434c",
+  "generatedAt": "2026-04-19T16:31:58.226Z",
+  "lastProcessedCommit": "40f76668e469ed6d5cf16461f0408b6afac76b71",
   "groups": [
+    {
+      "date": "2026-04-19",
+      "entries": [
+        {
+          "id": "ede78d7ccb059313",
+          "title": "Added project-scoped browser automation for agents",
+          "summary": "Agents can now use an in-process Chromium browser to navigate pages, inspect content, interact with elements, take screenshots, and run batched browser actions. Browser sessions are isolated per project, preserve cookies and login state across restarts, and use stable element references for more reliable automation.",
+          "category": "feature",
+          "commitShas": [
+            "e1f468107174be467f29ffeaf7fd30c08a513fe9",
+            "f41408fa5c1fab4f45288f2f2ba4f64abe0f215e"
+          ]
+        },
+        {
+          "id": "3d1dcf9abc55fc26",
+          "title": "Improved browser tooling reliability in desktop builds",
+          "summary": "Desktop builds now include the required Chromium runtime for browser automation, reducing setup failures and making browser tools work more predictably in packaged apps.",
+          "category": "fix",
+          "commitShas": ["f41408fa5c1fab4f45288f2f2ba4f64abe0f215e"]
+        },
+        {
+          "id": "813ac46e41f17235",
+          "title": "Clearer REST API error details",
+          "summary": "REST API failures now return more complete underlying error information, making issues easier to understand when browser tools, managed runs, prompts, scheduled tasks, or ticketing actions fail.",
+          "category": "improvement",
+          "commitShas": ["f41408fa5c1fab4f45288f2f2ba4f64abe0f215e"]
+        },
+        {
+          "id": "2529510e11945aa2",
+          "title": "Improved sub-ticket selection for orchestration",
+          "summary": "The orchestration selector now groups sub-tickets under their parent ticket, shows parent progress with a count indicator, and keeps rows in place while toggling selections. This makes nested ticket execution easier to review and less jumpy to use.",
+          "category": "improvement",
+          "commitShas": ["1dfdfa2d2a8d1f0e233772caa17d8e4458ee776b"]
+        }
+      ]
+    },
     {
       "date": "2026-04-18",
       "entries": [
@@ -1891,6 +1927,22 @@
           "d5baae1c3fa433dbb33353b754413377ca49434c"
         ],
         "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-19T16:31:58.087Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d5baae1c3fa433dbb33353b754413377ca49434c",
+        "toInclusiveCommit": "40f76668e469ed6d5cf16461f0408b6afac76b71",
+        "commitShas": [
+          "e1f468107174be467f29ffeaf7fd30c08a513fe9",
+          "d027292d0817a7592ab713ad5988f1b0a8888954",
+          "1dfdfa2d2a8d1f0e233772caa17d8e4458ee776b",
+          "f41408fa5c1fab4f45288f2f2ba4f64abe0f215e",
+          "40f76668e469ed6d5cf16461f0408b6afac76b71"
+        ],
+        "commitCount": 5,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

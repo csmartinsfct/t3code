@@ -2,7 +2,6 @@ import {
   baseProviderKind,
   DEFAULT_MODEL_BY_PROVIDER,
   modelSelectionProviderKind,
-  providerProfileId,
   type ModelSelection,
   type PromptTemplateDocument,
   type ProviderKind,
@@ -10,6 +9,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import { makeProviderModelSelection } from "./model";
 import { renderPromptTemplate } from "./promptTemplates";
 
 export interface ReviewPromptTemplateInput {
@@ -256,19 +256,7 @@ function pickLowestUtilizationClaudeProfile(
 }
 
 function toModelSelection(provider: ProviderKind, model: string): ModelSelection {
-  const base = baseProviderKind(provider);
-  if (base === "claudeAgent" || base === "gemini") {
-    const profileId = providerProfileId(provider);
-    return {
-      provider: base,
-      ...(profileId ? { profileId } : {}),
-      model,
-    };
-  }
-  return {
-    provider: "codex",
-    model,
-  };
+  return makeProviderModelSelection(provider, model);
 }
 
 /** @deprecated Model selection is now deterministic via orchestration settings and ticket overrides. */

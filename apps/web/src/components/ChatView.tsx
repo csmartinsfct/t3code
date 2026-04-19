@@ -3,7 +3,6 @@ import {
   baseProviderKind,
   type BaseProviderKind,
   modelSelectionProviderKind,
-  providerProfileId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
@@ -29,7 +28,11 @@ import {
   type SkillEntry,
   type DeclaredService,
 } from "@t3tools/contracts";
-import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  applyClaudePromptEffortPrefix,
+  makeProviderModelSelection,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
 import { summarizeTimelineText } from "@t3tools/shared/timeline";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -1400,10 +1403,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // suffix (e.g. "claudeAgent:metric") when a profiled provider is active.
   const rateLimitProvider = useMemo(() => selectedProvider, [selectedProvider]);
   const rateLimitEntryFull = useProviderRateLimit(rateLimitProvider);
-  // Prefer the entry matching the current selection; fall back to the
-  // thread-level early entry only when the selection-based lookup is empty
-  // (e.g. rate-limit data hasn't been fetched yet).
-  const rateLimitEntry = rateLimitEntryFull ?? rateLimitEntryEarly;
+  // Prefer the entry matching the current selection.  Only reuse the early
+  // lookup when it resolved the exact same provider; profiled providers have
+  // account-scoped limits and must not inherit the base provider's snapshot.
+  const rateLimitEntry =
+    rateLimitEntryFull ??
+    (rateLimitProviderEarly === rateLimitProvider ? rateLimitEntryEarly : null);
   const activeRateLimit = useMemo(
     () => (rateLimitEntry ? deriveRateLimitSnapshot(rateLimitEntry) : null),
     [rateLimitEntry],
@@ -1508,14 +1513,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
   const selectedModelSelection = useMemo<ModelSelection>(() => {
-    const base = baseProviderKind(selectedProvider);
-    const profileId = providerProfileId(selectedProvider);
-    return {
-      provider: base,
-      model: selectedModel,
-      ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
-      ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
-    } as ModelSelection;
+    return makeProviderModelSelection(
+      selectedProvider,
+      selectedModel,
+      selectedModelOptionsForDispatch,
+    );
   }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
   const selectedModelForPicker = selectedModel;
   const rawPhase = derivePhase(activeThread?.session ?? null);
@@ -4184,19 +4186,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       const title = truncate(titleSeed);
       const threadCreateBase = baseProviderKind(selectedProvider);
-      const threadCreateProfileId = providerProfileId(selectedProvider);
-      const threadCreateModelSelection: ModelSelection = {
-        provider: threadCreateBase,
-        model:
-          selectedModel ||
+      const threadCreateModelSelection = makeProviderModelSelection(
+        selectedProvider,
+        selectedModel ||
           activeProject.defaultModelSelection?.model ||
           DEFAULT_MODEL_BY_PROVIDER[threadCreateBase],
-        ...((threadCreateBase === "claudeAgent" || threadCreateBase === "gemini") &&
-        threadCreateProfileId
-          ? { profileId: threadCreateProfileId }
-          : {}),
-        ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
-      } as ModelSelection;
+        selectedModelSelection.options,
+      );
 
       if (isLocalDraftThread) {
         logWebTimeline("composer.thread.create.start", {
@@ -4778,13 +4774,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         providerStatuses,
         model,
       );
-      const base = baseProviderKind(resolvedProvider);
-      const profileId = providerProfileId(resolvedProvider);
-      const nextModelSelection: ModelSelection = {
-        provider: base,
-        model: resolvedModel,
-        ...((base === "claudeAgent" || base === "gemini") && profileId ? { profileId } : {}),
-      } as ModelSelection;
+      const nextModelSelection = makeProviderModelSelection(resolvedProvider, resolvedModel);
       setComposerDraftModelSelection(activeThread.id, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();

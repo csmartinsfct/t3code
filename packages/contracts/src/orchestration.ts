@@ -119,6 +119,7 @@ export const DEFAULT_PROVIDER_KIND: BaseProviderKind = "codex";
 
 export const CodexModelSelection = Schema.Struct({
   provider: Schema.Literal("codex"),
+  profileId: Schema.optionalKey(Schema.String),
   model: TrimmedNonEmptyString,
   options: Schema.optionalKey(CodexModelOptions),
 });
@@ -150,7 +151,7 @@ export type ModelSelection = typeof ModelSelection.Type;
 /** Get the full ProviderKind (including profile) from a ModelSelection. */
 export function modelSelectionProviderKind(sel: ModelSelection): ProviderKind {
   if (
-    (sel.provider === "claudeAgent" || sel.provider === "gemini") &&
+    (sel.provider === "codex" || sel.provider === "claudeAgent" || sel.provider === "gemini") &&
     "profileId" in sel &&
     sel.profileId
   ) {

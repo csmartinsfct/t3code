@@ -329,19 +329,23 @@ const make = Effect.gen(function* () {
     const requestedModelSelection = options?.modelSelection;
     const threadProvider: ProviderKind =
       currentProvider ?? modelSelectionProviderKind(thread.modelSelection);
+    const requestedProvider =
+      requestedModelSelection !== undefined
+        ? modelSelectionProviderKind(requestedModelSelection)
+        : undefined;
     if (
-      requestedModelSelection !== undefined &&
-      baseProviderKind(modelSelectionProviderKind(requestedModelSelection)) !==
-        baseProviderKind(threadProvider)
+      requestedProvider !== undefined &&
+      baseProviderKind(requestedProvider) !== baseProviderKind(threadProvider)
     ) {
       return yield* new ProviderAdapterRequestError({
         provider: threadProvider,
         method: "thread.turn.start",
-        detail: `Thread '${threadId}' is bound to provider '${threadProvider}' and cannot switch to '${requestedModelSelection.provider}'.`,
+        detail: `Thread '${threadId}' is bound to provider '${threadProvider}' and cannot switch to '${requestedProvider}'.`,
       });
     }
-    const preferredProvider: ProviderKind = currentProvider ?? threadProvider;
     const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
+    const desiredProvider = requestedProvider ?? modelSelectionProviderKind(desiredModelSelection);
+    const preferredProvider: ProviderKind = requestedProvider ?? currentProvider ?? threadProvider;
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: readModel.projects,
@@ -388,7 +392,8 @@ const make = Effect.gen(function* () {
       const providerChanged =
         requestedModelSelection !== undefined &&
         currentProvider !== undefined &&
-        baseProviderKind(requestedModelSelection.provider) !== baseProviderKind(currentProvider);
+        requestedProvider !== undefined &&
+        requestedProvider !== currentProvider;
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
       const activeSessionMissing = activeSession === undefined;
       const currentSessionCwd = activeSession?.cwd ?? undefined;
@@ -433,7 +438,7 @@ const make = Effect.gen(function* () {
         threadId,
         existingSessionThreadId,
         currentProvider,
-        desiredProvider: desiredModelSelection.provider,
+        desiredProvider,
         currentRuntimeMode: thread.session?.runtimeMode,
         desiredRuntimeMode: thread.runtimeMode,
         runtimeModeChanged,
@@ -460,7 +465,7 @@ const make = Effect.gen(function* () {
           shouldRestartForModelSelectionChange,
           resumeCursor: resumeCursor ?? null,
           currentProvider: currentProvider ?? null,
-          desiredProvider: desiredModelSelection.provider,
+          desiredProvider,
           activeSessionModel: activeSession?.model ?? null,
         },
       });

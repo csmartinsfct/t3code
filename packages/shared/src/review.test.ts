@@ -315,6 +315,42 @@ describe("selectReviewModel", () => {
     });
   });
 
+  it("preserves Codex profile ids when falling back to a profiled Codex provider", () => {
+    const result = selectReviewModel({
+      availableProviders: [
+        makeProvider({
+          provider: "codex:metric",
+          models: [
+            {
+              slug: "gpt-5.4",
+              name: "GPT-5.4",
+              isCustom: false,
+              capabilities: {
+                reasoningEffortLevels: [{ value: "high", label: "High", isDefault: true }],
+                supportsFastMode: true,
+                supportsThinkingToggle: false,
+                supportsPlan: true,
+                contextWindowOptions: [],
+                promptInjectedEffortLevels: [],
+              },
+            },
+          ],
+        }),
+      ],
+      rateLimits: [],
+      implementationModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+      },
+    });
+
+    expect(result).toEqual({
+      provider: "codex",
+      profileId: "metric",
+      model: "gpt-5.4",
+    });
+  });
+
   it("returns the implementation model selection when no alternate provider exists", () => {
     const implementationModelSelection = {
       provider: "codex" as const,

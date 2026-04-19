@@ -837,18 +837,30 @@ export function GeneralSettingsPanel() {
   // Build provider cards from static settings + discovered profiles
   const allProviderSettings = useMemo(() => {
     const base = [...PROVIDER_SETTINGS];
-    // Add entries for discovered Claude profiles from server providers
+    // Add entries for discovered provider profiles from server providers
     for (const sp of serverProviders) {
       const kind = sp.provider as string;
-      if (kind === "codex" || kind === "claudeAgent") continue;
-      if (!kind.startsWith("claudeAgent:")) continue;
-      base.push({
-        provider: "claudeAgent" as BaseProviderKind,
-        title: sp.displayName ?? sp.provider,
-        binaryPlaceholder: "Claude binary path",
-        binaryDescription: "Path to the Claude binary",
-        _profileProviderKind: sp.provider as ProviderKind,
-      });
+      if (kind === "codex" || kind === "claudeAgent" || kind === "gemini") continue;
+      if (kind.startsWith("codex:")) {
+        base.push({
+          provider: "codex" as BaseProviderKind,
+          title: sp.displayName ?? sp.provider,
+          binaryPlaceholder: "Codex binary path",
+          binaryDescription: "Path to the Codex binary",
+          homePathKey: "codexHomePath",
+          homePlaceholder: "CODEX_HOME",
+          homeDescription: "Codex profile home directory",
+          _profileProviderKind: sp.provider as ProviderKind,
+        });
+      } else if (kind.startsWith("claudeAgent:")) {
+        base.push({
+          provider: "claudeAgent" as BaseProviderKind,
+          title: sp.displayName ?? sp.provider,
+          binaryPlaceholder: "Claude binary path",
+          binaryDescription: "Path to the Claude binary",
+          _profileProviderKind: sp.provider as ProviderKind,
+        });
+      }
     }
     return base;
   }, [serverProviders]);

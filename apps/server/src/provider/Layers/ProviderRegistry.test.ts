@@ -123,29 +123,36 @@ function makeMutableServerSettingsService(
 }
 
 /**
- * Create a temporary CODEX_HOME scoped to the current Effect test.
+ * Create a temporary Codex home scoped to the current Effect test.
  * Cleanup is registered in the test scope rather than via Vitest hooks.
  */
 function withTempCodexHome(configContent?: string) {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const settingsService = yield* ServerSettingsService;
     const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-test-codex-" });
 
-    yield* Effect.acquireRelease(
-      Effect.sync(() => {
-        const originalCodexHome = process.env.CODEX_HOME;
-        process.env.CODEX_HOME = tmpDir;
-        return originalCodexHome;
-      }),
-      (originalCodexHome) =>
-        Effect.sync(() => {
-          if (originalCodexHome !== undefined) {
-            process.env.CODEX_HOME = originalCodexHome;
-          } else {
-            delete process.env.CODEX_HOME;
-          }
-        }),
+    const previousHomePath = yield* settingsService.getSettings.pipe(
+      Effect.map((settings) => settings.providers.codex.homePath),
+    );
+    yield* settingsService.updateSettings({
+      providers: {
+        codex: {
+          homePath: tmpDir,
+        },
+      },
+    });
+    yield* Effect.addFinalizer(() =>
+      settingsService
+        .updateSettings({
+          providers: {
+            codex: {
+              homePath: previousHomePath,
+            },
+          },
+        })
+        .pipe(Effect.orDie),
     );
 
     if (configContent !== undefined) {
@@ -156,19 +163,33 @@ function withTempCodexHome(configContent?: string) {
   });
 }
 
+function withTempClaudeConfigDir(configContent?: string) {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-test-claude-" });
+
+    if (configContent !== undefined) {
+      yield* fileSystem.writeFileString(path.join(tmpDir, ".claude.json"), configContent);
+    }
+
+    return tmpDir;
+  });
+}
+
 it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
   "ProviderRegistry",
   (it) => {
     // ── checkCodexProviderStatus tests ────────────────────────────────
     //
-    // These tests control CODEX_HOME to ensure the custom-provider detection
+    // These tests control the configured Codex home to ensure custom-provider detection
     // in hasCustomModelProvider() does not interfere with the auth-probe
     // path being tested.
 
     describe("checkCodexProviderStatus", () => {
       it.effect("returns ready when codex is installed and authenticated", () =>
         Effect.gen(function* () {
-          // Point CODEX_HOME at an empty tmp dir (no config.toml) so the
+          // Point Codex at an empty tmp dir (no config.toml) so the
           // default code path (OpenAI provider, auth probe runs) is exercised.
           yield* withTempCodexHome();
           const status = yield* checkCodexProviderStatus();
@@ -315,7 +336,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
       );
 
       it.effect.skipIf(process.platform === "win32")(
-        "inherits PATH when launching the codex probe with a CODEX_HOME override",
+        "inherits PATH when launching the codex probe with a configured home path",
         () =>
           Effect.gen(function* () {
             const fileSystem = yield* FileSystem.FileSystem;
@@ -837,9 +858,120 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect(
+        "returns not configured without auth probe when claude profile config is missing",
+        () =>
+          Effect.gen(function* () {
+            const configDir = yield* withTempClaudeConfigDir();
+            const calls: Array<string> = [];
+            const status = yield* checkClaudeProviderStatus(undefined, { configDir }).pipe(
+              Effect.provide(
+                mockSpawnerLayer((args) => {
+                  const joined = args.join(" ");
+                  calls.push(joined);
+                  if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+                  throw new Error(`Unexpected args: ${joined}`);
+                }),
+              ),
+            );
+
+            assert.strictEqual(status.provider, "claudeAgent");
+            assert.strictEqual(status.status, "error");
+            assert.strictEqual(status.installed, true);
+            assert.strictEqual(status.auth.status, "unauthenticated");
+            assert.match(status.message ?? "", /not configured/i);
+            assert.deepStrictEqual(calls, ["--version"]);
+          }),
+      );
+
+      it.effect("checks auth status when claude profile config exists", () =>
+        Effect.gen(function* () {
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":true}\n');
+          const calls: Array<string> = [];
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                calls.push(joined);
+                if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+                if (joined === "auth status")
+                  return {
+                    stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          );
+
+          assert.strictEqual(status.provider, "claudeAgent");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.deepStrictEqual(calls, ["--version", "auth status"]);
+        }),
+      );
+
+      it.effect("uses the configured base claude config dir from settings", () =>
+        Effect.gen(function* () {
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":true}\n');
+          const status = yield* checkClaudeProviderStatus(undefined, {
+            settingsOverride: {
+              ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent,
+              configDir,
+            },
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+                if (joined === "auth status")
+                  return {
+                    stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          );
+
+          assert.strictEqual(status.provider, "claudeAgent");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+        }),
+      );
+
+      it.effect("applies missing config preflight to profiled providers", () =>
+        Effect.gen(function* () {
+          const configDir = yield* withTempClaudeConfigDir();
+          const status = yield* checkClaudeProviderStatus(undefined, {
+            providerKind: "claudeAgent:metric" as never,
+            configDir,
+            displayName: "Claude (metric)",
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          );
+
+          assert.strictEqual(status.provider, "claudeAgent:metric");
+          assert.strictEqual(status.displayName, "Claude (metric)");
+          assert.strictEqual(status.status, "error");
+          assert.strictEqual(status.installed, true);
+          assert.strictEqual(status.auth.status, "unauthenticated");
+          assert.match(status.message ?? "", /not configured/i);
+        }),
+      );
+
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":true}\n');
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
@@ -863,7 +995,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("returns a display label for claude subscription types", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus(() => Effect.succeed("maxplan"));
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":true}\n');
+          const status = yield* checkClaudeProviderStatus(() => Effect.succeed("maxplan"), {
+            configDir,
+          });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.auth.status, "authenticated");
@@ -888,7 +1023,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("returns an api key label for claude api key auth", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":true}\n');
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.auth.status, "authenticated");
@@ -911,9 +1047,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ),
       );
 
-      it.effect("returns unavailable when claude is missing", () =>
+      it.effect("missing binary still reports not installed before config preflight", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir();
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "error");
           assert.strictEqual(status.installed, false);
@@ -945,7 +1082,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("returns unauthenticated when auth status reports not logged in", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":false}\n');
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "error");
           assert.strictEqual(status.installed, true);
@@ -973,7 +1111,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("returns unauthenticated when output includes 'not logged in'", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir('{"loggedIn":false}\n');
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "error");
           assert.strictEqual(status.installed, true);
@@ -993,7 +1132,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("returns warning when auth status command is unsupported", () =>
         Effect.gen(function* () {
-          const status = yield* checkClaudeProviderStatus();
+          const configDir = yield* withTempClaudeConfigDir("{}\n");
+          const status = yield* checkClaudeProviderStatus(undefined, { configDir });
           assert.strictEqual(status.provider, "claudeAgent");
           assert.strictEqual(status.status, "warning");
           assert.strictEqual(status.installed, true);

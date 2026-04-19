@@ -7,9 +7,13 @@
  * @module CodexAdapterLive
  */
 import {
+  baseProviderKind,
   type CanonicalItemType,
   type CanonicalRequestType,
+  makeProviderKind,
+  providerProfileId,
   type ProviderEvent,
+  type ProviderKind,
   type ProviderRuntimeEvent,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
@@ -21,6 +25,7 @@ import {
   ThreadId,
   TurnId,
   ProviderSendTurnInput,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
 
@@ -44,11 +49,31 @@ import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns.ts";
 import { buildT3ServiceInjectionPrompt } from "../sessionContextPrompt.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveCodexHomePath, resolveCodexHomePathForProfile } from "../codexProfileDiscovery.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-import * as os from "node:os";
-import * as path from "node:path";
 
 const PROVIDER = "codex" as const;
+
+function resolveRequestedCodexProvider(input: {
+  readonly provider?: ProviderKind | undefined;
+  readonly modelSelection?:
+    | { readonly provider: "codex"; readonly profileId?: string }
+    | null
+    | undefined;
+}): ProviderKind {
+  const provider = input.provider;
+  const modelSelectionProvider = input.modelSelection?.profileId
+    ? makeProviderKind("codex", input.modelSelection.profileId)
+    : undefined;
+  return provider ?? modelSelectionProvider ?? PROVIDER;
+}
+
+function resolveCodexProfileBinaryPath(settings: ServerSettings, profileId: string): string {
+  return (
+    settings.providers.codexProfiles.find((profile) => profile.profileId === profileId)
+      ?.binaryPath || settings.providers.codex.binaryPath
+  );
+}
 
 export interface CodexAdapterLiveOptions {
   readonly manager?: CodexAppServerManager;
@@ -1389,11 +1414,16 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const startSession: CodexAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
-      if (input.provider !== undefined && input.provider !== PROVIDER) {
+      const requestedProvider = resolveRequestedCodexProvider({
+        provider: input.provider as ProviderKind | undefined,
+        modelSelection:
+          input.modelSelection?.provider === "codex" ? input.modelSelection : undefined,
+      });
+      if (baseProviderKind(requestedProvider) !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
           operation: "startSession",
-          issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+          issue: `Expected provider '${PROVIDER}' but received '${requestedProvider}'.`,
         });
       }
 
@@ -1409,9 +1439,13 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ),
       );
       const codexSettings = allCodexSettings.providers.codex;
-      const binaryPath = codexSettings.binaryPath;
-      const homePath = codexSettings.homePath;
-      const codexHomePath = homePath || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+      const profileId = providerProfileId(requestedProvider);
+      const binaryPath = profileId
+        ? resolveCodexProfileBinaryPath(allCodexSettings, profileId)
+        : codexSettings.binaryPath;
+      const codexHomePath = profileId
+        ? resolveCodexHomePathForProfile(allCodexSettings, profileId)
+        : resolveCodexHomePath(allCodexSettings);
       if (input.cwd) {
         yield* trustCodexProject(codexHomePath, input.cwd).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -1453,12 +1487,12 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
-        provider: "codex",
+        provider: requestedProvider,
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: input.runtimeMode,
         binaryPath,
-        ...(homePath ? { homePath } : {}),
+        homePath: codexHomePath,
         ...(configOverrides.length > 0 ? { configOverrides } : {}),
         ...(appendDeveloperInstructions ? { appendDeveloperInstructions } : {}),
         ...(input.modelSelection?.provider === "codex"

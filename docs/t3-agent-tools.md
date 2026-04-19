@@ -26,7 +26,14 @@ The chat composer's MCP picker mirrors provider-side config on disk so the UI re
 - Gemini: user-level `<GEMINI_CLI_HOME>/settings.json` (default
   `~/.gemini/settings.json`) plus project-local `.gemini/settings.json`
 
-For Codex, project-scoped config is still gated by Codex project trust. T3 Code now auto-trusts the active project path by writing the matching `[projects."<cwd>"] trust_level = "trusted"` entry into `~/.codex/config.toml` before resolving Codex MCP servers and before starting Codex sessions, so repo-local MCP config works without any manual terminal setup.
+Codex profiles use profile-scoped homes. The base provider reads `~/.codex/config.toml`
+unless `providers.codex.homePath` or `CODEX_HOME` overrides it; discovered profiles
+such as `codex:metric` read `~/.codex-metric/config.toml` unless explicitly
+configured in `providers.codexProfiles`. For Codex, project-scoped config is still
+gated by Codex project trust. T3 Code now auto-trusts the active project path by
+writing the matching `[projects."<cwd>"] trust_level = "trusted"` entry into the
+active Codex home before resolving Codex MCP servers and before starting Codex
+sessions, so repo-local MCP config works without any manual terminal setup.
 
 ---
 

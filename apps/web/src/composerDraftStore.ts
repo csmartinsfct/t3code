@@ -362,7 +362,7 @@ function modelSelectionByProviderToOptions(
   const result: Record<string, unknown> = {};
   for (const [provider, selection] of Object.entries(map)) {
     if (selection?.options) {
-      result[provider] = selection.options;
+      result[baseProviderKind(provider as ProviderKind)] = selection.options;
     }
   }
   return Object.keys(result).length > 0 ? (result as ProviderModelOptions) : null;
@@ -595,14 +595,23 @@ function normalizeProviderModelOptions(
   legacy?: LegacyCodexFields,
 ): ProviderModelOptions | null {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const providerSpecificCandidate =
+    provider && candidate?.[provider] && typeof candidate[provider] === "object"
+      ? (candidate[provider] as Record<string, unknown>)
+      : null;
+  const providerBase = provider ? baseProviderKind(provider) : null;
   const codexCandidate =
     candidate?.codex && typeof candidate.codex === "object"
       ? (candidate.codex as Record<string, unknown>)
-      : null;
+      : providerBase === "codex"
+        ? providerSpecificCandidate
+        : null;
   const claudeCandidate =
     candidate?.claudeAgent && typeof candidate.claudeAgent === "object"
       ? (candidate.claudeAgent as Record<string, unknown>)
-      : null;
+      : providerBase === "claudeAgent"
+        ? providerSpecificCandidate
+        : null;
 
   const codexReasoningEffort: CodexReasoningEffort | undefined =
     codexCandidate?.reasoningEffort === "low" ||
@@ -737,8 +746,7 @@ function legacySyncModelSelectionOptions(
   }
   const options = modelOptions?.[modelSelection.provider];
   return {
-    provider: modelSelection.provider,
-    model: modelSelection.model,
+    ...modelSelection,
     ...(options ? { options } : {}),
   };
 }
@@ -802,7 +810,7 @@ function legacyToModelSelectionByProvider(
   }
   // Add/overwrite the active selection (it's authoritative for its provider)
   if (modelSelection) {
-    result[modelSelection.provider] = modelSelection;
+    result[modelSelectionProviderKind(modelSelection)] = modelSelection;
   }
   return result;
 }
@@ -1127,7 +1135,7 @@ function normalizePersistedDraftsByThreadId(
         modelSelection,
         mergedModelOptions,
       );
-      activeProvider = modelSelection?.provider ?? null;
+      activeProvider = modelSelection ? modelSelectionProviderKind(modelSelection) : null;
     }
 
     const hasModelData =
@@ -1191,7 +1199,9 @@ function migratePersistedComposerDraftStoreState(
     stickyModelSelection,
     nextStickyModelOptions,
   );
-  const stickyActiveProvider = normalizeProviderKind(candidate.stickyProvider) ?? null;
+  const stickyActiveProvider =
+    normalizeProviderKind(candidate.stickyProvider) ??
+    (stickyModelSelection ? modelSelectionProviderKind(stickyModelSelection) : null);
 
   const { draftThreadsByThreadId, projectDraftThreadIdByProjectId } =
     normalizePersistedDraftThreads(rawDraftThreadsByThreadId, rawProjectDraftThreadIdByProjectId);
@@ -1323,7 +1333,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
       stickyModelSelection,
       nextStickyModelOptions,
     );
-    stickyActiveProvider = normalizeProviderKind(normalizedPersistedState.stickyProvider);
+    stickyActiveProvider =
+      normalizeProviderKind(normalizedPersistedState.stickyProvider) ??
+      (stickyModelSelection ? modelSelectionProviderKind(stickyModelSelection) : null);
   }
 
   return createPersistedDraftStoreState({
@@ -1882,8 +1894,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             } else {
               // No options in selection → preserve existing options, update provider+model
               nextMap[normalizedFullKind] = {
-                provider: normalized.provider,
-                model: normalized.model,
+                ...normalized,
                 ...(current?.options ? { options: current.options } : {}),
               } as ModelSelection;
             }

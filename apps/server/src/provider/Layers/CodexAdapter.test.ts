@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   ApprovalRequestId,
@@ -9,6 +10,7 @@ import {
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
+  makeProviderKind,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -236,10 +238,96 @@ validationLayer("CodexAdapterLive validation", (it) => {
         provider: "codex",
         threadId: asThreadId("thread-1"),
         binaryPath: "codex",
+        homePath: path.join(os.homedir(), ".codex"),
         model: "gpt-5.3-codex",
         serviceTier: "fast",
         runtimeMode: "full-access",
       });
+    }),
+  );
+  it.effect("pins the base Codex provider to the default home path", () =>
+    Effect.gen(function* () {
+      const previousCodexHome = process.env.CODEX_HOME;
+      process.env.CODEX_HOME = path.join(os.tmpdir(), ".codex-metric");
+      try {
+        validationManager.startSessionImpl.mockClear();
+        const adapter = yield* CodexAdapter;
+
+        yield* adapter.startSession({
+          provider: "codex",
+          threadId: asThreadId("thread-default-home"),
+          runtimeMode: "full-access",
+        });
+
+        assert.equal(
+          validationManager.startSessionImpl.mock.calls[0]?.[0]?.homePath,
+          path.join(os.homedir(), ".codex"),
+        );
+      } finally {
+        if (previousCodexHome === undefined) {
+          delete process.env.CODEX_HOME;
+        } else {
+          process.env.CODEX_HOME = previousCodexHome;
+        }
+      }
+    }),
+  );
+  it.effect("pins Codex profile providers to their profile home path", () =>
+    Effect.gen(function* () {
+      const tempDir = yield* Effect.promise(() =>
+        import("node:fs/promises").then((fs) =>
+          fs.mkdtemp(path.join(process.cwd(), "tmp-codex-profile-")),
+        ),
+      );
+      const metricHome = path.join(tempDir, ".codex-metric");
+      const testLayer = makeCodexAdapterLive({ manager: validationManager }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerSettingsService.layerTest({
+            providers: {
+              codexProfiles: [
+                {
+                  profileId: "metric",
+                  displayName: "Codex (metric)",
+                  homePath: metricHome,
+                  binaryPath: "/opt/homebrew/bin/codex",
+                },
+              ],
+            },
+          }),
+        ),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(managedRunServiceTestLayer),
+        Layer.provideMerge(projectionSnapshotQueryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        validationManager.startSessionImpl.mockClear();
+        const adapter = yield* CodexAdapter;
+
+        yield* adapter.startSession({
+          threadId: asThreadId("thread-profile-home"),
+          modelSelection: {
+            provider: "codex",
+            profileId: "metric",
+            model: "gpt-5.4",
+          },
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(testLayer));
+
+      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
+        provider: makeProviderKind("codex", "metric"),
+        threadId: asThreadId("thread-profile-home"),
+        binaryPath: "/opt/homebrew/bin/codex",
+        homePath: metricHome,
+        model: "gpt-5.4",
+        runtimeMode: "full-access",
+      });
+      yield* Effect.promise(() =>
+        import("node:fs/promises").then((fs) => fs.rm(tempDir, { recursive: true, force: true })),
+      );
     }),
   );
   it.effect("auto-trusts the project cwd before starting a Codex session", () =>

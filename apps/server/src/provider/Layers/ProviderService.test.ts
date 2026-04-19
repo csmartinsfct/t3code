@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  asProviderInput,
   baseProviderKind,
   EventId,
   type ProviderKind,
@@ -19,7 +20,6 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { it, assert, vi, describe } from "@effect/vitest";
-import { assertFailure } from "@effect/vitest/utils";
 
 import { Effect, Fiber, Layer, Metric, Option, PubSub, Ref, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -332,6 +332,78 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("ProviderServiceLive does not reuse resume cursors across Codex profiles", () =>
+  Effect.gen(function* () {
+    const codex = makeFakeCodexAdapter();
+    const registry: typeof ProviderAdapterRegistry.Service = {
+      getByProvider: (provider) =>
+        baseProviderKind(provider) === "codex"
+          ? Effect.succeed(codex.adapter)
+          : Effect.fail(new ProviderUnsupportedError({ provider })),
+      listProviders: () => Effect.succeed(["codex"]),
+    };
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(AnalyticsService.layerTest),
+    );
+    const layer = Layer.mergeAll(
+      providerLayer,
+      directoryLayer,
+      runtimeRepositoryLayer,
+      NodeServices.layer,
+    );
+
+    yield* Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("thread-codex-profile-switch");
+      yield* directory.upsert({
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+        status: "stopped",
+        resumeCursor: { opaque: "default-account-resume" },
+      });
+
+      const provider = yield* ProviderService;
+      yield* provider.startSession(threadId, {
+        provider: asProviderInput("codex:metric" as ProviderKind),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      const startInput = codex.startSession.mock.calls[0]?.[0] as
+        | ProviderSessionStartInput
+        | undefined;
+      assert.equal(startInput?.provider, "codex:metric");
+      assert.equal(startInput && "resumeCursor" in startInput, false);
+
+      yield* directory.upsert({
+        provider: "codex:metric" as ProviderKind,
+        threadId,
+        runtimeMode: "full-access",
+        status: "running",
+        resumeCursor: { opaque: "metric-account-resume" },
+      });
+
+      yield* provider.sendTurn({
+        threadId,
+        input: "continue in the metric profile",
+        attachments: [],
+      });
+
+      const persistedProvider = yield* directory.getProvider(threadId);
+      assert.equal(persistedProvider, "codex:metric");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const routing = makeProviderServiceLayer();
 it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", () =>
   Effect.gen(function* () {
@@ -573,20 +645,12 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
 
       yield* provider.stopSession({ threadId: session.threadId });
-      const sendAfterStop = yield* Effect.result(
-        provider.sendTurn({
-          threadId: session.threadId,
-          input: "after-stop",
-          attachments: [],
-        }),
-      );
-      assertFailure(
-        sendAfterStop,
-        new ProviderValidationError({
-          operation: "ProviderService.sendTurn",
-          issue: `Cannot route thread '${session.threadId}' because no persisted provider binding exists.`,
-        }),
-      );
+      const sendAfterStop = yield* provider.sendTurn({
+        threadId: session.threadId,
+        input: "after-stop",
+        attachments: [],
+      });
+      assert.equal(sendAfterStop.threadId, session.threadId);
     }),
   );
 

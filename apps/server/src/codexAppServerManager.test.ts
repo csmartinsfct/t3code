@@ -244,6 +244,44 @@ describe("process stderr events", () => {
   });
 });
 
+describe("profiled Codex rate-limit events", () => {
+  it("stamps account rate-limit notifications with the active Codex profile", () => {
+    const { manager, context, emitEvent } = createCollabNotificationHarness();
+    context.session = {
+      ...context.session,
+      provider: "codex:metric" as never,
+    };
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      jsonrpc: "2.0",
+      method: "account/rateLimits/updated",
+      params: {
+        primary: {
+          used_percent: 73,
+          window_minutes: 300,
+        },
+      },
+    });
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "codex:metric",
+        method: "account/rateLimits/updated",
+        payload: {
+          primary: {
+            used_percent: 73,
+            window_minutes: 300,
+          },
+        },
+      }),
+    );
+  });
+});
+
 describe("normalizeCodexModelSlug", () => {
   it("maps 5.3 aliases to gpt-5.3-codex", () => {
     expect(normalizeCodexModelSlug("5.3")).toBe("gpt-5.3-codex");

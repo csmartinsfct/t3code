@@ -16,6 +16,7 @@ import {
   onServerConfigUpdated,
   onWelcome,
   resetServerStateForTests,
+  selectProviderRateLimitSnapshot,
   startServerStateSync,
 } from "./serverState";
 import { toastManager } from "../components/ui/toast";
@@ -379,5 +380,33 @@ describe("serverState", () => {
 
     expect(addToast).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  it("keeps provider profile rate-limit snapshots isolated", () => {
+    const snapshots = [
+      {
+        provider: "codex" as const,
+        rateLimitInfo: {
+          status: "allowed" as const,
+          utilization: 0.21,
+          rateLimitType: "five_hour" as const,
+        },
+        updatedAt: "2026-04-11T12:00:00.000Z",
+      },
+      {
+        provider: "codex:metric" as never,
+        rateLimitInfo: {
+          status: "allowed_warning" as const,
+          utilization: 0.82,
+          rateLimitType: "five_hour" as const,
+        },
+        updatedAt: "2026-04-11T12:01:00.000Z",
+      },
+    ];
+
+    expect(selectProviderRateLimitSnapshot(snapshots, "codex")).toBe(snapshots[0]);
+    expect(selectProviderRateLimitSnapshot(snapshots, "codex:metric" as never)).toBe(snapshots[1]);
+    expect(selectProviderRateLimitSnapshot([snapshots[0]!], "codex:metric" as never)).toBeNull();
+    expect(selectProviderRateLimitSnapshot([snapshots[1]!], "codex")).toBeNull();
   });
 });
