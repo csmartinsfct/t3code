@@ -30,10 +30,17 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSettings } from "../../hooks/useSettings";
-import { buildOrchestrationPlan, type OrchestrationPlan } from "../../lib/orchestrationValidation";
+import {
+  buildOrchestrationPlan,
+  expandBoardSelectionToEntries,
+  type OrchestrationPlan,
+  type OrchestrationSelectionEntry,
+  type OrchestrationSelectionExpansion,
+  type TicketAnnotation,
+} from "../../lib/orchestrationValidation";
 import { getCustomModelOptionsByProvider, makeAppModelSelection } from "../../modelSelection";
 import { ensureNativeApi } from "../../nativeApi";
 import { useServerProviders } from "../../rpc/serverState";
@@ -70,6 +77,35 @@ interface OrchestrationSubpageProps {
 }
 
 // ---------------------------------------------------------------------------
+// Display model
+// ---------------------------------------------------------------------------
+
+type GroupToggleState = "off" | "mixed" | "on";
+
+interface DisplayLeaf {
+  ticket: TicketSummary;
+  planIndex: number | null;
+  annotation: TicketAnnotation | null;
+  included: boolean;
+}
+
+interface DisplayStandalone {
+  kind: "standalone";
+  leaf: DisplayLeaf;
+}
+
+interface DisplayGroup {
+  kind: "group";
+  parent: TicketSummary;
+  leaves: DisplayLeaf[];
+  includedCount: number;
+  totalCount: number;
+  state: GroupToggleState;
+}
+
+type DisplayEntry = DisplayStandalone | DisplayGroup;
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -81,54 +117,82 @@ export function OrchestrationSubpage({
   onBack,
 }: OrchestrationSubpageProps) {
   // ── Plan state ──────────────────────────────────────────────────────
-  const [plan, setPlan] = useState<OrchestrationPlan | null>(null);
-  const [planLoading, setPlanLoading] = useState(true);
+  const [tree, setTree] = useState<readonly TicketTreeNode[] | null>(null);
+  const [treeLoading, setTreeLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Per-run inclusion set: user can uncheck tickets on this page to drop them
-  // from the run. Seeded with every originally-selected ticket (all on by default).
-  const [includedIds, setIncludedIds] = useState<Set<TicketId>>(
-    () => new Set(selectedTickets.keys()),
-  );
-
-  // If the caller replaces the selection, reset the inclusion set.
+  // Fetch the full ticket tree once per project; it doesn't change as the user
+  // toggles checkboxes, and we need it for both entry expansion and plan
+  // resolution.
   useEffect(() => {
-    setIncludedIds(new Set(selectedTickets.keys()));
-  }, [selectedTickets]);
-
-  useEffect(() => {
-    if (includedIds.size === 0) {
-      setPlan(null);
-      setError(null);
-      setPlanLoading(false);
-      return;
-    }
-
     let cancelled = false;
-    setPlanLoading(true);
+    setTreeLoading(true);
     setError(null);
 
     const api = ensureNativeApi();
     api.ticketing
       .getTree({ projectId: projectId as ProjectId })
-      .then((tree: readonly TicketTreeNode[]) => {
+      .then((next: readonly TicketTreeNode[]) => {
         if (cancelled) return;
-        const result = buildOrchestrationPlan(includedIds, tree, allTickets);
-        setPlan(result);
+        setTree(next);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load ticket data");
       })
       .finally(() => {
-        if (!cancelled) setPlanLoading(false);
+        if (!cancelled) setTreeLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [includedIds, allTickets, projectId]);
+  }, [projectId]);
+
+  // Resolve the board selection into grouped entries. Parents with children
+  // become group rows whose leaves drive execution; leaf-only selections stay
+  // flat. This also yields the full set of leaf IDs that should execute.
+  const expansion = useMemo<OrchestrationSelectionExpansion | null>(() => {
+    if (!tree) return null;
+    return expandBoardSelectionToEntries({
+      selectedIds: new Set(selectedTickets.keys()),
+      treeNodes: tree,
+      allTickets,
+    });
+  }, [tree, selectedTickets, allTickets]);
+
+  // Per-run inclusion set: the user can uncheck tickets on this page to drop
+  // them from the run. Seeded with every *leaf* of the board selection — if a
+  // parent ticket was selected, its sub-tickets are what actually run.
+  const [includedIds, setIncludedIds] = useState<Set<TicketId>>(() => new Set());
+
+  // Re-seed whenever the board selection changes. Using a key over the
+  // selection ids lets us re-seed exactly once per new selection even when the
+  // tree reloads independently.
+  const selectionSignature = useMemo(
+    () =>
+      Array.from(selectedTickets.keys())
+        .map((id) => String(id))
+        .toSorted()
+        .join(","),
+    [selectedTickets],
+  );
+  const seededSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!expansion) return;
+    if (seededSignatureRef.current === selectionSignature) return;
+    seededSignatureRef.current = selectionSignature;
+    setIncludedIds(new Set(expansion.leafIds));
+  }, [expansion, selectionSignature]);
+
+  // Plan is derived synchronously from tree + inclusion set.
+  const plan = useMemo<OrchestrationPlan | null>(() => {
+    if (!tree) return null;
+    if (includedIds.size === 0) return null;
+    return buildOrchestrationPlan(includedIds, tree, allTickets);
+  }, [tree, includedIds, allTickets]);
+  const planLoading = treeLoading && !tree;
 
   const toggleIncluded = useCallback((id: TicketId, checked: boolean) => {
     setIncludedIds((prev) => {
@@ -137,6 +201,17 @@ export function OrchestrationSubpage({
         next.add(id);
       } else {
         next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleGroup = useCallback((leafIds: readonly TicketId[], nextAllOn: boolean) => {
+    setIncludedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of leafIds) {
+        if (nextAllOn) next.add(id);
+        else next.delete(id);
       }
       return next;
     });
@@ -266,38 +341,48 @@ export function OrchestrationSubpage({
   );
 
   // ── Display ordering ────────────────────────────────────────────────
-  // Always render every originally-selected ticket so checkboxes are stable,
-  // even when the plan becomes blocked after an unchecking.
-  const displayEntries = useMemo(() => {
-    const bySelectedOrder = Array.from(selectedTickets.values());
-    const planOrder = plan?.kind === "valid" ? plan.orderedTickets : null;
-    if (!planOrder) {
-      return bySelectedOrder.map((ticket) => ({
+  // Rows stay in the tree's natural (board) order — toggling a checkbox must
+  // not shuffle the list under the user's cursor. Execution order is
+  // communicated by the step-number badge alone.
+  const displayEntries = useMemo<DisplayEntry[]>(() => {
+    if (!expansion) return [];
+
+    const runnablePlanIndexByTicketId = new Map<TicketId, number>();
+    const annotationByTicketId = new Map<TicketId, TicketAnnotation>();
+    if (plan?.kind === "valid") {
+      let runnableIndex = 0;
+      for (const entry of plan.orderedTickets) {
+        annotationByTicketId.set(entry.ticket.id, entry.annotation);
+        if (entry.annotation !== "skipped-done") {
+          runnablePlanIndexByTicketId.set(entry.ticket.id, runnableIndex);
+          runnableIndex += 1;
+        }
+      }
+    }
+
+    const resolveLeaf = (ticket: TicketSummary): DisplayLeaf => {
+      const planIndex = runnablePlanIndexByTicketId.get(ticket.id) ?? null;
+      const annotation = annotationByTicketId.get(ticket.id) ?? null;
+      return {
         ticket,
-        planIndex: null as number | null,
-        annotation: null as string | null,
-      }));
-    }
-    const seen = new Set<TicketId>();
-    const ordered: Array<{
-      ticket: TicketSummary;
-      planIndex: number | null;
-      annotation: string | null;
-    }> = [];
-    planOrder.forEach((entry, i) => {
-      seen.add(entry.ticket.id);
-      ordered.push({
-        ticket: entry.ticket,
-        planIndex: entry.annotation === "skipped-done" ? null : i,
-        annotation: entry.annotation,
-      });
+        planIndex,
+        annotation,
+        included: includedIds.has(ticket.id),
+      };
+    };
+
+    return expansion.entries.map((entry: OrchestrationSelectionEntry): DisplayEntry => {
+      if (entry.kind === "standalone") {
+        return { kind: "standalone", leaf: resolveLeaf(entry.ticket) };
+      }
+      const leaves = entry.leaves.map(resolveLeaf);
+      const includedCount = leaves.filter((l) => l.included).length;
+      const totalCount = leaves.length;
+      const state: GroupToggleState =
+        includedCount === 0 ? "off" : includedCount === totalCount ? "on" : "mixed";
+      return { kind: "group", parent: entry.parent, leaves, includedCount, totalCount, state };
     });
-    for (const ticket of bySelectedOrder) {
-      if (seen.has(ticket.id)) continue;
-      ordered.push({ ticket, planIndex: null, annotation: null });
-    }
-    return ordered;
-  }, [plan, selectedTickets]);
+  }, [expansion, plan, includedIds]);
 
   // ── Submit ──────────────────────────────────────────────────────────
   const resolvedMaxReviewIterations = useMemo<number | undefined>(() => {
@@ -385,23 +470,28 @@ export function OrchestrationSubpage({
                 ) : plan?.kind === "blocked-cycle" ? (
                   <BlockedCycleInline cycles={plan.cycles} />
                 ) : null}
-                {includedIds.size === 0 ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <CircleAlertIcon className="size-3.5 shrink-0" />
-                    Select at least one ticket to run.
-                  </div>
-                ) : null}
                 <div className="flex flex-col gap-1">
-                  {displayEntries.map((entry) => (
-                    <TicketRow
-                      key={entry.ticket.id}
-                      ticket={entry.ticket}
-                      planIndex={entry.planIndex}
-                      annotation={entry.annotation}
-                      included={includedIds.has(entry.ticket.id)}
-                      onToggle={(checked) => toggleIncluded(entry.ticket.id, checked)}
-                    />
-                  ))}
+                  {displayEntries.map((entry) =>
+                    entry.kind === "standalone" ? (
+                      <TicketRow
+                        key={entry.leaf.ticket.id}
+                        leaf={entry.leaf}
+                        onToggle={(checked) => toggleIncluded(entry.leaf.ticket.id, checked)}
+                      />
+                    ) : (
+                      <GroupBlock
+                        key={entry.parent.id}
+                        entry={entry}
+                        onToggleGroup={() =>
+                          toggleGroup(
+                            entry.leaves.map((l) => l.ticket.id),
+                            entry.state !== "on",
+                          )
+                        }
+                        onToggleLeaf={toggleIncluded}
+                      />
+                    ),
+                  )}
                 </div>
               </div>
             )}
@@ -528,18 +618,13 @@ export function OrchestrationSubpage({
 // ---------------------------------------------------------------------------
 
 function TicketRow({
-  ticket,
-  planIndex,
-  annotation,
-  included,
+  leaf,
   onToggle,
 }: {
-  ticket: TicketSummary;
-  planIndex: number | null;
-  annotation: string | null;
-  included: boolean;
+  leaf: DisplayLeaf;
   onToggle: (checked: boolean) => void;
 }) {
+  const { ticket, planIndex, annotation, included } = leaf;
   const isSkipped = annotation === "skipped-done";
   const isWarn = annotation === "warn-reprocess";
   const statusCfg = STATUS_CONFIG[ticket.status];
@@ -577,6 +662,65 @@ function TicketRow({
           Re-processing
         </Badge>
       )}
+    </div>
+  );
+}
+
+function GroupBlock({
+  entry,
+  onToggleGroup,
+  onToggleLeaf,
+}: {
+  entry: DisplayGroup;
+  onToggleGroup: () => void;
+  onToggleLeaf: (ticketId: TicketId, checked: boolean) => void;
+}) {
+  const { parent, leaves, includedCount, totalCount, state } = entry;
+  const dim = state === "off";
+  const allOn = state === "on";
+
+  return (
+    <div className="flex flex-col">
+      {/* Group header — parent ticket as context, tri-state cascade checkbox */}
+      <div
+        className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/40 ${
+          dim ? "opacity-60" : ""
+        }`}
+      >
+        <Checkbox
+          checked={allOn}
+          indeterminate={state === "mixed"}
+          onCheckedChange={() => onToggleGroup()}
+          aria-label={`${allOn ? "Exclude" : "Include"} all sub-tickets of ${parent.identifier}`}
+        />
+        <span className="size-5 shrink-0" aria-hidden />
+        <span className="font-mono text-[10px] text-muted-foreground">{parent.identifier}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/90">
+          {parent.title}
+        </span>
+        <span
+          className={`shrink-0 rounded-[.25rem] border px-1.5 py-0.5 font-mono text-[10px] tabular-nums transition-colors ${
+            allOn
+              ? "border-primary/36 bg-primary/8 text-primary"
+              : "border-border/60 bg-muted/50 text-muted-foreground"
+          }`}
+          aria-label={`${includedCount} of ${totalCount} sub-tickets included`}
+        >
+          {includedCount} / {totalCount}
+        </span>
+      </div>
+      {/* Leaves: indented, separated by a thin vertical guide */}
+      <div className="ml-[calc(--spacing(2)+--spacing(4.5)/2)] border-l border-border/50 pl-3 pt-0.5">
+        <div className="flex flex-col">
+          {leaves.map((leaf) => (
+            <TicketRow
+              key={leaf.ticket.id}
+              leaf={leaf}
+              onToggle={(checked) => onToggleLeaf(leaf.ticket.id, checked)}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

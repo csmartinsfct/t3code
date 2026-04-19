@@ -1,7 +1,7 @@
 import type { TicketDependency, TicketId, TicketSummary, TicketTreeNode } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { buildOrchestrationPlan } from "./orchestrationValidation";
+import { buildOrchestrationPlan, expandBoardSelectionToEntries } from "./orchestrationValidation";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -397,5 +397,115 @@ describe("buildOrchestrationPlan", () => {
       expect(ids[0]).toBe("A"); // A first (no deps)
       expect(ids[ids.length - 1]).toBe("D"); // D last (depends on B and C)
     }
+  });
+});
+
+describe("expandBoardSelectionToEntries", () => {
+  it("wraps a parent selection into a group of its descendant leaves", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const childA = makeTicket({
+      id: "child-a" as TicketId,
+      identifier: "T-CHILD-A",
+      parentId: "parent" as TicketId,
+      sortOrder: 1000,
+    });
+    const childB = makeTicket({
+      id: "child-b" as TicketId,
+      identifier: "T-CHILD-B",
+      parentId: "parent" as TicketId,
+      sortOrder: 2000,
+    });
+    const tree = [makeTreeNode(parent, [], [makeTreeNode(childA), makeTreeNode(childB)])];
+
+    const result = expandBoardSelectionToEntries({
+      selectedIds: new Set(["parent"] as TicketId[]),
+      treeNodes: tree,
+      allTickets: [parent, childA, childB],
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.kind).toBe("group");
+    if (result.entries[0]?.kind === "group") {
+      expect(result.entries[0].parent.identifier).toBe("T-PARENT");
+      expect(result.entries[0].leaves.map((leaf) => leaf.identifier)).toEqual([
+        "T-CHILD-A",
+        "T-CHILD-B",
+      ]);
+    }
+    expect(result.leafIds).toEqual(["child-a", "child-b"]);
+  });
+
+  it("emits a standalone entry for a leaf ticket with no children", () => {
+    const leaf = makeTicket({ id: "leaf" as TicketId, identifier: "T-LEAF" });
+    const tree = [makeTreeNode(leaf)];
+
+    const result = expandBoardSelectionToEntries({
+      selectedIds: new Set(["leaf"] as TicketId[]),
+      treeNodes: tree,
+      allTickets: [leaf],
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.kind).toBe("standalone");
+    expect(result.leafIds).toEqual(["leaf"]);
+  });
+
+  it("skips selected descendants whose ancestor is also selected", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const child = makeTicket({
+      id: "child" as TicketId,
+      identifier: "T-CHILD",
+      parentId: "parent" as TicketId,
+    });
+    const tree = [makeTreeNode(parent, [], [makeTreeNode(child)])];
+
+    const result = expandBoardSelectionToEntries({
+      selectedIds: new Set(["parent", "child"] as TicketId[]),
+      treeNodes: tree,
+      allTickets: [parent, child],
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.kind).toBe("group");
+    expect(result.leafIds).toEqual(["child"]);
+  });
+
+  it("returns an empty expansion for an empty selection", () => {
+    const result = expandBoardSelectionToEntries({
+      selectedIds: new Set(),
+      treeNodes: [],
+      allTickets: [],
+    });
+    expect(result.entries).toEqual([]);
+    expect(result.leafIds).toEqual([]);
+  });
+
+  it("mixes groups and standalones sorted by board order", () => {
+    const leafFirst = makeTicket({
+      id: "leaf-first" as TicketId,
+      identifier: "T-LEAF-FIRST",
+      sortOrder: 1000,
+    });
+    const parent = makeTicket({
+      id: "parent" as TicketId,
+      identifier: "T-PARENT",
+      sortOrder: 2000,
+    });
+    const child = makeTicket({
+      id: "child" as TicketId,
+      identifier: "T-CHILD",
+      parentId: "parent" as TicketId,
+      sortOrder: 2500,
+    });
+    const tree = [makeTreeNode(leafFirst), makeTreeNode(parent, [], [makeTreeNode(child)])];
+
+    const result = expandBoardSelectionToEntries({
+      selectedIds: new Set(["leaf-first", "parent"] as TicketId[]),
+      treeNodes: tree,
+      allTickets: [leafFirst, parent, child],
+    });
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual(["standalone", "group"]);
+    expect(result.leafIds).toEqual(["leaf-first", "child"]);
   });
 });

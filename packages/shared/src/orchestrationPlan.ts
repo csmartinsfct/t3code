@@ -1,10 +1,4 @@
-import type {
-  TicketDependency,
-  TicketId,
-  TicketStatus,
-  TicketSummary,
-  TicketTreeNode,
-} from "@t3tools/contracts";
+import type { TicketId, TicketStatus, TicketSummary, TicketTreeNode } from "@t3tools/contracts";
 import { toposort } from "./toposort.js";
 
 export type TicketAnnotation = "will-run" | "skipped-done" | "warn-reprocess";
@@ -188,6 +182,97 @@ function buildSelectedExecutionMap(input: {
     }
   }
   return selectedTicketIdByExecutionId;
+}
+
+export interface OrchestrationGroupEntry {
+  kind: "group";
+  parent: TicketSummary;
+  leaves: TicketSummary[];
+}
+
+export interface OrchestrationStandaloneEntry {
+  kind: "standalone";
+  ticket: TicketSummary;
+}
+
+export type OrchestrationSelectionEntry = OrchestrationGroupEntry | OrchestrationStandaloneEntry;
+
+export interface OrchestrationSelectionExpansion {
+  entries: OrchestrationSelectionEntry[];
+  leafIds: TicketId[];
+}
+
+/**
+ * Resolve a raw board selection into either standalone leaf rows or parent
+ * groups that expose their descendant leaves. Also returns the full set of
+ * leaf IDs — this is the set of tickets that will actually execute and is the
+ * natural default for the orchestration page's "included" checkboxes.
+ */
+export function expandBoardSelectionToEntries(input: {
+  selectedIds: ReadonlySet<TicketId>;
+  treeNodes: readonly TicketTreeNode[];
+  allTickets: readonly TicketSummary[];
+}): OrchestrationSelectionExpansion {
+  if (input.selectedIds.size === 0) {
+    return { entries: [], leafIds: [] };
+  }
+
+  const { ticketById, childIdsByParentId, parentIdByTicketId } = buildTreeIndexes({
+    treeNodes: input.treeNodes,
+    allTickets: input.allTickets,
+  });
+
+  const hasSelectedAncestor = (ticketId: TicketId): boolean => {
+    let cursor = parentIdByTicketId.get(ticketId) ?? null;
+    while (cursor) {
+      if (input.selectedIds.has(cursor)) return true;
+      cursor = parentIdByTicketId.get(cursor) ?? null;
+    }
+    return false;
+  };
+
+  const topLevel: TicketSummary[] = [];
+  for (const id of input.selectedIds) {
+    const ticket = ticketById.get(id);
+    if (!ticket) continue;
+    if (hasSelectedAncestor(id)) continue;
+    topLevel.push(ticket);
+  }
+  topLevel.sort(compareTicketsByBoardOrder);
+
+  const entries: OrchestrationSelectionEntry[] = [];
+  const seenLeafIds = new Set<TicketId>();
+  const leafIds: TicketId[] = [];
+
+  for (const ticket of topLevel) {
+    const childIds = childIdsByParentId.get(ticket.id) ?? [];
+    if (childIds.length === 0) {
+      entries.push({ kind: "standalone", ticket });
+      if (!seenLeafIds.has(ticket.id)) {
+        seenLeafIds.add(ticket.id);
+        leafIds.push(ticket.id);
+      }
+      continue;
+    }
+
+    const descendantLeafIds = collectLeafExecutionIds({
+      ticketId: ticket.id,
+      childIdsByParentId,
+    });
+    const leaves: TicketSummary[] = [];
+    for (const leafId of descendantLeafIds) {
+      const leaf = ticketById.get(leafId);
+      if (!leaf) continue;
+      leaves.push(leaf);
+      if (!seenLeafIds.has(leafId)) {
+        seenLeafIds.add(leafId);
+        leafIds.push(leafId);
+      }
+    }
+    entries.push({ kind: "group", parent: ticket, leaves });
+  }
+
+  return { entries, leafIds };
 }
 
 export function flattenTicketTree(nodes: readonly TicketTreeNode[]): TicketSummary[] {
