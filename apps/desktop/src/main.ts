@@ -417,7 +417,49 @@ function resolveAboutCommitHash(): string | null {
 }
 
 function resolveBackendEntry(): string {
-  return Path.join(resolveAppRoot(), "apps/server/dist/bin.mjs");
+  const entry = Path.join(resolveAppRoot(), "apps/server/dist/bin.mjs");
+  // In packaged builds `resolveAppRoot()` is `app.getAppPath()`, which for
+  // asar-enabled builds ends in `.../app.asar`. Electron's Node APIs
+  // transparently redirect `app.asar` → `app.asar.unpacked` for paths listed
+  // in electron-builder's `asarUnpack`, but the child Bun process we spawn
+  // does NOT get that redirect and will fail with "Module not found" on any
+  // asar-virtual path. Swap to the real on-disk unpacked path so Bun can
+  // read `bin.mjs` and follow its `node_modules` import graph.
+  return app.isPackaged ? entry.replace(`${Path.sep}app.asar${Path.sep}`, `${Path.sep}app.asar.unpacked${Path.sep}`) : entry;
+}
+
+/**
+ * Resolve the Bun binary used to spawn the backend.
+ *
+ * T3 switched from Electron-Node to Bun for the backend runtime (T3CO-328)
+ * so the vendored `cookie-import-browser.ts` can static-import `bun:sqlite`
+ * without crashing the whole browser surface under Electron's Node.
+ *
+ * Resolution order:
+ * 1. Packaged app — bundled binary at `<appResources>/bin/bun[.exe]`. The
+ *    build script (`scripts/build-desktop-artifact.ts`) downloads Bun
+ *    per-platform + arch at package time and electron-builder copies it
+ *    into the app Resources dir.
+ * 2. Dev — honours `T3CODE_BUN_BINARY` env var if set, otherwise falls back
+ *    to `bun` on PATH. Throws if neither is available.
+ */
+function resolveBackendRuntime(): string {
+  const exeName = process.platform === "win32" ? "bun.exe" : "bun";
+  if (app.isPackaged) {
+    // In a packaged Electron app, process.resourcesPath points at
+    // Contents/Resources (macOS) / resources/ (win/linux).
+    const bundled = Path.join(process.resourcesPath, "bin", exeName);
+    if (FS.existsSync(bundled)) return bundled;
+    throw new Error(
+      `[desktop] bundled Bun binary missing at ${bundled}. ` +
+        "The production build did not include the per-platform Bun binary.",
+    );
+  }
+  const envOverride = process.env.T3CODE_BUN_BINARY;
+  if (envOverride && FS.existsSync(envOverride)) return envOverride;
+  // Development: rely on `bun` on PATH. ChildProcess.spawn resolves unqualified
+  // names through PATH when shell is false.
+  return exeName;
 }
 
 function resolveBackendCwd(): string {
@@ -1014,14 +1056,21 @@ function startBackend(): void {
   }
 
   const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
+  let backendRuntime: string;
+  try {
+    backendRuntime = resolveBackendRuntime();
+  } catch (err) {
+    handleFatalStartupError("resolve-backend-runtime", err);
+    return;
+  }
+  // Backend runs under Bun (T3CO-328). This lets the vendored browser code
+  // static-import `bun:sqlite` without crashing, keeps parity with `bun run
+  // dev` during development, and matches T3's existing @effect/*-bun deps.
+  // No `ELECTRON_RUN_AS_NODE=1` — we explicitly DON'T want the Electron
+  // binary acting as the runtime.
+  const child = ChildProcess.spawn(backendRuntime, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendChildEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
+    env: backendChildEnv(),
     stdio: captureBackendLogs
       ? ["ignore", "pipe", "pipe", "pipe"]
       : ["ignore", "inherit", "inherit", "pipe"],

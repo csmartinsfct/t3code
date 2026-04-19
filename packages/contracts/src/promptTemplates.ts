@@ -20,7 +20,13 @@ export const ADMIN_PROMPT_GROUP_ID = "admin" as const;
 export const AdminPromptGroupId = Schema.Literal(ADMIN_PROMPT_GROUP_ID);
 export type AdminPromptGroupId = typeof AdminPromptGroupId.Type;
 
-export const ADMIN_PROMPT_IDS = ["general", "managedRuns", "scheduledTasks", "ticketing"] as const;
+export const ADMIN_PROMPT_IDS = [
+  "general",
+  "managedRuns",
+  "scheduledTasks",
+  "ticketing",
+  "browser",
+] as const;
 export type AdminPromptId = (typeof ADMIN_PROMPT_IDS)[number];
 export const AdminPromptId = Schema.Literals(ADMIN_PROMPT_IDS);
 
@@ -345,6 +351,59 @@ When the user asks about tickets, tasks, issues, or project tracking:
 11. Use get_ticket_history for audit trails of all ticket changes.
 12. Tickets can optionally have a \`worktree\` field storing the git worktree/branch name for isolated development. Set it via create_ticket or update_ticket. Set to null to clear.`;
 
+const BROWSER_DEFAULT_TEXT = `## T3 Browser Automation
+
+This project has T3 browser automation via the \`/api/browser\` REST endpoint — a per-project headless Chromium context with plaintext output and stable element references (@refs). Prefer this over any chrome-devtools or other browser MCP: it is faster, per-project isolated, and the default endpoint the T3 server provides.
+
+### When to use it
+
+- Automating a web UI (click buttons, fill forms, extract text, take screenshots).
+- Verifying that a dev-server change renders correctly in a real browser.
+- Scraping a page for structured data (links, forms, Open Graph, JSON-LD).
+- Inspecting or modifying CSS live on a running page.
+
+### Call pattern
+
+\`\`\`bash
+curl -s -X POST <BASE_URL>/api/browser?projectId=<PROJECT_UUID> \\
+  -H "Authorization: Bearer <TOKEN>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"tool":"<tool>","input":{...}}'
+\`\`\`
+
+Responses wrap the command's plaintext output in the standard T3 envelope:
+\`{"data":{"message":"OK","data":{"output":"<plaintext>"}},"error":null}\`.
+
+Call \`GET /api/browser\` first to discover the full tool registry with input schemas — 55+ tools are registered.
+
+### The @ref system (important)
+
+Call \`snapshot\` first to get the accessibility tree with stable element references. Each element gets an \`@e<N>\` (ARIA role) or \`@c<N>\` (cursor-interactive) identifier. Use those refs in follow-up \`click\`, \`fill\`, \`hover\`, \`attrs\`, \`css\`, \`is\`, \`screenshot\` calls. @refs are invalidated on navigation — call \`snapshot\` again after \`goto\` / \`click\` / \`reload\`.
+
+Example flow:
+1. \`{"tool":"goto","input":{"url":"https://example.com"}}\`
+2. \`{"tool":"snapshot","input":{"interactive":true}}\` → returns \`@e1 [link] "Learn more"\`
+3. \`{"tool":"click","input":{"ref":"@e1"}}\`
+4. \`{"tool":"snapshot","input":{"interactive":true}}\` → fresh refs for the new page
+
+Prefer @refs over CSS selectors. Selectors still work as a fallback but are fragile.
+
+### Command categories
+
+- **Navigate:** \`goto\`, \`back\`, \`forward\`, \`reload\`, \`url\`
+- **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
+- **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
+- **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`focus\`, \`status\`, \`ux-audit\`
+- **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
+
+### Known issues
+
+- \`useragent\` currently fails under the per-project persistent-context (returns "Context recreation failed: null is not an object" and resets the tab). Tracked for fix; avoid until resolved.
+
+### Per-project isolation
+
+Each project has its own Chromium profile at \`<dataDir>/browser/<projectId>/chromium-profile/\`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed between projects.`;
+
 export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   general: {
     version: PROMPT_TEMPLATE_VERSION,
@@ -361,5 +420,9 @@ export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   ticketing: {
     version: PROMPT_TEMPLATE_VERSION,
     blocks: [{ when: null, text: TICKETING_DEFAULT_TEXT }],
+  },
+  browser: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [{ when: null, text: BROWSER_DEFAULT_TEXT }],
   },
 } as const satisfies Record<AdminPromptId, PromptDocumentV1>;

@@ -44,6 +44,7 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
+import { BrowserManagerService } from "./browser/Services/BrowserManager.ts";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
 import {
   PromptManagementService,
@@ -415,6 +416,14 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.succeed(SessionRestartService, {
           scheduleRestart: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
+        Layer.succeed(BrowserManagerService, {
+          acquire: () => Effect.die(new Error("not mocked")),
+          recreate: () => Effect.die(new Error("not mocked")),
+          release: () => Effect.void,
+          releaseAll: () => Effect.void,
         }),
       ),
       Layer.provide(

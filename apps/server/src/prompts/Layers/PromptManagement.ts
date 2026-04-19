@@ -132,6 +132,11 @@ const ADMIN_PROMPT_METADATA = {
     label: "Ticketing",
     description: "Instructions for using the T3 ticketing API for project issue tracking.",
   },
+  browser: {
+    label: "Browser",
+    description:
+      "Instructions for driving the per-project headless Chromium via the T3 /api/browser REST service (navigate, snapshot with @refs, click/fill, screenshots, evaluate JS, batch).",
+  },
 } as const satisfies Record<AdminPromptId, Pick<PromptDefinition, "label" | "description">>;
 
 // ---------------------------------------------------------------------------

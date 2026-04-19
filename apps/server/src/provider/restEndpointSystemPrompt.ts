@@ -61,6 +61,7 @@ You have access to several T3 project services via REST HTTP endpoints. Call the
 | Managed Runs | ${baseUrl}/api/managed-runs | Start, stop, and monitor long-running services (dev servers, build watchers, docker compose) |
 | Scheduled Tasks | ${baseUrl}/api/scheduled-tasks | Create, manage, and monitor recurring scheduled tasks and cron jobs |
 | Ticketing | ${baseUrl}/api/ticketing | Project issue tracking: tickets, labels, comments, dependencies, artifacts |
+| Browser | ${baseUrl}/api/browser | Per-project headless Chromium automation with plaintext output and stable @ref element IDs (navigate, snapshot, click/fill, screenshots, evaluate JS) |
 | Prompts | ${baseUrl}/api/prompts | Prompt definitions, validation, preview rendering, and explicit prompt updates |
 | Session Restart | ${baseUrl}/api/session-restart | Restart the current agent session (after installing an MCP or when a tool is stuck) |
 

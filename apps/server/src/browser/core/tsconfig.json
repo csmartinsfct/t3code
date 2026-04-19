@@ -1,0 +1,15 @@
+{
+  "extends": "../../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "bun"],
+    "lib": ["ES2023", "esnext.disposable", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  "include": ["**/*.ts"]
+}

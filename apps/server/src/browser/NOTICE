@@ -1,0 +1,69 @@
+T3 Code — Browser Automation
+=============================
+
+Portions of apps/server/src/browser/ are derived from GStack Browser, an MIT-
+licensed project by Garry Tan:
+
+    https://github.com/gstack/gstack
+    Copyright (c) 2026 Garry Tan
+
+GStack Browser provides the accessibility-tree + @ref element-selection system,
+Playwright Chromium lifecycle management, anti-bot hardening, dialog handling,
+and the per-command plaintext output format that this module reproduces.
+
+The MIT license text is available at:
+    https://github.com/gstack/gstack/blob/main/LICENSE
+
+Vendoring approach
+------------------
+
+All files under apps/server/src/browser/core/ are **byte-identical to the
+corresponding file under gstack/browse/src/** aside from a single 1-line
+comment prepended at the top of every file identifying the origin. No logic,
+imports, or identifiers have been modified. Diffs between any vendored file
+and the upstream version are exactly +1 / -0 (the vendor-header line).
+
+To run on Node.js without requiring the Bun runtime, we load
+`core/bun-polyfill.cjs` at server startup (`--require`). That polyfill —
+itself part of upstream gstack — provides `Bun.serve`, `Bun.spawn`,
+`Bun.spawnSync`, and `Bun.sleep` backed by Node's `http` and `child_process`.
+For the SQLite dependency used by `cookie-import-browser.ts`
+(`import { Database } from 'bun:sqlite'`), T3's server runs under the Bun
+runtime in production as well as dev — T3 already depends on
+`@effect/sql-sqlite-bun` and `@types/bun`, so Bun is the natural runtime.
+
+Files vendored (25 .ts + 1 .cjs)
+--------------------------------
+
+  activity.ts               audit.ts                 browser-manager.ts
+  buffers.ts                bun-polyfill.cjs         cdp-inspector.ts
+  commands.ts               config.ts                content-security.ts
+  cookie-import-browser.ts  cookie-picker-routes.ts  cookie-picker-ui.ts
+  error-handling.ts         media-extract.ts         meta-commands.ts
+  network-capture.ts        path-security.ts         platform.ts
+  read-commands.ts          sidebar-agent.ts         sidebar-utils.ts
+  snapshot.ts               tab-session.ts           token-registry.ts
+  url-validation.ts         write-commands.ts
+
+Intentionally NOT vendored
+--------------------------
+
+  - server.ts       — Bun HTTP daemon entry point (T3 exposes its own
+                      /api/browser REST endpoint instead)
+  - cli.ts          — browse CLI (T3 drives the library directly, no CLI)
+  - find-browse.ts  — daemon discovery (no daemon to discover)
+  - welcome.html    — daemon's welcome page asset
+  - extension/      — Chrome side-panel extension (deferred to a future
+                      T3 iteration if the side-panel UX is desired)
+
+No code inside the retained 26 files references any of the above, so the
+module graph is complete.
+
+Deviations from upstream behaviour (T3-owned, live outside core/)
+----------------------------------------------------------------
+
+Changes T3 needs (per-project Chromium profiles, custom data directories,
+agent-facing REST shape, etc.) are implemented in T3-authored files that
+live alongside core/ — typically wrappers, subclasses of `BrowserManager`,
+or layer code in `apps/server/src/browser/Layers/`. The vendored files
+themselves are never edited.

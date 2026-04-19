@@ -12,6 +12,7 @@ export interface AdminPromptDocuments {
   readonly managedRuns: PromptDocumentV1;
   readonly scheduledTasks: PromptDocumentV1;
   readonly ticketing: PromptDocumentV1;
+  readonly browser: PromptDocumentV1;
 }
 
 /**
@@ -35,6 +36,7 @@ export function buildT3ServiceInjectionPrompt(input: {
     renderAdminPromptDocument(adminPrompts.managedRuns),
     renderAdminPromptDocument(adminPrompts.scheduledTasks),
     renderAdminPromptDocument(adminPrompts.ticketing),
+    renderAdminPromptDocument(adminPrompts.browser),
   ];
   return sections.join("\n\n");
 }

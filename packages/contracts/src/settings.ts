@@ -140,6 +140,9 @@ export const AdminPromptSettings = Schema.Struct({
   ticketing: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.ticketing),
   ),
+  browser: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.browser),
+  ),
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type AdminPromptSettings = typeof AdminPromptSettings.Type;
 
@@ -330,6 +333,7 @@ export const ServerSettingsPatch = Schema.Struct({
           managedRuns: Schema.optionalKey(PromptDocumentPatch),
           scheduledTasks: Schema.optionalKey(PromptDocumentPatch),
           ticketing: Schema.optionalKey(PromptDocumentPatch),
+          browser: Schema.optionalKey(PromptDocumentPatch),
         }),
       ),
     }),

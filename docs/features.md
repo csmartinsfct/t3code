@@ -424,7 +424,31 @@ Prompts are block-based documents (version 1). Each block has:
 
 ---
 
-## 9. Git Integration
+## 9. Browser Automation
+
+Per-project headless Chromium automation for QA testing, web scraping, and UI verification. See [browser-tools.md](browser-tools.md) for the full reference.
+
+**What it is:** 58 plaintext-returning tools exposed at `/api/browser` — navigate, click/fill/hover/type, accessibility snapshots with stable `@ref` element IDs, screenshots (full page / viewport / clipped / element / base64), PDF export, JavaScript evaluation, multi-tab management, and a batch endpoint that sequences up to 50 commands in one request.
+
+**Per-project isolation.** Each T3 project gets its own Chromium persistent context at `<dataDir>/browser/<projectId>/chromium-profile/`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed across projects. Chromium runs headless by default.
+
+**Vendored, not invented.** The core command implementations are byte-identical to upstream [GStack Browser](https://github.com/gstack/gstack) (MIT, © Garry Tan). T3-specific behavior (per-project profiles, REST shape, Effect-based lifecycle) lives in T3-authored files outside the vendored `core/` directory.
+
+**User interaction:**
+
+- Runs invisibly by default — no browser popup. Screenshots are the window into what the agent is doing.
+- Settings → Prompts → Browser lets you edit the system-prompt instructions the agent sees.
+- (Planned) A "watch mode" UI toggle to flip the active project's Chromium to headed for demos and debugging — tracked at [T3CO-330](t3://ticket/T3CO-330).
+
+**Agent interaction (REST API — `/api/browser`):**
+
+- Discovery: `GET /api/browser` returns the full tool registry with input schemas.
+- Typical flow: `goto` → `snapshot` (get `@e1`, `@e2` refs) → `click @e1` / `fill @e2 value=...` → `snapshot` (fresh refs) → `screenshot`.
+- `batch` runs up to 50 `{tool, input}` entries sequentially.
+
+---
+
+## 10. Git Integration
 
 Built-in git operations for version control without leaving the app.
 
@@ -470,7 +494,7 @@ The configured text generation model can auto-generate:
 
 ---
 
-## 10. Worktree & Environment Modes
+## 11. Worktree & Environment Modes
 
 Per-thread workspace isolation using git worktrees.
 
@@ -501,7 +525,7 @@ Configurable globally via `defaultThreadEnvMode` in server settings, or per-thre
 
 ---
 
-## 11. Terminal
+## 12. Terminal
 
 PTY-based terminal sessions embedded in the UI, attached to threads.
 
@@ -541,7 +565,7 @@ PTY-based terminal sessions embedded in the UI, attached to threads.
 
 ---
 
-## 12. File Explorer
+## 13. File Explorer
 
 A built-in file browser and editor for navigating project files.
 
@@ -565,7 +589,7 @@ A built-in file browser and editor for navigating project files.
 
 ---
 
-## 13. Diff Viewer
+## 14. Diff Viewer
 
 Visualize code changes from agent turns or git operations.
 
@@ -585,7 +609,7 @@ Visualize code changes from agent turns or git operations.
 
 ---
 
-## 14. Checkpointing
+## 15. Checkpointing
 
 Git-ref based snapshots that track file state before and after each agent turn.
 
@@ -613,7 +637,7 @@ Git-ref based snapshots that track file state before and after each agent turn.
 
 ---
 
-## 15. Settings & Configuration
+## 16. Settings & Configuration
 
 ### Server settings
 
@@ -671,7 +695,7 @@ Limits: 256 rules max, 64-char key values, 256-char when expressions.
 
 ---
 
-## 16. T3 Project Service Injection
+## 17. T3 Project Service Injection
 
 Internal T3 project services are exposed to every provider the same way: REST endpoint URLs and a short-lived Bearer token are injected into the session-start prompt via the shared `buildT3ServiceInjectionPrompt` helper. The model calls them with its native shell/bash tool. See [t3-agent-tools.md](t3-agent-tools.md) for implementation details.
 
@@ -692,7 +716,7 @@ Trade-off: one extra round-trip for tool discovery (`GET` before `POST`) in exch
 
 ---
 
-## 17. Desktop App (Electron)
+## 18. Desktop App (Electron)
 
 The Electron shell wraps the server and web app into a native desktop application.
 
@@ -723,7 +747,7 @@ The Electron shell wraps the server and web app into a native desktop applicatio
 
 ---
 
-## 18. Startup Recovery
+## 19. Startup Recovery
 
 Handles server restarts gracefully when threads were mid-execution. See [startup-recovery.md](startup-recovery.md) for implementation details.
 
@@ -745,7 +769,7 @@ On startup, the server scans the orchestration state for sessions with `status =
 
 ---
 
-## 19. Observability
+## 20. Observability
 
 Logging, tracing, and metrics for debugging and monitoring.
 
@@ -775,7 +799,7 @@ All WebSocket RPC calls are instrumented with request/response tracing, error tr
 
 ---
 
-## 20. Keyboard Shortcuts
+## 21. Keyboard Shortcuts
 
 ### Global shortcuts
 
@@ -806,7 +830,7 @@ Users can define custom shortcuts in `keybindings.json` with conditional express
 
 ---
 
-## 21. Changelog
+## 22. Changelog
 
 AI-generated release notes from git commit history. See [changelog.md](changelog.md) for implementation details.
 
@@ -831,7 +855,7 @@ AI-generated release notes from git commit history. See [changelog.md](changelog
 
 ---
 
-## 22. Attachment Storage
+## 23. Attachment Storage
 
 Immutable file storage for chat attachments (images, documents, etc.).
 

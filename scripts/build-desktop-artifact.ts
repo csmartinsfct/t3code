@@ -9,6 +9,11 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import {
+  fetchBunBinary,
+  desktopArchToBunArch,
+  desktopPlatformToBunPlatform,
+} from "./lib/fetch-bun-binary.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -517,6 +522,28 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
+    // T3CO-328: backend is spawned under the bundled Bun binary (not Electron-
+    // Node), and Bun cannot read files from inside Electron's `app.asar`
+    // archive. Keep asar packaging for the Electron main process and other
+    // assets (cheaper install, less casually-browsable source) but unpack
+    // the paths Bun needs to read at runtime: the bundled server entry +
+    // its transitive `node_modules` graph.
+    asar: true,
+    asarUnpack: [
+      "apps/server/dist/**",
+      "node_modules/**",
+    ],
+    // Bundle the per-platform Bun binary (T3CO-328) into the packaged app's
+    // Resources directory. `main.ts` resolves it via
+    // `resolveBackendRuntime()` → `process.resourcesPath/bin/<bun exe>`.
+    // Staged at `<stageAppDir>/bin/` by the artifact script before
+    // electron-builder runs.
+    extraResources: [
+      {
+        from: "bin/",
+        to: "bin/",
+      },
+    ],
   };
   const publishConfig = resolveGitHubPublishConfig();
   if (publishConfig) {
@@ -711,6 +738,47 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+
+  // Bundle the Bun binary for the target platform + arch (T3CO-328). The
+  // packaged backend runs under Bun so the vendored `cookie-import-browser`
+  // can static-import `bun:sqlite` without taking down the whole browser
+  // surface under Electron-Node. Binary lands under `bin/<exe>` and is
+  // copied into the packaged app Resources via electron-builder's
+  // `extraResources`.
+  const bunPlatform = desktopPlatformToBunPlatform(options.platform);
+  const bunArch = desktopArchToBunArch(options.arch);
+  const bunExe = options.platform === "win" ? "bun.exe" : "bun";
+  const stagedBinDir = path.join(stageAppDir, "bin");
+  const stagedBunPath = path.join(stagedBinDir, bunExe);
+  yield* Effect.log(`[desktop-artifact] Fetching Bun binary for ${bunPlatform}-${bunArch}...`);
+  const sourceBunPath = yield* Effect.tryPromise({
+    try: () =>
+      fetchBunBinary(bunPlatform, bunArch, {
+        logger: (msg) => console.log(msg),
+      }),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: `Failed to fetch Bun binary for ${bunPlatform}-${bunArch}.`,
+        cause,
+      }),
+  });
+  yield* fs.makeDirectory(stagedBinDir, { recursive: true });
+  yield* fs.copyFile(sourceBunPath, stagedBunPath);
+  if (options.platform !== "win") {
+    // fs.copyFile preserves bits, but double-check the +x flag is set so
+    // ChildProcess.spawn can actually exec it at runtime. `0o755` = rwxr-xr-x.
+    yield* Effect.tryPromise({
+      try: async () => {
+        const { chmodSync } = await import("node:fs");
+        chmodSync(stagedBunPath, 0o755);
+      },
+      catch: (cause) =>
+        new BuildScriptError({
+          message: `Failed to mark staged Bun binary executable at ${stagedBunPath}.`,
+          cause,
+        }),
+    });
+  }
 
   yield* assertPlatformBuildResources(options.platform, stageResourcesDir, options.verbose);
 

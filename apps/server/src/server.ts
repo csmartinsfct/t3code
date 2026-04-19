@@ -52,6 +52,8 @@ import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem"
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
+import { browserRouteLayer } from "./browser/http";
+import { BrowserManagerServiceLive } from "./browser/Layers/BrowserManager";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
 import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
 import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
@@ -272,6 +274,7 @@ const RuntimeCoreServicesLive = Layer.empty.pipe(
       Layer.provide(PersistenceLayerLive),
     ),
   ),
+  Layer.provideMerge(BrowserManagerServiceLive),
   Layer.provideMerge(OrchestrationRunRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
   Layer.provideMerge(ProjectionThreadRepositoryLive.pipe(Layer.provide(PersistenceLayerLive))),
   Layer.provideMerge(
@@ -301,6 +304,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   managedRunsRouteLayer,
   scheduledTasksRouteLayer,
   ticketingRouteLayer,
+  browserRouteLayer,
   promptsRouteLayer,
   sessionRestartRouteLayer,
   staticAndDevRouteLayer,

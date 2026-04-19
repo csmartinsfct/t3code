@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "bun run src/bin.ts",
     "build": "node scripts/cli.ts build",
-    "start": "node dist/bin.mjs",
+    "start": "bun dist/bin.mjs",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -29,9 +29,11 @@
     "@effect/sql-sqlite-bun": "catalog:",
     "@pierre/diffs": "^1.1.0-beta.16",
     "cron-parser": "^5.5.0",
+    "diff": "^7.0.0",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
     "open": "^10.1.0",
+    "playwright": "^1.58.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -41,6 +43,7 @@
     "@t3tools/shared": "workspace:*",
     "@t3tools/web": "workspace:*",
     "@types/bun": "catalog:",
+    "@types/diff": "^8.0.0",
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

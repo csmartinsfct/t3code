@@ -1,18 +1,19 @@
 # T3 Agent Tools
 
-How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, prompt management, and session restart) to AI provider sessions.
+How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, browser automation, prompt management, and session restart) to AI provider sessions.
 
 ## Overview
 
 T3 Code exposes several internal REST API services that AI models can use during conversations:
 
-| Service         | Endpoint               | Tools | Purpose                                                        |
-| --------------- | ---------------------- | ----- | -------------------------------------------------------------- |
-| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose |
-| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                           |
-| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts     |
-| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates    |
-| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session           |
+| Service         | Endpoint               | Tools | Purpose                                                                                                                                                                               |
+| --------------- | ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose                                                                                                                        |
+| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                                                                                                                                                  |
+| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                            |
+| Browser         | `/api/browser`         | 58    | Per-project headless Chromium with plaintext output and stable @ref element IDs (navigate, snapshot, click/fill, screenshots, evaluate JS) — see [browser-tools.md](browser-tools.md) |
+| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                           |
+| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                  |
 
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
