@@ -50,6 +50,7 @@ Record:
 Widen the provider union FIRST. Every provider-specific map in the codebase typechecks against `Record<BaseProviderKind, …>`, so adding a new kind causes compiler errors exactly where maps need to be extended. Lean on those errors as a TODO list.
 
 File: `packages/contracts/src/orchestration.ts`
+
 - Add `"<provider>"` to `BASE_PROVIDER_KINDS` (line 45-ish).
 - Add `<Provider>ModelSelection` struct with `provider: Literal("<provider>")`, optional `profileId`, `model: TrimmedNonEmptyString`, optional `options`.
 - Add it to the `ModelSelection` union.
@@ -57,6 +58,7 @@ File: `packages/contracts/src/orchestration.ts`
 - Update any `isValidProviderKind` check that enumerates provider prefixes.
 
 File: `packages/contracts/src/model.ts`
+
 - Add `<Provider>ModelOptions` struct. Start empty (`Schema.Struct({})`) unless the spike proves provider-specific toggles. Gemini has none; Codex has `reasoningEffort` + `fastMode`; Claude has `effort` + `thinking` + `fastMode` + `contextWindow`.
 - Add `<Provider>` entry to `ProviderModelOptions`.
 - Add `<Provider>` entry to `DEFAULT_MODEL_BY_PROVIDER` and `DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER`.
@@ -64,22 +66,27 @@ File: `packages/contracts/src/model.ts`
 - Add `<Provider>` entry to `PROVIDER_DISPLAY_NAMES`.
 
 File: `packages/contracts/src/settings.ts`
+
 - Add `<Provider>Settings` struct with `enabled`, `binaryPath` (defaults to CLI name), `homePath`/`configDir` (provider-specific), `customModels`. Follow the `makeBinaryPathSetting` pattern used by Codex.
 - Add `<Provider>` entry to `ServerSettings.providers`.
 - Add `<Provider>SettingsPatch` and include it in `ServerSettingsPatch.providers`.
 - Add `<Provider>ModelOptionsPatch` (if options are non-empty) and include the `<Provider>` arm of `ModelSelectionPatch`.
 
 File: `packages/contracts/src/providerRuntime.ts`
+
 - No contract change is required if the runtime-event schema is already provider-neutral (it is today). Only extend the `raw.source` literal enum if you want lifecycle logs to tag the provider-specific transport (e.g. `gemini.acp.notification`).
 
 File: `packages/contracts/src/ticketing.ts`
+
 - Add `<Provider>` arm to `TicketModelSelection` (separate union kept in sync with `ModelSelection` to avoid a circular import). Orchestration runner uses this for `implementerModel` / `reviewerModel` overrides.
 
 File: `packages/shared/src/model.ts`
+
 - Add `<Provider>` fallback to `inferBaseProviderKindFromModelSlug` (slug-prefix heuristic). This is what `normalizeModelSelectionProvider` uses to correct a model selection whose `provider` field drifted from its slug — a real bug Gemini shipped first (fork fix `b553e7ff`).
 - Extend `normalizeModelOptionsWithCapabilities` helpers if the provider has options.
 
 File: `packages/shared/src/review.ts`
+
 - Update any review-model selection heuristic that enumerates providers.
 
 **Commit after contracts land** (`0b9a8495` pattern). At this point the web and server code should be riddled with typecheck errors where provider-specific maps are missing a branch. Those errors are your map.
@@ -91,6 +98,7 @@ File: `packages/shared/src/review.ts`
 File: `apps/server/src/provider/Services/<Provider>Provider.ts` (new, thin service tag).
 
 File: `apps/server/src/provider/Layers/<Provider>Provider.ts` (new, the live layer).
+
 - Implement `checkProviderStatus` that returns a `ServerProvider` snapshot.
 - `installed`: probe the binary via a version subcommand (e.g. `gemini --version`). Use `spawnAndCollect` from `providerSnapshot` helpers.
 - `version`: parse from the version probe output.
@@ -389,18 +397,22 @@ Web: make sure `apps/web/src/lib/rateLimit.ts` renders the tiers you send. Gemin
 T3 routes "not the chat turn" inference (commit messages, PR bodies, branch names, thread titles, managed-run inference) through `RoutingTextGeneration`. Every provider must be explicit — **no silent fallback to Codex** for unknown providers.
 
 File: `apps/server/src/git/Layers/RoutingTextGeneration.ts`
+
 - Add a `<Provider>TextGen` ServiceMap tag and an `Internal<Provider>Layer`.
 - Dispatch via `baseProviderKind(provider)` in the `route` function. TypeScript exhaustiveness will catch a missing branch.
 
 File: `apps/server/src/git/Layers/<Provider>TextGeneration.ts` (new)
+
 - Wrap `run<Provider>StructuredOutput` per operation.
 - Use the same Effect schemas as Codex/Claude so the output types stay aligned.
 
 File: `apps/server/src/llm/structuredOutput.ts`
+
 - Add `run<Provider>StructuredOutput` that runs the binary in an ephemeral / read-only mode (Gemini uses `--approval-mode plan`; Codex uses `-s read-only --ephemeral`). Parse the output envelope, decode with the target schema.
 - If the provider doesn't expose a JSON-schema flag, prompt it explicitly to return a single JSON object and parse the CLI envelope. Gemini's `runGeminiStructuredOutput` uses that approach.
 
 File: `apps/server/src/managedRuns/Layers/Inference.ts`
+
 - Either implement a provider runner, OR return an explicit unsupported result before falling through to another provider. Gemini does the latter.
 
 ---
@@ -413,14 +425,15 @@ When a user reverts checkpoints, the reactor may need to trim turns off the prov
 
 ```ts
 if (rolledBackTurns > 0) {
-  const capabilities = yield* providerService.getCapabilities(sessionRuntime.value.provider);
+  const capabilities = yield * providerService.getCapabilities(sessionRuntime.value.provider);
   if (capabilities.conversationRollback === "unsupported") {
-    yield* appendRevertFailureActivity({
-      threadId,
-      turnCount: event.payload.turnCount,
-      detail: `Checkpoint revert is unavailable for ${sessionRuntime.value.provider} because provider conversation rollback is unsupported.`,
-      createdAt: now,
-    }).pipe(Effect.catch(() => Effect.void));
+    yield *
+      appendRevertFailureActivity({
+        threadId,
+        turnCount: event.payload.turnCount,
+        detail: `Checkpoint revert is unavailable for ${sessionRuntime.value.provider} because provider conversation rollback is unsupported.`,
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
     return;
   }
 }
@@ -471,30 +484,38 @@ Today T3 does NOT register its own `t3-code` MCP bridge for any provider — pro
 ## Phase 15 — Web UI
 
 File: `apps/web/src/components/chat/ProviderModelPicker.tsx` (+ `.browser.tsx`)
+
 - Add an icon entry for the new provider.
 - Confirm the picker's "disabled reason" chain surfaces each state: `disabled` → "Disabled"; `!installed` → "Not installed"; `auth.status === "unauthenticated"` → "Not authenticated"; `status === "warning"` → "Needs attention"; else "Unavailable". Gemini added this granularity in `91fbeba5`.
 
 File: `apps/web/src/components/chat/composerProviderRegistry.tsx`
+
 - Add a registry entry. Traits menu content may be null if the provider has no model options (Gemini's case).
 
 File: `apps/web/src/components/chat/TraitsPicker.tsx`
+
 - Add a branch if the provider exposes distinct controls.
 
 File: `apps/web/src/components/settings/SettingsPanels.tsx`
+
 - Add a panel with: enable toggle, binary path, home/config path, custom models, refresh button, auth status display.
 
 File: `apps/web/src/modelSelection.ts` + `apps/web/src/session-logic.ts` + `apps/web/src/store.ts`
+
 - Update `makeAppModelSelection` and any provider-switching helpers. Use `makeProviderModelSelection` from `packages/shared/src/model.ts` (added in `b553e7ff`).
 - Update fallbacks: never coerce an unknown provider to Codex silently. Propagate the error to the picker.
 
 File: `apps/web/src/components/ChatView.tsx` + `apps/web/src/components/KeybindingsToast.browser.tsx` + `apps/web/src/components/chat/ProviderModelPicker.browser.tsx`
+
 - If the provider needs any new icon import, it usually lands here.
 - The runtime-mode toggle button (`LockIcon`/`LockOpenIcon`) + `CompactComposerControlsMenu` "Access" section already work for any provider — no changes.
 
 File: `apps/web/src/routes/__root.browser.tsx`
+
 - Confirm test fixtures include the new `providers.<provider>` defaults so the route stays typecheck-clean.
 
 **UI behavior:**
+
 - Gemini appears selectable only when enabled + installed + authenticated.
 - If installed but unauthenticated, Gemini appears disabled in the picker with the actionable status line.
 - Model traits that the capability map does not expose must be hidden.
