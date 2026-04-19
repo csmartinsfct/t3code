@@ -187,6 +187,14 @@ The BrowserManager layer lazy-launches a persistent context on the first `acquir
 
 Dev server: paths resolve under `~/.t3/dev/browser/<projectId>/...` when `ServerConfig.devUrl` is set (Electron dev mode), otherwise `~/.t3/userdata/browser/<projectId>/...`.
 
+### Chromium bundle
+
+Playwright's Chromium binary is shipped inside the packaged desktop app rather than downloaded on first launch. The build script (`scripts/build-desktop-artifact.ts`) runs `bunx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH` pointing at a staged directory, which electron-builder then copies into `Resources/playwright-browsers/` via `extraResources`. At runtime, `backendChildEnv()` in `apps/desktop/src/main.ts` sets `PLAYWRIGHT_BROWSERS_PATH` to that directory before spawning the backend, so Playwright finds the bundled copy.
+
+Runtime install is not supported: `playwright/cli.js` is unresolvable from inside `app.asar.unpacked` under the Bun runtime, and a lazy 200 MB download on first use is user-hostile anyway. If the bundled copy is missing, `assertChromiumAvailable` in `BrowserManager.ts` logs a clear diagnostic at startup and the first `goto` fails loudly.
+
+Dev builds leave `PLAYWRIGHT_BROWSERS_PATH` unset, so Playwright uses the developer's `~/Library/Caches/ms-playwright/` install (`bunx playwright install chromium` once per machine).
+
 ---
 
 ## Known issues
@@ -206,7 +214,7 @@ Dev server: paths resolve under `~/.t3/dev/browser/<projectId>/...` when `Server
 - [T3CO-324](t3://ticket/T3CO-324) — browser admin prompt
 - [T3CO-325](t3://ticket/T3CO-325) — integration tests
 - [T3CO-328](t3://ticket/T3CO-328) — Bun production runtime switch (deferred)
-- [T3CO-329](t3://ticket/T3CO-329) — Chromium auto-install (deferred)
+- [T3CO-329](t3://ticket/T3CO-329) — Chromium auto-install (superseded: Chromium is bundled at build time; see "Chromium bundle" below)
 - [T3CO-330](t3://ticket/T3CO-330) — headed/headless UX (deferred)
 - [T3CO-331](t3://ticket/T3CO-331) — fix `useragent` under persistent context (deferred)
 - [T3CO-333](t3://ticket/T3CO-333) — port pure-logic vendored tests (deferred)
@@ -215,10 +223,10 @@ Dev server: paths resolve under `~/.t3/dev/browser/<projectId>/...` when `Server
 
 ## Debugging
 
-| Symptom                                            | Check                                                                                                                                                                                                          |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Executable doesn't exist at .../chromium/chrome`  | Run `playwright install chromium` once per machine. Tracked for auto-install at [T3CO-329](t3://ticket/T3CO-329).                                                                                              |
-| `Context recreation failed: null is not an object` | `useragent` crash — see known issues above.                                                                                                                                                                    |
-| Cookies missing after restart                      | Verify profile dir exists at `<dataDir>/browser/<projectId>/chromium-profile/Default/Cookies`. Session cookies (no `max-age`) don't persist; that's per-spec.                                                  |
-| `Ref @e3 not found`                                | Snapshot is stale. Re-call `snapshot` after any navigation.                                                                                                                                                    |
-| Agent doesn't know the endpoint exists             | Settings → Prompts → Browser — confirm the admin prompt is enabled (it's a shipped default). Also check the `## T3 Browser Automation` block is present in the rendered system prompt for the failing session. |
+| Symptom                                            | Check                                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Executable doesn't exist at .../chromium/chrome`  | Dev: run `bunx playwright install chromium` once per machine. Packaged app: the Chromium bundle is shipped in `Resources/playwright-browsers/`; if it's missing the build was incomplete — reinstall the app. See "Chromium bundle" above. |
+| `Context recreation failed: null is not an object` | `useragent` crash — see known issues above.                                                                                                                                                                                                |
+| Cookies missing after restart                      | Verify profile dir exists at `<dataDir>/browser/<projectId>/chromium-profile/Default/Cookies`. Session cookies (no `max-age`) don't persist; that's per-spec.                                                                              |
+| `Ref @e3 not found`                                | Snapshot is stale. Re-call `snapshot` after any navigation.                                                                                                                                                                                |
+| Agent doesn't know the endpoint exists             | Settings → Prompts → Browser — confirm the admin prompt is enabled (it's a shipped default). Also check the `## T3 Browser Automation` block is present in the rendered system prompt for the failing session.                             |

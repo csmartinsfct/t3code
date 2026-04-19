@@ -55,74 +55,37 @@ function browserDataDir(stateDir: string, projectId: ProjectId): string {
 }
 
 /**
- * Eagerly install Playwright Chromium at server startup if it's not already
- * on disk (T3CO-329). Runs forked so layer construction isn't blocked by the
- * download.
+ * Verify that Playwright's Chromium binary is on disk at server startup.
  *
- * First-use UX without this: first `goto` takes 30-60s while Chromium
- * downloads, or (worse) fails with `Executable doesn't exist at ...` if the
- * user's network is offline. With this: the download is scheduled at server
- * startup and any failure gets surfaced in the server log with the manual
- * fallback command, rather than appearing in the middle of an agent turn.
+ * Packaged desktop builds ship Chromium via electron-builder's
+ * `extraResources` and the Electron main process sets
+ * `PLAYWRIGHT_BROWSERS_PATH` to point Playwright at the bundled copy (see
+ * `scripts/build-desktop-artifact.ts` and `apps/desktop/src/main.ts`). Dev
+ * builds rely on the developer having run `bunx playwright install chromium`.
+ *
+ * Runtime install is not a supported path: `playwright/cli.js` is
+ * unresolvable from inside `app.asar.unpacked` under Bun, and a lazy 200 MB
+ * download is a hostile first-use UX besides. If Chromium is missing we log
+ * a clear, actionable error at startup instead of letting `launchPersistentContext`
+ * fail opaquely deep inside a later agent turn.
  */
-const ensureChromiumInstalled = Effect.promise(async () => {
+const assertChromiumAvailable = Effect.promise(async () => {
   const { chromium } = await import("playwright");
   const execPath = chromium.executablePath();
   const { existsSync } = await import("node:fs");
   if (execPath && existsSync(execPath)) {
-    console.log("[t3/browser] Chromium already installed at", execPath);
+    console.log("[t3/browser] Chromium available at", execPath);
     return;
   }
-  console.log(
-    "[t3/browser] Chromium not found at",
-    execPath || "(unknown)",
-    "— kicking off `playwright install chromium` in the background.",
+  const envHint = process.env.PLAYWRIGHT_BROWSERS_PATH
+    ? ` PLAYWRIGHT_BROWSERS_PATH=${process.env.PLAYWRIGHT_BROWSERS_PATH}`
+    : "";
+  console.error(
+    `[t3/browser] Chromium binary not found at ${execPath || "(unknown)"}.${envHint}`,
+    "Browser tools will fail until Chromium is installed.",
+    "Dev: run `bunx playwright install chromium`.",
+    "Packaged app: reinstall — the Chromium bundle should be shipped in Resources/playwright-browsers.",
   );
-  // Resolve the playwright CLI through createRequire so this works under
-  // both Bun (runtime) and bundled Node without `import.meta.resolve`.
-  const { createRequire } = await import("node:module");
-  const req = createRequire(import.meta.url);
-  let cliPath: string;
-  try {
-    cliPath = req.resolve("playwright/cli.js");
-  } catch (err) {
-    console.error(
-      "[t3/browser] Could not locate playwright CLI for automatic install.",
-      "Run `bunx playwright install chromium` manually.",
-      err,
-    );
-    return;
-  }
-  const { spawn } = await import("node:child_process");
-  const child = spawn(process.execPath, [cliPath, "install", "chromium"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    // Detach so the download continues if the server restarts, but don't
-    // call unref — we do want to report the exit result to the parent log
-    // while the parent is alive.
-  });
-  child.stdout?.on("data", (chunk) => {
-    process.stdout.write(`[t3/browser/install] ${chunk}`);
-  });
-  child.stderr?.on("data", (chunk) => {
-    process.stderr.write(`[t3/browser/install] ${chunk}`);
-  });
-  child.on("error", (err) => {
-    console.error(
-      "[t3/browser] Failed to spawn `playwright install chromium`:",
-      err,
-      "Run `bunx playwright install chromium` manually to complete setup.",
-    );
-  });
-  child.on("exit", (code, signal) => {
-    if (code === 0) {
-      console.log("[t3/browser] Chromium installed successfully.");
-    } else {
-      console.error(
-        `[t3/browser] \`playwright install chromium\` exited with code=${code} signal=${signal}.`,
-        "Run `bunx playwright install chromium` manually to complete setup.",
-      );
-    }
-  });
 });
 
 export const BrowserManagerServiceLive = Layer.effect(
@@ -302,11 +265,11 @@ export const BrowserManagerServiceLive = Layer.effect(
       Effect.forkScoped,
     );
 
-    // T3CO-329: kick off `playwright install chromium` in the background at
-    // layer startup if Chromium isn't already on disk. Eager rather than
-    // lazy so agents don't pay a 30-60s download mid-command the first time
-    // the browser is used.
-    yield* ensureChromiumInstalled.pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+    // Verify Chromium is on disk at startup. The check logs a clear
+    // diagnostic rather than throwing — we don't want a missing browser to
+    // prevent the rest of the server from booting, only to make sure the
+    // failure mode is obvious the next time an agent reaches for the tool.
+    yield* assertChromiumAvailable.pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
 
     yield* Effect.addFinalizer(() => releaseAll());
 

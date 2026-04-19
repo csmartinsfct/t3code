@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from "effect";
+import { Cause, Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import type { OrchestrationRunId, PromptId, ProjectId } from "@t3tools/contracts";
@@ -12,6 +12,7 @@ import {
   extractBearerToken,
   parseToolCallBody,
   respondError,
+  respondErrorFromCause,
   respondOk,
   type ToolDefinition,
 } from "../restResponse";
@@ -360,8 +361,10 @@ const handlePost = Effect.gen(function* () {
   if (!handler) return respondError(`Unknown tool: ${body.tool}`);
 
   return yield* handler(body.input).pipe(
-    Effect.catch((error) => {
-      if (Schema.is(PromptManagementError)(error)) {
+    Effect.catchCause((cause) => {
+      const failure = Cause.findErrorOption(cause);
+      if (failure._tag === "Some" && Schema.is(PromptManagementError)(failure.value)) {
+        const error = failure.value;
         return Effect.succeed(
           respondError(
             JSON.stringify({
@@ -373,9 +376,7 @@ const handlePost = Effect.gen(function* () {
           ),
         );
       }
-      return Effect.succeed(
-        respondError(error instanceof Error ? error.message : String(error), 500),
-      );
+      return Effect.succeed(respondErrorFromCause(cause));
     }),
   );
 });

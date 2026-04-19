@@ -160,6 +160,17 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   delete env.T3CODE_NO_BROWSER;
   delete env.T3CODE_HOST;
   delete env.T3CODE_DESKTOP_WS_URL;
+
+  // Point Playwright at the Chromium bundle shipped in Resources (staged by
+  // `scripts/build-desktop-artifact.ts`). The packaged app cannot self-install
+  // Chromium at runtime — `playwright/cli.js` is unresolvable from inside
+  // `app.asar.unpacked` under Bun — so the browser tool depends on the binary
+  // being present here. Dev builds leave the env var unset so Playwright uses
+  // the developer's `~/Library/Caches/ms-playwright/` install.
+  if (app.isPackaged) {
+    env.PLAYWRIGHT_BROWSERS_PATH = Path.join(process.resourcesPath, "playwright-browsers");
+  }
+
   return env;
 }
 
@@ -425,7 +436,9 @@ function resolveBackendEntry(): string {
   // does NOT get that redirect and will fail with "Module not found" on any
   // asar-virtual path. Swap to the real on-disk unpacked path so Bun can
   // read `bin.mjs` and follow its `node_modules` import graph.
-  return app.isPackaged ? entry.replace(`${Path.sep}app.asar${Path.sep}`, `${Path.sep}app.asar.unpacked${Path.sep}`) : entry;
+  return app.isPackaged
+    ? entry.replace(`${Path.sep}app.asar${Path.sep}`, `${Path.sep}app.asar.unpacked${Path.sep}`)
+    : entry;
 }
 
 /**

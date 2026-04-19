@@ -1,5 +1,5 @@
-import { Effect } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { Cause, Effect, Result } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns";
@@ -17,6 +17,37 @@ export function respondOk<T>(data: T, message = "OK") {
 
 export function respondError(error: string, status = 400) {
   return HttpServerResponse.jsonUnsafe({ data: null, error }, { status });
+}
+
+/**
+ * Build a 500 JSON error response from an Effect Cause, unwrapping tagged
+ * errors so nested causes survive the round-trip.
+ *
+ * `Data.TaggedError` is an Error subclass with an empty `.message`, so the
+ * naive `error.message` fallback serialized them as `""` and swallowed every
+ * diagnostic. This formatter walks failures → defects → `.cause` chains so
+ * the client sees something useful.
+ */
+export function respondErrorFromCause(cause: Cause.Cause<unknown>, status = 500) {
+  return respondError(formatCause(cause), status);
+}
+
+function formatCause(cause: Cause.Cause<unknown>): string {
+  const failure = Cause.findErrorOption(cause);
+  if (failure._tag === "Some") return formatThrown(failure.value);
+  const defect = Result.getSuccess(Cause.findDefect(cause));
+  if (defect._tag === "Some") return formatThrown(defect.value);
+  return Cause.pretty(cause);
+}
+
+function formatThrown(err: unknown): string {
+  if (err === null || err === undefined) return String(err);
+  if (!(err instanceof Error)) return String(err);
+  const tag = (err as { _tag?: string })._tag ?? err.name;
+  const head = err.message ? `${tag}: ${err.message}` : tag;
+  const nested = (err as { cause?: unknown }).cause;
+  if (nested === undefined || nested === null) return head;
+  return `${head} → ${formatThrown(nested)}`;
 }
 
 // ---------------------------------------------------------------------------

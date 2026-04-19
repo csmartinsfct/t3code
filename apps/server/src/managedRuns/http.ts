@@ -8,6 +8,7 @@ import {
   parseToolCallBody,
   resolveAuth,
   respondError,
+  respondErrorFromCause,
   respondOk,
   type ToolDefinition,
 } from "../restResponse";
@@ -316,9 +317,7 @@ const handlePost = Effect.gen(function* () {
   if (!handler) return respondError(`Unknown tool: ${body.tool}`);
 
   return yield* handler(body.input).pipe(
-    Effect.catch((error) =>
-      Effect.succeed(respondError(error instanceof Error ? error.message : String(error), 500)),
-    ),
+    Effect.catchCause((cause) => Effect.succeed(respondErrorFromCause(cause))),
   );
 });
 

@@ -1,7 +1,13 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { parseToolCallBody, resolveAuth, respondError, respondOk } from "../restResponse";
+import {
+  parseToolCallBody,
+  resolveAuth,
+  respondError,
+  respondErrorFromCause,
+  respondOk,
+} from "../restResponse";
 import { buildCommandHandlers, toolDefinitions } from "./handlers";
 import { BrowserManagerService, type BrowserInstance } from "./Services/BrowserManager";
 
@@ -53,9 +59,7 @@ const handlePost = Effect.gen(function* () {
   if (!handler) return respondError(`Unknown tool: ${body.tool}`);
 
   return yield* handler(body.input).pipe(
-    Effect.catch((error) =>
-      Effect.succeed(respondError(error instanceof Error ? error.message : String(error), 500)),
-    ),
+    Effect.catchCause((cause) => Effect.succeed(respondErrorFromCause(cause))),
   );
 });
 

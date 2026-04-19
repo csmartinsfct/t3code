@@ -529,10 +529,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // the paths Bun needs to read at runtime: the bundled server entry +
     // its transitive `node_modules` graph.
     asar: true,
-    asarUnpack: [
-      "apps/server/dist/**",
-      "node_modules/**",
-    ],
+    asarUnpack: ["apps/server/dist/**", "node_modules/**"],
     // Bundle the per-platform Bun binary (T3CO-328) into the packaged app's
     // Resources directory. `main.ts` resolves it via
     // `resolveBackendRuntime()` → `process.resourcesPath/bin/<bun exe>`.
@@ -542,6 +539,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       {
         from: "bin/",
         to: "bin/",
+      },
+      // Playwright Chromium binaries, installed during staging so the packaged
+      // app works offline on first launch. The Electron main process exposes
+      // this directory to the backend via `PLAYWRIGHT_BROWSERS_PATH`.
+      {
+        from: "playwright-browsers/",
+        to: "playwright-browsers/",
       },
     ],
   };
@@ -827,6 +831,25 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
     })`bun install --production`,
+  );
+
+  // Bundle Playwright Chromium into the staged app so the packaged desktop
+  // build can launch the browser tool offline on first run. Without this the
+  // packaged app can't self-install Chromium: `playwright/cli.js` cannot be
+  // resolved from inside `app.asar.unpacked` under the Bun runtime, and
+  // shipping a lazy download is hostile to the first-use UX besides. The
+  // Electron main process sets `PLAYWRIGHT_BROWSERS_PATH` to this directory
+  // via `backendChildEnv()` before spawning the backend.
+  const stagedBrowsersDir = path.join(stageAppDir, "playwright-browsers");
+  yield* fs.makeDirectory(stagedBrowsersDir, { recursive: true });
+  yield* Effect.log("[desktop-artifact] Installing Playwright Chromium into staged resources...");
+  yield* runCommand(
+    ChildProcess.make({
+      cwd: stageAppDir,
+      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: stagedBrowsersDir },
+      ...commandOutputOptions(options.verbose),
+      shell: process.platform === "win32",
+    })`bunx playwright install chromium`,
   );
 
   const buildEnv: NodeJS.ProcessEnv = {
