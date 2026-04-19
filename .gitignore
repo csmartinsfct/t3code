@@ -15,6 +15,7 @@ release/
 release-mock/
 .t3
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
