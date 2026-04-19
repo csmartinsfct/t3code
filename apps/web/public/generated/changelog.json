@@ -1,11 +1,74 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-18T01:21:44.362Z",
-  "lastProcessedCommit": "6718e4e4a9ce5a470bfee34402a6d224c127ddd4",
+  "generatedAt": "2026-04-18T19:18:49.256Z",
+  "lastProcessedCommit": "d5baae1c3fa433dbb33353b754413377ca49434c",
   "groups": [
     {
       "date": "2026-04-18",
       "entries": [
+        {
+          "id": "6ec56014e015bd89",
+          "title": "Sessions can now restart themselves when tools need a refresh",
+          "summary": "Agents can restart their own provider session when newly installed tools need to load or a tool call becomes stuck. The restart happens after the current turn finishes, preserves conversation context, and keeps the continuation out of the visible timeline.",
+          "category": "feature",
+          "commitShas": ["40eff901998c56bbb896aa0f9fd867137c2d197a"]
+        },
+        {
+          "id": "c62249b3f7ec9985",
+          "title": "More control when starting orchestration runs",
+          "summary": "Added per-run options to include or exclude selected tickets, override implementer and reviewer models, skip review, and set maximum review rounds before starting a run.",
+          "category": "feature",
+          "commitShas": [
+            "22bf180af79c90559ca756d4ef362a3dfe75dba1",
+            "501638dec7569b497d91b682d0777794514bf666",
+            "a297796648221c5d77c8003e86f499c147a5352d"
+          ]
+        },
+        {
+          "id": "4ef2871ebf7cd2c9",
+          "title": "Bulk ticket deletion from the board",
+          "summary": "Added a bulk delete action to the board selection bar with confirmation, making it faster to remove multiple selected tickets at once from card or list views.",
+          "category": "feature",
+          "commitShas": ["43dee2549e822232c71d10603d7c43119c0d13ef"]
+        },
+        {
+          "id": "663c9a030b9f5071",
+          "title": "Gemini is now a first-class provider",
+          "summary": "Added Gemini support across chat and orchestration, including provider selection, settings, attachments, authentication detection, MCP server discovery, quota usage reporting, runtime access controls, and parity with existing Codex and Claude workflows.",
+          "category": "feature",
+          "commitShas": [
+            "0b9a8495a96c0299b4fcdbb36846161be877d701",
+            "2edd6b92d4ea76f402f3b21da7ec59df9e928873",
+            "501638dec7569b497d91b682d0777794514bf666",
+            "5c054a76edcfe67db1d4a69c42138c808c90625e",
+            "7f6400c929f92254f464883a2ee9a0aeb35f3f45",
+            "8102202f5539ffa87abcf72576483a2b0f37fa4d",
+            "837862e100bc62b8332c1504706bab112500b7a3",
+            "91fbeba51120c758d240c194515cfd1cedde2354",
+            "932321cd57cbde4365ca58ff207fd21d99fc33ba",
+            "9ebb04adf71228005b037331732610eb77b2208c",
+            "a0cfbedf3a5d1525b298eaacf3c6f5b7cae15194",
+            "b30025e87fc0fd26f3a30ea3ccb350de5b3e4fb0",
+            "b46e6d119b949337c416b1736c68bd85e8ec2f4b",
+            "b553e7ffe29b358dd100be20984304bda620b5fb",
+            "bb9796ec5dbec9c37c409bc3f91a5850587c39bf",
+            "f3f5bde8259c59d265c1d53cd4852d762970819b"
+          ]
+        },
+        {
+          "id": "a05dbc9ea6aba918",
+          "title": "Cleaner ticket links in chat",
+          "summary": "Improved chat rendering so ticket links still appear as ticket badges even when models wrap parts of the link syntax in backticks.",
+          "category": "fix",
+          "commitShas": ["eacc5c69280f0738ba38a74aa2c91b2a03137981"]
+        },
+        {
+          "id": "acfc0c26be9414dc",
+          "title": "App-styled context menus",
+          "summary": "Replaced native operating system context menus with consistent in-app menus that match T3 Code's design language across environments.",
+          "category": "improvement",
+          "commitShas": ["76b06541915890d1e8df2086fdc0be8bd72b0c40"]
+        },
         {
           "id": "207e1f8cdbae076b",
           "title": "Smoother Sidebar Startup",
@@ -1778,6 +1841,54 @@
         "commitShas": [
           "ada0a342220f66e24f51368c3f8a7e5c3838350a",
           "6718e4e4a9ce5a470bfee34402a6d224c127ddd4"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-18T19:18:41.055Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "6718e4e4a9ce5a470bfee34402a6d224c127ddd4",
+        "toInclusiveCommit": "a297796648221c5d77c8003e86f499c147a5352d",
+        "commitShas": [
+          "6c835112583100c5c53ff498d4d39c063283c54e",
+          "76b06541915890d1e8df2086fdc0be8bd72b0c40",
+          "0b9a8495a96c0299b4fcdbb36846161be877d701",
+          "2edd6b92d4ea76f402f3b21da7ec59df9e928873",
+          "22bf180af79c90559ca756d4ef362a3dfe75dba1",
+          "8102202f5539ffa87abcf72576483a2b0f37fa4d",
+          "b553e7ffe29b358dd100be20984304bda620b5fb",
+          "bb9796ec5dbec9c37c409bc3f91a5850587c39bf",
+          "a0cfbedf3a5d1525b298eaacf3c6f5b7cae15194",
+          "b46e6d119b949337c416b1736c68bd85e8ec2f4b",
+          "5c054a76edcfe67db1d4a69c42138c808c90625e",
+          "eacc5c69280f0738ba38a74aa2c91b2a03137981",
+          "f3f5bde8259c59d265c1d53cd4852d762970819b",
+          "501638dec7569b497d91b682d0777794514bf666",
+          "91fbeba51120c758d240c194515cfd1cedde2354",
+          "837862e100bc62b8332c1504706bab112500b7a3",
+          "7f6400c929f92254f464883a2ee9a0aeb35f3f45",
+          "9ebb04adf71228005b037331732610eb77b2208c",
+          "55301924c0a505733dab344b0142ab49bf86f4f2",
+          "f592460c0478b3664e736c44256761d82ff4796f",
+          "932321cd57cbde4365ca58ff207fd21d99fc33ba",
+          "b30025e87fc0fd26f3a30ea3ccb350de5b3e4fb0",
+          "43dee2549e822232c71d10603d7c43119c0d13ef",
+          "a297796648221c5d77c8003e86f499c147a5352d"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-18T19:18:49.112Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "a297796648221c5d77c8003e86f499c147a5352d",
+        "toInclusiveCommit": "d5baae1c3fa433dbb33353b754413377ca49434c",
+        "commitShas": [
+          "40eff901998c56bbb896aa0f9fd867137c2d197a",
+          "d5baae1c3fa433dbb33353b754413377ca49434c"
         ],
         "commitCount": 2,
         "model": "gpt-5.4",
