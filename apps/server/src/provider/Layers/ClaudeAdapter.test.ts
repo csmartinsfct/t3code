@@ -3140,11 +3140,9 @@ describe("ClaudeAdapterLive", () => {
           rate_limit_info: { status: "allowed" },
         } as unknown as SDKMessage);
 
-        const result = yield* Effect.tryPromise(() => {
-          const probe = adapter.probeRateLimits;
-          if (!probe) throw new Error("probeRateLimits not available");
-          return Effect.runPromise(probe());
-        });
+        const probe = adapter.probeRateLimits;
+        if (!probe) throw new Error("probeRateLimits not available");
+        const result = yield* probe();
         assert.isNotNull(result);
         assert.equal(result!.status, "allowed");
         assert.isAbove(harness.probeQuery.closeCalls, 0);
@@ -3159,11 +3157,9 @@ describe("ClaudeAdapterLive", () => {
         // Pre-fail the query before the probe starts iterating.
         harness.probeQuery.fail(new Error("boom"));
 
-        const result = yield* Effect.tryPromise(() => {
-          const probe = adapter.probeRateLimits;
-          if (!probe) throw new Error("probeRateLimits not available");
-          return Effect.runPromise(probe());
-        });
+        const probe = adapter.probeRateLimits;
+        if (!probe) throw new Error("probeRateLimits not available");
+        const result = yield* probe();
         assert.isNull(result);
         assert.isAbove(harness.probeQuery.closeCalls, 0);
       }).pipe(Effect.provide(harness.layer));
@@ -3177,11 +3173,9 @@ describe("ClaudeAdapterLive", () => {
         // Finish the stream without any rate_limit_event.
         harness.probeQuery.finish();
 
-        const result = yield* Effect.tryPromise(() => {
-          const probe = adapter.probeRateLimits;
-          if (!probe) throw new Error("probeRateLimits not available");
-          return Effect.runPromise(probe());
-        });
+        const probe = adapter.probeRateLimits;
+        if (!probe) throw new Error("probeRateLimits not available");
+        const result = yield* probe();
         assert.isNull(result);
         assert.isAbove(harness.probeQuery.closeCalls, 0);
       }).pipe(Effect.provide(harness.layer));

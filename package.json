@@ -79,6 +79,7 @@
     ]
   },
   "trustedDependencies": [
+    "electron",
     "node-pty"
   ]
 }

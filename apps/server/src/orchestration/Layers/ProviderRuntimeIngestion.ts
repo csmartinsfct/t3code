@@ -775,7 +775,7 @@ const make = Effect.fn("make")(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const lifecycle = yield* ProviderLifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
-    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
+    lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }));
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,

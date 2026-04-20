@@ -34,7 +34,7 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive } from "./ProviderService.ts";
+import { makeProviderServiceLive, runProviderIdleReaperSweep } from "./ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -1350,14 +1350,25 @@ describe("idle session reaper", () => {
       ),
       directoryLayer,
       runtimeRepositoryLayer,
+      settingsLayer,
       NodeServices.layer,
     );
 
     return { codex, layer };
   }
 
+  const runIdleSweep = (codex: ReturnType<typeof makeFakeCodexAdapter>) =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const serverSettings = yield* ServerSettingsService;
+      yield* runProviderIdleReaperSweep({
+        adapters: [codex.adapter],
+        directory,
+        serverSettings,
+      });
+    });
+
   it.effect("stops sessions idle beyond the configured threshold", () => {
-    vi.useFakeTimers();
     const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 1 });
 
     return Effect.gen(function* () {
@@ -1378,20 +1389,14 @@ describe("idle session reaper", () => {
         activeTurnId: undefined,
       }));
 
-      // Advance the clock to trigger the reaper sweep (60s interval).
-      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+      yield* runIdleSweep(codex);
 
       // The fake adapter's stopSession should have been called.
       assert.isTrue(codex.stopSession.mock.calls.length > 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(layer),
-      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
-    );
+    }).pipe(Effect.scoped, Effect.provide(layer));
   });
 
   it.effect("skips sessions with an active turn", () => {
-    vi.useFakeTimers();
     const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 1 });
 
     return Effect.gen(function* () {
@@ -1411,19 +1416,14 @@ describe("idle session reaper", () => {
         activeTurnId: asTurnId("running-turn"),
       }));
 
-      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+      yield* runIdleSweep(codex);
 
       // stopSession should NOT have been called (turn is active).
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(layer),
-      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
-    );
+    }).pipe(Effect.scoped, Effect.provide(layer));
   });
 
   it.effect("does not reap when idleSessionTimeoutMinutes is 0", () => {
-    vi.useFakeTimers();
     const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 0 });
 
     return Effect.gen(function* () {
@@ -1443,19 +1443,14 @@ describe("idle session reaper", () => {
         activeTurnId: undefined,
       }));
 
-      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+      yield* runIdleSweep(codex);
 
       // Reaper is disabled — stopSession should not be called.
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(layer),
-      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
-    );
+    }).pipe(Effect.scoped, Effect.provide(layer));
   });
 
   it.effect("does not stop recently active sessions", () => {
-    vi.useFakeTimers();
     const { codex, layer } = makeReaperTestLayer({ idleSessionTimeoutMinutes: 60 });
 
     return Effect.gen(function* () {
@@ -1476,13 +1471,9 @@ describe("idle session reaper", () => {
         activeTurnId: undefined,
       }));
 
-      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(61_000));
+      yield* runIdleSweep(codex);
 
       assert.equal(codex.stopSession.mock.calls.length, 0);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(layer),
-      Effect.ensuring(Effect.sync(() => vi.useRealTimers())),
-    );
+    }).pipe(Effect.scoped, Effect.provide(layer));
   });
 });

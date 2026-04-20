@@ -1,118 +1,39 @@
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import type { HttpServerResponse } from "effect/unstable/http";
 
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 
 import { respondError, respondOk, type ToolDefinition } from "../restResponse";
-import {
-  BrowserManagerService,
-  type BrowserInstance,
-  type BrowserManagerServiceShape,
-} from "./Services/BrowserManager";
-
-// ---------------------------------------------------------------------------
-// Vendored-code runtime bridge
-// ---------------------------------------------------------------------------
-//
-// The vendored GStack code under apps/server/src/browser/core/ is excluded
-// from typecheck (see apps/server/tsconfig.json and NOTICE). We call into it
-// through dynamic imports at runtime and declare the minimal interfaces we
-// touch below. Keeping these types local to this file preserves the rule
-// that vendored files are never edited — all T3-specific typing and
-// adaptation happens outside core/.
-// ---------------------------------------------------------------------------
-
-/** Narrow surface of the vendored TabSession we touch. */
-interface VendoredSession {
-  readonly page: unknown;
-}
-
-/** Narrow surface of the vendored BrowserManager we touch. */
-interface VendoredBrowserManager {
-  getActiveSession(): VendoredSession;
-}
-
-interface VendoredModules {
-  readonly handleReadCommand: (
-    command: string,
-    args: string[],
-    session: VendoredSession,
-    bm?: VendoredBrowserManager,
-  ) => Promise<string>;
-  readonly handleWriteCommand: (
-    command: string,
-    args: string[],
-    session: VendoredSession,
-    bm: VendoredBrowserManager,
-  ) => Promise<string>;
-  readonly handleSnapshot: (args: string[], session: VendoredSession) => Promise<string>;
-  readonly handleMetaCommand: (
-    command: string,
-    args: string[],
-    bm: VendoredBrowserManager,
-    shutdown: () => Promise<void> | void,
-  ) => Promise<string>;
-}
-
-let cachedModules: VendoredModules | null = null;
-
-async function loadVendoredModules(): Promise<VendoredModules> {
-  if (cachedModules) return cachedModules;
-  // `.ts` extension cast to `string` so the dynamic import survives the
-  // tsconfig `exclude` for core/**. `allowImportingTsExtensions` is enabled
-  // in the server tsconfig and Bun resolves TS paths natively at runtime.
-  const [readMod, writeMod, snapshotMod, metaMod] = await Promise.all([
-    import("./core/read-commands.ts" as string),
-    import("./core/write-commands.ts" as string),
-    import("./core/snapshot.ts" as string),
-    import("./core/meta-commands.ts" as string),
-  ]);
-  cachedModules = {
-    handleReadCommand: readMod.handleReadCommand,
-    handleWriteCommand: writeMod.handleWriteCommand,
-    handleSnapshot: snapshotMod.handleSnapshot,
-    handleMetaCommand: metaMod.handleMetaCommand,
-  };
-  return cachedModules;
-}
+import { BrowserHostResolver, type BrowserHostResolverShape } from "./BrowserHostResolver";
+import type { BrowserHostToolName } from "./BrowserHost";
+import type { PlaywrightCommandDescriptor } from "./hosts/PlaywrightHost/PlaywrightBrowserHost";
 
 // ---------------------------------------------------------------------------
 // Handler plumbing
 // ---------------------------------------------------------------------------
 
 export interface ToolContext {
-  readonly browser: BrowserManagerServiceShape;
+  readonly resolver: BrowserHostResolverShape;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId;
 }
 
 export type ToolHandler = (
   input: Record<string, unknown>,
-) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown, never>;
+) => Effect.Effect<HttpServerResponse.HttpServerResponse, BrowserToolError, never>;
 
-/** `stop` / `restart` meta-commands call shutdown. The T3 dispatcher never
- *  routes to those (see the excluded meta commands below), but we still pass
- *  a no-op + warning to guard against any future accidental routing. */
-const NOOP_SHUTDOWN = (): void => {
-  console.warn("[t3/browser] vendored meta handler attempted to invoke shutdown — ignored");
-};
+class BrowserToolError extends Data.TaggedError("BrowserToolError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
-function withVendored<A>(
-  ctx: ToolContext,
-  body: (env: {
-    readonly modules: VendoredModules;
-    readonly bm: VendoredBrowserManager;
-    readonly session: VendoredSession;
-    readonly instance: BrowserInstance;
-  }) => Promise<A>,
-) {
-  return Effect.gen(function* () {
-    const instance = yield* ctx.browser.acquire(ctx.projectId);
-    const modules = yield* Effect.promise(() => loadVendoredModules());
-    const bm = instance.inner as VendoredBrowserManager;
-    const session = bm.getActiveSession();
-    return yield* Effect.promise(() => body({ modules, bm, session, instance }));
-  });
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toBrowserToolError(error: unknown): BrowserToolError {
+  if (error instanceof BrowserToolError) return error;
+  return new BrowserToolError({ message: errorMessage(error), cause: error });
 }
 
 // ---------------------------------------------------------------------------
@@ -890,33 +811,28 @@ function runCommand(
   tool: string,
   ctx: ToolContext,
   input: Record<string, unknown>,
-): Effect.Effect<string, unknown, never> {
-  // Tools that require closing + relaunching the Chromium context can't go
-  // through the vendored dispatch — the vendored `recreateContext()` assumes
-  // `this.browser !== null`, which isn't true under `launchPersistentContext`.
-  // Handle them via the BrowserManager layer's `recreate` primitive.
+): Effect.Effect<string, BrowserToolError, never> {
   const layerHandler = LAYER_HANDLERS[tool];
   if (layerHandler) return layerHandler(ctx, input);
 
   const spec = SPECS[tool];
-  if (!spec) return Effect.fail(new Error(`unknown tool '${tool}'`));
+  if (!spec) return Effect.fail(new BrowserToolError({ message: `unknown tool '${tool}'` }));
   let args: string[];
   try {
     args = spec.argsFromInput(input, tool);
   } catch (err) {
-    return Effect.fail(err);
+    return Effect.fail(toBrowserToolError(err));
   }
-  return withVendored(ctx, ({ modules, bm, session }) => {
-    switch (spec.category) {
-      case "read":
-        return modules.handleReadCommand(spec.command, args, session, bm);
-      case "write":
-        return modules.handleWriteCommand(spec.command, args, session, bm);
-      case "snapshot":
-        return modules.handleSnapshot(args, session);
-      case "meta":
-        return modules.handleMetaCommand(spec.command, args, bm, NOOP_SHUTDOWN);
+  return Effect.gen(function* () {
+    const host = yield* ctx.resolver.get(ctx.projectId).pipe(Effect.mapError(toBrowserToolError));
+    const method = host[tool as BrowserHostToolName];
+    if (!method) {
+      return yield* new BrowserToolError({ message: `unknown tool '${tool}'` });
     }
+    return yield* Effect.tryPromise({
+      try: () => method(args, { ...input, __toolName: tool }),
+      catch: toBrowserToolError,
+    });
   });
 }
 
@@ -927,56 +843,59 @@ function runCommand(
 type LayerHandler = (
   ctx: ToolContext,
   input: Record<string, unknown>,
-) => Effect.Effect<string, unknown, never>;
+) => Effect.Effect<string, BrowserToolError, never>;
 
 const LAYER_HANDLERS: Record<string, LayerHandler> = {
-  // T3CO-331: the vendored `useragent` command calls `recreateContext()`
-  // which dereferences `this.browser.newContext()`. Under persistent context
-  // that's null and the tab resets to about:blank. Instead we close the
-  // existing context and relaunch with Playwright's native `userAgent`
-  // option, preserving the profile dir so cookies/auth survive.
   useragent: (ctx, input) => {
     const reset = optBool(input, "reset");
-    if (reset) {
-      return ctx.browser
-        .recreate(ctx.projectId, { userAgent: null })
-        .pipe(Effect.map(() => "User agent reset to Playwright default"));
-    }
     const value = optString(input, "value");
-    if (!value) {
+    const args = reset ? ["--reset"] : value ? [value] : [];
+    if (!reset && args.length === 0) {
       return Effect.fail(
-        new Error("useragent: missing required input.value (string), or pass reset=true"),
+        new BrowserToolError({
+          message: "useragent: missing required input.value (string), or pass reset=true",
+        }),
       );
     }
-    return ctx.browser
-      .recreate(ctx.projectId, { userAgent: value })
-      .pipe(Effect.map(() => `User agent set to "${value}"`));
+    return Effect.gen(function* () {
+      const host = yield* ctx.resolver.get(ctx.projectId).pipe(Effect.mapError(toBrowserToolError));
+      return yield* Effect.tryPromise({
+        try: () => host.useragent(args, { ...input, __toolName: "useragent" }),
+        catch: toBrowserToolError,
+      });
+    });
   },
 
-  // T3CO-330: let the agent flip the Chromium window between headless and
-  // headed on demand. Default is headless (set when the context is first
-  // acquired). This tool closes the current context and relaunches with the
-  // requested visibility; the per-project profile dir is unchanged so
-  // cookies / localStorage / auth survive the flip.
   visibility: (ctx, input) => {
     const mode = optString(input, "mode");
     if (mode !== "headed" && mode !== "headless") {
-      return Effect.fail(new Error("visibility: input.mode must be 'headed' or 'headless'"));
-    }
-    const headless = mode === "headless";
-    return ctx.browser
-      .recreate(ctx.projectId, { headless })
-      .pipe(
-        Effect.map(
-          () => `Browser mode set to ${mode}. Chromium relaunched with persistent profile intact.`,
-        ),
+      return Effect.fail(
+        new BrowserToolError({ message: "visibility: input.mode must be 'headed' or 'headless'" }),
       );
+    }
+    return Effect.gen(function* () {
+      const host = yield* ctx.resolver.get(ctx.projectId).pipe(Effect.mapError(toBrowserToolError));
+      return yield* Effect.tryPromise({
+        try: () => host.visibility([mode], { ...input, __toolName: "visibility" }),
+        catch: toBrowserToolError,
+      });
+    });
   },
 };
 
 // ---------------------------------------------------------------------------
 // Public handler map + tool definitions
 // ---------------------------------------------------------------------------
+
+export const playwrightCommandDescriptors: ReadonlyMap<
+  BrowserHostToolName,
+  PlaywrightCommandDescriptor
+> = new Map(
+  Object.entries(SPECS).map(([name, spec]) => [
+    name as BrowserHostToolName,
+    { command: spec.command, category: spec.category },
+  ]),
+);
 
 /**
  * The full T3 browser tool surface. Each spec in SPECS becomes a ToolHandler
@@ -1037,7 +956,7 @@ export function buildCommandHandlers(ctx: ToolContext): Record<string, ToolHandl
           Effect.catch((error) =>
             Effect.succeed({
               ok: false as const,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage(error),
             }),
           ),
         );
@@ -1097,4 +1016,4 @@ export const toolDefinitions: ToolDefinition[] = [
 // Kept for import-graph stability
 // ---------------------------------------------------------------------------
 
-export { BrowserManagerService };
+export { BrowserHostResolver };

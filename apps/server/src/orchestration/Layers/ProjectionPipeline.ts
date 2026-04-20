@@ -669,9 +669,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const threadRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
-          if (Option.isNone(threadRow)) {
-            return;
-          }
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
             messageId: event.payload.messageId,
           });
@@ -722,6 +719,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               threadId: event.payload.threadId,
               messageIds: [event.payload.messageId],
             });
+            return;
+          }
+          if (Option.isNone(threadRow)) {
             return;
           }
           const candidateIdentifiers = extractCanonicalTicketIdentifierCandidates(nextText);
@@ -1312,6 +1312,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threads,
+        apply: applyThreadsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -1338,10 +1342,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
         apply: applyPendingApprovalsProjection,
-      },
-      {
-        name: ORCHESTRATION_PROJECTOR_NAMES.threads,
-        apply: applyThreadsProjection,
       },
     ];
 

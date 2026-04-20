@@ -285,6 +285,7 @@ TicketingTestLayer("TicketingService", (it) => {
         Stream.runCollect,
         Effect.forkScoped,
       );
+      yield* Effect.yieldNow;
 
       yield* ticketing.addTicketLabel({
         ticketId: ticket.id,

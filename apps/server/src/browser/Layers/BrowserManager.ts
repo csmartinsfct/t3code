@@ -93,6 +93,8 @@ export const BrowserManagerServiceLive = Layer.effect(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
     const entries = yield* Ref.make(new Map<ProjectId, ContextEntry>());
+    const services = yield* Effect.services();
+    const runFork = Effect.runForkWith(services);
 
     const launchContext = (projectId: ProjectId, overrides: BrowserLaunchOverrides) =>
       Effect.tryPromise({
@@ -140,7 +142,7 @@ export const BrowserManagerServiceLive = Layer.effect(
           const browser = ctx.browser();
           if (browser) {
             browser.on("disconnected", () => {
-              void Effect.runPromise(releaseInternal(projectId));
+              runFork(releaseInternal(projectId).pipe(Effect.ignoreCause({ log: true })));
             });
           }
 
@@ -212,7 +214,7 @@ export const BrowserManagerServiceLive = Layer.effect(
         // Merge partial overrides over current, so (e.g.) flipping headless
         // doesn't reset a previously-set userAgent.
         const merged: BrowserLaunchOverrides = {
-          ...(existing?.overrides ?? {}),
+          ...existing?.overrides,
           ...overrides,
         };
         if (existing) {

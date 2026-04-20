@@ -992,7 +992,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(entry.turnId !== undefined ? { turnId: entry.turnId } : {}),
     } satisfies LifecycleEntry;
     return lifecycle
-      ? lifecycle.log(threadId, clean).pipe(Effect.catch(() => Effect.void))
+      ? lifecycle.log(threadId, clean).pipe(Effect.ignoreCause({ log: true }))
       : Effect.void;
   };
 

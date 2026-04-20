@@ -170,6 +170,61 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-missing-thread-message-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("stores message rows even when the thread row has not been projected yet", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = new Date().toISOString();
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.makeUnsafe("evt-message-before-thread"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-message-before-thread"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-message-before-thread"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-message-before-thread"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-message-before-thread"),
+            messageId: MessageId.makeUnsafe("message-before-thread"),
+            role: "assistant",
+            text: "message survives missing thread projection",
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const messageRows = yield* sql<{
+          readonly messageId: string;
+          readonly text: string;
+        }>`
+          SELECT
+            message_id AS "messageId",
+            text
+          FROM projection_thread_messages
+          WHERE message_id = 'message-before-thread'
+        `;
+        assert.deepEqual(messageRows, [
+          {
+            messageId: "message-before-thread",
+            text: "message survives missing thread projection",
+          },
+        ]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

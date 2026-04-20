@@ -36,6 +36,7 @@ import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { EmbeddedBrowser } from "../browser/EmbeddedBrowser";
 import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { ALL_STATUSES } from "../settings/ticketUtils";
 import {
@@ -881,7 +882,9 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             onViewModeChange={setViewMode}
           />
           <div ref={boardBodyRef} className="relative flex min-h-0 flex-1">
-            {viewMode === "list" ? (
+            {viewMode === "browser" ? (
+              <EmbeddedBrowser projectId={typedProjectId} />
+            ) : viewMode === "list" ? (
               <KanbanListView
                 filteredTicketsByStatus={filteredTicketsByStatus}
                 epicProgressMap={epicProgressMap}

@@ -61,7 +61,7 @@ function makeProviderSessionDirectoryImpl(options?: {
     const lifecycle = options?.lifecycleLogger;
     const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
       lifecycle
-        ? lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void))
+        ? lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }))
         : Effect.void;
     const repository = yield* ProviderSessionRuntimeRepository;
 

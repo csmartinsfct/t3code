@@ -101,11 +101,16 @@ const uiStateStoreState = {
     boardScrollLeft: number;
     updatedAt: string;
   } | null,
+  boardViewMode: "cards" as "cards" | "list" | "browser",
+  boardFiltersByProjectId: {},
   setManagementBoardRoot: vi.fn(),
   pushManagementBoardTicket: vi.fn(),
   popManagementBoardTicket: vi.fn(),
   setManagementBoardScrollLeft: vi.fn(),
   sanitizeManagementBoardContext: vi.fn(),
+  setBoardViewMode: vi.fn(),
+  setBoardFilters: vi.fn(),
+  toggleBoardCollapsedStatus: vi.fn(),
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -153,6 +158,12 @@ vi.mock("../../ticketSelectionStore", () => ({
 }));
 
 vi.mock("../../uiStateStore", () => ({
+  DEFAULT_BOARD_FILTERS: {
+    priorityFilter: [],
+    labelFilter: [],
+    searchQuery: "",
+    collapsedStatuses: [],
+  },
   useUiStateStore: (selector: (state: typeof uiStateStoreState) => unknown) =>
     selector(uiStateStoreState),
 }));
@@ -177,6 +188,10 @@ vi.mock("../ui/sidebar", () => ({
       Toggle sidebar
     </button>
   ),
+}));
+
+vi.mock("../browser/EmbeddedBrowser", () => ({
+  EmbeddedBrowser: ({ projectId }: { projectId: string }) => <div>EmbeddedBrowser:{projectId}</div>,
 }));
 
 vi.mock("./KanbanSelectionBar", () => ({
@@ -284,11 +299,13 @@ async function renderBoard({
   threadId = null,
   tickets = [],
   managementBoardContext = null,
+  boardViewMode = "cards",
 }: {
   electron?: boolean;
   threadId?: ThreadId | null;
   tickets?: ReadonlyArray<TicketSummary>;
   managementBoardContext?: typeof uiStateStoreState.managementBoardContext;
+  boardViewMode?: typeof uiStateStoreState.boardViewMode;
 } = {}) {
   vi.resetModules();
   vi.clearAllMocks();
@@ -296,6 +313,7 @@ async function renderBoard({
   selectionStoreState.selectedTicketIds = new Set();
   selectionStoreState.selectedTickets = new Map();
   uiStateStoreState.managementBoardContext = managementBoardContext;
+  uiStateStoreState.boardViewMode = boardViewMode;
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
   columnMockState.lastProps = null;
@@ -414,6 +432,16 @@ describe("KanbanBoard", () => {
     expect(markup).toContain("drag-region");
     expect(markup).toContain("px-3 sm:px-5");
     expect(markup).not.toContain("New ticket");
+  });
+
+  it("renders the embedded browser when browser board mode is active", async () => {
+    const markup = await renderBoard({
+      tickets: [makeTicket()],
+      boardViewMode: "browser",
+    });
+
+    expect(markup).toContain("EmbeddedBrowser:project-1");
+    expect(markup).not.toContain("Default ticket");
   });
 
   it("steps back through nested ticket detail state one level at a time before returning to the board", async () => {

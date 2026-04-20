@@ -6,6 +6,7 @@ import {
   ThreadId,
   TicketId,
   type Ticket,
+  type TicketTreeNode,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -84,6 +85,17 @@ const makeTicket = (
     ...rest,
   };
 };
+
+const makeTicketTree = (...tickets: ReadonlyArray<Ticket>): TicketTreeNode[] =>
+  tickets.map((ticket) => ({
+    ticket: {
+      ...ticket,
+      subTicketCount: ticket.subTickets.length,
+      dependencyCount: ticket.dependencies.length,
+    },
+    children: [],
+    dependencies: [],
+  }));
 
 const makeThread = (
   id: ThreadId,
@@ -269,6 +281,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
+        getTree: () => Effect.succeed(makeTicketTree(ticket)),
         getByIdentifier: ({ identifier }) =>
           identifier === ticket.identifier
             ? Effect.succeed(ticket)
@@ -319,6 +332,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
+        getTree: () => Effect.succeed(makeTicketTree(ticket)),
         getByIdentifier: ({ identifier }) =>
           identifier === ticket.identifier
             ? Effect.succeed(ticket)
@@ -347,6 +361,7 @@ describe("OrchestrationRunService", () => {
     expect(JSON.parse(createdRuns[0]?.ticketOrderJson ?? "[]")).toEqual([
       {
         ticketId: ticket.id,
+        selectedTicketId: ticket.id,
         workingThreadId: expect.any(String),
       },
     ]);
@@ -410,6 +425,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
+        getTree: () => Effect.succeed(makeTicketTree(...tickets)),
         getByIdentifier: ({ identifier }) => {
           const ticket = tickets.find((entry) => entry.identifier === identifier);
           return ticket

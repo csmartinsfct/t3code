@@ -9,10 +9,8 @@ import { Effect } from "effect";
 
 import { buildT3ServiceInjectionPrompt } from "../provider/sessionContextPrompt.ts";
 import { buildCommandHandlers, toolDefinitions } from "./handlers.ts";
-import {
-  type BrowserInstance,
-  type BrowserManagerServiceShape,
-} from "./Services/BrowserManager.ts";
+import type { BrowserHost, BrowserHostCommand } from "./BrowserHost.ts";
+import type { BrowserHostResolverShape } from "./BrowserHostResolver.ts";
 
 const TEST_PROJECT = ProjectId.makeUnsafe("00000000-0000-0000-0000-000000000001");
 const TEST_THREAD = ThreadId.makeUnsafe("t3co-325-test");
@@ -121,25 +119,42 @@ it.effect("toolDefinitions exposes the expected walking-skeleton tools plus batc
  * `withVendored`'s `loadVendoredModules()` — input validation happens before
  * that point for the paths we assert on.
  */
-function stubBrowserService(): BrowserManagerServiceShape {
-  const instance: BrowserInstance = {
-    _kind: "T3BrowserInstance",
-    projectId: TEST_PROJECT,
-    userDataDir: "/tmp/t3-test-browser-profile",
-    inner: {},
-  };
+const unreachableBrowserTool: BrowserHostCommand = async () => {
+  throw new Error("stub browser host should not be reached");
+};
+
+function stubBrowserHost(): BrowserHost {
+  return new Proxy(
+    {
+      kind: "playwright" as const,
+      projectId: TEST_PROJECT,
+      dispose: async () => {},
+      runTool: unreachableBrowserTool,
+    },
+    {
+      get(target, property, receiver) {
+        if (property in target) return Reflect.get(target, property, receiver);
+        return unreachableBrowserTool;
+      },
+    },
+  ) as unknown as BrowserHost;
+}
+
+function stubBrowserResolver(): BrowserHostResolverShape {
+  const host = stubBrowserHost();
   return {
-    acquire: () => Effect.succeed(instance),
-    recreate: () => Effect.succeed(instance),
-    release: () => Effect.void,
-    releaseAll: () => Effect.void,
+    get: () => Effect.succeed(host),
+    persistElectronHost: () => Effect.void,
+    announceElectronHosts: () => Effect.void,
+    beginRestartRecovery: () => Effect.void,
+    completeRestartRecovery: () => Effect.void,
   };
 }
 
 it.effect("unknown tool names are not present in the handler map", () =>
   Effect.sync(() => {
     const handlers = buildCommandHandlers({
-      browser: stubBrowserService(),
+      resolver: stubBrowserResolver(),
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,
     });
@@ -152,7 +167,7 @@ it.effect("unknown tool names are not present in the handler map", () =>
 it.effect("goto handler rejects missing input.url with a clear error envelope", () =>
   Effect.gen(function* () {
     const handlers = buildCommandHandlers({
-      browser: stubBrowserService(),
+      resolver: stubBrowserResolver(),
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,
     });
@@ -190,7 +205,7 @@ it.effect("goto handler rejects missing input.url with a clear error envelope", 
 it.effect("batch handler resolves cleanly when input.commands is not an array", () =>
   Effect.gen(function* () {
     const handlers = buildCommandHandlers({
-      browser: stubBrowserService(),
+      resolver: stubBrowserResolver(),
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,
     });
@@ -202,7 +217,7 @@ it.effect("batch handler resolves cleanly when input.commands is not an array", 
 it.effect("batch handler resolves cleanly when commands exceeds the 50-entry cap", () =>
   Effect.gen(function* () {
     const handlers = buildCommandHandlers({
-      browser: stubBrowserService(),
+      resolver: stubBrowserResolver(),
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,
     });

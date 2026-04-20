@@ -174,7 +174,7 @@ const runStartupRecovery = Effect.gen(function* () {
   const serverSettings = yield* ServerSettingsService;
   const lifecycle = yield* ProviderLifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
-    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
+    lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }));
   const settings = yield* serverSettings.getSettings;
   const readModel = yield* orchestrationEngine.getReadModel();
   const threadsById = new Map(readModel.threads.map((thread) => [thread.id, thread] as const));
