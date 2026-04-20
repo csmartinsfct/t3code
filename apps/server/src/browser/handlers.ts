@@ -830,7 +830,7 @@ function runCommand(
       return yield* new BrowserToolError({ message: `unknown tool '${tool}'` });
     }
     return yield* Effect.tryPromise({
-      try: () => method(args, { ...input, __toolName: tool }),
+      try: () => method.call(host, args, { ...input, __toolName: tool }),
       catch: toBrowserToolError,
     });
   });

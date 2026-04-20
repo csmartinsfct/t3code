@@ -227,3 +227,53 @@ it.effect("batch handler resolves cleanly when commands exceeds the 50-entry cap
     assert.isDefined(response);
   }),
 );
+
+// Regression: tools whose slot on BrowserHost is a class method that shadows
+// the `installBrowserHostCommands` delegator must still be invoked with
+// `this` bound to the host. Dispatching `method(args, input)` (bare call)
+// loses `this`, so class-methods like ElectronWebContentsBrowserHost.snapshot /
+// .evaluate / .goto referenced `undefined.cdpHost` / `undefined.send` /
+// `undefined.waitForLoadEvent` in production. Fixed by `method.call(host, ...)`
+// in runCommand.
+it.effect("handlers preserve `this` when dispatching class-method-shadowed tools", () =>
+  Effect.gen(function* () {
+    class ShadowHost {
+      readonly kind = "electron-wc" as const;
+      readonly projectId = TEST_PROJECT;
+      readonly secret = "bound-correctly";
+      dispose = async (): Promise<void> => {};
+      runTool: BrowserHostCommand = async () => "unreachable via runTool";
+      // Mirror the shadowing pattern on ElectronWebContentsBrowserHost:
+      // an own class method with a BROWSER_HOST_TOOL_NAMES slot name that
+      // references `this`.
+      async html(): Promise<string> {
+        return this.secret;
+      }
+    }
+    const host = new ShadowHost() as unknown as BrowserHost;
+    const handlers = buildCommandHandlers({
+      resolver: {
+        get: () => Effect.succeed(host),
+        persistElectronHost: () => Effect.void,
+        announceElectronHosts: () => Effect.void,
+        beginRestartRecovery: () => Effect.void,
+        completeRestartRecovery: () => Effect.void,
+      },
+      projectId: TEST_PROJECT,
+      threadId: TEST_THREAD,
+    });
+    const result = yield* handlers.html!({}).pipe(
+      Effect.catch((err) =>
+        Effect.succeed({
+          failed: true,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      ),
+    );
+    if ("failed" in result) {
+      assert.fail(`html dispatch lost \`this\` binding: ${result.message}`);
+    } else {
+      assert.isDefined(result);
+    }
+  }),
+);
