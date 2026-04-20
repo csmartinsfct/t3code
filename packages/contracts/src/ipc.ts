@@ -222,6 +222,8 @@ export interface DesktopBrowserBridge {
   mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
   setBounds: (bounds: BrowserViewBounds) => Promise<void>;
   unmount: () => Promise<void>;
+  suspendForModal: () => Promise<void>;
+  resumeFromModal: () => Promise<void>;
   navigate: (url: string) => Promise<void>;
   getUrl: () => Promise<string>;
 }

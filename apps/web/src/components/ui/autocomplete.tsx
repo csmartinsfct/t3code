@@ -2,12 +2,28 @@
 
 import { Autocomplete as AutocompletePrimitive } from "@base-ui/react/autocomplete";
 import { ChevronsUpDownIcon, XIcon } from "lucide-react";
+import type * as React from "react";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
-const Autocomplete = AutocompletePrimitive.Root;
+const AutocompleteRoot = AutocompletePrimitive.Root as <ItemValue>(
+  props: AutocompletePrimitive.Root.Props<ItemValue>,
+) => React.ReactElement | null;
+
+function Autocomplete<ItemValue>(props: AutocompletePrimitive.Root.Props<ItemValue>) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open: props.open,
+    defaultOpen: props.defaultOpen,
+    onOpenChange: props.onOpenChange,
+    enabled: true,
+    source: "autocomplete",
+  });
+
+  return <AutocompleteRoot {...props} onOpenChange={handleOpenChange} />;
+}
 
 function AutocompleteInput({
   className,

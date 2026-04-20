@@ -16,6 +16,7 @@ import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { EmbeddedBrowserModalFallbackProbe } from "../embeddedBrowserModalSuspension";
 import { Button } from "../components/ui/button";
 import { ContextMenuPortal } from "../components/ui/context-menu";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
@@ -77,6 +78,7 @@ export function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <ContextMenuPortal />
+        <EmbeddedBrowserModalFallbackProbe />
         <ServerStateBootstrap />
         <EventRouter />
         <AppSidebarLayout>

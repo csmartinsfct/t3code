@@ -4,11 +4,37 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
 
-const Menu = MenuPrimitive.Root;
+function Menu({
+  open,
+  defaultOpen,
+  onOpenChange,
+  trackEmbeddedBrowserOverlay = true,
+  ...props
+}: MenuPrimitive.Root.Props & {
+  trackEmbeddedBrowserOverlay?: boolean;
+}) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: trackEmbeddedBrowserOverlay,
+    source: "menu",
+  });
+
+  return (
+    <MenuPrimitive.Root
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      open={open}
+      {...props}
+    />
+  );
+}
 
 const MenuPortal = MenuPrimitive.Portal;
 

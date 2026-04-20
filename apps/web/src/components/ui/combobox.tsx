@@ -4,6 +4,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { CheckIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -21,9 +22,17 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
 ) {
   const chipsRef = React.useRef<Element | null>(null);
   const value = React.useMemo(() => ({ chipsRef, multiple: !!props.multiple }), [props.multiple]);
+  const handleOpenChange = useTrackedOverlayOpen({
+    open: props.open,
+    defaultOpen: props.defaultOpen,
+    onOpenChange: props.onOpenChange,
+    enabled: true,
+    source: "combobox",
+  });
+
   return (
     <ComboboxContext.Provider value={value}>
-      <ComboboxPrimitive.Root {...props} />
+      <ComboboxPrimitive.Root {...props} onOpenChange={handleOpenChange} />
     </ComboboxContext.Provider>
   );
 }

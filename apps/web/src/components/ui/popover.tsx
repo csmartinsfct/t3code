@@ -2,11 +2,29 @@
 
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 
 const PopoverCreateHandle = PopoverPrimitive.createHandle;
 
-const Popover = PopoverPrimitive.Root;
+function Popover({ open, defaultOpen, onOpenChange, ...props }: PopoverPrimitive.Root.Props) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: true,
+    source: "popover",
+  });
+
+  return (
+    <PopoverPrimitive.Root
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      open={open}
+      {...props}
+    />
+  );
+}
 
 function PopoverTrigger({ className, children, ...props }: PopoverPrimitive.Trigger.Props) {
   return (

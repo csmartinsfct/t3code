@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useContextMenuStore } from "./contextMenuStore";
+import {
+  __resetEmbeddedBrowserModalSuspensionForTests,
+  getTrackedEmbeddedBrowserOverlayCountForTests,
+  setEmbeddedBrowserMountedForModalSuspension,
+} from "./embeddedBrowserModalSuspension";
 
 afterEach(() => {
-  const { resolve } = useContextMenuStore.getState();
+  const { releaseBrowserOverlay, resolve } = useContextMenuStore.getState();
+  releaseBrowserOverlay?.();
   if (resolve) {
     resolve(null);
   }
@@ -12,7 +18,10 @@ afterEach(() => {
     items: [],
     position: { x: 0, y: 0 },
     resolve: null,
+    releaseBrowserOverlay: null,
   });
+  __resetEmbeddedBrowserModalSuspensionForTests();
+  vi.unstubAllGlobals();
 });
 
 describe("show", () => {
@@ -39,6 +48,30 @@ describe("show", () => {
     useContextMenuStore.getState().show([{ id: "b", label: "B" }]);
 
     await expect(first).resolves.toBeNull();
+  });
+
+  it("suspends the embedded browser synchronously while open", async () => {
+    const suspendForModal = vi.fn(async () => {});
+    const resumeFromModal = vi.fn(async () => {});
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        browser: {
+          suspendForModal,
+          resumeFromModal,
+        },
+      },
+    });
+    setEmbeddedBrowserMountedForModalSuspension(true);
+
+    const promise = useContextMenuStore.getState().show([{ id: "a", label: "A" }]);
+
+    expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(1);
+    await vi.waitFor(() => expect(suspendForModal).toHaveBeenCalledTimes(1));
+
+    useContextMenuStore.getState().dismiss();
+    await expect(promise).resolves.toBeNull();
+    expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(0);
+    await vi.waitFor(() => expect(resumeFromModal).toHaveBeenCalledTimes(1));
   });
 });
 

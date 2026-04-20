@@ -5,10 +5,28 @@ import { XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 
 const DialogCreateHandle = DialogPrimitive.createHandle;
 
-const Dialog = DialogPrimitive.Root;
+function Dialog({ open, defaultOpen, onOpenChange, ...props }: DialogPrimitive.Root.Props) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: true,
+    source: "dialog",
+  });
+
+  return (
+    <DialogPrimitive.Root
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      open={open}
+      {...props}
+    />
+  );
+}
 
 const DialogPortal = DialogPrimitive.Portal;
 

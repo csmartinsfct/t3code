@@ -16,6 +16,8 @@ const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
 const BROWSER_MOUNT_CHANNEL = "browser:mount";
 const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
 const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
+const BROWSER_SUSPEND_CHANNEL = "browser:suspendForModal";
+const BROWSER_RESUME_CHANNEL = "browser:resumeFromModal";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
 
@@ -59,6 +61,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     mount: (projectId, bounds) => ipcRenderer.invoke(BROWSER_MOUNT_CHANNEL, projectId, bounds),
     setBounds: (bounds) => ipcRenderer.invoke(BROWSER_SET_BOUNDS_CHANNEL, bounds),
     unmount: () => ipcRenderer.invoke(BROWSER_UNMOUNT_CHANNEL),
+    suspendForModal: () => ipcRenderer.invoke(BROWSER_SUSPEND_CHANNEL),
+    resumeFromModal: () => ipcRenderer.invoke(BROWSER_RESUME_CHANNEL),
     navigate: (url) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url),
     getUrl: () => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL),
   },

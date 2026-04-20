@@ -2,11 +2,34 @@
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 
 const AlertDialogCreateHandle = AlertDialogPrimitive.createHandle;
 
-const AlertDialog = AlertDialogPrimitive.Root;
+function AlertDialog({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: AlertDialogPrimitive.Root.Props) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: true,
+    source: "alert-dialog",
+  });
+
+  return (
+    <AlertDialogPrimitive.Root
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      open={open}
+      {...props}
+    />
+  );
+}
 
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
 
