@@ -249,7 +249,8 @@ The Phase 4 smoke audit used `scripts/embedded-browser-extension-audit.cjs` agai
 
 - MV2 content-script extension loaded with the expected deprecation warning; its JS injected and its CSS hiding rule applied.
 - MV3 extension loaded; content script messaged the service worker successfully; `chrome.runtime`, `chrome.storage.local`, `chrome.tabs.query`, `chrome.scripting.executeScript`, and `chrome.action` were present in the tested contexts.
-- The MV3 action popup is declarable and its HTML is packaged, but there is no native browser toolbar affordance in the current embedded UI. Direct hidden-window popup navigation was not promoted into the automated smoke because this v0.1 UI has no action button surface yet.
+- The MV3 action popup was directly loaded in a hidden Electron `BrowserWindow` at its `chrome-extension://<id>/popup.html` URL. It rendered successfully, messaged the service worker, and `chrome.tabs.query({ active: true, currentWindow: true })` returned the active audit page tab.
+- No interactive permission prompts surfaced during install, content-script injection, service-worker messaging, or popup rendering; permissions came from the manifest. The current embedded UI still has no native toolbar/action affordance, so user-invoked popup UI remains future extension-management work.
 
 ### Chromium bundle
 

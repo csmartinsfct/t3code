@@ -174,6 +174,20 @@ function serveAuditPage() {
   });
 }
 
+async function waitForPopupResult(popup) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const text = await popup.webContents.executeJavaScript(
+      "document.querySelector('#root')?.textContent ?? ''",
+    );
+    if (typeof text === "string" && text && text !== "loading") {
+      return text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for MV3 action popup to render");
+}
+
 async function runAudit() {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "t3-extension-audit-"));
   app.setPath("userData", path.join(tempRoot, "electron-user-data"));
@@ -220,6 +234,23 @@ async function runAudit() {
       ? serviceWorkersRaw
       : Object.values(serviceWorkersRaw ?? {});
 
+    const popup = new BrowserWindow({
+      show: false,
+      width: 320,
+      height: 240,
+      webPreferences: { session: partition },
+    });
+    windows.push(popup);
+    const popupUrl = `chrome-extension://${mv3.id}/popup.html`;
+    await popup.loadURL(popupUrl);
+    const popupText = await waitForPopupResult(popup);
+    let popupResult;
+    try {
+      popupResult = JSON.parse(popupText);
+    } catch (error) {
+      popupResult = { parseError: String(error?.message ?? error), text: popupText };
+    }
+
     const result = {
       electron: process.versions.electron,
       chromium: process.versions.chrome,
@@ -236,7 +267,12 @@ async function runAudit() {
         contentScriptMessagedServiceWorker: mv3ContentScriptResponse?.ok === true,
         contentScriptResponse: mv3ContentScriptResponse,
         actionPopupDeclared: mv3.manifest?.action?.default_popup === "popup.html",
-        actionPopupDirectLoad: "not run by this harness",
+        actionPopupDirectLoad: {
+          url: popupUrl,
+          rendered: Boolean(popupResult?.result?.ok),
+          result: popupResult,
+        },
+        permissionPrompts: "none observed in this harness; permissions came from manifest install",
         runningServiceWorkers: serviceWorkers.map((worker) => ({
           scope: worker.scope,
           scriptURL: worker.scriptURL,
@@ -248,6 +284,7 @@ async function runAudit() {
     };
 
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    popup.close();
     page.close();
     auditComplete = true;
   } finally {
