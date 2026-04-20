@@ -138,7 +138,7 @@ CSS selectors still work as a fallback for any command that takes a `ref` or `se
 | `viewport`                                                  | Set viewport size (e.g. `1024x768`)                                                                |
 | `cookie`, `cookie-import`, `cookie-import-browser`          | Cookie management (last reads from installed browsers — Chrome, Edge, Brave, Arc, Chromium, Comet) |
 | `header`                                                    | Custom request header on future requests (colon-separated)                                         |
-| `useragent`                                                 | Override UA — **currently broken, see known issues**                                               |
+| `useragent`                                                 | Override UA (works on Electron host; broken on Playwright host — see known issues)                 |
 | `upload`                                                    | Upload file(s) via `<input type=file>`                                                             |
 | `dialog-accept`, `dialog-dismiss`                           | Auto-handle next alert/confirm/prompt                                                              |
 | `style`                                                     | Live CSS modification via CDP with undo history                                                    |
@@ -446,7 +446,23 @@ sequenceDiagram
 
 ## Known issues
 
-- **`useragent`** — calls the vendored `recreateContext()`, which assumes `this.browser !== null`. Under `launchPersistentContext` there is no separate Browser object, so the call crashes and resets the active tab to `about:blank`. Tracked at [T3CO-331](t3://ticket/T3CO-331). Avoid until fixed; the other 55 commands are unaffected.
+- **`useragent`** (Playwright host only) — calls the vendored `recreateContext()`, which assumes `this.browser !== null`. Under `launchPersistentContext` there is no separate Browser object, so the call crashes and resets the active tab to `about:blank`. Tracked at [T3CO-331](t3://ticket/T3CO-331). Avoid on the Playwright host; works end-to-end in the Electron embedded host (`Network.setUserAgentOverride` via CDP).
+
+## JavaScript dialog handling (Electron host)
+
+`alert()`, `confirm()`, and `prompt()` on the embedded `WebContentsView` would, by default, render a Chromium-native window-modal dialog attached to the owning BrowserWindow — blurring the entire T3 Code UI (chat input, sidebars, everything), not just the webview region. The CDP `Page.javascriptDialogOpening` event does not fire reliably through our broker before the native modal appears, so an out-of-band CDP handler can't intercept in time.
+
+The Electron host addresses this with two layers:
+
+1. **`webPreferences.disableDialogs: true`** on the `WebContentsView` — Chromium's native dialog path is suppressed entirely. No window-modal, no UI block.
+2. **Page-side override** installed via `Page.addScriptToEvaluateOnNewDocument` on every new document. The shim replaces `window.alert/confirm/prompt` with functions that:
+   - Push a record into `window.__t3_captured_dialogs[]` (with type, message, timestamp, and the `handled` outcome actually applied).
+   - Read `window.__t3_dialog_policy` to decide the synchronous return value.
+   - Reset `window.__t3_dialog_policy` to the accept default after each call (one-shot).
+
+`dialog-accept [text]` and `dialog-dismiss` write the new policy to the page via `Runtime.evaluate` immediately before returning, so the next dialog-triggering interaction sees the intended value. `dialog` drains the page-side buffer (also via `Runtime.evaluate`) on demand and merges into the server's dialog history; drains must happen before navigation, or not-yet-drained entries on the old document are lost.
+
+This uses `Runtime.evaluate` (command channel) and sidesteps `Runtime.addBinding` + `Runtime.bindingCalled` because Runtime event subscriptions are not currently delivered through our Electron debugger broker — see [T3CO-7](t3://ticket/T3CO-7). Tracked as [T3CO-2](t3://ticket/T3CO-2).
 
 ---
 

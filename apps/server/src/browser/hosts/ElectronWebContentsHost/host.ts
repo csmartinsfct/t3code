@@ -304,16 +304,19 @@ export class ElectronWebContentsHost {
     }
   }
 
+  // Ensures the element has keyboard focus after a click. The preceding
+  // Input.dispatchMouseEvent already delivers the click; this only touches
+  // focus because CDP mouse events alone do not reliably shift focus in an
+  // Electron WebContents, which breaks subsequent Input.insertText /
+  // Input.dispatchKeyEvent calls used by fill/type/press.
+  //
+  // Do NOT also call el.click() here — that would double-fire onclick.
   private async activateResolved(resolved: ResolvedRef): Promise<void> {
     try {
       if (resolved.entry.kind === "cursor") {
         const selector = JSON.stringify(resolved.entry.selector);
-        // Focus first so subsequent Input.insertText / Input.dispatchKeyEvent
-        // calls (used by fill/type/press) target this element instead of
-        // BODY. Mouse event dispatch alone does not reliably shift focus in
-        // an Electron WebContents driven over CDP.
         await this.evaluate<void>(
-          `(() => { const el = document.querySelector(${selector}); if (!el) return; el.focus?.(); el.click?.(); })()`,
+          `(() => { const el = document.querySelector(${selector}); if (!el) return; el.focus?.(); })()`,
         );
         return;
       }
@@ -325,7 +328,7 @@ export class ElectronWebContentsHost {
       if (!objectId) return;
       await this.client.sendCommand("Runtime.callFunctionOn", {
         objectId,
-        functionDeclaration: "function () { this.focus?.(); this.click?.(); }",
+        functionDeclaration: "function () { this.focus?.(); }",
         returnByValue: true,
       });
     } catch {

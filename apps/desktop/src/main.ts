@@ -1792,6 +1792,13 @@ function createEmbeddedBrowserView(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Suppress Chromium's native JavaScript dialog path. alert/confirm/prompt
+      // would otherwise render a window-modal dialog attached to the owning
+      // BrowserWindow — blurring the entire T3 Code UI, not just the webview.
+      // The server host injects a page-side override (`Page.addScriptToEvaluate
+      // OnNewDocument` + `Runtime.addBinding`) that captures the dialog and
+      // returns a synchronous value driven by `dialog-accept` / `dialog-dismiss`.
+      disableDialogs: true,
     },
   });
   const embedded: EmbeddedBrowserViewState = {

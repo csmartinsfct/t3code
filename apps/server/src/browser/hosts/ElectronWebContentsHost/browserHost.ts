@@ -186,6 +186,81 @@ function parseKeyEventDescriptor(raw: string): KeyEventDescriptor {
   throw new Error(`press: unsupported key '${keyToken}'`);
 }
 
+// Injected into every page to replace window.alert/confirm/prompt. The native
+// dialog path is suppressed via `webPreferences.disableDialogs` in the desktop
+// main; the shim captures each call into `window.__t3_captured_dialogs[]` and
+// returns a synchronous value driven by `window.__t3_dialog_policy`.
+//
+// We use a page-side buffer (drained on demand via Runtime.evaluate) rather
+// than Runtime.addBinding + Runtime.bindingCalled because Runtime.* event
+// subscriptions are not currently delivered through the Electron debugger
+// channel — see T3CO-7. Runtime.evaluate (command channel) works.
+//
+// Policy is one-shot: reset to the accept default after every dialog so stale
+// decisions cannot leak across unrelated pages or interactions.
+const DIALOG_OVERRIDE_SCRIPT = `(function(){
+  if (window.__t3_dialog_installed) return;
+  window.__t3_dialog_installed = true;
+  window.__t3_dialog_policy = { accept: true };
+  window.__t3_captured_dialogs = window.__t3_captured_dialogs || [];
+  const consumePolicy = () => {
+    const policy = window.__t3_dialog_policy || { accept: true };
+    window.__t3_dialog_policy = { accept: true };
+    return policy;
+  };
+  const capture = (entry, policy) => {
+    try {
+      window.__t3_captured_dialogs.push({
+        ...entry,
+        handled: policy.accept ? "accepted" : "dismissed",
+      });
+    } catch (e) {}
+  };
+  window.alert = function(message) {
+    const policy = consumePolicy();
+    capture({
+      at: new Date().toISOString(),
+      type: "alert",
+      message: String(message == null ? "" : message),
+    }, policy);
+  };
+  window.confirm = function(message) {
+    const policy = consumePolicy();
+    capture({
+      at: new Date().toISOString(),
+      type: "confirm",
+      message: String(message == null ? "" : message),
+    }, policy);
+    return !!policy.accept;
+  };
+  window.prompt = function(message, defaultValue) {
+    const policy = consumePolicy();
+    capture({
+      at: new Date().toISOString(),
+      type: "prompt",
+      message: String(message == null ? "" : message),
+      defaultPrompt: String(defaultValue == null ? "" : defaultValue),
+    }, policy);
+    if (!policy.accept) return null;
+    if (policy.text != null) return String(policy.text);
+    return defaultValue == null ? "" : String(defaultValue);
+  };
+})();`;
+
+// Drain + clear the page-side dialog buffer in one evaluate roundtrip.
+const DIALOG_DRAIN_SCRIPT = `(function(){
+  const captured = (window.__t3_captured_dialogs || []).slice();
+  window.__t3_captured_dialogs = [];
+  return captured;
+})()`;
+
+function dialogPolicyScript(policy: { accept: boolean; text?: string }): string {
+  return `window.__t3_dialog_policy = ${JSON.stringify({
+    accept: policy.accept,
+    ...(policy.text === undefined ? {} : { text: policy.text }),
+  })};`;
+}
+
 function parseClip(value: string): { x: number; y: number; width: number; height: number } {
   const parts = value.split(",").map(Number);
   const [x, y, width, height] = parts;
@@ -324,6 +399,7 @@ export class ElectronWebContentsBrowserHost {
       case "network":
         return this.bufferedEvents("network", this.networkEvents);
       case "dialog":
+        await this.drainCapturedDialogs();
         return this.dialogHistory();
       case "cookies":
         return this.cookies();
@@ -368,17 +444,23 @@ export class ElectronWebContentsBrowserHost {
         return this.useragent(args, input);
       case "upload":
         return this.upload(args);
-      case "dialog-accept":
-        this.nextDialogAction = {
+      case "dialog-accept": {
+        const policy: { accept: boolean; text?: string } = {
           accept: true,
           ...(args.length > 0 ? { text: args.join(" ") } : {}),
         };
-        return this.nextDialogAction.text
-          ? `Dialogs will be accepted with text: "${this.nextDialogAction.text}"`
+        this.nextDialogAction = policy;
+        await this.syncDialogPolicyToPage(policy);
+        return policy.text
+          ? `Dialogs will be accepted with text: "${policy.text}"`
           : "Dialogs will be accepted";
-      case "dialog-dismiss":
-        this.nextDialogAction = { accept: false };
+      }
+      case "dialog-dismiss": {
+        const policy = { accept: false };
+        this.nextDialogAction = policy;
+        await this.syncDialogPolicyToPage(policy);
         return "Dialogs will be dismissed";
+      }
       case "style":
         return this.style(args);
       case "cleanup":
@@ -440,9 +522,81 @@ export class ElectronWebContentsBrowserHost {
         this.send("Network.enable"),
         this.send("Page.enable"),
       ]);
+      await this.installDialogInterceptor();
     } catch (cause) {
       // The host may be constructed before the desktop bridge is fully re-announced.
       console.warn("ElectronWebContentsBrowserHost failed to prime CDP event domains", cause);
+    }
+  }
+
+  // Pushes the current `nextDialogAction` to the active document so the shim
+  // returns the intended value on its next call. One-shot on the page side:
+  // the shim resets `window.__t3_dialog_policy` to the accept default after
+  // each dialog, so this must be called before every click that might trigger
+  // one. Best-effort — if the eval fails (e.g. no frame attached), we fall
+  // back to the server-side default of accept.
+  private async syncDialogPolicyToPage(policy: { accept: boolean; text?: string }): Promise<void> {
+    if (!this.client) return;
+    await this.send("Runtime.evaluate", {
+      expression: dialogPolicyScript(policy),
+      silent: true,
+    }).catch(() => {});
+  }
+
+  // Injects the page-side alert/confirm/prompt override on every new document.
+  // Idempotent in the shim (`window.__t3_dialog_installed` guard) so re-calling
+  // after a reconnect is safe.
+  private async installDialogInterceptor(): Promise<void> {
+    await this.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: DIALOG_OVERRIDE_SCRIPT,
+    });
+    // Cover the already-loaded document. Failures here are non-fatal — new
+    // documents will still get the override via addScriptToEvaluateOnNewDocument.
+    await this.send("Runtime.evaluate", {
+      expression: DIALOG_OVERRIDE_SCRIPT,
+      silent: true,
+    }).catch(() => {});
+  }
+
+  // Reads captured dialogs out of the page-side buffer and merges them into
+  // the server-side history. Called on demand from the `dialog` tool — pulling
+  // (rather than listening) sidesteps the unreliable Runtime.bindingCalled
+  // delivery path. Dialogs survive navigation only if drained before the
+  // navigation; not-yet-drained dialogs on the old document are lost. That is
+  // acceptable for agent use — a dialog immediately before a navigation is
+  // rare, and the agent can call `dialog` between the click and the navigate.
+  private async drainCapturedDialogs(): Promise<void> {
+    if (!this.client) return;
+    try {
+      const response = await this.client.sendCommand<
+        RuntimeEvaluateResponse<
+          Array<{
+            at?: string;
+            type?: string;
+            message?: string;
+            defaultPrompt?: string;
+            handled?: "accepted" | "dismissed";
+          }>
+        >
+      >("Runtime.evaluate", {
+        expression: DIALOG_DRAIN_SCRIPT,
+        returnByValue: true,
+      });
+      const captured = response.result?.value;
+      if (!Array.isArray(captured)) return;
+      for (const entry of captured) {
+        this.recordCapturedDialog({
+          at: entry.at ?? new Date().toISOString(),
+          ...(entry.type === undefined ? {} : { type: entry.type }),
+          ...(entry.message === undefined ? {} : { message: entry.message }),
+          ...(entry.defaultPrompt === undefined ? {} : { defaultPrompt: entry.defaultPrompt }),
+          ...(entry.handled === undefined ? {} : { handled: entry.handled }),
+        });
+      }
+    } catch {
+      // Failures here are non-fatal; dialogs will still be captured on the
+      // next drain attempt as long as the page's __t3_captured_dialogs
+      // buffer hasn't been wiped by a navigation.
     }
   }
 
@@ -461,8 +615,34 @@ export class ElectronWebContentsBrowserHost {
       });
     }
     this.subscribeTo("Page.javascriptDialogOpening", (event) => {
+      // Safety net for the unlikely case that a dialog slips past the page-side
+      // override (for example, during the brief window before the script is
+      // installed on a freshly-attached target). disableDialogs in webPrefs
+      // keeps it from becoming a window-modal, but we still want to answer.
       void this.handleDialogOpening(event);
     });
+  }
+
+  private recordCapturedDialog(dialog: {
+    at: string;
+    type?: string;
+    message?: string;
+    defaultPrompt?: string;
+    handled?: "accepted" | "dismissed";
+  }): void {
+    // Prefer the `handled` value stamped by the shim at the moment the dialog
+    // fired — it reflects the actual policy that was applied. Fall back to the
+    // current server-side policy for Page.javascriptDialogOpening events that
+    // reach us without a shim stamp (the rare native-path safety-net case).
+    const handled: "accepted" | "dismissed" =
+      dialog.handled ?? ((this.nextDialogAction?.accept ?? true) ? "accepted" : "dismissed");
+    this.dialogs.push({
+      at: dialog.at,
+      ...(dialog.type === undefined ? {} : { type: dialog.type }),
+      ...(dialog.message === undefined ? {} : { message: dialog.message }),
+      handled,
+    });
+    if (dialog.handled === undefined) this.nextDialogAction = undefined;
   }
 
   private subscribeTo(
