@@ -79,8 +79,19 @@ interface TestServer {
   readonly close: () => Promise<void>;
 }
 
+// Simulates the Electron main process's tab manager on top of the harness's
+// Target.* CDP primitives. In production the Electron broker keeps a
+// Map<tabId, WebContentsView>; here we approximate with a plain map keyed by
+// the numeric tab id the server host expects, backed by harness targets.
 class HarnessTransport implements CdpBrokerTransport {
   readonly sentMethods: string[] = [];
+  private readonly tabs = new Map<
+    number,
+    { targetId: string; sessionId: string; url: string; title: string }
+  >();
+  private activeTabId = 0;
+  private nextTabId = 1;
+  private rootInitialized = false;
 
   constructor(private readonly harness: ElectronWebContentsHarness) {}
 
@@ -103,6 +114,75 @@ class HarnessTransport implements CdpBrokerTransport {
       flatten: true,
     });
     return response.sessionId;
+  }
+
+  async listTabs(_request: Parameters<NonNullable<CdpBrokerTransport["listTabs"]>>[0]) {
+    this.ensureRoot();
+    return {
+      tabs: Array.from(this.tabs.entries()).map(([id, tab]) => ({
+        id,
+        url: tab.url,
+        title: tab.title,
+        favicon: null,
+        active: id === this.activeTabId,
+      })),
+      activeTabId: this.activeTabId,
+    };
+  }
+
+  async newTab(request: Parameters<NonNullable<CdpBrokerTransport["newTab"]>>[0]) {
+    this.ensureRoot();
+    const url = request.url ?? "about:blank";
+    const created = await this.harness.sendCdp<{ targetId: string }>("Target.createTarget", {
+      url,
+    });
+    const attached = await this.harness.sendCdp<{ sessionId: string }>("Target.attachToTarget", {
+      targetId: created.targetId,
+      flatten: true,
+    });
+    const id = this.nextTabId++;
+    this.tabs.set(id, {
+      targetId: created.targetId,
+      sessionId: attached.sessionId,
+      url,
+      title: "",
+    });
+    this.activeTabId = id;
+    return id;
+  }
+
+  async switchTab(request: Parameters<NonNullable<CdpBrokerTransport["switchTab"]>>[0]) {
+    this.ensureRoot();
+    if (!this.tabs.has(request.tabId)) throw new Error(`unknown tab id ${request.tabId}`);
+    this.activeTabId = request.tabId;
+    return this.activeTabId;
+  }
+
+  async closeTab(request: Parameters<NonNullable<CdpBrokerTransport["closeTab"]>>[0]) {
+    this.ensureRoot();
+    const tab = this.tabs.get(request.tabId);
+    if (!tab) throw new Error(`unknown tab id ${request.tabId}`);
+    if (request.tabId === 0) {
+      await this.harness
+        .sendCdp("Page.navigate", { url: "about:blank" }, tab.sessionId)
+        .catch(() => {});
+      tab.url = "about:blank";
+      tab.title = "";
+      return this.activeTabId;
+    }
+    await this.harness.sendCdp("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
+    this.tabs.delete(request.tabId);
+    if (this.activeTabId === request.tabId) {
+      const next = this.tabs.keys().next();
+      this.activeTabId = next.done ? 0 : next.value;
+    }
+    return this.activeTabId;
+  }
+
+  private ensureRoot(): void {
+    if (this.rootInitialized) return;
+    this.tabs.set(0, { targetId: "root", sessionId: "root", url: "about:blank", title: "" });
+    this.rootInitialized = true;
   }
 }
 

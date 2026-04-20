@@ -39,6 +39,38 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly options?: Record<string, unknown>;
   }) => Promise<string>;
+  readonly listTabs?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+  }) => Promise<BrowserTabListing>;
+  readonly newTab?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly url?: string;
+  }) => Promise<number>;
+  readonly switchTab?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly tabId: number;
+  }) => Promise<number>;
+  readonly closeTab?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly tabId: number;
+  }) => Promise<number>;
+}
+
+export interface BrowserTabSummary {
+  readonly id: number;
+  readonly url: string;
+  readonly title: string;
+  readonly favicon: string | null;
+  readonly active: boolean;
+}
+
+export interface BrowserTabListing {
+  readonly tabs: ReadonlyArray<BrowserTabSummary>;
+  readonly activeTabId: number;
 }
 
 export class CdpBrokerError extends Error {
@@ -256,5 +288,49 @@ export class CdpBroker {
         cause,
       });
     }
+  }
+
+  async listTabs(viewId: string): Promise<BrowserTabListing> {
+    if (!this.transport.listTabs) {
+      throw new CdpBrokerError("listTabs is not available for this transport", {
+        code: "CDP_LIST_TABS_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.listTabs({ id: this.requestId(), viewId });
+  }
+
+  async newTab(viewId: string, url?: string): Promise<number> {
+    if (!this.transport.newTab) {
+      throw new CdpBrokerError("newTab is not available for this transport", {
+        code: "CDP_NEW_TAB_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.newTab({
+      id: this.requestId(),
+      viewId,
+      ...(url === undefined ? {} : { url }),
+    });
+  }
+
+  async switchTab(viewId: string, tabId: number): Promise<number> {
+    if (!this.transport.switchTab) {
+      throw new CdpBrokerError("switchTab is not available for this transport", {
+        code: "CDP_SWITCH_TAB_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.switchTab({ id: this.requestId(), viewId, tabId });
+  }
+
+  async closeTab(viewId: string, tabId: number): Promise<number> {
+    if (!this.transport.closeTab) {
+      throw new CdpBrokerError("closeTab is not available for this transport", {
+        code: "CDP_CLOSE_TAB_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.closeTab({ id: this.requestId(), viewId, tabId });
   }
 }

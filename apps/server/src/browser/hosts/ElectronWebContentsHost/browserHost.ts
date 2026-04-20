@@ -76,19 +76,6 @@ interface CapturedDialog {
   readonly handled: "accepted" | "dismissed";
 }
 
-interface NativeTab {
-  readonly id: number;
-  readonly targetId: string;
-  sessionId: string;
-  url: string;
-  title: string;
-  closed: boolean;
-}
-
-interface TargetCreateResponse {
-  readonly targetId: string;
-}
-
 interface ScreenshotResponse {
   readonly data: string;
 }
@@ -306,7 +293,6 @@ export class ElectronWebContentsBrowserHost {
   private readonly consoleEvents: BufferedEvent[] = [];
   private readonly networkEvents: BufferedEvent[] = [];
   private readonly dialogs: CapturedDialog[] = [];
-  private readonly tabRegistry = new Map<number, NativeTab>();
   private lastSnapshotText = "";
   private styleHistory: Array<{
     readonly selector: string;
@@ -315,7 +301,6 @@ export class ElectronWebContentsBrowserHost {
     readonly newValue: string;
   }> = [];
   private nextDialogAction: { readonly accept: boolean; readonly text?: string } | undefined;
-  private nextTabId = 1;
 
   constructor(
     readonly projectId: ProjectId,
@@ -333,14 +318,6 @@ export class ElectronWebContentsBrowserHost {
       };
       this.cdpHost = new ElectronWebContentsHost(this.client);
       void this.primeEventDomains();
-      this.tabRegistry.set(0, {
-        id: 0,
-        targetId: "root",
-        sessionId: this.activeSessionId,
-        url: "about:blank",
-        title: "",
-        closed: false,
-      });
       this.startEventSubscriptions();
     }
     installBrowserHostCommands(this);
@@ -484,13 +461,15 @@ export class ElectronWebContentsBrowserHost {
         return this.newTab(args[0]);
       case "closetab":
         return this.closeTab(args[0]);
-      case "status":
+      case "status": {
+        const tabCount = this.broker ? (await this.broker.listTabs(this.viewId)).tabs.length : 1;
         return [
           "Status: healthy",
           "Mode: electron-wc",
           `URL: ${await this.currentUrl()}`,
-          `Tabs: ${Array.from(this.tabRegistry.values()).filter((tab) => !tab.closed).length}`,
+          `Tabs: ${tabCount}`,
         ].join("\n");
+      }
       case "ux-audit":
         return this.evaluateJson(UX_AUDIT_SCRIPT);
       default:
@@ -760,7 +739,6 @@ export class ElectronWebContentsBrowserHost {
     const response = await this.send<NavigateResponse>("Page.navigate", { url });
     if (response.errorText) throw new Error(`Navigation failed: ${response.errorText}`);
     await loaded;
-    await this.refreshActiveTabMetadata();
     return `Navigated to ${url} (native)`;
   }
 
@@ -771,16 +749,11 @@ export class ElectronWebContentsBrowserHost {
     const loaded = this.waitForLoadEvent().catch(() => {});
     await this.send("Page.navigateToHistoryEntry", { entryId: target.id });
     await loaded;
-    await this.refreshActiveTabMetadata();
     return `${label} -> ${await this.currentUrl()}`;
   }
 
   private async currentUrl(): Promise<string> {
     return this.evaluateText("location.href");
-  }
-
-  private async title(): Promise<string> {
-    return this.evaluateText("document.title");
   }
 
   private async evaluate<T>(expression: string): Promise<T> {
@@ -1212,94 +1185,51 @@ export class ElectronWebContentsBrowserHost {
     };
   }
 
-  private async refreshActiveTabMetadata(): Promise<void> {
-    const tab = Array.from(this.tabRegistry.values()).find(
-      (candidate) => candidate.sessionId === this.activeSessionId && !candidate.closed,
-    );
-    if (!tab) return;
-    tab.url = await this.currentUrl().catch(() => tab.url);
-    tab.title = await this.title().catch(() => tab.title);
-  }
-
+  // Tab operations are routed through the broker to the Electron main process,
+  // which owns the `Map<tabId, WebContentsView>` per project and handles
+  // mount/unmount/throttle on switch. The server host does not maintain its
+  // own registry anymore — each call re-reads from the broker so the host
+  // cannot drift from desktop state when the user clicks a tab in the UI.
   private async listTabs(): Promise<string> {
-    await this.refreshActiveTabMetadata();
-    const rows = Array.from(this.tabRegistry.values())
-      .filter((tab) => !tab.closed)
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const { tabs, activeTabId } = await this.broker.listTabs(this.viewId);
+    if (tabs.length === 0) return "(no tabs)";
+    return tabs
       .toSorted((a, b) => a.id - b.id)
-      .map(
-        (tab) =>
-          `${tab.sessionId === this.activeSessionId ? "->" : "  "} [${tab.id}] ${tab.title || "(untitled)"} - ${tab.url}`,
-      );
-    return rows.length === 0 ? "(no tabs)" : rows.join("\n");
+      .map((tab) => {
+        const marker = tab.id === activeTabId ? "->" : "  ";
+        return `${marker} [${tab.id}] ${tab.title || "(untitled)"} - ${tab.url}`;
+      })
+      .join("\n");
   }
 
   private async switchTab(value: string | undefined): Promise<string> {
-    const tabId = value === undefined ? 0 : Number(value);
-    const tab = this.tabRegistry.get(tabId);
-    if (!tab || tab.closed) throw new Error(`tab: no open native tab ${String(value)}`);
-    this.activeSessionId = tab.sessionId;
-    await this.refreshActiveTabMetadata();
-    return `Switched to tab ${tab.id}`;
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    if (value === undefined) throw new Error("tab: missing id");
+    const tabId = Number(value);
+    if (!Number.isInteger(tabId) || tabId < 0) throw new Error(`tab: invalid id ${value}`);
+    const newActive = await this.broker.switchTab(this.viewId, tabId);
+    return `Switched to tab ${newActive}`;
   }
 
-  private async newTab(url = "about:blank"): Promise<string> {
+  private async newTab(url?: string): Promise<string> {
     if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
-    const created = await this.send<TargetCreateResponse>("Target.createTarget", { url });
-    const sessionId = await this.broker.attachTarget(this.viewId, created.targetId);
-    const tab: NativeTab = {
-      id: this.nextTabId++,
-      targetId: created.targetId,
-      sessionId,
-      url,
-      title: "",
-      closed: false,
-    };
-    this.tabRegistry.set(tab.id, tab);
-    this.activeSessionId = sessionId;
-    this.subscribeTo(
-      "Runtime.consoleAPICalled",
-      (event) => this.pushBuffered(this.consoleEvents, event),
-      sessionId,
-    );
-    for (const method of [
-      "Network.requestWillBeSent",
-      "Network.responseReceived",
-      "Network.loadingFinished",
-      "Network.loadingFailed",
-    ]) {
-      this.subscribeTo(method, (event) => this.pushBuffered(this.networkEvents, event), sessionId);
-    }
-    this.subscribeTo(
-      "Page.javascriptDialogOpening",
-      (event) => {
-        void this.handleDialogOpening(event);
-      },
-      sessionId,
-    );
-    await this.primeEventDomains();
-    await this.refreshActiveTabMetadata();
-    return `Opened tab ${tab.id} -> ${tab.url}`;
+    const tabId = await this.broker.newTab(this.viewId, url);
+    return `Opened tab ${tabId} -> ${url ?? "about:blank"}`;
   }
 
   private async closeTab(value: string | undefined): Promise<string> {
-    const fallback = Array.from(this.tabRegistry.values()).find(
-      (tab) => tab.sessionId === this.activeSessionId && !tab.closed,
-    );
-    const tabId = value === undefined ? fallback?.id : Number(value);
-    if (tabId === undefined) throw new Error("closetab: no active tab");
-    const tab = this.tabRegistry.get(tabId);
-    if (!tab || tab.closed) throw new Error(`closetab: no open native tab ${String(value)}`);
-    if (tab.id === 0) {
-      await this.send("Page.navigate", { url: "about:blank" });
-      tab.url = "about:blank";
-      tab.title = "";
-      return "Reset root tab to about:blank";
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    if (value === undefined) {
+      // Fallback: close the currently active tab.
+      const { activeTabId } = await this.broker.listTabs(this.viewId);
+      await this.broker.closeTab(this.viewId, activeTabId);
+      return `Closed tab ${activeTabId}`;
     }
-    await this.send("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
-    tab.closed = true;
-    const root = this.tabRegistry.get(0);
-    if (root && !root.closed) this.activeSessionId = root.sessionId;
-    return `Closed tab ${tab.id}`;
+    const tabId = Number(value);
+    if (!Number.isInteger(tabId) || tabId < 0) throw new Error(`closetab: invalid id ${value}`);
+    const newActive = await this.broker.closeTab(this.viewId, tabId);
+    return tabId === 0 && newActive === 0 ? "Reset root tab to about:blank" : `Closed tab ${tabId}`;
   }
 }
 

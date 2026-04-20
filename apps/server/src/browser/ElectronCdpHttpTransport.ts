@@ -1,4 +1,5 @@
 import {
+  type BrowserTabListing,
   CdpBroker,
   CdpBrokerError,
   type CdpBrokerEvent,
@@ -173,6 +174,36 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
         body: JSON.stringify(request),
       });
       return await parseBrokerResponse<string>(response);
+    } catch (cause) {
+      this.evictOnTransportFailure(cause);
+      throw cause;
+    }
+  }
+
+  async listTabs(request: Parameters<NonNullable<CdpBrokerTransport["listTabs"]>>[0]) {
+    return this.postJson<BrowserTabListing>("tabs/list", request);
+  }
+
+  async newTab(request: Parameters<NonNullable<CdpBrokerTransport["newTab"]>>[0]) {
+    return this.postJson<number>("tabs/new", request);
+  }
+
+  async switchTab(request: Parameters<NonNullable<CdpBrokerTransport["switchTab"]>>[0]) {
+    return this.postJson<number>("tabs/switch", request);
+  }
+
+  async closeTab(request: Parameters<NonNullable<CdpBrokerTransport["closeTab"]>>[0]) {
+    return this.postJson<number>("tabs/close", request);
+  }
+
+  private async postJson<T>(path: string, request: unknown): Promise<T> {
+    try {
+      const response = await fetch(brokerUrl(this.baseUrl, path), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(request),
+      });
+      return await parseBrokerResponse<T>(response);
     } catch (cause) {
       this.evictOnTransportFailure(cause);
       throw cause;
