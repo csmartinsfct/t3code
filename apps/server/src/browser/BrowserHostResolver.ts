@@ -118,10 +118,11 @@ export async function createBrowserHostResolver({
   browser,
   descriptors,
 }: CreateBrowserHostResolverOptions): Promise<BrowserHostResolverShape> {
+  const persisted = await readPersistedHosts(stateDir);
   let state: ResolverState = {
-    persisted: await readPersistedHosts(stateDir),
+    persisted,
     announcedElectronProjects: new Set<ProjectId>(),
-    reannounceInProgress: false,
+    reannounceInProgress: Array.from(persisted.values()).some((host) => host === "electron"),
   };
 
   const updateState = (f: (current: ResolverState) => ResolverState): void => {
@@ -221,7 +222,10 @@ export function getCachedBrowserHostResolver(
 ): Promise<BrowserHostResolverShape> {
   const existing = cachedResolvers.get(options.stateDir);
   if (existing) return existing;
-  const resolver = createBrowserHostResolver(options);
+  const resolver = createBrowserHostResolver(options).catch((cause: unknown) => {
+    cachedResolvers.delete(options.stateDir);
+    throw cause;
+  });
   cachedResolvers.set(options.stateDir, resolver);
   return resolver;
 }
