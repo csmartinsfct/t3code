@@ -42,6 +42,7 @@ import {
   Fiber,
   Layer,
   Option,
+  Ref,
   Scope,
   Schema,
   Stream,
@@ -84,7 +85,15 @@ import {
 } from "../Services/OrchestrationRunRunner.ts";
 
 const SCOPE = "server.orchestration-runner";
-const TURN_TIMEOUT = Duration.minutes(30);
+// Turn watcher declares a turn "stuck" only after this long with zero
+// activity on the thread's provider event stream. The timer is reset by
+// ANY event (message delta, tool call, lifecycle transition), so long but
+// productive turns do not trip it.
+const TURN_IDLE_TIMEOUT = Duration.minutes(30);
+// After dispatching an interrupt on a stuck turn, wait this long for the
+// provider to emit turn.aborted/turn.completed before declaring the turn
+// failed without confirmation.
+const TURN_INTERRUPT_GRACE = Duration.seconds(30);
 
 type TurnOutcome =
   | { readonly result: "completed"; readonly turnId: TurnId | null }
@@ -607,15 +616,95 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         return reviewThread.modelSelection;
       });
 
+    // ---------------------------------------------------------------------------
+    // Interrupt / stop helpers — hoisted above waitForTurnCompletion because
+    // the idle-timeout path dispatches an interrupt before declaring a turn
+    // failed.
+    // ---------------------------------------------------------------------------
+
+    /** Dispatch a turn interrupt for a working thread (best-effort). */
+    const interruptWorkingThread = (threadId: ThreadId) =>
+      dispatchCommand(
+        {
+          type: "thread.turn.interrupt",
+          commandId: runnerCommandId("interrupt"),
+          threadId,
+          createdAt: new Date().toISOString(),
+        },
+        `Failed to interrupt turn on thread ${threadId}`,
+      ).pipe(Effect.catch(() => Effect.void));
+
+    /** Dispatch a session stop for a working thread (best-effort). */
+    const stopWorkingThread = (threadId: ThreadId) =>
+      dispatchCommand(
+        {
+          type: "thread.session.stop",
+          commandId: runnerCommandId("stop"),
+          threadId,
+          createdAt: new Date().toISOString(),
+        },
+        `Failed to stop session on thread ${threadId}`,
+      ).pipe(Effect.catch(() => Effect.void));
+
     /**
      * Wait for a turn to settle on a working thread by observing the canonical
      * provider runtime stream. This gives us an explicit terminal outcome
      * instead of inferring success from session lifecycle state.
+     *
+     * Robustness requirements:
+     *
+     * 1. The stream from `providerService.streamEvents` is hot (no replay), so
+     *    if a `turn.started` event fired before we subscribed, the event
+     *    handler has no way to learn which turn is active and would drop the
+     *    eventual `turn.completed` via the "ignored-before-start" guard. This
+     *    happens on resume when either (a) orchestration paused while a turn
+     *    was still running on the provider side or (b) a user manually sent a
+     *    message on the working thread before clicking Resume. We defend
+     *    against this by seeding `activeTurnId` from the current session state
+     *    after the subscription is open; events are gated on `seedReady` so
+     *    terminal events that arrive during seeding are processed against the
+     *    seeded turn id rather than dropped.
+     *
+     * 2. The watcher used to declare a turn "failed" after a hard 30-minute
+     *    wall-clock timeout, even when the provider was still actively
+     *    streaming events and producing work. That both lied about the
+     *    outcome (the turn often completed successfully a few minutes later)
+     *    and left a phantom provider turn running after orchestration had
+     *    moved on. We now use an idle-based timeout: any event on the thread
+     *    (message delta, tool call, lifecycle transition) resets the timer,
+     *    so long but productive turns do not trip it. When the idle
+     *    threshold is crossed we dispatch a `thread.turn.interrupt` and wait
+     *    up to `TURN_INTERRUPT_GRACE` for the provider to emit
+     *    `turn.aborted`/`turn.completed` before declaring the turn failed —
+     *    so the provider state and the runner state can never diverge.
      */
     const waitForTurnCompletion = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const turnDone = yield* Deferred.make<TurnOutcome>();
-        let activeTurnId: string | null = null;
+        const seedReady = yield* Deferred.make<void>();
+        const activeTurnIdRef = yield* Ref.make<string | null>(null);
+
+        // Activity signal — resolved on every provider event for this
+        // thread, then swapped for a fresh unresolved Deferred. The
+        // idle watchdog awaits the current signal; if it times out, we
+        // know the thread has been silent for the full idle window.
+        const initialActivity = yield* Deferred.make<void>();
+        const activitySignalRef = yield* Ref.make(initialActivity);
+
+        // Activity fiber: any provider event on this thread pokes the
+        // activity signal. Runs independently of the narrow state-machine
+        // fiber below so idle tracking stays accurate even while that
+        // one is blocked on the seed gate.
+        const activityFiber = yield* Stream.runForEach(
+          providerService.streamEvents.pipe(Stream.filter((event) => event.threadId === threadId)),
+          () =>
+            Effect.gen(function* () {
+              const current = yield* Ref.get(activitySignalRef);
+              const fresh = yield* Deferred.make<void>();
+              yield* Ref.set(activitySignalRef, fresh);
+              yield* Deferred.succeed(current, undefined);
+            }),
+        ).pipe(Effect.forkScoped);
 
         const fiber = yield* Stream.runForEach(
           providerService.streamEvents.pipe(
@@ -626,6 +715,14 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           ),
           (event) =>
             Effect.gen(function* () {
+              // Wait for the session-state seed to complete before
+              // processing. Any terminal event that arrives during seeding
+              // is queued by Stream.runForEach's sequential handler and
+              // processed once activeTurnIdRef is populated — preventing
+              // the "ignored-before-start" drop that stranded resumes.
+              yield* Deferred.await(seedReady);
+              const activeTurnId = yield* Ref.get(activeTurnIdRef);
+
               yield* Effect.logInfo(
                 formatTimelineLog(SCOPE, "runner.turn-watcher.runtime-event", {
                   threadId,
@@ -636,11 +733,12 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               );
 
               if (event.type === "turn.started") {
-                activeTurnId = event.turnId ?? null;
+                const newTurnId = event.turnId ?? null;
+                yield* Ref.set(activeTurnIdRef, newTurnId);
                 yield* Effect.logInfo(
                   formatTimelineLog(SCOPE, "runner.turn-watcher.saw-start", {
                     threadId,
-                    turnId: activeTurnId,
+                    turnId: newTurnId,
                   }),
                 );
                 return;
@@ -738,28 +836,72 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
             }),
         ).pipe(Effect.forkScoped);
 
-        // Wait for completion with a timeout
-        const maybeOutcome = yield* Deferred.await(turnDone).pipe(
-          Effect.timeoutOption(TURN_TIMEOUT),
+        // Seed activeTurnId from current session state. Must happen AFTER
+        // the subscription is open so any turn.started that fires during
+        // seeding is captured by the handler (which in turn waits on
+        // seedReady and will observe our seed under the eventual Ref.get).
+        const currentSession = yield* providerService.listSessions().pipe(
+          Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)),
+          Effect.orElseSucceed(() => undefined),
         );
-        const outcome: TurnOutcome = Option.match(maybeOutcome, {
-          onNone: () => {
-            return {
-              result: "failed" as const,
-              error: "Turn timed out after 30 minutes",
-              turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
-            };
-          },
-          onSome: (value) => value,
-        });
-        if (Option.isNone(maybeOutcome)) {
-          yield* Effect.logWarning(
-            formatTimelineLog(SCOPE, "runner.turn-watcher.timeout", { threadId }),
+        if (currentSession && currentSession.status === "running" && currentSession.activeTurnId) {
+          yield* Ref.set(activeTurnIdRef, currentSession.activeTurnId);
+          yield* Effect.logInfo(
+            formatTimelineLog(SCOPE, "runner.turn-watcher.seeded-from-session", {
+              threadId,
+              turnId: currentSession.activeTurnId,
+            }),
           );
         }
+        yield* Deferred.succeed(seedReady, undefined);
 
-        // Clean up the subscription fiber
+        // Idle-timeout watchdog. Races with the state-machine resolver
+        // (turnDone). Awaits the activity signal; any activity resolves it
+        // and we loop for a fresh signal. Only true silence for the full
+        // TURN_IDLE_TIMEOUT trips the stuck-turn path.
+        const idleWatchdog = Effect.gen(function* () {
+          while (true) {
+            const current = yield* Ref.get(activitySignalRef);
+            const result = yield* Deferred.await(current).pipe(
+              Effect.timeoutOption(TURN_IDLE_TIMEOUT),
+            );
+            if (Option.isNone(result)) {
+              break;
+            }
+          }
+          const activeTurnId = yield* Ref.get(activeTurnIdRef);
+          yield* Effect.logWarning(
+            formatTimelineLog(SCOPE, "runner.turn-watcher.idle-timeout", {
+              threadId,
+              activeTurnId,
+              idleTimeoutMs: Duration.toMillis(TURN_IDLE_TIMEOUT),
+            }),
+          );
+          // Force a real terminal event by interrupting the provider turn,
+          // then wait briefly for turn.aborted/turn.completed confirmation
+          // so the runner and provider states cannot diverge.
+          yield* interruptWorkingThread(threadId);
+          const graceful = yield* Deferred.await(turnDone).pipe(
+            Effect.timeoutOption(TURN_INTERRUPT_GRACE),
+          );
+          return Option.match(graceful, {
+            onNone: () => {
+              const idleMinutes = Math.round(Duration.toMillis(TURN_IDLE_TIMEOUT) / 60000);
+              const graceSeconds = Math.round(Duration.toMillis(TURN_INTERRUPT_GRACE) / 1000);
+              return {
+                result: "failed" as const,
+                error: `Turn appears stuck (no provider activity for ${idleMinutes} minutes) and did not acknowledge interrupt within ${graceSeconds}s`,
+                turnId: activeTurnId ? TurnId.makeUnsafe(activeTurnId) : null,
+              };
+            },
+            onSome: (value) => value,
+          });
+        });
+
+        const outcome: TurnOutcome = yield* Effect.race(Deferred.await(turnDone), idleWatchdog);
+
         yield* Fiber.interrupt(fiber);
+        yield* Fiber.interrupt(activityFiber);
 
         return outcome;
       });
@@ -1111,34 +1253,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
         return yield* withRunService((service) => service.get({ runId }));
       });
-
-    // ---------------------------------------------------------------------------
-    // Interrupt / stop helpers
-    // ---------------------------------------------------------------------------
-
-    /** Dispatch a turn interrupt for a working thread (best-effort). */
-    const interruptWorkingThread = (threadId: ThreadId) =>
-      dispatchCommand(
-        {
-          type: "thread.turn.interrupt",
-          commandId: runnerCommandId("interrupt"),
-          threadId,
-          createdAt: new Date().toISOString(),
-        },
-        `Failed to interrupt turn on thread ${threadId}`,
-      ).pipe(Effect.catch(() => Effect.void));
-
-    /** Dispatch a session stop for a working thread (best-effort). */
-    const stopWorkingThread = (threadId: ThreadId) =>
-      dispatchCommand(
-        {
-          type: "thread.session.stop",
-          commandId: runnerCommandId("stop"),
-          threadId,
-          createdAt: new Date().toISOString(),
-        },
-        `Failed to stop session on thread ${threadId}`,
-      ).pipe(Effect.catch(() => Effect.void));
 
     const resolveFreshAgentResumeTarget = (input: {
       readonly run: OrchestrationRun;

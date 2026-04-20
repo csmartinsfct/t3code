@@ -3448,4 +3448,89 @@ describe("OrchestrationRunRunner", () => {
       "orchestration.run.paused",
     );
   });
+
+  it("reattaches to an in-flight provider turn on resume when turn.started fired before subscription", async () => {
+    // Regression: previously waitForTurnCompletion subscribed to the hot
+    // provider event stream without seeding activeTurnId, so if a turn was
+    // already running when the watcher attached (e.g. orchestration paused
+    // via the old 30-min timeout while the provider kept running, or the
+    // user manually sent a message to the working thread before clicking
+    // Resume), the eventual turn.completed was dropped via the
+    // "ignored-before-start" branch and the runner stranded in the working
+    // phase until the user interrupted. The fix seeds activeTurnId from
+    // providerService.listSessions().
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const inflightTurnId = TurnId.makeUnsafe("turn-inflight");
+    const pausedSingleTicketRun = makeRun({
+      ticketOrder: [{ ticketId: ticket1Id, workingThreadId: workingThread1 }],
+      currentTicketIndex: 0,
+      status: "paused",
+      maxReviewIterations: 0,
+    });
+    const runningSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "running",
+    });
+    const completedSingleTicketRun = makeRun({
+      ...pausedSingleTicketRun,
+      status: "completed",
+    });
+    let getCallCount = 0;
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      runService: {
+        get: () => {
+          getCallCount += 1;
+          if (getCallCount === 1) return Effect.succeed(pausedSingleTicketRun);
+          return Effect.succeed(runningSingleTicketRun);
+        },
+        resume: () => Effect.succeed(runningSingleTicketRun),
+        updateRunProgress: () => Effect.succeed(runningSingleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerService: {
+        listSessions: () =>
+          Effect.succeed([
+            {
+              provider: "codex",
+              threadId: workingThread1,
+              status: "running" as const,
+              runtimeMode: "full-access" as const,
+              activeTurnId: inflightTurnId,
+              createdAt: "2026-04-09T10:00:00.000Z",
+              updatedAt: "2026-04-09T10:00:00.500Z",
+            },
+          ]),
+      },
+      // Only the terminal event — the watcher never sees a turn.started
+      // for this turn, because it (conceptually) fired before the
+      // subscription opened.
+      providerEvents: Stream.fromIterable([
+        makeTurnCompletedRuntimeEvent({
+          threadId: workingThread1,
+          turnId: inflightTurnId,
+        }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.resumeRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const activityKinds = parentActivities.map((command) => command.activity.kind);
+
+    expect(activityKinds).toContain("orchestration.run.resumed");
+    expect(activityKinds).toContain("orchestration.run.ticket.completed");
+    expect(activityKinds).toContain("orchestration.run.completed");
+    // The watcher must not have stalled and hit the idle path.
+    expect(activityKinds).not.toContain("orchestration.run.paused");
+  });
 });
