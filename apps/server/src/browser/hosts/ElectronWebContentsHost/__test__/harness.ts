@@ -60,6 +60,8 @@ export interface ElectronWebContentsHarness {
 }
 
 const electronPath = resolveElectronPath();
+const CLEANUP_RETRY_COUNT = 10;
+const CLEANUP_RETRY_DELAY_MS = 100;
 
 const HARNESS_MAIN_SOURCE = `
 import { app, BrowserWindow, WebContentsView } from "electron";
@@ -262,6 +264,26 @@ function resolveElectronPath(): string {
   return resolved;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeHarnessDir(dir: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < CLEANUP_RETRY_COUNT; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(CLEANUP_RETRY_DELAY_MS);
+    }
+  }
+  await rm(dir, { recursive: true, force: true }).catch((error: unknown) => {
+    throw lastError ?? error;
+  });
+}
+
 export async function createElectronWebContentsHarness(): Promise<ElectronWebContentsHarness> {
   const dir = await mkdtemp(join(tmpdir(), "t3-electron-wc-harness-"));
   const entrypoint = join(dir, "main.mjs");
@@ -287,6 +309,7 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
   >();
   let nextId = 1;
   let disposed = false;
+  let childExited = false;
 
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk) => {
@@ -294,6 +317,7 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
   });
 
   child.once("exit", (code, signal) => {
+    childExited = true;
     disposed = true;
     const error = new Error(
       `Electron harness exited before responding (code=${String(code)}, signal=${String(signal)})`,
@@ -412,8 +436,17 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
         await request("dispose");
       } finally {
         disposed = true;
-        child.kill();
-        await rm(dir, { recursive: true, force: true });
+        const exited =
+          childExited ||
+          (await new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), 1_000);
+            child.once("exit", () => {
+              clearTimeout(timer);
+              resolve(true);
+            });
+          }));
+        if (!exited) child.kill();
+        await removeHarnessDir(dir);
       }
     },
   };

@@ -14,14 +14,33 @@ Desktop builds also have a native embedded-browser path behind the management-bo
 
 Agent calls reach that same native view through an Electron-main-owned loopback CDP broker. Desktop startup creates a localhost broker with a random bearer token and sends `{ electronCdpBrokerUrl, electronCdpBrokerToken }` to the Bun server in the one-shot bootstrap envelope. The server wraps that endpoint in `CdpBroker`, so `/api/browser` commands for Electron-authoritative projects drive the visible `WebContentsView`; if Chrome DevTools steals `webContents.debugger`, broker calls return the transient DevTools-open error until the debugger reattaches.
 
-| Field              | Value                                                                       |
-| ------------------ | --------------------------------------------------------------------------- |
-| Endpoint           | `/api/browser`                                                              |
-| Auth               | Bearer token (per-thread, `managedRunService.issueMcpAccess`) or dev-bypass |
-| Response envelope  | `{ data: { message, data: { output: string } }, error: null }`              |
-| Total tools        | 58 (navigate, read, interact, snapshot/screenshot, meta, batch)             |
-| Underlying runtime | Playwright Chromium, `launchPersistentContext`                              |
-| Profile location   | `<dataDir>/browser/<projectId>/chromium-profile/`                           |
+| Field                  | Value                                                                       |
+| ---------------------- | --------------------------------------------------------------------------- |
+| Endpoint               | `/api/browser`                                                              |
+| Auth                   | Bearer token (per-thread, `managedRunService.issueMcpAccess`) or dev-bypass |
+| Response envelope      | `{ data: { message, data: { output: string } }, error: null }`              |
+| Total tools            | 58 (navigate, read, interact, snapshot/screenshot, meta, batch)             |
+| Headless host          | Playwright Chromium, `launchPersistentContext`                              |
+| Native host            | Electron `WebContentsView` + `webContents.debugger` CDP                     |
+| Playwright profile     | `<dataDir>/browser/<projectId>/chromium-profile/`                           |
+| Native host assignment | `<dataDir>/browser/<projectId>/host.json`                                   |
+
+## Two Browser Hosts
+
+`/api/browser` resolves one of two hosts per project:
+
+- **Playwright host** — the default for server-only, CI, scheduled-task, and projects that have never mounted the embedded browser. It owns a persistent Playwright Chromium context under `<dataDir>/browser/<projectId>/chromium-profile/`.
+- **Electron WebContents host** — active once the desktop app mounts the embedded browser for a project. It drives the exact `WebContentsView` the user sees through an Electron-main-owned CDP broker.
+
+The resolver is deliberately host-sticky. On first native mount, Electron main writes `<dataDir>/browser/<projectId>/host.json` as:
+
+```json
+{ "host": "electron" }
+```
+
+Server startup reads that file before routing tool calls. This prevents the post-restart race where an early agent call could otherwise fall back to Playwright and see a separate, unauthenticated profile. Closing the board browser toggle hides and throttles the native view, but it does not clear `host.json`; switching back to Playwright requires a future explicit reset/migration flow.
+
+Electron and Playwright profiles are separate Chromium profiles by design. They are not co-opened and should not share a directory because Chromium profile locks and version-stamped schemas make that unsafe.
 
 ---
 
@@ -144,9 +163,30 @@ CSS selectors still work as a fallback for any command that takes a `ref` or `se
 
 `batch` runs up to 50 of the above sequentially in one request. Each entry is `{ tool, input }` — same shape as a top-level POST. Nested `batch` is rejected. Per-entry errors surface as `[N] toolName ERROR: ...` lines in combined output; the overall request still resolves successfully so agents can inspect partial progress.
 
+### Native Day-1 vs Deferred
+
+The Electron host implements the day-1 native surface for navigation, core read commands, core interactions, snapshot/ref commands, screenshots/PDF, tabs, cookies/storage, headers, console/network/dialog buffers, style/cleanup, and status/UX audit.
+
+Three tools are intentionally deferred in native mode and return the standard parity message:
+
+| Tool                    | Reason deferred                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `eval`                  | Depends on reading and executing a local file through the Playwright-oriented handler path.      |
+| `cookie-import-browser` | Imports cookies from external installed browsers into a Playwright context; needs native review. |
+| `responsive`            | Produces multiple viewport screenshots and needs native bounds/DPR-specific behavior.            |
+
+Two tools are permanently unsupported in the embedded host:
+
+| Tool         | Native behavior                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------- |
+| `focus`      | Not meaningful because the native browser already lives inside the Electron app window.           |
+| `visibility` | Playwright-only layer command; embedded visibility is controlled by the renderer bounds protocol. |
+
 ---
 
 ## Architecture
+
+### Host-Agnostic Dispatch
 
 ```
 Agent (Claude / Codex / Gemini, out-of-process)
@@ -159,15 +199,13 @@ apps/server/src/browser/handlers.ts        (T3-authored — table-driven SPECS)
    │  argsFromInput(input) → string[]
    │  category: read | write | snapshot | meta
    ▼
-apps/server/src/browser/Layers/BrowserManager.ts  (T3-authored — Effect layer)
-   │  acquire(projectId) → BrowserInstance { inner: <vendored BM> }
-   │  Lazy launchPersistentContext(<dataDir>/browser/<projectId>/chromium-profile/)
-   │  Idle eviction (30min) + graceful shutdown
+apps/server/src/browser/BrowserHostResolver.ts
+   │  host.json absent/playwright → PlaywrightBrowserHost
+   │  host.json electron          → ElectronWebContentsBrowserHost
    ▼
-apps/server/src/browser/core/             (vendored gstack — byte-identical)
-   │  handleReadCommand / handleWriteCommand / handleSnapshot / handleMetaCommand
-   ▼
-Playwright Chromium (per-project persistent context)
+BrowserHost.runTool(...)
+   ├─ PlaywrightBrowserHost → BrowserManager → vendored gstack core → Playwright Chromium
+   └─ ElectronWebContentsBrowserHost → CdpBroker → Electron main → WebContentsView
 ```
 
 ### Key design decisions
@@ -176,6 +214,8 @@ Playwright Chromium (per-project persistent context)
 - **Composition, not modification.** Per-project Chromium profiles, T3-scoped data directories, and the REST surface live in T3-authored files outside `core/`. Never edit vendored files — pull-up cost would be paid on every gstack refresh.
 - **Plaintext output.** Every command returns plaintext, not structured JSON. Agents read output directly; the envelope is only for transport. This saves ~2k tokens per command vs typical JSON-framed MCP tool output.
 - **Bun production runtime.** The vendored `cookie-import-browser.ts` imports `bun:sqlite` at module load time. Rather than shim that, T3 runs `apps/server` under Bun in production (T3 already depends on `@effect/sql-sqlite-bun`). Tracked at [T3CO-328](t3://ticket/T3CO-328) for the `package.json` `start` script flip.
+- **CDP broker instead of remote debugging port.** Electron main exposes only a bearer-protected loopback broker to the child server. There is no public `--remote-debugging-port`; the bootstrap envelope passes the random broker URL/token.
+- **Restart recovery is explicit.** If the server restarts while Electron main keeps native views alive, `/api/browser` treats persisted Electron projects as temporarily unavailable until main re-announces active views.
 
 ### Per-project profiles
 
@@ -190,6 +230,26 @@ PersistentOriginTrials       DIPS                        ...
 The BrowserManager layer lazy-launches a persistent context on the first `acquire(projectId)` call and holds it in a `Map<ProjectId, BrowserContext>`. Contexts are closed (not deleted on disk) after 30 minutes of idle time, and a fresh launch restores all persistent auth state from the profile dir. A project's Chromium crash evicts only that project's context — other projects keep running.
 
 Dev server: paths resolve under `~/.t3/dev/browser/<projectId>/...` when `ServerConfig.devUrl` is set (Electron dev mode), otherwise `~/.t3/userdata/browser/<projectId>/...`.
+
+Native embedded profiles live inside Electron's own `persist:<projectId>` partition storage. The `host.json` assignment sits beside the Playwright profile metadata under `<dataDir>/browser/<projectId>/host.json`; it records routing preference, not a shared profile location. Because the partition name embeds the canonical project id, any future project import/merge flow that rewrites ids must migrate the Electron partition as well.
+
+### Retina / DPR
+
+All browser tool coordinates are CSS pixels. The Electron host normalizes CDP details internally: `DOM.getBoxModel` and `Input.dispatchMouseEvent` use CSS pixels, while `Page.captureScreenshot` returns device pixels. Screenshot output remains the familiar browser-tool payload, and any future coordinate-to-screenshot correlation must keep the `devicePixelRatio` multiplier in mind on Retina displays.
+
+### DevTools Conflict Policy
+
+Electron allows only one `webContents.debugger` client per `WebContents`. When the user opens Chrome DevTools on the embedded browser, Electron detaches T3's debugger. While detached, native `/api/browser` calls fail with a clear transient error asking the user to close DevTools; Electron then reattaches and agent tools resume. Native Chrome DevTools coexistence is not planned for this host. A future T3-owned DevTools panel should use the same `CdpBroker` rather than competing for the debugger client.
+
+### Extension Support
+
+Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electron `Session`, so loaded extensions apply only when the project is Electron-authoritative. Playwright projects do not see Electron-loaded extensions, and full extension management UI must gate on host kind.
+
+The Phase 4 smoke audit used `scripts/embedded-browser-extension-audit.cjs` against Electron 40.6.0:
+
+- MV2 content-script extension loaded with the expected deprecation warning; its JS injected and its CSS hiding rule applied.
+- MV3 extension loaded; content script messaged the service worker successfully; `chrome.runtime`, `chrome.storage.local`, `chrome.tabs.query`, `chrome.scripting.executeScript`, and `chrome.action` were present in the tested contexts.
+- The MV3 action popup is declarable and its HTML is packaged, but there is no native browser toolbar affordance in the current embedded UI. Direct hidden-window popup navigation was not promoted into the automated smoke because this v0.1 UI has no action button surface yet.
 
 ### Chromium bundle
 

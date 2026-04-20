@@ -6,14 +6,14 @@ How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, 
 
 T3 Code exposes several internal REST API services that AI models can use during conversations:
 
-| Service         | Endpoint               | Tools | Purpose                                                                                                                                                                               |
-| --------------- | ---------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose                                                                                                                        |
-| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                                                                                                                                                  |
-| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                            |
-| Browser         | `/api/browser`         | 58    | Per-project headless Chromium with plaintext output and stable @ref element IDs (navigate, snapshot, click/fill, screenshots, evaluate JS) — see [browser-tools.md](browser-tools.md) |
-| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                           |
-| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                  |
+| Service         | Endpoint               | Tools | Purpose                                                                                                                                                                                                                                                                             |
+| --------------- | ---------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose                                                                                                                                                                                                                      |
+| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                                                                                                                                                                                                                                                |
+| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                                                                                                                          |
+| Browser         | `/api/browser`         | 58    | Per-project browser automation with plaintext output and stable @ref element IDs. Defaults to Playwright headless Chromium; desktop projects that mount the embedded browser route to Electron `WebContentsView` through the CDP broker — see [browser-tools.md](browser-tools.md). |
+| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                                                                                                                         |
+| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                                                                                                                |
 
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
@@ -46,6 +46,8 @@ Every supported provider (Codex, Claude, Gemini) reaches the four T3 services th
 - **Gemini**: sent as an ACP embedded-context resource on the first user turn (ACP `session/new` and `session/load` do not accept a system-prompt field). The session-context hash is stored on the resume cursor so the prompt is only re-injected when it actually changes between process runs.
 
 The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files and surfaced in the composer MCP menu.
+
+Browser automation has two host implementations behind that same REST endpoint. Agents do not choose between them per call. `BrowserHostResolver` checks the project state: Playwright serves headless/server contexts and projects without native browser history; Electron serves projects whose embedded browser was mounted and persisted in `browser/<projectId>/host.json`. This keeps the prompt/tool contract stable while letting desktop agents act in the exact tab the user can see.
 
 **Trade-offs:**
 

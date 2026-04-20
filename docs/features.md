@@ -727,6 +727,7 @@ The Electron shell wraps the server and web app into a native desktop applicatio
 ### Features
 
 - **Native window** — Platform-appropriate title bar and window management.
+- **Embedded browser** — Board toolbar browser mode mounts a per-project Electron `WebContentsView` with a URL bar and native Chromium rendering. Agent `/api/browser` calls drive the same visible view through the Electron CDP broker once `host.json` marks the project Electron-authoritative.
 - **Protocol handler** — `t3://` scheme for internal navigation (e.g. `t3://ticket/T3CO-42`).
 - **Auto-update** — Checks every 4 hours via electron-updater. Supports prerelease channels. GitHub token support for higher rate limits.
 - **Shell environment sync** — Preserves the user's PATH and shell environment in the embedded server.
@@ -742,6 +743,13 @@ The Electron shell wraps the server and web app into a native desktop applicatio
 - `desktop:open-external` — Open URLs and files externally.
 - `desktop:update-*` — Update lifecycle (check, download, install, progress).
 - `desktop:get-ws-url` — Get the backend WebSocket URL.
+- `browser:*` — Embedded browser mount, bounds, navigation, URL, and unmount IPC.
+
+### Embedded browser
+
+The embedded browser is a native desktop-only project surface. The web renderer owns the chrome (URL bar and placeholder rect), while Electron main owns the `WebContentsView`, its per-project `persist:<projectId>` session, hidden-view throttling, and CDP debugger lifecycle. The server resolves `/api/browser` through the two-host model documented in [Browser Tools](browser-tools.md): Playwright remains the default headless host; Electron becomes authoritative for a project after first native mount and persists that choice in `browser/<projectId>/host.json`.
+
+The v0.1 placement is intentionally the management-board browser toggle. The browser is project infrastructure, so future layout work can move it into a project-pane system without changing the host resolver, CDP broker, or REST tool surface.
 
 ### Build targets
 
