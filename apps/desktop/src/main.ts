@@ -1638,6 +1638,14 @@ function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow 
   return BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
 }
 
+function findEmbeddedBrowserOwnerWindow(embedded: EmbeddedBrowserViewState): BrowserWindow | null {
+  for (const window of BrowserWindow.getAllWindows()) {
+    const state = embeddedBrowserStateByWindow.get(window);
+    if (state?.viewsByProjectId.get(embedded.projectId) === embedded) return window;
+  }
+  return null;
+}
+
 function getActiveEmbeddedBrowser(window: BrowserWindow): EmbeddedBrowserViewState | null {
   const state = getEmbeddedBrowserWindowState(window);
   if (!state.activeProjectId) return null;
@@ -1830,9 +1838,28 @@ function createEmbeddedBrowserView(
       if (!attached) scheduleEmbeddedBrowserDebuggerRetry(embedded);
     });
   });
+  // Prevent the webview from stealing focus from the chat shell on programmatic
+  // navigations (agent-driven `goto`/`reload` via CDP, or a main-window reload
+  // that remounts the embedded view). Chromium focuses a WebContents when its
+  // document finishes loading; we undo that ONLY when the webview wasn't the
+  // focused WebContents immediately before the navigation started. If the user
+  // had clicked into the webview first, this branch does nothing and focus
+  // stays where the user put it.
+  let preNavHadViewFocus = false;
+  view.webContents.on("did-start-loading", () => {
+    preNavHadViewFocus = view.webContents.isFocused();
+  });
   view.webContents.on("did-finish-load", () => {
     if (embedded.devtoolsOpen) {
       void resumeEmbeddedBrowser(embedded);
+    }
+    if (!preNavHadViewFocus && view.webContents.isFocused()) {
+      // Chromium auto-focused the WebContents on load; return focus to the
+      // owning BrowserWindow's primary renderer (the chat shell). Focusing
+      // the main WebContents implicitly shifts focus away from the embedded
+      // view (WebContents.blur() is not exposed in Electron).
+      const owner = findEmbeddedBrowserOwnerWindow(embedded);
+      if (owner && !owner.isDestroyed()) owner.webContents.focus();
     }
   });
   view.webContents.on("destroyed", () => {
