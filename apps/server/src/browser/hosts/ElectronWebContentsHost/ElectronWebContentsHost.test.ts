@@ -95,31 +95,25 @@ describe("ElectronWebContentsHost snapshot PoC", () => {
     });
   });
 
-  it("uses cached backendNodeId first, then slow-path queryAXTree on staleness", async () => {
+  it("uses cached backendNodeId first, then re-runs the full AX tree on staleness", async () => {
     const calls: string[] = [];
     const client: CdpClient = {
       async sendCommand(method, params) {
         calls.push(`${method}:${JSON.stringify(params ?? {})}`);
-        if (method === "Accessibility.getFullAXTree") return { nodes: axNodes } as never;
+        if (method === "Accessibility.getFullAXTree") {
+          const stale =
+            calls.filter((call) => call.startsWith("Accessibility.getFullAXTree")).length > 1;
+          return {
+            nodes: stale
+              ? axNodes.map((node) =>
+                  node.backendDOMNodeId === 101 ? { ...node, backendDOMNodeId: 201 } : node,
+                )
+              : axNodes,
+          } as never;
+        }
         if (method === "DOM.describeNode") {
           if ((params as { backendNodeId: number }).backendNodeId === 101) throw new Error("stale");
           return { node: {} } as never;
-        }
-        if (method === "Accessibility.queryAXTree") {
-          return {
-            nodes: [
-              {
-                role: { value: "link" },
-                name: { value: "More information" },
-                backendDOMNodeId: 201,
-              },
-              {
-                role: { value: "link" },
-                name: { value: "More information" },
-                backendDOMNodeId: 202,
-              },
-            ],
-          } as never;
         }
         return {} as never;
       },
@@ -130,7 +124,89 @@ describe("ElectronWebContentsHost snapshot PoC", () => {
 
     assert.equal(resolved.backendNodeId, 201);
     assert.isTrue(calls.some((call) => call.startsWith("DOM.describeNode")));
-    assert.isTrue(calls.some((call) => call.startsWith("Accessibility.queryAXTree")));
+    assert.equal(calls.filter((call) => call.startsWith("Accessibility.getFullAXTree")).length, 2);
+    assert.isFalse(calls.some((call) => call.startsWith("Accessibility.queryAXTree")));
+  });
+
+  it("returns screenshot DPR from window.devicePixelRatio, not visual viewport scale", async () => {
+    const client: CdpClient = {
+      async sendCommand(method) {
+        if (method === "Page.captureScreenshot") {
+          return { data: Buffer.from("png").toString("base64") } as never;
+        }
+        if (method === "Runtime.evaluate") {
+          return { result: { value: 2 } } as never;
+        }
+        if (method === "Page.getLayoutMetrics") {
+          return { visualViewport: { scale: 1 } } as never;
+        }
+        return {} as never;
+      },
+    };
+    const host = new ElectronWebContentsHost(client);
+    const screenshot = await host.captureScreenshot();
+    assert.equal(screenshot.devicePixelRatio, 2);
+    assert.equal(screenshot.buffer.toString(), "png");
+  });
+
+  it("uses Cmd+A on macOS when filling text", async () => {
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const client: CdpClient = {
+      async sendCommand(method, params) {
+        calls.push(params === undefined ? { method } : { method, params });
+        if (method === "Accessibility.getFullAXTree") return { nodes: axNodes } as never;
+        if (method === "DOM.describeNode") return { node: {} } as never;
+        if (method === "DOM.getBoxModel") {
+          return { model: { border: [0, 0, 10, 0, 10, 10, 0, 10] } } as never;
+        }
+        if (method === "Runtime.evaluate") return { result: { value: "MacIntel" } } as never;
+        return {} as never;
+      },
+    };
+    const host = new ElectronWebContentsHost(client);
+    await host.snapshot();
+    await host.fill("@e4", "hello");
+
+    const selectAll = calls.filter(
+      (call) => call.method === "Input.dispatchKeyEvent" && call.params?.code === "KeyA",
+    );
+    assert.equal(selectAll.length, 2);
+    assert.deepEqual(
+      selectAll.map((call) => call.params?.modifiers),
+      [4, 4],
+    );
+  });
+
+  it("scrolls at the viewport center by default and accepts explicit coordinates", async () => {
+    const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    const client: CdpClient = {
+      async sendCommand(method, params) {
+        calls.push(params === undefined ? { method } : { method, params });
+        if (method === "Page.getLayoutMetrics") {
+          return { cssVisualViewport: { clientWidth: 800, clientHeight: 600 } } as never;
+        }
+        return {} as never;
+      },
+    };
+    const host = new ElectronWebContentsHost(client);
+    await host.scroll(120);
+    await host.scroll(80, 10, { x: 20, y: 30 });
+
+    const wheelCalls = calls.filter((call) => call.method === "Input.dispatchMouseEvent");
+    assert.deepEqual(wheelCalls[0]?.params, {
+      type: "mouseWheel",
+      x: 400,
+      y: 300,
+      deltaX: 0,
+      deltaY: 120,
+    });
+    assert.deepEqual(wheelCalls[1]?.params, {
+      type: "mouseWheel",
+      x: 20,
+      y: 30,
+      deltaX: 10,
+      deltaY: 80,
+    });
   });
 
   it("uses the vendored cursor-interactive heuristics in the Runtime.evaluate source", () => {

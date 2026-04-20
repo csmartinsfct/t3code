@@ -17,12 +17,14 @@ enough to reproduce T3's current `@ref` contract:
 - Ref identity can be rebuilt as `{ role, name, nth, backendNodeId }`, where
   `nth` follows Playwright's `getByRole(role, { name }).nth(index)` model.
 - Cached `backendDOMNodeId` gives a fast path for immediate actions after a
-  snapshot. When it is stale, `Accessibility.queryAXTree` can re-select by
-  role/name and re-apply the stored `nth`.
+  snapshot. When it is stale, the PoC re-runs `Accessibility.getFullAXTree` and
+  resolves the original tuple against full-tree order instead of relying on
+  `Accessibility.queryAXTree`'s filtered ordering.
 - The cursor-interactive scan ports directly to `Runtime.evaluate`; it does not
   depend on Playwright locators.
 - Input and screenshot primitives line up with CDP's model: mouse/keyboard input
-  uses CSS pixels, while screenshots return a buffer plus DPR metadata.
+  uses CSS pixels, while screenshots return a buffer plus `window.devicePixelRatio`
+  metadata.
 
 ## Divergence
 
@@ -38,6 +40,30 @@ Chromium AX roles that differ from Playwright's normalized role names on complex
 sites. That risk is acceptable because the stored tuple has enough information
 to fail cleanly as stale and re-snapshot, and because the high-value interactive
 roles used by the browser tools are present in the CDP AX tree.
+
+One Phase 1 implementation note: `apps/server/src/browser/handlers.ts` was
+updated to use a tagged `BrowserToolError` while adding the PoC tests. That is
+not part of the Electron host surface; it only narrows existing browser-handler
+Effect error channels so the server typecheck can pass with the new typed PoC
+files included.
+
+## Harness Targets
+
+The standalone Electron 40.6.0 harness covers the ticket's five target shapes:
+
+| Target                 | Shape exercised                            |
+| ---------------------- | ------------------------------------------ |
+| `example.com`          | trivial heading/link tree                  |
+| `news.ycombinator.com` | dynamic listing with repeated links/text   |
+| Gmail login            | labeled form inputs                        |
+| data-URL popover page  | floating-container cursor-interactive scan |
+| data-URL iframe page   | active-page tree with iframe present       |
+
+In this worktree, the harness entrypoint is executable as
+`bunx electron apps/server/src/browser/hosts/ElectronWebContentsHost/run-poc.mjs`.
+The local Bun install did not materialize Electron's `dist` binary, so no
+captured per-target counts were added here. Phase 2 should run the harness in
+CI or a desktop-dev environment and pin the resulting per-target parity table.
 
 ## Recommendation
 

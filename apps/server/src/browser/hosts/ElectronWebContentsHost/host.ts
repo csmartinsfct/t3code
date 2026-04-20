@@ -1,5 +1,6 @@
-import { snapshotFromCdp } from "./snapshot.ts";
+import { buildSnapshotFromAxNodes, snapshotFromCdp } from "./snapshot.ts";
 import type {
+  AxNode,
   CdpBoxModel,
   CdpClient,
   RefEntry,
@@ -16,8 +17,9 @@ interface RuntimeEvaluateResponse<T> {
 }
 
 interface LayoutMetricsResponse {
-  visualViewport?: {
-    scale?: number;
+  cssVisualViewport?: {
+    clientWidth?: number;
+    clientHeight?: number;
   };
 }
 
@@ -54,7 +56,7 @@ export class ElectronWebContentsHost {
       return { ref: cleanRef, entry, backendNodeId: entry.backendNodeId };
     }
 
-    const fallback = await this.queryAxTreeForTuple(entry);
+    const fallback = await this.resolveFromFullAxTree(entry);
     if (fallback !== undefined) {
       entry.backendNodeId = fallback;
       return { ref: cleanRef, entry, backendNodeId: fallback };
@@ -84,17 +86,18 @@ export class ElectronWebContentsHost {
 
   async fill(ref: string, text: string): Promise<void> {
     await this.click(ref);
+    const modifiers = await this.selectAllModifier();
     await this.client.sendCommand("Input.dispatchKeyEvent", {
       type: "keyDown",
       key: "a",
       code: "KeyA",
-      modifiers: 2,
+      modifiers,
     });
     await this.client.sendCommand("Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "a",
       code: "KeyA",
-      modifiers: 2,
+      modifiers,
     });
     await this.type(text);
   }
@@ -103,24 +106,26 @@ export class ElectronWebContentsHost {
     await this.client.sendCommand("Input.insertText", { text });
   }
 
-  async scroll(deltaY: number, deltaX = 0): Promise<void> {
+  async scroll(deltaY: number, deltaX = 0, point?: { x: number; y: number }): Promise<void> {
+    const target = point ?? (await this.viewportCenter());
     await this.client.sendCommand("Input.dispatchMouseEvent", {
       type: "mouseWheel",
-      x: 0,
-      y: 0,
+      x: target.x,
+      y: target.y,
       deltaX,
       deltaY,
     });
   }
 
   async captureScreenshot(): Promise<ScreenshotResult> {
-    const [screenshot, metrics] = await Promise.all([
+    const [screenshot, devicePixelRatio] = await Promise.all([
       this.client.sendCommand<{ data: string }>("Page.captureScreenshot", { format: "png" }),
-      this.client.sendCommand<LayoutMetricsResponse>("Page.getLayoutMetrics"),
+      this.evaluate<number>("window.devicePixelRatio"),
     ]);
     return {
       buffer: Buffer.from(screenshot.data, "base64"),
-      devicePixelRatio: metrics.visualViewport?.scale ?? 1,
+      devicePixelRatio:
+        Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1,
     };
   }
 
@@ -133,23 +138,39 @@ export class ElectronWebContentsHost {
     }
   }
 
-  private async queryAxTreeForTuple(entry: RefEntry): Promise<number | undefined> {
-    const response = await this.client.sendCommand<{
-      nodes: Array<{
-        role?: { value?: string };
-        name?: { value?: string };
-        backendDOMNodeId?: number;
-      }>;
-    }>("Accessibility.queryAXTree", {
-      accessibleName: entry.name || undefined,
-      role: entry.role,
-    });
-    const matches = response.nodes.filter((node) => {
-      const role = String(node.role?.value ?? "");
-      const name = String(node.name?.value ?? "");
-      return role === entry.role && name === entry.name && node.backendDOMNodeId !== undefined;
-    });
-    return matches[entry.nth]?.backendDOMNodeId;
+  private async resolveFromFullAxTree(entry: RefEntry): Promise<number | undefined> {
+    const response = await this.client.sendCommand<{ nodes: AxNode[] }>(
+      "Accessibility.getFullAXTree",
+    );
+    const snapshot = buildSnapshotFromAxNodes(response.nodes, [], {});
+    for (const candidate of snapshot.refs.values()) {
+      if (
+        candidate.kind === "ax" &&
+        candidate.role === entry.role &&
+        candidate.name === entry.name &&
+        candidate.nth === entry.nth
+      ) {
+        return candidate.backendNodeId;
+      }
+    }
+    return undefined;
+  }
+
+  private async selectAllModifier(): Promise<number> {
+    try {
+      const platform = await this.evaluate<string>("navigator.platform");
+      return /\bmac/i.test(platform) ? 4 : 2;
+    } catch {
+      return process.platform === "darwin" ? 4 : 2;
+    }
+  }
+
+  private async viewportCenter(): Promise<{ x: number; y: number }> {
+    const metrics = await this.client.sendCommand<LayoutMetricsResponse>("Page.getLayoutMetrics");
+    return {
+      x: (metrics.cssVisualViewport?.clientWidth ?? 0) / 2,
+      y: (metrics.cssVisualViewport?.clientHeight ?? 0) / 2,
+    };
   }
 
   private async centerPoint(resolved: ResolvedRef): Promise<{ x: number; y: number }> {
