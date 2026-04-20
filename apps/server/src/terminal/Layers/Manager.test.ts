@@ -189,6 +189,10 @@ function multiTerminalHistoryLogPath(
 interface CreateManagerOptions {
   shellResolver?: () => string;
   subprocessChecker?: (terminalPid: number) => Effect.Effect<boolean>;
+  processTreeTerminator?: (
+    terminalPid: number,
+    signal: "SIGTERM" | "SIGKILL",
+  ) => Effect.Effect<void>;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
@@ -225,6 +229,7 @@ const createManager = (
         ...(options.subprocessChecker !== undefined
           ? { subprocessChecker: options.subprocessChecker }
           : {}),
+        processTreeTerminator: options.processTreeTerminator ?? (() => Effect.void),
         ...(options.subprocessPollIntervalMs !== undefined
           ? { subprocessPollIntervalMs: options.subprocessPollIntervalMs }
           : {}),
@@ -704,6 +709,33 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
       assert.equal(process.killSignals[0], "SIGTERM");
       expect(process.killSignals).toContain("SIGKILL");
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("terminates the terminal process tree when closing a running terminal", () =>
+    Effect.gen(function* () {
+      const treeSignals: Array<{ pid: number; signal: "SIGTERM" | "SIGKILL" }> = [];
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        processKillGraceMs: 10,
+        processTreeTerminator: (pid, signal) =>
+          Effect.sync(() => {
+            treeSignals.push({ pid, signal });
+          }),
+      });
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      const closeFiber = yield* manager.close({ threadId: "thread-1" }).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("10 millis");
+      yield* Fiber.join(closeFiber);
+
+      expect(treeSignals).toEqual([
+        { pid: process.pid, signal: "SIGTERM" },
+        { pid: process.pid, signal: "SIGKILL" },
+      ]);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 

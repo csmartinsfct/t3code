@@ -57,6 +57,11 @@ const TERMINAL_ENV_BLOCKLIST = new Set(["PORT", "ELECTRON_RENDERER_PORT", "ELECT
 type TerminalSubprocessChecker = (
   terminalPid: number,
 ) => Effect.Effect<boolean, TerminalSubprocessCheckError>;
+type TerminalProcessSignal = "SIGTERM" | "SIGKILL";
+type TerminalProcessTreeTerminator = (
+  terminalPid: number,
+  signal: TerminalProcessSignal,
+) => Effect.Effect<void, TerminalProcessTreeSignalError>;
 
 class TerminalSubprocessCheckError extends Data.TaggedError("TerminalSubprocessCheckError")<{
   readonly message: string;
@@ -68,7 +73,15 @@ class TerminalSubprocessCheckError extends Data.TaggedError("TerminalSubprocessC
 class TerminalProcessSignalError extends Data.TaggedError("TerminalProcessSignalError")<{
   readonly message: string;
   readonly cause?: unknown;
-  readonly signal: "SIGTERM" | "SIGKILL";
+  readonly signal: TerminalProcessSignal;
+}> {}
+
+class TerminalProcessTreeSignalError extends Data.TaggedError("TerminalProcessTreeSignalError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+  readonly terminalPid: number;
+  readonly signal: TerminalProcessSignal;
+  readonly command: "ps" | "taskkill" | "kill";
 }> {}
 
 interface ShellCandidate {
@@ -398,6 +411,184 @@ const defaultSubprocessChecker = Effect.fn("terminal.defaultSubprocessChecker")(
   return yield* checkPosixSubprocessActivity(terminalPid);
 });
 
+interface PosixProcessEntry {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+}
+
+function parsePosixProcessTable(stdout: string): ReadonlyArray<PosixProcessEntry> {
+  const entries: PosixProcessEntry[] = [];
+  for (const line of stdout.split(/\r?\n/g)) {
+    const [pidRaw, ppidRaw, pgidRaw] = line.trim().split(/\s+/g);
+    const pid = Number(pidRaw);
+    const ppid = Number(ppidRaw);
+    const pgid = Number(pgidRaw);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || !Number.isInteger(pgid) || pid <= 0) {
+      continue;
+    }
+    entries.push({ pid, ppid, pgid });
+  }
+  return entries;
+}
+
+function collectDescendantProcesses(
+  rootPid: number,
+  entries: ReadonlyArray<PosixProcessEntry>,
+): ReadonlyArray<PosixProcessEntry> {
+  const byParent = new Map<number, PosixProcessEntry[]>();
+  for (const entry of entries) {
+    const existing = byParent.get(entry.ppid);
+    if (existing) {
+      existing.push(entry);
+    } else {
+      byParent.set(entry.ppid, [entry]);
+    }
+  }
+
+  const descendants: PosixProcessEntry[] = [];
+  const stack = [...(byParent.get(rootPid) ?? [])];
+  const seen = new Set<number>();
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (!next || seen.has(next.pid)) continue;
+    seen.add(next.pid);
+    descendants.push(next);
+    stack.push(...(byParent.get(next.pid) ?? []));
+  }
+  return descendants;
+}
+
+const signalProcessId = Effect.fn("terminal.signalProcessId")(function* (
+  pid: number,
+  signal: TerminalProcessSignal,
+): Effect.fn.Return<void, TerminalProcessTreeSignalError> {
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) {
+    return;
+  }
+  yield* Effect.try({
+    try: () => process.kill(pid, signal),
+    catch: (cause) =>
+      new TerminalProcessTreeSignalError({
+        message: `Failed to send ${signal} to process ${pid}.`,
+        cause,
+        terminalPid: pid,
+        signal,
+        command: "kill",
+      }),
+  }).pipe(
+    Effect.catch((error) => {
+      const code = (error.cause as NodeJS.ErrnoException | undefined)?.code;
+      return code === "ESRCH" ? Effect.void : Effect.fail(error);
+    }),
+  );
+});
+
+const signalProcessGroup = Effect.fn("terminal.signalProcessGroup")(function* (
+  pgid: number,
+  rootPid: number,
+  signal: TerminalProcessSignal,
+): Effect.fn.Return<void, TerminalProcessTreeSignalError> {
+  if (!Number.isInteger(pgid) || pgid <= 1 || pgid === process.pid) {
+    return;
+  }
+  yield* Effect.try({
+    try: () => process.kill(-pgid, signal),
+    catch: (cause) =>
+      new TerminalProcessTreeSignalError({
+        message: `Failed to send ${signal} to process group ${pgid}.`,
+        cause,
+        terminalPid: rootPid,
+        signal,
+        command: "kill",
+      }),
+  }).pipe(
+    Effect.catch((error) => {
+      const code = (error.cause as NodeJS.ErrnoException | undefined)?.code;
+      return code === "ESRCH" ? Effect.void : Effect.fail(error);
+    }),
+  );
+});
+
+const terminateWindowsProcessTree = Effect.fn("terminal.terminateWindowsProcessTree")(function* (
+  terminalPid: number,
+  signal: TerminalProcessSignal,
+): Effect.fn.Return<void, TerminalProcessTreeSignalError> {
+  const args = ["/pid", String(terminalPid), "/T"];
+  if (signal === "SIGKILL") {
+    args.push("/F");
+  }
+  yield* Effect.tryPromise({
+    try: () =>
+      runProcess("taskkill", args, {
+        timeoutMs: 1_500,
+        allowNonZeroExit: true,
+        maxBufferBytes: 32_768,
+        outputMode: "truncate",
+      }),
+    catch: (cause) =>
+      new TerminalProcessTreeSignalError({
+        message: "Failed to terminate Windows terminal process tree.",
+        cause,
+        terminalPid,
+        signal,
+        command: "taskkill",
+      }),
+  }).pipe(Effect.asVoid);
+});
+
+const terminatePosixProcessTree = Effect.fn("terminal.terminatePosixProcessTree")(function* (
+  terminalPid: number,
+  signal: TerminalProcessSignal,
+): Effect.fn.Return<void, TerminalProcessTreeSignalError> {
+  const psResult = yield* Effect.tryPromise({
+    try: () =>
+      runProcess("ps", ["-eo", "pid=,ppid=,pgid="], {
+        timeoutMs: 1_000,
+        maxBufferBytes: 262_144,
+        outputMode: "truncate",
+      }),
+    catch: (cause) =>
+      new TerminalProcessTreeSignalError({
+        message: "Failed to inspect terminal process tree.",
+        cause,
+        terminalPid,
+        signal,
+        command: "ps",
+      }),
+  });
+
+  const descendants = collectDescendantProcesses(
+    terminalPid,
+    parsePosixProcessTable(psResult.stdout),
+  );
+  const descendantPids = new Set(descendants.map((entry) => entry.pid));
+  const processGroups = [
+    ...new Set(
+      descendants
+        .map((entry) => entry.pgid)
+        .filter((pgid) => Number.isInteger(pgid) && pgid > 1 && descendantPids.has(pgid)),
+    ),
+  ];
+
+  yield* Effect.forEach(processGroups, (pgid) => signalProcessGroup(pgid, terminalPid, signal), {
+    discard: true,
+  });
+  yield* Effect.forEach(descendants.toReversed(), (entry) => signalProcessId(entry.pid, signal), {
+    discard: true,
+  });
+});
+
+const defaultProcessTreeTerminator: TerminalProcessTreeTerminator = (terminalPid, signal) => {
+  if (!Number.isInteger(terminalPid) || terminalPid <= 1) {
+    return Effect.void;
+  }
+  if (process.platform === "win32") {
+    return terminateWindowsProcessTree(terminalPid, signal);
+  }
+  return terminatePosixProcessTree(terminalPid, signal);
+};
+
 function capHistory(history: string, maxLines: number): string {
   if (history.length === 0) return history;
   const hasTrailingNewline = history.endsWith("\n");
@@ -644,6 +835,7 @@ interface TerminalManagerOptions {
   ptyAdapter: PtyAdapterShape;
   shellResolver?: () => string;
   subprocessChecker?: TerminalSubprocessChecker;
+  processTreeTerminator?: TerminalProcessTreeTerminator;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
@@ -668,6 +860,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
     const shellResolver = options.shellResolver ?? defaultShellResolver;
     const subprocessChecker = options.subprocessChecker ?? defaultSubprocessChecker;
+    const processTreeTerminator = options.processTreeTerminator ?? defaultProcessTreeTerminator;
     const subprocessPollIntervalMs =
       options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS;
     const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS;
@@ -781,6 +974,21 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       threadId: string,
       terminalId: string,
     ) {
+      const signalProcessTree = (signal: TerminalProcessSignal) =>
+        processTreeTerminator(process.pid, signal).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to terminate terminal process tree", {
+              threadId,
+              terminalId,
+              terminalPid: process.pid,
+              signal,
+              command: error.command,
+              error: error.message,
+            }),
+          ),
+        );
+
+      yield* signalProcessTree("SIGTERM");
       const terminated = yield* Effect.try({
         try: () => process.kill("SIGTERM"),
         catch: (cause) =>
@@ -801,11 +1009,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         ),
       );
       if (!terminated) {
-        return;
+        yield* Effect.logDebug("terminal process was already unavailable during SIGTERM", {
+          threadId,
+          terminalId,
+          terminalPid: process.pid,
+        });
       }
 
       yield* Effect.sleep(processKillGraceMs);
 
+      yield* signalProcessTree("SIGKILL");
       yield* Effect.try({
         try: () => process.kill("SIGKILL"),
         catch: (cause) =>
