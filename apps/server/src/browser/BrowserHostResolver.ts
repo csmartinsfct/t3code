@@ -7,7 +7,8 @@ import { Data, Effect, Layer, ServiceMap } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import type { BrowserHost, BrowserHostToolName } from "./BrowserHost.ts";
-import { ElectronWebContentsBrowserHost } from "./hosts/ElectronWebContentsBrowserHost.ts";
+import type { CdpBroker } from "./CdpBroker.ts";
+import { ElectronWebContentsBrowserHost } from "./hosts/ElectronWebContentsHost/browserHost.ts";
 import {
   PlaywrightBrowserHost,
   type PlaywrightCommandDescriptor,
@@ -111,12 +112,14 @@ interface CreateBrowserHostResolverOptions {
   readonly stateDir: string;
   readonly browser: BrowserManagerServiceShape;
   readonly descriptors: ReadonlyMap<BrowserHostToolName, PlaywrightCommandDescriptor>;
+  readonly electronBroker?: CdpBroker;
 }
 
 export async function createBrowserHostResolver({
   stateDir,
   browser,
   descriptors,
+  electronBroker,
 }: CreateBrowserHostResolverOptions): Promise<BrowserHostResolverShape> {
   const persisted = await readPersistedHosts(stateDir);
   let state: ResolverState = {
@@ -132,6 +135,8 @@ export async function createBrowserHostResolver({
   const makePlaywrightHost = (projectId: ProjectId) =>
     new PlaywrightBrowserHost(projectId, browser, descriptors) as unknown as BrowserHost;
 
+  const electronHostOptions = electronBroker === undefined ? undefined : { broker: electronBroker };
+
   const get: BrowserHostResolverShape["get"] = (projectId) =>
     Effect.try({
       try: () => {
@@ -144,7 +149,10 @@ export async function createBrowserHostResolver({
               "Embedded browser host is recovering after a server restart; retry once the desktop process re-announces active browser views.",
           });
         }
-        return new ElectronWebContentsBrowserHost(projectId) as unknown as BrowserHost;
+        return new ElectronWebContentsBrowserHost(
+          projectId,
+          electronHostOptions,
+        ) as unknown as BrowserHost;
       },
       catch: (cause) =>
         cause instanceof BrowserHostResolverError

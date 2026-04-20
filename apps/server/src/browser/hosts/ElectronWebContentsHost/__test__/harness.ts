@@ -46,10 +46,15 @@ export interface ElectronWebContentsHarness {
   };
   goto(url: string): Promise<string>;
   getUrl(): Promise<string>;
-  sendCdp<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+  sendCdp<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<T>;
   subscribeCdpEvent(
     method: string,
     listener: (event: HarnessCdpEventMessage) => void,
+    sessionId?: string,
   ): Promise<() => Promise<void>>;
   dispose(): Promise<void>;
 }
@@ -64,36 +69,109 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 
 let window;
-let view;
+let rootView;
+let activeTargetId = "root";
+let nextTargetId = 1;
+let nextSessionId = 1;
+const targets = new Map();
+const sessions = new Map([["root", "root"]]);
 const cdpSubscriptions = new Set();
 
 function send(message) {
   process.stdout.write("T3_ELECTRON_HARNESS " + JSON.stringify(message) + "\\n");
 }
 
+function debug(message) {
+  if (process.env.T3_ELECTRON_HARNESS_DEBUG === "1") {
+    console.error("[harness]", message);
+  }
+}
+
+function subscriptionKey(sessionId, method) {
+  return sessionId + ":" + method;
+}
+
+function sendCdpEvent(sessionId, method, params) {
+  if (!cdpSubscriptions.has(subscriptionKey(sessionId, method))) return;
+  send({ type: "cdp.event", method, params, sessionId });
+}
+
+async function createView(targetId, bounds = { x: 0, y: 0, width: 1024, height: 768 }) {
+  debug("createView " + targetId);
+  const view = new WebContentsView();
+  window.contentView.addChildView(view);
+  view.setBounds(bounds);
+  debug("attach debugger " + targetId);
+  view.webContents.debugger.attach("1.3");
+  view.webContents.debugger.on("message", (_event, method, params) => {
+    for (const [sessionId, mappedTargetId] of sessions) {
+      if (mappedTargetId === targetId) sendCdpEvent(sessionId, method, params);
+    }
+  });
+  targets.set(targetId, view);
+  return view;
+}
+
 async function ensureView() {
-  if (view) return view;
+  if (rootView) return rootView;
+  debug("app.whenReady");
   await app.whenReady();
+  debug("create BrowserWindow");
   window = new BrowserWindow({
     show: false,
     width: 1024,
     height: 768,
     webPreferences: { offscreen: true },
   });
-  view = new WebContentsView();
-  window.contentView.addChildView(view);
-  view.setBounds({ x: 0, y: 0, width: 1024, height: 768 });
-  view.webContents.debugger.attach("1.3");
-  view.webContents.debugger.on("message", (_event, method, params, sessionId) => {
-    if (!cdpSubscriptions.has(method)) return;
-    send({ type: "cdp.event", method, params, sessionId });
-  });
+  rootView = await createView("root");
+  debug("send ready");
   send({
     type: "ready",
     electron: process.versions.electron,
     chrome: process.versions.chrome,
   });
-  return view;
+  return rootView;
+}
+
+function viewForSession(sessionId) {
+  const targetId = sessions.get(sessionId || "root") || activeTargetId;
+  const target = targets.get(targetId);
+  if (!target) throw new Error("Unknown CDP session: " + sessionId);
+  return { target, targetId };
+}
+
+async function sendCdpCommand(sessionId, method, params) {
+  await ensureView();
+  if (method === "Target.createTarget") {
+    const targetId = "target-" + nextTargetId++;
+    const view = await createView(targetId);
+    const url = String(params?.url || "about:blank");
+    await view.webContents.loadURL(url);
+    return { targetId };
+  }
+  if (method === "Target.attachToTarget") {
+    const targetId = String(params?.targetId || "");
+    if (!targets.has(targetId)) throw new Error("Unknown target: " + targetId);
+    const nextSession = "session-" + nextSessionId++;
+    sessions.set(nextSession, targetId);
+    return { sessionId: nextSession };
+  }
+  if (method === "Target.closeTarget") {
+    const targetId = String(params?.targetId || "");
+    const target = targets.get(targetId);
+    if (target && target !== rootView) {
+      if (target.webContents.debugger.isAttached()) target.webContents.debugger.detach();
+      window.contentView.removeChildView(target);
+      target.webContents.close();
+      targets.delete(targetId);
+      for (const [mappedSessionId, mappedTargetId] of Array.from(sessions)) {
+        if (mappedTargetId === targetId) sessions.delete(mappedSessionId);
+      }
+    }
+    return { success: true };
+  }
+  const { target } = viewForSession(sessionId);
+  return target.webContents.debugger.sendCommand(method, params);
 }
 
 async function handle(message) {
@@ -110,22 +188,26 @@ async function handle(message) {
       const method = String(message.params?.method ?? "");
       if (!method) throw new Error("cdp.send requires params.method");
       const params = message.params?.params;
-      return target.webContents.debugger.sendCommand(method, params);
+      return sendCdpCommand(String(message.params?.sessionId || "root"), method, params);
     }
     case "cdp.subscribe": {
       const method = String(message.params?.method ?? "");
       if (!method) throw new Error("cdp.subscribe requires params.method");
-      cdpSubscriptions.add(method);
+      const sessionId = String(message.params?.sessionId || "root");
+      cdpSubscriptions.add(subscriptionKey(sessionId, method));
       return undefined;
     }
     case "cdp.unsubscribe": {
       const method = String(message.params?.method ?? "");
       if (!method) throw new Error("cdp.unsubscribe requires params.method");
-      cdpSubscriptions.delete(method);
+      const sessionId = String(message.params?.sessionId || "root");
+      cdpSubscriptions.delete(subscriptionKey(sessionId, method));
       return undefined;
     }
     case "dispose":
-      if (target.webContents.debugger.isAttached()) target.webContents.debugger.detach();
+      for (const target of targets.values()) {
+        if (target.webContents.debugger.isAttached()) target.webContents.debugger.detach();
+      }
       window?.close();
       app.quit();
       return undefined;
@@ -277,10 +359,16 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
     },
     goto: (url) => request<string>("goto", { url }),
     getUrl: () => request<string>("getUrl"),
-    sendCdp: (method, params) => request("cdp.send", { method, params }),
-    async subscribeCdpEvent(method, listener) {
+    sendCdp: (method, params, sessionId) =>
+      request("cdp.send", { method, params, ...(sessionId === undefined ? {} : { sessionId }) }),
+    async subscribeCdpEvent(method, listener, sessionId) {
       const onMessage = (message: HarnessMessage) => {
-        if (!("type" in message) || message.type !== "cdp.event" || message.method !== method) {
+        if (
+          !("type" in message) ||
+          message.type !== "cdp.event" ||
+          message.method !== method ||
+          (sessionId !== undefined && message.sessionId !== sessionId)
+        ) {
           return;
         }
         listener({
@@ -290,10 +378,16 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
         });
       };
       messageListeners.add(onMessage);
-      await request("cdp.subscribe", { method });
+      await request("cdp.subscribe", {
+        method,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      });
       return async () => {
         messageListeners.delete(onMessage);
-        await request("cdp.unsubscribe", { method });
+        await request("cdp.unsubscribe", {
+          method,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        });
       };
     },
     async dispose() {

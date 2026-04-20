@@ -1,0 +1,1191 @@
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as nodePath from "node:path";
+
+import type { ProjectId } from "@t3tools/contracts";
+
+import type { CdpBroker } from "../../CdpBroker.ts";
+import { installBrowserHostCommands, type BrowserHostCommand } from "../../BrowserHost.ts";
+import { ElectronWebContentsHost } from "./host.ts";
+import type { CdpClient } from "./types.ts";
+
+const DEFAULT_SESSION_ID = "root";
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+export const ELECTRON_NATIVE_UNAVAILABLE_MESSAGE =
+  "Embedded browser host is not connected yet; retry once the desktop process re-announces active browser views.";
+
+export function unsupportedNativeToolMessage(tool: string): string {
+  return `tool ${tool} is not yet supported in native (Electron) mode for this project. This project is using the embedded browser; tools that require Playwright are disabled. See T3CO-335 for parity progress.`;
+}
+
+export function unsupportedPermanentNativeToolMessage(tool: string): string {
+  return `tool ${tool} is not supported in native (Electron) mode for this project. This tool requires a standalone Playwright browser context and is not meaningful in the embedded browser.`;
+}
+
+const DEFERRED_TOOLS = new Set(["eval", "cookie-import-browser", "responsive"]);
+const UNSUPPORTED_NATIVE_TOOLS = new Set(["focus", "visibility"]);
+
+interface RuntimeEvaluateResponse<T> {
+  readonly result?: {
+    readonly value?: T;
+    readonly description?: string;
+    readonly subtype?: string;
+  };
+  readonly exceptionDetails?: {
+    readonly text?: string;
+    readonly exception?: {
+      readonly description?: string;
+    };
+  };
+}
+
+interface NavigateResponse {
+  readonly frameId?: string;
+  readonly loaderId?: string;
+  readonly errorText?: string;
+}
+
+interface HistoryResponse {
+  readonly currentIndex: number;
+  readonly entries: Array<{ readonly id: number; readonly url: string }>;
+}
+
+interface ElectronWebContentsBrowserHostOptions {
+  readonly broker?: CdpBroker;
+  readonly viewId?: string;
+  readonly sessionId?: string;
+}
+
+interface BufferedEvent {
+  readonly at: string;
+  readonly method: string;
+  readonly params: unknown;
+  readonly backpressure?: {
+    readonly queued: number;
+    readonly capacity: number;
+    readonly dropped: number;
+  };
+}
+
+interface CapturedDialog {
+  readonly at: string;
+  readonly type?: string;
+  readonly message?: string;
+  readonly url?: string;
+  readonly handled: "accepted" | "dismissed";
+}
+
+interface NativeTab {
+  readonly id: number;
+  readonly targetId: string;
+  sessionId: string;
+  url: string;
+  title: string;
+  closed: boolean;
+}
+
+interface TargetCreateResponse {
+  readonly targetId: string;
+}
+
+interface ScreenshotResponse {
+  readonly data: string;
+}
+
+function stringifyResult(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function parseClip(value: string): { x: number; y: number; width: number; height: number } {
+  const parts = value.split(",").map(Number);
+  const [x, y, width, height] = parts;
+  if (
+    parts.length !== 4 ||
+    x === undefined ||
+    y === undefined ||
+    width === undefined ||
+    height === undefined ||
+    !parts.every((part) => Number.isFinite(part))
+  ) {
+    throw new Error("screenshot: clip must be x,y,width,height");
+  }
+  return { x, y, width, height };
+}
+
+function parseViewport(value: string): { width: number; height: number } {
+  const parts = value.split("x").map(Number);
+  const [width, height] = parts;
+  if (
+    width === undefined ||
+    height === undefined ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    throw new Error("viewport: size must be WIDTHxHEIGHT");
+  }
+  return {
+    width: Math.min(Math.max(Math.round(width), 1), 16_384),
+    height: Math.min(Math.max(Math.round(height), 1), 16_384),
+  };
+}
+
+export class ElectronWebContentsBrowserHost {
+  readonly kind = "electron-wc" as const;
+
+  private readonly viewId: string;
+  private activeSessionId: string;
+  private readonly broker?: CdpBroker;
+  private readonly cdpHost?: ElectronWebContentsHost;
+  private readonly client?: CdpClient;
+  private readonly subscriptionIterators: Array<AsyncIterator<unknown>> = [];
+  private readonly consoleEvents: BufferedEvent[] = [];
+  private readonly networkEvents: BufferedEvent[] = [];
+  private readonly dialogs: CapturedDialog[] = [];
+  private readonly tabRegistry = new Map<number, NativeTab>();
+  private lastSnapshotText = "";
+  private styleHistory: Array<{
+    readonly selector: string;
+    readonly property: string;
+    readonly oldValue: string;
+    readonly newValue: string;
+  }> = [];
+  private nextDialogAction: { readonly accept: boolean; readonly text?: string } | undefined;
+  private nextTabId = 1;
+
+  constructor(
+    readonly projectId: ProjectId,
+    options: ElectronWebContentsBrowserHostOptions = {},
+  ) {
+    this.viewId = options.viewId ?? String(projectId);
+    this.activeSessionId = options.sessionId ?? DEFAULT_SESSION_ID;
+    if (options.broker) {
+      this.broker = options.broker;
+      this.client = {
+        sendCommand: (method, params) =>
+          options.broker!.send(this.viewId, this.activeSessionId, method, params, {
+            timeoutMs: DEFAULT_TIMEOUT_MS,
+          }),
+      };
+      this.cdpHost = new ElectronWebContentsHost(this.client);
+      void this.primeEventDomains();
+      this.tabRegistry.set(0, {
+        id: 0,
+        targetId: "root",
+        sessionId: this.activeSessionId,
+        url: "about:blank",
+        title: "",
+        closed: false,
+      });
+      this.startEventSubscriptions();
+    }
+    installBrowserHostCommands(this);
+  }
+
+  readonly dispose = async (): Promise<void> => {
+    await Promise.allSettled(this.subscriptionIterators.map((iterator) => iterator.return?.()));
+  };
+
+  readonly runTool: BrowserHostCommand = async (args, input) => {
+    const tool = typeof input.__toolName === "string" ? input.__toolName : "";
+    if (DEFERRED_TOOLS.has(tool)) {
+      throw new Error(unsupportedNativeToolMessage(tool));
+    }
+    if (UNSUPPORTED_NATIVE_TOOLS.has(tool)) {
+      throw new Error(unsupportedPermanentNativeToolMessage(tool));
+    }
+    if (!this.client || !this.cdpHost) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+
+    switch (tool) {
+      case "goto":
+        return this.goto(args);
+      case "back":
+        return this.history(-1, "Back");
+      case "forward":
+        return this.history(1, "Forward");
+      case "reload": {
+        const loaded = this.waitForLoadEvent().catch(() => {});
+        await this.send("Page.reload");
+        await loaded;
+        return `Reloaded ${await this.currentUrl()}`;
+      }
+      case "url":
+        return this.currentUrl();
+      case "text":
+        return this.evaluateText(TEXT_SCRIPT);
+      case "html":
+        return this.html(args[0]);
+      case "links":
+        return this.evaluateText(LINKS_SCRIPT);
+      case "forms":
+        return this.evaluateJson(FORMS_SCRIPT);
+      case "accessibility":
+        return this.accessibility();
+      case "js":
+      case "evaluate":
+        return this.evaluateText(args[0] ?? "");
+      case "css":
+        return this.css(args[0], args[1]);
+      case "attrs":
+        return this.attrs(args[0]);
+      case "is":
+        return this.is(args[0], args[1]);
+      case "console":
+        return this.bufferedEvents("console", this.consoleEvents);
+      case "network":
+        return this.bufferedEvents("network", this.networkEvents);
+      case "dialog":
+        return this.dialogHistory();
+      case "cookies":
+        return this.cookies();
+      case "storage":
+        return this.storage(args);
+      case "perf":
+        return this.evaluateJson(PERF_SCRIPT);
+      case "inspect":
+        return this.inspect(args);
+      case "media":
+        return this.evaluateJson(MEDIA_SCRIPT(args));
+      case "data":
+        return this.evaluateJson(DATA_SCRIPT(args));
+      case "click":
+        await this.cdpHost.click(requiredArg(args, "click", "ref"));
+        return `Clicked ${args[0]} -> now at ${await this.currentUrl()}`;
+      case "fill":
+        await this.cdpHost.fill(requiredArg(args, "fill", "ref"), args.slice(1).join(" "));
+        return `Filled ${args[0]}`;
+      case "select":
+        return this.select(args[0], args.slice(1).join(" "));
+      case "hover":
+        return this.hover(args[0]);
+      case "type":
+        await this.cdpHost.type(args.join(" "));
+        return `Typed ${args.join(" ").length} characters`;
+      case "press":
+        return this.press(args[0]);
+      case "scroll":
+        return this.scroll(args[0]);
+      case "wait":
+        return this.wait(args[0]);
+      case "viewport":
+        return this.viewport(args[0]);
+      case "cookie":
+        return this.setCookie(args[0]);
+      case "cookie-import":
+        return this.importCookies(args[0]);
+      case "header":
+        return this.header(args[0]);
+      case "useragent":
+        return this.useragent(args, input);
+      case "upload":
+        return this.upload(args);
+      case "dialog-accept":
+        this.nextDialogAction = {
+          accept: true,
+          ...(args.length > 0 ? { text: args.join(" ") } : {}),
+        };
+        return this.nextDialogAction.text
+          ? `Dialogs will be accepted with text: "${this.nextDialogAction.text}"`
+          : "Dialogs will be accepted";
+      case "dialog-dismiss":
+        this.nextDialogAction = { accept: false };
+        return "Dialogs will be dismissed";
+      case "style":
+        return this.style(args);
+      case "cleanup":
+        return this.cleanup(args);
+      case "prettyscreenshot":
+        await this.cleanup(["--all"]);
+        return this.screenshot(args);
+      case "snapshot":
+        return this.snapshot(args);
+      case "screenshot":
+        return this.screenshot(args);
+      case "pdf":
+        return this.pdf(args[0]);
+      case "diff":
+        return this.diff();
+      case "tabs":
+        return this.listTabs();
+      case "tab":
+        return this.switchTab(args[0]);
+      case "newtab":
+        return this.newTab(args[0]);
+      case "closetab":
+        return this.closeTab(args[0]);
+      case "status":
+        return [
+          "Status: healthy",
+          "Mode: electron-wc",
+          `URL: ${await this.currentUrl()}`,
+          `Tabs: ${Array.from(this.tabRegistry.values()).filter((tab) => !tab.closed).length}`,
+        ].join("\n");
+      case "ux-audit":
+        return this.evaluateJson(UX_AUDIT_SCRIPT);
+      default:
+        throw new Error(`unknown Electron browser tool '${tool}'`);
+    }
+  };
+
+  readonly useragent: BrowserHostCommand = async (args) => {
+    if (!this.client) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    if (args[0] === "--reset") {
+      await this.send("Network.setUserAgentOverride", { userAgent: "" });
+      return "User agent reset to Electron default";
+    }
+    const value = args[0];
+    if (!value)
+      throw new Error("useragent: missing required input.value (string), or pass reset=true");
+    await this.send("Network.setUserAgentOverride", { userAgent: value });
+    return `User agent set to "${value}"`;
+  };
+
+  readonly visibility: BrowserHostCommand = async () => {
+    throw new Error(unsupportedPermanentNativeToolMessage("visibility"));
+  };
+
+  private async primeEventDomains(): Promise<void> {
+    try {
+      await Promise.all([
+        this.send("Runtime.enable"),
+        this.send("Network.enable"),
+        this.send("Page.enable"),
+      ]);
+    } catch (cause) {
+      // The host may be constructed before the desktop bridge is fully re-announced.
+      console.warn("ElectronWebContentsBrowserHost failed to prime CDP event domains", cause);
+    }
+  }
+
+  private startEventSubscriptions(): void {
+    this.subscribeTo("Runtime.consoleAPICalled", (event) => {
+      this.pushBuffered(this.consoleEvents, event);
+    });
+    for (const method of [
+      "Network.requestWillBeSent",
+      "Network.responseReceived",
+      "Network.loadingFinished",
+      "Network.loadingFailed",
+    ]) {
+      this.subscribeTo(method, (event) => {
+        this.pushBuffered(this.networkEvents, event);
+      });
+    }
+    this.subscribeTo("Page.javascriptDialogOpening", (event) => {
+      void this.handleDialogOpening(event);
+    });
+  }
+
+  private subscribeTo(
+    eventName: string,
+    onEvent: (event: BufferedEvent) => void,
+    sessionId = this.activeSessionId,
+  ): void {
+    if (!this.broker) return;
+    const events = this.broker.subscribe(this.viewId, sessionId, eventName);
+    const iterator = events[Symbol.asyncIterator]();
+    this.subscriptionIterators.push(iterator);
+    void (async () => {
+      try {
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) break;
+          onEvent({
+            at: new Date().toISOString(),
+            method: next.value.method,
+            params: next.value.params,
+            ...(next.value.backpressure === undefined
+              ? {}
+              : { backpressure: next.value.backpressure }),
+          });
+        }
+      } catch (cause) {
+        console.warn(`ElectronWebContentsBrowserHost subscription failed for ${eventName}`, cause);
+      }
+    })();
+  }
+
+  private pushBuffered(buffer: BufferedEvent[], event: BufferedEvent, limit = 200): void {
+    buffer.push(event);
+    if (buffer.length > limit) buffer.splice(0, buffer.length - limit);
+  }
+
+  private bufferedEvents(name: string, buffer: readonly BufferedEvent[]): string {
+    if (buffer.length === 0) return `(no ${name} events captured)`;
+    return JSON.stringify(buffer.slice(-50), null, 2);
+  }
+
+  private async handleDialogOpening(event: BufferedEvent): Promise<void> {
+    const params = event.params as {
+      readonly type?: string;
+      readonly message?: string;
+      readonly url?: string;
+      readonly defaultPrompt?: string;
+    };
+    const policy = this.nextDialogAction ?? { accept: true };
+    await this.send("Page.handleJavaScriptDialog", {
+      accept: policy.accept,
+      ...(policy.text === undefined ? {} : { promptText: policy.text }),
+    }).catch((cause) => {
+      console.warn("ElectronWebContentsBrowserHost failed to handle JavaScript dialog", cause);
+    });
+    this.dialogs.push({
+      at: event.at,
+      ...(params.type === undefined ? {} : { type: params.type }),
+      ...(params.message === undefined ? {} : { message: params.message }),
+      ...(params.url === undefined ? {} : { url: params.url }),
+      handled: policy.accept ? "accepted" : "dismissed",
+    });
+    this.nextDialogAction = undefined;
+  }
+
+  private dialogHistory(): string {
+    const policy = this.nextDialogAction
+      ? {
+          nextDialogPolicy: this.nextDialogAction.accept ? "accept" : "dismiss",
+          ...(this.nextDialogAction.text === undefined ? {} : { text: this.nextDialogAction.text }),
+        }
+      : {};
+    return JSON.stringify(
+      {
+        ...policy,
+        dialogs: this.dialogs.slice(-25),
+      },
+      null,
+      2,
+    );
+  }
+
+  private waitForEvent(eventName: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> {
+    if (!this.broker) return Promise.reject(new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE));
+    const events = this.broker.subscribe(this.viewId, this.activeSessionId, eventName);
+    const iterator = events[Symbol.asyncIterator]();
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        void iterator.return?.();
+        reject(new Error(`Timed out waiting for ${eventName}`));
+      }, timeoutMs);
+      void iterator.next().then(
+        () => {
+          clearTimeout(timer);
+          void iterator.return?.();
+          resolve();
+        },
+        (cause) => {
+          clearTimeout(timer);
+          void iterator.return?.();
+          reject(cause);
+        },
+      );
+    });
+  }
+
+  private send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+    if (!this.client) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    return this.client.sendCommand<T>(method, params);
+  }
+
+  private async goto(args: readonly string[]): Promise<string> {
+    const url = requiredArg(args, "goto", "url");
+    const loaded = this.waitForLoadEvent().catch(() => {});
+    const response = await this.send<NavigateResponse>("Page.navigate", { url });
+    if (response.errorText) throw new Error(`Navigation failed: ${response.errorText}`);
+    await loaded;
+    await this.refreshActiveTabMetadata();
+    return `Navigated to ${url} (native)`;
+  }
+
+  private async history(delta: -1 | 1, label: "Back" | "Forward"): Promise<string> {
+    const history = await this.send<HistoryResponse>("Page.getNavigationHistory");
+    const target = history.entries[history.currentIndex + delta];
+    if (!target) return `${label} -> ${await this.currentUrl()}`;
+    const loaded = this.waitForLoadEvent().catch(() => {});
+    await this.send("Page.navigateToHistoryEntry", { entryId: target.id });
+    await loaded;
+    await this.refreshActiveTabMetadata();
+    return `${label} -> ${await this.currentUrl()}`;
+  }
+
+  private async currentUrl(): Promise<string> {
+    return this.evaluateText("location.href");
+  }
+
+  private async title(): Promise<string> {
+    return this.evaluateText("document.title");
+  }
+
+  private async evaluate<T>(expression: string): Promise<T> {
+    if (!expression) throw new Error("js: missing JavaScript expression");
+    const result = await this.send<RuntimeEvaluateResponse<T>>("Runtime.evaluate", {
+      expression: wrapForEval(expression),
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (result.exceptionDetails) {
+      throw new Error(
+        result.exceptionDetails.exception?.description ??
+          result.exceptionDetails.text ??
+          "JavaScript evaluation failed",
+      );
+    }
+    return result.result?.value as T;
+  }
+
+  private async evaluateText(expression: string): Promise<string> {
+    return stringifyResult(await this.evaluate(expression));
+  }
+
+  private async evaluateJson(expression: string): Promise<string> {
+    return JSON.stringify(await this.evaluate(expression), null, 2);
+  }
+
+  private async html(selector?: string): Promise<string> {
+    if (!selector) return this.evaluateText(HTML_SCRIPT);
+    return this.evaluateText(elementScript(selector, "el.innerHTML"));
+  }
+
+  private async css(selector: string | undefined, property: string | undefined): Promise<string> {
+    if (!selector || !property) throw new Error("css: missing selector or property");
+    return this.evaluateText(
+      elementScript(selector, `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`),
+    );
+  }
+
+  private async attrs(selector: string | undefined): Promise<string> {
+    if (!selector) throw new Error("attrs: missing selector");
+    return this.evaluateJson(
+      elementScript(
+        selector,
+        `Object.fromEntries(Array.from(el.attributes).map((attr) => [attr.name, attr.value]))`,
+      ),
+    );
+  }
+
+  private async is(property: string | undefined, selector: string | undefined): Promise<string> {
+    if (!property || !selector) throw new Error("is: missing property or selector");
+    return this.evaluateText(elementScript(selector, STATE_SCRIPT(property)));
+  }
+
+  private async accessibility(): Promise<string> {
+    const snapshot = await this.cdpHost!.snapshot({ interactive: false, compact: false });
+    return snapshot.text;
+  }
+
+  private async cookies(): Promise<string> {
+    const response = await this.send<{ cookies: unknown[] }>("Network.getAllCookies");
+    return JSON.stringify(response.cookies, null, 2);
+  }
+
+  private async storage(args: readonly string[]): Promise<string> {
+    if (args[0] === "set") {
+      const key = args[1];
+      if (!key) throw new Error("storage: missing key");
+      await this.evaluate(
+        `localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(args[2] ?? "")})`,
+      );
+      return `Set localStorage["${key}"]`;
+    }
+    return this.evaluateJson(STORAGE_SCRIPT);
+  }
+
+  private async inspect(args: readonly string[]): Promise<string> {
+    if (args.includes("--history")) {
+      if (this.styleHistory.length === 0) return "(no style modifications)";
+      return this.styleHistory
+        .map(
+          (entry, index) =>
+            `[${index}] ${entry.selector} { ${entry.property}: ${entry.oldValue} -> ${entry.newValue} }`,
+        )
+        .join("\n");
+    }
+    const selector = args.find((arg) => !arg.startsWith("--")) ?? "body";
+    return this.evaluateJson(elementScript(selector, INSPECT_SCRIPT));
+  }
+
+  private async select(selector: string | undefined, value: string): Promise<string> {
+    if (!selector || !value) throw new Error("select: missing selector or value");
+    await this.evaluate(elementScript(selector, SELECT_SCRIPT(value)));
+    return `Selected "${value}" in ${selector}`;
+  }
+
+  private async hover(selector: string | undefined): Promise<string> {
+    if (!selector) throw new Error("hover: missing selector");
+    const point = await this.elementCenter(selector);
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    return `Hovered ${selector}`;
+  }
+
+  private async press(key: string | undefined): Promise<string> {
+    if (!key) throw new Error("press: missing key");
+    await this.send("Input.dispatchKeyEvent", { type: "keyDown", key });
+    await this.send("Input.dispatchKeyEvent", { type: "keyUp", key });
+    return `Pressed ${key}`;
+  }
+
+  private async scroll(selector?: string): Promise<string> {
+    if (selector) {
+      await this.evaluate(
+        elementScript(selector, "el.scrollIntoView({ block: 'center', inline: 'center' })"),
+      );
+      return `Scrolled ${selector} into view`;
+    }
+    await this.cdpHost!.scroll(700);
+    return "Scrolled to bottom";
+  }
+
+  private async wait(selector?: string): Promise<string> {
+    if (selector === "--load") {
+      await this.waitForLoadEvent();
+      return "Page loaded";
+    }
+    if (selector === "--networkidle") {
+      await this.waitForNetworkIdle();
+      return "Network idle";
+    }
+    if (!selector) throw new Error("wait: missing selector");
+    const started = Date.now();
+    while (Date.now() - started < DEFAULT_TIMEOUT_MS) {
+      const found = await this.evaluate<boolean>(
+        `document.querySelector(${JSON.stringify(selector)}) !== null`,
+      ).catch(() => false);
+      if (found) return `Element ${selector} appeared`;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`Timed out waiting for ${selector}`);
+  }
+
+  private async viewport(size: string | undefined): Promise<string> {
+    if (!size) throw new Error("viewport: missing size");
+    const viewport = parseViewport(size);
+    await this.send("Emulation.setDeviceMetricsOverride", {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 0,
+      mobile: false,
+    });
+    return `Viewport set to ${viewport.width}x${viewport.height}`;
+  }
+
+  private async setCookie(assignment: string | undefined): Promise<string> {
+    if (!assignment || !assignment.includes("=")) throw new Error("cookie: expected name=value");
+    const [name, ...valueParts] = assignment.split("=");
+    const url = await this.currentUrl();
+    await this.send("Network.setCookie", { name, value: valueParts.join("="), url });
+    return `Cookie set: ${name}=****`;
+  }
+
+  private async importCookies(filePath: string | undefined): Promise<string> {
+    if (!filePath) throw new Error("cookie-import: missing file path");
+    const raw = await fs.readFile(filePath, "utf8");
+    const cookies = JSON.parse(raw) as Array<Record<string, unknown>>;
+    if (!Array.isArray(cookies)) throw new Error("Cookie file must contain a JSON array");
+    for (const cookie of cookies) await this.send("Network.setCookie", cookie);
+    return `Loaded ${cookies.length} cookies from ${filePath}`;
+  }
+
+  private async header(value: string | undefined): Promise<string> {
+    if (!value || !value.includes(":")) throw new Error("header: expected name:value");
+    const index = value.indexOf(":");
+    const name = value.slice(0, index).trim();
+    const headerValue = value.slice(index + 1).trim();
+    await this.send("Network.setExtraHTTPHeaders", { headers: { [name]: headerValue } });
+    const redacted = [
+      "authorization",
+      "cookie",
+      "set-cookie",
+      "x-api-key",
+      "x-auth-token",
+    ].includes(name.toLowerCase())
+      ? "****"
+      : headerValue;
+    return `Header set: ${name}: ${redacted}`;
+  }
+
+  private async upload(args: readonly string[]): Promise<string> {
+    const selector = args[0];
+    const files = args.slice(1);
+    if (!selector || files.length === 0) throw new Error("upload: missing selector or files");
+    const backendNodeId = selector.startsWith("@")
+      ? (await this.cdpHost!.resolveRef(selector)).backendNodeId
+      : await this.backendNodeIdForSelector(selector);
+    if (backendNodeId === undefined) throw new Error(`${selector} cannot be used for upload`);
+    await this.send("DOM.setFileInputFiles", {
+      backendNodeId,
+      files,
+    });
+    return `Uploaded: ${files.map((file) => nodePath.basename(file)).join(", ")}`;
+  }
+
+  private async style(args: readonly string[]): Promise<string> {
+    if (args[0] === "--undo") {
+      const index = args[1] === undefined ? this.styleHistory.length - 1 : Number(args[1]);
+      const entry = this.styleHistory[index];
+      if (!entry) return "(no style modifications)";
+      await this.evaluate(
+        elementScript(
+          entry.selector,
+          `el.style.setProperty(${JSON.stringify(entry.property)}, ${JSON.stringify(entry.oldValue)})`,
+        ),
+      );
+      this.styleHistory.splice(index, 1);
+      return `Reverted modification #${index}`;
+    }
+    const [selector, property, ...valueParts] = args;
+    const value = valueParts.join(" ");
+    if (!selector || !property || !value)
+      throw new Error("style: missing selector, property, or value");
+    const oldValue = await this.evaluateText(
+      elementScript(selector, `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`),
+    );
+    await this.evaluate(
+      elementScript(
+        selector,
+        `el.style.setProperty(${JSON.stringify(property)}, ${JSON.stringify(value)}, "important")`,
+      ),
+    );
+    this.styleHistory.push({ selector, property, oldValue, newValue: value });
+    return `Style modified: ${selector} { ${property}: ${oldValue || "(none)"} -> ${value} }`;
+  }
+
+  private async cleanup(args: readonly string[]): Promise<string> {
+    const all = args.length === 0 || args.includes("--all");
+    const removed = await this.evaluate<number>(
+      CLEANUP_SCRIPT(
+        all || args.includes("--ads"),
+        all || args.includes("--cookies"),
+        all || args.includes("--sticky"),
+        all || args.includes("--overlays"),
+      ),
+    );
+    return `Cleanup applied (${removed} elements hidden)`;
+  }
+
+  private async snapshot(args: readonly string[]): Promise<string> {
+    const depth = numberFlag(args, "--depth");
+    const result = await this.cdpHost!.snapshot({
+      interactive: args.includes("--interactive"),
+      compact: args.includes("--compact"),
+      cursorInteractive: args.includes("--cursor-interactive") || args.includes("--interactive"),
+      ...(depth === undefined ? {} : { depth }),
+    });
+    this.lastSnapshotText = result.text;
+    return result.text;
+  }
+
+  private async screenshot(args: readonly string[]): Promise<string> {
+    let base64 = false;
+    let outputPath = nodePath.join(os.tmpdir(), "browse-screenshot.png");
+    let clip: ReturnType<typeof parseClip> | undefined;
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index];
+      if (arg === "--base64") base64 = true;
+      else if (arg === "--clip") clip = parseClip(args[++index] ?? "");
+      else if (arg && !arg.startsWith("--")) outputPath = arg;
+    }
+    const result =
+      clip === undefined
+        ? await this.cdpHost!.captureScreenshot()
+        : await this.captureClippedScreenshot(clip);
+    if (base64) {
+      return JSON.stringify(
+        {
+          dataUrl: `data:image/png;base64,${result.buffer.toString("base64")}`,
+          devicePixelRatio: result.devicePixelRatio,
+        },
+        null,
+        2,
+      );
+    }
+    await fs.writeFile(outputPath, result.buffer);
+    return JSON.stringify(
+      {
+        path: outputPath,
+        devicePixelRatio: result.devicePixelRatio,
+      },
+      null,
+      2,
+    );
+  }
+
+  private async pdf(outputPath = nodePath.join(os.tmpdir(), "browse-page.pdf")): Promise<string> {
+    const response = await this.send<{ data: string }>("Page.printToPDF", {
+      printBackground: true,
+    });
+    await fs.writeFile(outputPath, response.data, "base64");
+    return `PDF saved: ${outputPath}`;
+  }
+
+  private async diff(): Promise<string> {
+    const before = this.lastSnapshotText;
+    const after = await this.evaluateText(TEXT_SCRIPT);
+    this.lastSnapshotText = after;
+    if (!before) return after;
+    return [
+      `--- previous`,
+      `+++ current`,
+      ...after
+        .split("\n")
+        .filter((line) => !before.includes(line))
+        .map((line) => `+ ${line}`),
+    ].join("\n");
+  }
+
+  private async elementCenter(selector: string): Promise<{ x: number; y: number }> {
+    return this.evaluate(
+      elementScript(
+        selector,
+        `(() => {
+      const rect = el.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    })()`,
+      ),
+    );
+  }
+
+  private async backendNodeIdForSelector(selector: string): Promise<number> {
+    const document = await this.send<{ root: { nodeId: number } }>("DOM.getDocument", {
+      depth: 0,
+      pierce: true,
+    });
+    const found = await this.send<{ nodeId: number }>("DOM.querySelector", {
+      nodeId: document.root.nodeId,
+      selector,
+    });
+    if (!found.nodeId) throw new Error(`Element not found: ${selector}`);
+    const described = await this.send<{ node: { backendNodeId?: number } }>("DOM.describeNode", {
+      nodeId: found.nodeId,
+    });
+    if (described.node.backendNodeId === undefined) {
+      throw new Error(`Element has no backend node id: ${selector}`);
+    }
+    return described.node.backendNodeId;
+  }
+
+  private async waitForLoadEvent(): Promise<void> {
+    await this.waitForEvent("Page.loadEventFired");
+  }
+
+  private async waitForNetworkIdle(): Promise<void> {
+    let seenNetworkActivity = false;
+    const started = Date.now();
+    while (Date.now() - started < DEFAULT_TIMEOUT_MS) {
+      const before = this.networkEvents.length;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const after = this.networkEvents.length;
+      if (after > before) {
+        seenNetworkActivity = true;
+        continue;
+      }
+      if (seenNetworkActivity || Date.now() - started >= 500) return;
+    }
+    throw new Error("Timed out waiting for network idle");
+  }
+
+  private async captureClippedScreenshot(
+    clip: ReturnType<typeof parseClip>,
+  ): Promise<{ buffer: Buffer; devicePixelRatio: number }> {
+    const [response, devicePixelRatio] = await Promise.all([
+      this.send<ScreenshotResponse>("Page.captureScreenshot", { format: "png", clip }),
+      this.evaluate<number>("window.devicePixelRatio").catch(() => 1),
+    ]);
+    return {
+      buffer: Buffer.from(response.data, "base64"),
+      devicePixelRatio:
+        Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1,
+    };
+  }
+
+  private async refreshActiveTabMetadata(): Promise<void> {
+    const tab = Array.from(this.tabRegistry.values()).find(
+      (candidate) => candidate.sessionId === this.activeSessionId && !candidate.closed,
+    );
+    if (!tab) return;
+    tab.url = await this.currentUrl().catch(() => tab.url);
+    tab.title = await this.title().catch(() => tab.title);
+  }
+
+  private async listTabs(): Promise<string> {
+    await this.refreshActiveTabMetadata();
+    const rows = Array.from(this.tabRegistry.values())
+      .filter((tab) => !tab.closed)
+      .toSorted((a, b) => a.id - b.id)
+      .map(
+        (tab) =>
+          `${tab.sessionId === this.activeSessionId ? "->" : "  "} [${tab.id}] ${tab.title || "(untitled)"} - ${tab.url}`,
+      );
+    return rows.length === 0 ? "(no tabs)" : rows.join("\n");
+  }
+
+  private async switchTab(value: string | undefined): Promise<string> {
+    const tabId = value === undefined ? 0 : Number(value);
+    const tab = this.tabRegistry.get(tabId);
+    if (!tab || tab.closed) throw new Error(`tab: no open native tab ${String(value)}`);
+    this.activeSessionId = tab.sessionId;
+    await this.refreshActiveTabMetadata();
+    return `Switched to tab ${tab.id}`;
+  }
+
+  private async newTab(url = "about:blank"): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const created = await this.send<TargetCreateResponse>("Target.createTarget", { url });
+    const sessionId = await this.broker.attachTarget(this.viewId, created.targetId);
+    const tab: NativeTab = {
+      id: this.nextTabId++,
+      targetId: created.targetId,
+      sessionId,
+      url,
+      title: "",
+      closed: false,
+    };
+    this.tabRegistry.set(tab.id, tab);
+    this.activeSessionId = sessionId;
+    this.subscribeTo(
+      "Runtime.consoleAPICalled",
+      (event) => this.pushBuffered(this.consoleEvents, event),
+      sessionId,
+    );
+    for (const method of [
+      "Network.requestWillBeSent",
+      "Network.responseReceived",
+      "Network.loadingFinished",
+      "Network.loadingFailed",
+    ]) {
+      this.subscribeTo(method, (event) => this.pushBuffered(this.networkEvents, event), sessionId);
+    }
+    this.subscribeTo(
+      "Page.javascriptDialogOpening",
+      (event) => {
+        void this.handleDialogOpening(event);
+      },
+      sessionId,
+    );
+    await this.primeEventDomains();
+    await this.refreshActiveTabMetadata();
+    return `Opened tab ${tab.id} -> ${tab.url}`;
+  }
+
+  private async closeTab(value: string | undefined): Promise<string> {
+    const fallback = Array.from(this.tabRegistry.values()).find(
+      (tab) => tab.sessionId === this.activeSessionId && !tab.closed,
+    );
+    const tabId = value === undefined ? fallback?.id : Number(value);
+    if (tabId === undefined) throw new Error("closetab: no active tab");
+    const tab = this.tabRegistry.get(tabId);
+    if (!tab || tab.closed) throw new Error(`closetab: no open native tab ${String(value)}`);
+    if (tab.id === 0) {
+      await this.send("Page.navigate", { url: "about:blank" });
+      tab.url = "about:blank";
+      tab.title = "";
+      return "Reset root tab to about:blank";
+    }
+    await this.send("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
+    tab.closed = true;
+    const root = this.tabRegistry.get(0);
+    if (root && !root.closed) this.activeSessionId = root.sessionId;
+    return `Closed tab ${tab.id}`;
+  }
+}
+
+function requiredArg(args: readonly string[], tool: string, name: string): string {
+  const value = args[0];
+  if (!value) throw new Error(`${tool}: missing ${name}`);
+  return value;
+}
+
+function numberFlag(args: readonly string[], flag: string): number | undefined {
+  const index = args.indexOf(flag);
+  if (index < 0) return undefined;
+  const value = Number(args[index + 1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function wrapForEval(expression: string): string {
+  return `(async () => {
+    const source = ${JSON.stringify(expression)};
+    const value = await (async () => (0, eval)(source))().catch(async () => {
+      return await (async () => { ${expression} })();
+    });
+    return value;
+  })()`;
+}
+
+function selectorExpression(selector: string): string {
+  return selector.startsWith("@") ? `null` : `document.querySelector(${JSON.stringify(selector)})`;
+}
+
+function elementScript(selector: string, body: string): string {
+  if (selector.startsWith("@")) {
+    throw new Error(`Selector ${selector} requires a fresh snapshot-backed ref for this command`);
+  }
+  return `(() => {
+    const el = ${selectorExpression(selector)};
+    if (!el) throw new Error("Element not found: ${selector.replaceAll('"', '\\"')}");
+    return ${body};
+  })()`;
+}
+
+const TEXT_SCRIPT = `document.body?.innerText ?? ""`;
+const HTML_SCRIPT = `(() => {
+  const dt = document.doctype;
+  const doctype = dt ? "<!DOCTYPE " + dt.name + ">\\n" : "";
+  return doctype + document.documentElement.outerHTML;
+})()`;
+const LINKS_SCRIPT = `Array.from(document.querySelectorAll("a[href]"))
+  .map((a) => ({ text: (a.textContent || "").trim().slice(0, 120), href: a.href }))
+  .filter((link) => link.text && link.href)
+  .map((link) => link.text + " -> " + link.href)
+  .join("\\n")`;
+const FORMS_SCRIPT = `Array.from(document.querySelectorAll("form")).map((form, index) => ({
+  index,
+  action: form.action || undefined,
+  method: form.method || "get",
+  id: form.id || undefined,
+  fields: Array.from(form.querySelectorAll("input, select, textarea")).map((el) => ({
+    tag: el.tagName.toLowerCase(),
+    type: el.type || undefined,
+    name: el.name || undefined,
+    id: el.id || undefined,
+    placeholder: el.placeholder || undefined,
+    required: !!el.required || undefined,
+    value: el.type === "password" ? "[redacted]" : el.value || undefined,
+    options: el.tagName === "SELECT" ? Array.from(el.options).map((o) => ({ value: o.value, text: o.text })) : undefined,
+  })),
+}))`;
+const STORAGE_SCRIPT = `({ localStorage: { ...localStorage }, sessionStorage: { ...sessionStorage } })`;
+const PERF_SCRIPT = `(() => {
+  const nav = performance.getEntriesByType("navigation")[0];
+  if (!nav) return {};
+  return {
+    dns: Math.round(nav.domainLookupEnd - nav.domainLookupStart),
+    tcp: Math.round(nav.connectEnd - nav.connectStart),
+    ttfb: Math.round(nav.responseStart - nav.requestStart),
+    domReady: Math.round(nav.domContentLoadedEventEnd - nav.startTime),
+    load: Math.round(nav.loadEventEnd - nav.startTime),
+    total: Math.round(nav.loadEventEnd - nav.startTime),
+  };
+})()`;
+const INSPECT_SCRIPT = `(() => {
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  return {
+    tag: el.tagName.toLowerCase(),
+    id: el.id || undefined,
+    classes: Array.from(el.classList),
+    box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    styles: {
+      display: style.display,
+      position: style.position,
+      color: style.color,
+      backgroundColor: style.backgroundColor,
+      fontSize: style.fontSize,
+    },
+  };
+})()`;
+const UX_AUDIT_SCRIPT = `(() => ({
+  title: document.title,
+  imagesMissingAlt: Array.from(document.images).filter((img) => !img.alt).length,
+  buttonsWithoutText: Array.from(document.querySelectorAll("button")).filter((button) => !(button.textContent || button.getAttribute("aria-label") || "").trim()).length,
+  inputsWithoutLabels: Array.from(document.querySelectorAll("input, textarea, select")).filter((input) => !input.id || !document.querySelector("label[for='" + CSS.escape(input.id) + "']")).length,
+}))()`;
+
+function STATE_SCRIPT(property: string): string {
+  switch (property) {
+    case "visible":
+      return "!!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)";
+    case "hidden":
+      return "!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)";
+    case "enabled":
+      return "!(el.disabled || el.getAttribute('aria-disabled') === 'true')";
+    case "disabled":
+      return "!!(el.disabled || el.getAttribute('aria-disabled') === 'true')";
+    case "checked":
+      return "!!el.checked";
+    case "editable":
+      return "!!(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))";
+    case "focused":
+      return "el === document.activeElement";
+    default:
+      throw new Error(`Unknown property: ${property}`);
+  }
+}
+
+function SELECT_SCRIPT(value: string): string {
+  return `(() => {
+    if (el.tagName !== "SELECT") throw new Error("Element is not a <select>");
+    const option = Array.from(el.options).find((item) => item.value === ${JSON.stringify(value)} || item.text === ${JSON.stringify(value)});
+    if (!option) throw new Error("Option not found: ${value.replaceAll('"', '\\"')}");
+    el.value = option.value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`;
+}
+
+function MEDIA_SCRIPT(args: readonly string[]): string {
+  const filter = args.includes("--images")
+    ? "images"
+    : args.includes("--videos")
+      ? "videos"
+      : args.includes("--audio")
+        ? "audio"
+        : "all";
+  return `(() => {
+    const result = {
+      images: Array.from(document.images).map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || "" })),
+      videos: Array.from(document.querySelectorAll("video")).map((video) => ({ src: video.currentSrc || video.src || "" })),
+      audio: Array.from(document.querySelectorAll("audio")).map((audio) => ({ src: audio.currentSrc || audio.src || "" })),
+    };
+    return ${JSON.stringify(filter)} === "all" ? result : result[${JSON.stringify(filter)}];
+  })()`;
+}
+
+function DATA_SCRIPT(args: readonly string[]): string {
+  const all = args.length === 0;
+  return `(() => ({
+    jsonLd: ${all || args.includes("--jsonld")} ? Array.from(document.querySelectorAll('script[type="application/ld+json"]')).map((script) => {
+      try { return JSON.parse(script.textContent || ""); } catch { return null; }
+    }).filter(Boolean) : undefined,
+    openGraph: ${all || args.includes("--og")} ? Object.fromEntries(Array.from(document.querySelectorAll('meta[property^="og:"]')).map((meta) => [(meta.getAttribute("property") || "").replace(/^og:/, ""), meta.getAttribute("content") || ""])) : undefined,
+    twitterCards: ${all || args.includes("--twitter")} ? Object.fromEntries(Array.from(document.querySelectorAll('meta[name^="twitter:"]')).map((meta) => [(meta.getAttribute("name") || "").replace(/^twitter:/, ""), meta.getAttribute("content") || ""])) : undefined,
+    meta: ${all || args.includes("--meta")} ? {
+      title: document.title,
+      description: document.querySelector('meta[name="description"]')?.getAttribute("content") || "",
+      canonical: document.querySelector('link[rel="canonical"]')?.getAttribute("href") || "",
+    } : undefined,
+  }))()`;
+}
+
+function CLEANUP_SCRIPT(
+  ads: boolean,
+  cookies: boolean,
+  sticky: boolean,
+  overlays: boolean,
+): string {
+  const selectors = [
+    ...(ads ? ['[class*="ad-"]', '[id*="ad-"]', "ins"] : []),
+    ...(cookies ? ['[class*="cookie"]', '[id*="cookie"]'] : []),
+    ...(overlays ? ['[class*="modal"]', '[role="dialog"]'] : []),
+  ];
+  return `(() => {
+    let removed = 0;
+    for (const selector of ${JSON.stringify(selectors)}) {
+      for (const el of document.querySelectorAll(selector)) {
+        el.style.setProperty("display", "none", "important");
+        removed++;
+      }
+    }
+    if (${sticky}) {
+      for (const el of document.querySelectorAll("*")) {
+        const style = getComputedStyle(el);
+        if (style.position === "fixed" || style.position === "sticky") {
+          el.style.setProperty("display", "none", "important");
+          removed++;
+        }
+      }
+    }
+    return removed;
+  })()`;
+}

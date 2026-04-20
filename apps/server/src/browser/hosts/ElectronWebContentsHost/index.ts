@@ -1,3 +1,9 @@
+export {
+  ElectronWebContentsBrowserHost,
+  ELECTRON_NATIVE_UNAVAILABLE_MESSAGE,
+  unsupportedNativeToolMessage,
+  unsupportedPermanentNativeToolMessage,
+} from "./browserHost.ts";
 export { ElectronWebContentsHost } from "./host.ts";
 export { buildSnapshotFromAxNodes, flattenAxTree, snapshotFromCdp } from "./snapshot.ts";
 export {

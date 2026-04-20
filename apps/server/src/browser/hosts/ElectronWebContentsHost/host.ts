@@ -23,6 +23,12 @@ interface LayoutMetricsResponse {
   };
 }
 
+interface ResolveNodeResponse {
+  object: {
+    objectId?: string;
+  };
+}
+
 export class ElectronWebContentsHost {
   private refs = new Map<string, RefEntry>();
 
@@ -73,6 +79,7 @@ export class ElectronWebContentsHost {
       x: point.x,
       y: point.y,
       button: "left",
+      buttons: 1,
       clickCount: 1,
     });
     await this.client.sendCommand("Input.dispatchMouseEvent", {
@@ -80,8 +87,10 @@ export class ElectronWebContentsHost {
       x: point.x,
       y: point.y,
       button: "left",
+      buttons: 0,
       clickCount: 1,
     });
+    await this.activateResolved(resolved);
   }
 
   async fill(ref: string, text: string): Promise<void> {
@@ -107,14 +116,10 @@ export class ElectronWebContentsHost {
   }
 
   async scroll(deltaY: number, deltaX = 0, point?: { x: number; y: number }): Promise<void> {
-    const target = point ?? (await this.viewportCenter());
-    await this.client.sendCommand("Input.dispatchMouseEvent", {
-      type: "mouseWheel",
-      x: target.x,
-      y: target.y,
-      deltaX,
-      deltaY,
-    });
+    void point;
+    await this.evaluate<void>(
+      `window.scrollBy(${JSON.stringify(deltaX)}, ${JSON.stringify(deltaY)})`,
+    );
   }
 
   async captureScreenshot(): Promise<ScreenshotResult> {
@@ -196,6 +201,9 @@ export class ElectronWebContentsHost {
     if (resolved.backendNodeId === undefined) {
       throw new Error(`Ref @${resolved.ref} cannot be resolved to a backend node.`);
     }
+    const rectPoint = await this.centerPointFromBackendNode(resolved.backendNodeId);
+    if (rectPoint !== undefined) return rectPoint;
+
     const response = await this.client.sendCommand<CdpBoxModel>("DOM.getBoxModel", {
       backendNodeId: resolved.backendNodeId,
     });
@@ -216,5 +224,55 @@ export class ElectronWebContentsHost {
       x: (x1 + x2 + x3 + x4) / 4,
       y: (y1 + y2 + y3 + y4) / 4,
     };
+  }
+
+  private async centerPointFromBackendNode(
+    backendNodeId: number,
+  ): Promise<{ x: number; y: number } | undefined> {
+    try {
+      const resolved = await this.client.sendCommand<ResolveNodeResponse>("DOM.resolveNode", {
+        backendNodeId,
+      });
+      const objectId = resolved.object.objectId;
+      if (!objectId) return undefined;
+      const response = await this.client.sendCommand<
+        RuntimeEvaluateResponse<{ x: number; y: number; width: number; height: number }>
+      >("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function () {
+          const rect = this.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        }`,
+        returnByValue: true,
+      });
+      const rect = response.result.value;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return undefined;
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async activateResolved(resolved: ResolvedRef): Promise<void> {
+    try {
+      if (resolved.entry.kind === "cursor") {
+        const selector = JSON.stringify(resolved.entry.selector);
+        await this.evaluate<void>(`document.querySelector(${selector})?.click()`);
+        return;
+      }
+      if (resolved.backendNodeId === undefined) return;
+      const node = await this.client.sendCommand<ResolveNodeResponse>("DOM.resolveNode", {
+        backendNodeId: resolved.backendNodeId,
+      });
+      const objectId = node.object.objectId;
+      if (!objectId) return;
+      await this.client.sendCommand("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: "function () { this.click?.(); }",
+        returnByValue: true,
+      });
+    } catch {
+      // CDP input above is the primary path; activation is a best-effort embedded-mode fallback.
+    }
   }
 }
