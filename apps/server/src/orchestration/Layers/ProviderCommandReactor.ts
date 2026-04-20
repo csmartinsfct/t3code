@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const lifecycle = yield* ProviderLifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
-    lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void));
+    lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }));
   const handledTurnStartKeys = yield* Cache.make<string, true>({
     capacity: HANDLED_TURN_START_KEY_MAX,
     timeToLive: HANDLED_TURN_START_KEY_TTL,

@@ -39,7 +39,7 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { ProviderValidationError } from "../Errors.ts";
+import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -154,8 +154,8 @@ function readPersistedCwd(
 
 interface ProviderIdleReaperAdapter {
   readonly provider: ProviderKind;
-  readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>, unknown>;
-  readonly stopSession: (threadId: ThreadId) => Effect.Effect<void, unknown>;
+  readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>, ProviderAdapterError>;
+  readonly stopSession: (threadId: ThreadId) => Effect.Effect<void, ProviderAdapterError>;
 }
 
 export const runProviderIdleReaperSweep = Effect.fn("runProviderIdleReaperSweep")(
@@ -174,7 +174,7 @@ export const runProviderIdleReaperSweep = Effect.fn("runProviderIdleReaperSweep"
 
     yield* Effect.forEach(input.adapters, (adapter) =>
       Effect.gen(function* () {
-        const sessions = yield* adapter.listSessions().pipe(Effect.catch(() => Effect.succeed([])));
+        const sessions = yield* adapter.listSessions().pipe(Effect.orElseSucceed(() => []));
         yield* Effect.forEach(
           sessions.filter((s) => s.status !== "closed" && !s.activeTurnId),
           (session) =>
@@ -214,9 +214,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 ) {
   const analytics = yield* Effect.service(AnalyticsService);
   const serverSettings = yield* ServerSettingsService;
+  const services = yield* Effect.services();
+  const runFork = Effect.runForkWith(services);
   const lifecycle = options?.lifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
-    lifecycle ? lifecycle.log(threadId, entry).pipe(Effect.catch(() => Effect.void)) : Effect.void;
+    lifecycle
+      ? lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }))
+      : Effect.void;
   const canonicalEventLogger =
     options?.canonicalEventLogger ??
     (options?.canonicalEventLogPath !== undefined
@@ -933,10 +937,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     adapters,
     directory,
     serverSettings,
-  }).pipe(Effect.catch(() => Effect.void));
+  }).pipe(Effect.ignoreCause({ log: true }));
 
   const idleReaperInterval = setInterval(() => {
-    Effect.runPromise(runIdleReaperSweep).catch(() => {});
+    runFork(runIdleReaperSweep);
   }, IDLE_REAPER_INTERVAL_MS);
 
   if (typeof idleReaperInterval === "object" && "unref" in idleReaperInterval) {

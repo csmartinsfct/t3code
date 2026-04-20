@@ -87,7 +87,15 @@ const makeTicket = (
 };
 
 const makeTicketTree = (...tickets: ReadonlyArray<Ticket>): TicketTreeNode[] =>
-  tickets.map((ticket) => ({ ticket, children: [] }));
+  tickets.map((ticket) => ({
+    ticket: {
+      ...ticket,
+      subTicketCount: ticket.subTickets.length,
+      dependencyCount: ticket.dependencies.length,
+    },
+    children: [],
+    dependencies: [],
+  }));
 
 const makeThread = (
   id: ThreadId,
