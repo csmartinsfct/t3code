@@ -141,6 +141,101 @@ it("BrowserHostResolver cached startup failures are retryable", async () => {
   assert.equal(host.kind, "playwright");
 });
 
+it("BrowserHostResolver memoizes Electron hosts per project across get() calls (T3CO-350)", async () => {
+  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
+  const stateDir = nodePath.join(baseDir, "userdata");
+  const resolver = await createBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: fakeElectronBroker(),
+  });
+  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
+
+  const first = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  const second = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  assert.equal(first.kind, "electron-wc");
+  // Same project must return the same instance so @ref maps, snapshot/console/
+  // network/dialog buffers, and tab registry survive between HTTP requests.
+  assert.strictEqual(first, second);
+});
+
+it("BrowserHostResolver concurrent get() calls return the same Electron host", async () => {
+  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
+  const stateDir = nodePath.join(baseDir, "userdata");
+  const resolver = await createBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: fakeElectronBroker(),
+  });
+  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
+
+  const [a, b, c] = await Promise.all([
+    Effect.runPromise(resolver.get(PROJECT_ELECTRON)),
+    Effect.runPromise(resolver.get(PROJECT_ELECTRON)),
+    Effect.runPromise(resolver.get(PROJECT_ELECTRON)),
+  ]);
+  assert.strictEqual(a, b);
+  assert.strictEqual(b, c);
+});
+
+it("BrowserHostResolver.dispose disposes cached hosts and evicts the cache", async () => {
+  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
+  const stateDir = nodePath.join(baseDir, "userdata");
+  const resolver = await createBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: fakeElectronBroker(),
+  });
+  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
+
+  const first = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  await Effect.runPromise(resolver.dispose());
+  const second = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  assert.notStrictEqual(first, second, "dispose should evict cache so a fresh host is returned");
+});
+
+it("getCachedBrowserHostResolver disposes superseded entries on broker cycle", async () => {
+  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
+  const stateDir = nodePath.join(baseDir, "userdata");
+
+  const brokerA = fakeElectronBroker();
+  const resolverA = await getCachedBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: brokerA,
+    electronBrokerCacheKey: "broker-a",
+  });
+  await Effect.runPromise(resolverA.persistElectronHost(PROJECT_ELECTRON));
+  const hostA = await Effect.runPromise(resolverA.get(PROJECT_ELECTRON));
+  // Spy on dispose — we want to confirm superseded entries actually close.
+  // `BrowserHost.dispose` is declared readonly; the cast here is strictly for
+  // test-observation and does not survive outside this block.
+  let disposed = false;
+  const mutableHostA = hostA as { dispose: () => Promise<void> };
+  const originalDispose = mutableHostA.dispose;
+  mutableHostA.dispose = async () => {
+    disposed = true;
+    await originalDispose.call(hostA);
+  };
+
+  // Simulate broker rotation: new URL/token → new cache key under the same stateDir.
+  const resolverB = await getCachedBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: fakeElectronBroker(),
+    electronBrokerCacheKey: "broker-b",
+  });
+  // Let the dispose microtask flush.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.isTrue(disposed, "superseded resolver's hosts should be disposed");
+  assert.notStrictEqual(resolverA, resolverB, "broker rotation should return a fresh resolver");
+});
+
 it("BrowserHost command methods cannot return pixel streams", async () => {
   type Return = Awaited<ReturnType<BrowserHostCommand>>;
   // This type assertion is the load-bearing guard: widening BrowserHostCommand to

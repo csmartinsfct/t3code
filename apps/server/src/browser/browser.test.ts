@@ -148,6 +148,7 @@ function stubBrowserResolver(): BrowserHostResolverShape {
     announceElectronHosts: () => Effect.void,
     beginRestartRecovery: () => Effect.void,
     completeRestartRecovery: () => Effect.void,
+    dispose: () => Effect.void,
   };
 }
 
@@ -258,6 +259,7 @@ it.effect("handlers preserve `this` when dispatching class-method-shadowed tools
         announceElectronHosts: () => Effect.void,
         beginRestartRecovery: () => Effect.void,
         completeRestartRecovery: () => Effect.void,
+        dispose: () => Effect.void,
       },
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,

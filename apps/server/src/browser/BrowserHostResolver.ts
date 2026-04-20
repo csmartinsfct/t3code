@@ -26,6 +26,11 @@ interface ResolverState {
   readonly persisted: Map<ProjectId, PersistedBrowserHostKind>;
   readonly announcedElectronProjects: Set<ProjectId>;
   readonly reannounceInProgress: boolean;
+  // @ref maps, snapshot/console/network/dialog buffers, tab registry, and CDP
+  // subscription iterators all live on the host instance. Memoize per project
+  // so refs survive between HTTP requests and subscriptions don't leak. See
+  // T3CO-350 for the full list of state that would otherwise be lost.
+  readonly electronHosts: Map<ProjectId, ElectronWebContentsBrowserHost>;
 }
 
 export class BrowserHostResolverError extends Data.TaggedError("BrowserHostResolverError")<{
@@ -45,6 +50,7 @@ export interface BrowserHostResolverShape {
   readonly completeRestartRecovery: (
     projectIds: readonly ProjectId[],
   ) => Effect.Effect<void, BrowserHostResolverError>;
+  readonly dispose: () => Effect.Effect<void, never>;
 }
 
 export class BrowserHostResolver extends ServiceMap.Service<
@@ -139,6 +145,7 @@ export async function createBrowserHostResolver({
     persisted,
     announcedElectronProjects: new Set<ProjectId>(),
     reannounceInProgress: Array.from(persisted.values()).some((host) => host === "electron"),
+    electronHosts: new Map<ProjectId, ElectronWebContentsBrowserHost>(),
   };
 
   const updateState = (f: (current: ResolverState) => ResolverState): void => {
@@ -177,10 +184,15 @@ export async function createBrowserHostResolver({
               "Embedded browser host is recovering after a server restart; retry once the desktop process re-announces active browser views.",
           });
         }
-        return new ElectronWebContentsBrowserHost(
-          projectId,
-          electronHostOptions,
-        ) as unknown as BrowserHost;
+        const cached = state.electronHosts.get(projectId);
+        if (cached) return cached as unknown as BrowserHost;
+        const host = new ElectronWebContentsBrowserHost(projectId, electronHostOptions);
+        updateState((current) => {
+          const electronHosts = new Map(current.electronHosts);
+          electronHosts.set(projectId, host);
+          return { ...current, electronHosts };
+        });
+        return host as unknown as BrowserHost;
       },
       catch: (cause) =>
         cause instanceof BrowserHostResolverError
@@ -242,12 +254,20 @@ export async function createBrowserHostResolver({
       });
     });
 
+  const dispose: BrowserHostResolverShape["dispose"] = () =>
+    Effect.promise(async () => {
+      const hosts = Array.from(state.electronHosts.values());
+      updateState((current) => ({ ...current, electronHosts: new Map() }));
+      await Promise.allSettled(hosts.map((host) => host.dispose()));
+    });
+
   return {
     get,
     persistElectronHost,
     announceElectronHosts,
     beginRestartRecovery,
     completeRestartRecovery,
+    dispose,
   } satisfies BrowserHostResolverShape;
 }
 
@@ -259,6 +279,20 @@ export function getCachedBrowserHostResolver(
   const cacheKey = `${options.stateDir}\0${options.electronBrokerCacheKey ?? "no-electron-broker"}`;
   const existing = cachedResolvers.get(cacheKey);
   if (existing) return existing;
+
+  // Broker URL/token cycle: a new entry for the same stateDir under a
+  // different key supersedes the old one. Dispose the old resolver so its
+  // cached Electron hosts close their CDP subscriptions instead of leaking.
+  const stateDirPrefix = `${options.stateDir}\0`;
+  for (const [staleKey, stalePromise] of cachedResolvers) {
+    if (staleKey === cacheKey) continue;
+    if (!staleKey.startsWith(stateDirPrefix)) continue;
+    cachedResolvers.delete(staleKey);
+    void stalePromise
+      .then((resolver) => Effect.runPromise(resolver.dispose()))
+      .catch(() => undefined);
+  }
+
   const resolver = createBrowserHostResolver(options).catch((cause: unknown) => {
     cachedResolvers.delete(cacheKey);
     throw cause;
