@@ -101,11 +101,16 @@ const uiStateStoreState = {
     boardScrollLeft: number;
     updatedAt: string;
   } | null,
+  boardViewMode: "cards" as const,
+  boardFiltersByProjectId: {},
   setManagementBoardRoot: vi.fn(),
   pushManagementBoardTicket: vi.fn(),
   popManagementBoardTicket: vi.fn(),
   setManagementBoardScrollLeft: vi.fn(),
   sanitizeManagementBoardContext: vi.fn(),
+  setBoardViewMode: vi.fn(),
+  setBoardFilters: vi.fn(),
+  toggleBoardCollapsedStatus: vi.fn(),
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -153,6 +158,12 @@ vi.mock("../../ticketSelectionStore", () => ({
 }));
 
 vi.mock("../../uiStateStore", () => ({
+  DEFAULT_BOARD_FILTERS: {
+    priorityFilter: [],
+    labelFilter: [],
+    searchQuery: "",
+    collapsedStatuses: [],
+  },
   useUiStateStore: (selector: (state: typeof uiStateStoreState) => unknown) =>
     selector(uiStateStoreState),
 }));

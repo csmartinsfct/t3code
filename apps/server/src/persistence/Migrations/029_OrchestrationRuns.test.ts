@@ -1,12 +1,10 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import Migration029 from "./029_OrchestrationRuns.ts";
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "../NodeSqliteClient.ts";
-
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
 const assertOrchestrationSchema = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -55,20 +53,20 @@ const assertOrchestrationSchema = Effect.gen(function* () {
   );
 });
 
-layer("029_OrchestrationRuns", (it) => {
-  it.effect("applies cleanly on a fresh database", () =>
-    Effect.gen(function* () {
-      yield* runMigrations({ toMigrationInclusive: 29 });
-      yield* assertOrchestrationSchema;
-    }),
-  );
+it.effect("029_OrchestrationRuns applies cleanly on a fresh database", () =>
+  Effect.gen(function* () {
+    yield* runMigrations({ toMigrationInclusive: 29 });
+    yield* assertOrchestrationSchema;
+  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);
 
-  it.effect("applies cleanly on an existing database and can be rerun safely", () =>
+it.effect(
+  "029_OrchestrationRuns applies cleanly on an existing database and can be rerun safely",
+  () =>
     Effect.gen(function* () {
       yield* runMigrations({ toMigrationInclusive: 28 });
       yield* runMigrations({ toMigrationInclusive: 29 });
       yield* Migration029;
       yield* assertOrchestrationSchema;
-    }),
-  );
-});
+    }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+);

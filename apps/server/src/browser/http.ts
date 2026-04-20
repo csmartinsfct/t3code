@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import {
@@ -8,10 +8,18 @@ import {
   respondErrorFromCause,
   respondOk,
 } from "../restResponse";
-import { buildCommandHandlers, toolDefinitions } from "./handlers";
-import { BrowserManagerService, type BrowserInstance } from "./Services/BrowserManager";
+import { ServerConfig } from "../config";
+import { buildCommandHandlers, playwrightCommandDescriptors, toolDefinitions } from "./handlers";
+import { getCachedBrowserHostResolver } from "./BrowserHostResolver";
+import { BrowserManagerService } from "./Services/BrowserManager";
+import type { BrowserInstance } from "./Services/BrowserManager";
 
 const API_ROUTE = "/api/browser";
+
+class BrowserHttpError extends Data.TaggedError("BrowserHttpError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 // ---------------------------------------------------------------------------
 // HTTP handlers
@@ -45,12 +53,33 @@ const handlePost = Effect.gen(function* () {
   const auth = yield* resolveAuth(webRequest);
   if (!auth) return respondError("Unauthorized", 401);
 
-  const body = yield* Effect.promise(() => parseToolCallBody(webRequest));
+  const body = yield* Effect.tryPromise({
+    try: () => parseToolCallBody(webRequest),
+    catch: (cause) =>
+      new BrowserHttpError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
   if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
 
+  const config = yield* ServerConfig;
   const browser = yield* BrowserManagerService;
+  const resolver = yield* Effect.tryPromise({
+    try: () =>
+      getCachedBrowserHostResolver({
+        stateDir: config.stateDir,
+        browser,
+        descriptors: playwrightCommandDescriptors,
+      }),
+    catch: (cause) =>
+      new BrowserHttpError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
   const handlers = buildCommandHandlers({
-    browser,
+    resolver,
     projectId: auth.projectId,
     threadId: auth.threadId,
   });
