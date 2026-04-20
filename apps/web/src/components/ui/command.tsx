@@ -3,6 +3,7 @@
 import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
 import { SearchIcon } from "lucide-react";
 import type * as React from "react";
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 import {
   Autocomplete,
@@ -16,7 +17,29 @@ import {
   AutocompleteSeparator,
 } from "~/components/ui/autocomplete";
 
-const CommandDialog = CommandDialogPrimitive.Root;
+function CommandDialog({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: CommandDialogPrimitive.Root.Props) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: true,
+    source: "command-dialog",
+  });
+
+  return (
+    <CommandDialogPrimitive.Root
+      defaultOpen={defaultOpen}
+      onOpenChange={handleOpenChange}
+      open={open}
+      {...props}
+    />
+  );
+}
 
 const CommandDialogPortal = CommandDialogPrimitive.Portal;
 

@@ -65,6 +65,7 @@ export function ContextMenuPortal() {
   return (
     <Menu
       open={open}
+      trackEmbeddedBrowserOverlay={false}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           dismiss();

@@ -7,9 +7,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
 
+import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 
-const Select = SelectPrimitive.Root;
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>,
+) {
+  const handleOpenChange = useTrackedOverlayOpen({
+    open: props.open,
+    defaultOpen: props.defaultOpen,
+    onOpenChange: props.onOpenChange,
+    enabled: true,
+    source: "select",
+  });
+
+  return <SelectPrimitive.Root {...props} onOpenChange={handleOpenChange} />;
+}
 
 const selectTriggerVariants = cva(
   "relative inline-flex select-none items-center justify-between gap-2 border rounded-lg text-left text-base outline-none transition-[color,box-shadow,background-color] data-disabled:pointer-events-none data-disabled:opacity-64 sm:text-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",

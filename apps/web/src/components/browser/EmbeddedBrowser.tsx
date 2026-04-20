@@ -3,6 +3,8 @@ import { ArrowRightIcon, GlobeIcon, RotateCwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserModalSuspension";
+
 import { Button } from "../ui/button";
 
 interface EmbeddedBrowserProps {
@@ -61,6 +63,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
               return;
             }
             mountedRef.current = true;
+            setEmbeddedBrowserMountedForModalSuspension(true);
             const currentUrl = await browserBridge.getUrl();
             if (currentUrl) setUrl(currentUrl);
           })
@@ -112,6 +115,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       const pendingMount = mountPromiseRef.current;
       const shouldUnmount = mountedRef.current || pendingMount !== null;
       mountedRef.current = false;
+      setEmbeddedBrowserMountedForModalSuspension(false);
       void (async () => {
         await pendingMount?.catch(() => {});
         if (shouldUnmount) {

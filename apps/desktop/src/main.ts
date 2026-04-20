@@ -69,6 +69,8 @@ const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
 const BROWSER_MOUNT_CHANNEL = "browser:mount";
 const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
 const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
+const BROWSER_SUSPEND_CHANNEL = "browser:suspendForModal";
+const BROWSER_RESUME_CHANNEL = "browser:resumeFromModal";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
@@ -113,6 +115,8 @@ type EmbeddedBrowserViewState = {
   reattachRetryTimer: ReturnType<typeof setTimeout> | null;
   devtoolsOpen: boolean;
   mounted: boolean;
+  suspendedForModal: boolean;
+  bounds: BrowserViewBounds | null;
 };
 type EmbeddedBrowserWindowState = {
   readonly viewsByProjectId: Map<string, EmbeddedBrowserViewState>;
@@ -1654,6 +1658,7 @@ function cleanupEmbeddedBrowserView(
 ): void {
   clearEmbeddedBrowserDebuggerRetry(embedded);
   embedded.mounted = false;
+  embedded.suspendedForModal = false;
   failEmbeddedBrowserCdpSubscriptions(embedded, "Embedded browser view was destroyed");
   if (embeddedBrowserViewsByProjectId.get(embedded.projectId) === embedded) {
     embeddedBrowserViewsByProjectId.delete(embedded.projectId);
@@ -1796,6 +1801,8 @@ function createEmbeddedBrowserView(
     reattachRetryTimer: null,
     devtoolsOpen: false,
     mounted: false,
+    suspendedForModal: false,
+    bounds: null,
   };
 
   view.webContents.debugger.on("detach", (_event, reason) => {
@@ -1859,6 +1866,7 @@ function registerIpcHandlers(): void {
       if (previousActive?.mounted) {
         window.contentView.removeChildView(previousActive.view);
         previousActive.mounted = false;
+        previousActive.suspendedForModal = false;
         await pauseAndThrottleEmbeddedBrowser(previousActive);
       }
 
@@ -1875,6 +1883,8 @@ function registerIpcHandlers(): void {
       }
 
       await resumeEmbeddedBrowser(embedded);
+      embedded.bounds = bounds;
+      embedded.suspendedForModal = false;
       embedded.view.setBounds(bounds);
       if (!embedded.mounted) {
         window.contentView.addChildView(embedded.view);
@@ -1891,6 +1901,7 @@ function registerIpcHandlers(): void {
     const bounds = normalizeBrowserBounds(rawBounds);
     const embedded = window ? getActiveEmbeddedBrowser(window) : null;
     if (!embedded || !bounds) return;
+    embedded.bounds = bounds;
     embedded.view.setBounds(bounds);
   });
 
@@ -1898,11 +1909,44 @@ function registerIpcHandlers(): void {
   ipcMain.handle(BROWSER_UNMOUNT_CHANNEL, async (event) => {
     const window = getIpcBrowserWindow(event);
     const embedded = window ? getActiveEmbeddedBrowser(window) : null;
-    if (!window || !embedded || !embedded.mounted) return;
+    if (!window || !embedded) return;
+
+    if (embedded.mounted) {
+      window.contentView.removeChildView(embedded.view);
+      embedded.mounted = false;
+    }
+    embedded.suspendedForModal = false;
+    await pauseAndThrottleEmbeddedBrowser(embedded);
+  });
+
+  ipcMain.removeHandler(BROWSER_SUSPEND_CHANNEL);
+  ipcMain.handle(BROWSER_SUSPEND_CHANNEL, async (event) => {
+    const window = getIpcBrowserWindow(event);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    if (!window || !embedded) return;
+
+    embedded.suspendedForModal = true;
+    if (!embedded.mounted) return;
 
     window.contentView.removeChildView(embedded.view);
     embedded.mounted = false;
-    await pauseAndThrottleEmbeddedBrowser(embedded);
+  });
+
+  ipcMain.removeHandler(BROWSER_RESUME_CHANNEL);
+  ipcMain.handle(BROWSER_RESUME_CHANNEL, async (event) => {
+    const window = getIpcBrowserWindow(event);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    if (!window || !embedded) return;
+
+    embedded.suspendedForModal = false;
+    await resumeEmbeddedBrowser(embedded);
+    if (embedded.bounds) {
+      embedded.view.setBounds(embedded.bounds);
+    }
+    if (!embedded.mounted) {
+      window.contentView.addChildView(embedded.view);
+      embedded.mounted = true;
+    }
   });
 
   ipcMain.removeHandler(BROWSER_NAVIGATE_CHANNEL);
