@@ -825,12 +825,14 @@ function runCommand(
   }
   return Effect.gen(function* () {
     const host = yield* ctx.resolver.get(ctx.projectId).pipe(Effect.mapError(toBrowserToolError));
-    const method = host[tool as BrowserHostToolName];
-    if (!method) {
-      return yield* new BrowserToolError({ message: `unknown tool '${tool}'` });
-    }
+    // Always dispatch through runTool. Going via host[tool] picks up private
+    // class methods that happen to share a name with a BROWSER_HOST_TOOL_NAMES
+    // slot but do not implement the (args, input) BrowserHostCommand contract
+    // (e.g. ElectronWebContentsBrowserHost.hover/press/scroll/viewport etc.
+    // take individual unwrapped parameters and break when called with the
+    // dispatch (args, input) shape).
     return yield* Effect.tryPromise({
-      try: () => method.call(host, args, { ...input, __toolName: tool }),
+      try: () => host.runTool(args, { ...input, __toolName: tool }),
       catch: toBrowserToolError,
     });
   });

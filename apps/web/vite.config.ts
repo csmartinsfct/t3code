@@ -7,6 +7,7 @@ import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const hmrDisabled = process.env.T3CODE_DISABLE_HMR === "1";
 
 const buildSourcemap =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -45,13 +46,15 @@ export default defineConfig({
   server: {
     port,
     strictPort: true,
-    hmr: {
-      // Explicit config so Vite's HMR WebSocket connects reliably
-      // inside Electron's BrowserWindow. Vite 8 uses console.debug for
-      // connection logs — enable "Verbose" in DevTools to see them.
-      protocol: "ws",
-      host: "localhost",
-    },
+    hmr: hmrDisabled
+      ? false
+      : {
+          // Explicit config so Vite's HMR WebSocket connects reliably
+          // inside Electron's BrowserWindow. Vite 8 uses console.debug for
+          // connection logs — enable "Verbose" in DevTools to see them.
+          protocol: "ws",
+          host: "localhost",
+        },
   },
   build: {
     outDir: "dist",

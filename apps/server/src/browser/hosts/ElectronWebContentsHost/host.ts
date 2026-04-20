@@ -86,22 +86,92 @@ export class ElectronWebContentsHost {
     await this.activateResolved(resolved);
   }
 
+  /**
+   * Run a JavaScript expression with `el` bound to the element identified
+   * by a `@ref`. Cursor-interactive refs fall back to document.querySelector
+   * with the stored CSS selector. ARIA refs resolve the backend node id to a
+   * Runtime object id via DOM.resolveNode and execute the body as a function
+   * body whose `this` is the element.
+   */
+  async evaluateOnRef<T>(ref: string, body: string): Promise<T> {
+    const resolved = await this.resolveRef(ref);
+    if (resolved.entry.kind === "cursor") {
+      const selector = JSON.stringify(resolved.entry.selector);
+      const response = await this.client.sendCommand<RuntimeEvaluateResponse<T>>(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const el = document.querySelector(${selector});
+            if (!el) throw new Error(${JSON.stringify(`Ref ${ref} is no longer in the DOM.`)});
+            return ${body};
+          })()`,
+          awaitPromise: true,
+          returnByValue: true,
+        },
+      );
+      return response.result.value as T;
+    }
+    if (resolved.backendNodeId === undefined) {
+      throw new Error(`Ref ${ref} cannot be resolved to a backend node.`);
+    }
+    const resolvedNode = await this.client.sendCommand<ResolveNodeResponse>("DOM.resolveNode", {
+      backendNodeId: resolved.backendNodeId,
+    });
+    const objectId = resolvedNode.object.objectId;
+    if (!objectId) {
+      throw new Error(`Ref ${ref} resolved without a Runtime object id.`);
+    }
+    const response = await this.client.sendCommand<RuntimeEvaluateResponse<T>>(
+      "Runtime.callFunctionOn",
+      {
+        functionDeclaration: `function () { const el = this; return ${body}; }`,
+        objectId,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+    );
+    return response.result.value as T;
+  }
+
+  async hover(ref: string): Promise<void> {
+    const resolved = await this.resolveRef(ref);
+    const point = await this.centerPoint(resolved);
+    await this.client.sendCommand("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: point.x,
+      y: point.y,
+    });
+  }
+
   async fill(ref: string, text: string): Promise<void> {
-    await this.click(ref);
-    const modifiers = await this.selectAllModifier();
-    await this.client.sendCommand("Input.dispatchKeyEvent", {
-      type: "keyDown",
-      key: "a",
-      code: "KeyA",
-      modifiers,
-    });
-    await this.client.sendCommand("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: "a",
-      code: "KeyA",
-      modifiers,
-    });
+    // Focus + clear the element's current value via direct DOM assignment.
+    // Chromium does not treat CDP-synthesized Ctrl/Cmd+A as an accelerator
+    // reliably inside an Electron WebContents, so a select-all dance can
+    // leave the previous value intact and Input.insertText then appends.
+    // Setting `value = ""` + dispatching input/change events is what every
+    // framework listens for anyway.
+    await this.evaluateOnRef<void>(
+      ref,
+      `(() => {
+        el.focus?.();
+        if ("value" in el) {
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        } else if (el.isContentEditable) {
+          el.textContent = "";
+          el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        }
+      })()`,
+    );
     await this.type(text);
+    await this.evaluateOnRef<void>(
+      ref,
+      `(() => {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      })()`,
+    );
   }
 
   async type(text: string): Promise<void> {
@@ -157,15 +227,6 @@ export class ElectronWebContentsHost {
       }
     }
     return undefined;
-  }
-
-  private async selectAllModifier(): Promise<number> {
-    try {
-      const platform = await this.evaluate<string>("navigator.platform");
-      return /\bmac/i.test(platform) ? 4 : 2;
-    } catch {
-      return process.platform === "darwin" ? 4 : 2;
-    }
   }
 
   private async centerPoint(resolved: ResolvedRef): Promise<{ x: number; y: number }> {
@@ -247,7 +308,13 @@ export class ElectronWebContentsHost {
     try {
       if (resolved.entry.kind === "cursor") {
         const selector = JSON.stringify(resolved.entry.selector);
-        await this.evaluate<void>(`document.querySelector(${selector})?.click()`);
+        // Focus first so subsequent Input.insertText / Input.dispatchKeyEvent
+        // calls (used by fill/type/press) target this element instead of
+        // BODY. Mouse event dispatch alone does not reliably shift focus in
+        // an Electron WebContents driven over CDP.
+        await this.evaluate<void>(
+          `(() => { const el = document.querySelector(${selector}); if (!el) return; el.focus?.(); el.click?.(); })()`,
+        );
         return;
       }
       if (resolved.backendNodeId === undefined) return;
@@ -258,7 +325,7 @@ export class ElectronWebContentsHost {
       if (!objectId) return;
       await this.client.sendCommand("Runtime.callFunctionOn", {
         objectId,
-        functionDeclaration: "function () { this.click?.(); }",
+        functionDeclaration: "function () { this.focus?.(); this.click?.(); }",
         returnByValue: true,
       });
     } catch {

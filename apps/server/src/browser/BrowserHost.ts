@@ -74,6 +74,7 @@ export type BrowserHost = {
   readonly kind: BrowserHostKind;
   readonly projectId: ProjectId;
   readonly dispose: () => Promise<void>;
+  readonly runTool: BrowserHostCommand;
 } & {
   readonly [K in BrowserHostToolName]: BrowserHostCommand;
 };

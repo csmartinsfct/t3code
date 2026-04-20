@@ -6,6 +6,7 @@
  *
  * @module ServerConfig
  */
+import { resolveT3StateDirMode } from "@t3tools/shared/paths";
 import { Effect, FileSystem, Layer, LogLevel, Path, Schema, ServiceMap } from "effect";
 
 export const DEFAULT_PORT = 3773;
@@ -66,7 +67,7 @@ export const deriveServerPaths = Effect.fn(function* (
   devUrl: ServerConfigShape["devUrl"],
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
-  const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
+  const stateDir = join(baseDir, resolveT3StateDirMode(devUrl !== undefined));
   const dbPath = join(stateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");

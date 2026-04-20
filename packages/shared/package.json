@@ -71,6 +71,10 @@
     "./toposort": {
       "types": "./src/toposort.ts",
       "import": "./src/toposort.ts"
+    },
+    "./paths": {
+      "types": "./src/paths.ts",
+      "import": "./src/paths.ts"
     }
   },
   "scripts": {

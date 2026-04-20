@@ -112,6 +112,12 @@ Auth: `Authorization: Bearer t3-dev-bypass` (dev-only bypass token). Ticketing a
 
 If the tools in this session are connected to the wrong instance (e.g. production), use these endpoints directly or write to the dev database at `~/.t3/dev/state.sqlite`.
 
+### Dev env vars
+
+- `T3CODE_PORT` / `--port` — override the dev server port (default `3773`).
+- `T3CODE_WEB_SOURCEMAP` — `0`/`false` disables web build sourcemaps; `hidden` emits hidden sourcemaps.
+- `T3CODE_DISABLE_HMR=1` — disable Vite HMR in the web dev server. The page still serves but code changes require a manual reload. Useful when you don't want the app to auto-reload while iterating. Wired up in `apps/web/vite.config.ts`.
+
 ## Data Directories
 
 The T3 server persists state in `~/.t3/` (overridable via `T3CODE_HOME`).

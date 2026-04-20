@@ -229,32 +229,35 @@ it.effect("batch handler resolves cleanly when commands exceeds the 50-entry cap
   }),
 );
 
-// Regression: tools whose slot on BrowserHost is a class method that shadows
-// the `installBrowserHostCommands` delegator must still be invoked with
-// `this` bound to the host. Dispatching `method(args, input)` (bare call)
-// loses `this`, so class-methods like ElectronWebContentsBrowserHost.snapshot /
-// .evaluate / .goto referenced `undefined.cdpHost` / `undefined.send` /
-// `undefined.waitForLoadEvent` in production. Fixed by `method.call(host, ...)`
-// in runCommand.
-it.effect("handlers preserve `this` when dispatching class-method-shadowed tools", () =>
+// Regression: private class methods on a BrowserHost whose names collide with
+// BROWSER_HOST_TOOL_NAMES (e.g. ElectronWebContentsBrowserHost.hover/press/
+// scroll/viewport) take unwrapped arguments, not the (args, input) shape. A
+// prior implementation dispatched through `host[tool]`, which picked up those
+// private helpers and crashed with signature mismatches. Dispatch must always
+// go through `runTool` so shadow methods cannot intercept.
+it.effect("handlers dispatch through runTool and ignore shadow class methods", () =>
   Effect.gen(function* () {
     class ShadowHost {
       readonly kind = "electron-wc" as const;
       readonly projectId = TEST_PROJECT;
-      readonly secret = "bound-correctly";
+      lastTool: string | undefined;
       dispose = async (): Promise<void> => {};
-      runTool: BrowserHostCommand = async () => "unreachable via runTool";
-      // Mirror the shadowing pattern on ElectronWebContentsBrowserHost:
-      // an own class method with a BROWSER_HOST_TOOL_NAMES slot name that
-      // references `this`.
-      async html(): Promise<string> {
-        return this.secret;
+      runTool: BrowserHostCommand = async (_args, input) => {
+        this.lastTool = typeof input.__toolName === "string" ? input.__toolName : undefined;
+        return "via runTool";
+      };
+      // Shadow method with a wrong (non-dispatch) signature. If dispatch ever
+      // picks this up again, it will observe unwrapped arguments and the test
+      // will detect the regression via `lastTool` remaining unset.
+      async hover(selector: string | undefined): Promise<string> {
+        if (typeof selector !== "string") throw new Error("shadow hover called with wrong shape");
+        return `shadow-hovered ${selector}`;
       }
     }
-    const host = new ShadowHost() as unknown as BrowserHost;
+    const host = new ShadowHost();
     const handlers = buildCommandHandlers({
       resolver: {
-        get: () => Effect.succeed(host),
+        get: () => Effect.succeed(host as unknown as BrowserHost),
         persistElectronHost: () => Effect.void,
         announceElectronHosts: () => Effect.void,
         beginRestartRecovery: () => Effect.void,
@@ -264,18 +267,11 @@ it.effect("handlers preserve `this` when dispatching class-method-shadowed tools
       projectId: TEST_PROJECT,
       threadId: TEST_THREAD,
     });
-    const result = yield* handlers.html!({}).pipe(
-      Effect.catch((err) =>
-        Effect.succeed({
-          failed: true,
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      ),
-    );
-    if ("failed" in result) {
-      assert.fail(`html dispatch lost \`this\` binding: ${result.message}`);
-    } else {
-      assert.isDefined(result);
-    }
+    const response = yield* handlers.hover!({ ref: "@e1" });
+    assert.isDefined(response);
+    // Observable proof that runTool ran (and not the shadow class method,
+    // which would throw on the unwrapped argument shape): `lastTool` is set
+    // inside runTool on dispatch, so it matches the tool name.
+    assert.include(host.lastTool ?? "", "hover");
   }),
 );

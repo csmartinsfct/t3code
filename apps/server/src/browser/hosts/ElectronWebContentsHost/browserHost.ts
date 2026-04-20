@@ -100,6 +100,92 @@ function stringifyResult(value: unknown): string {
   return String(value);
 }
 
+interface KeyEventDescriptor {
+  readonly key: string;
+  readonly code: string;
+  readonly windowsVirtualKeyCode?: number;
+  readonly nativeVirtualKeyCode?: number;
+  readonly text?: string;
+  readonly modifiers: number;
+}
+
+// CDP modifier bitmask — Alt=1, Ctrl=2, Meta=4, Shift=8.
+const KEY_MODIFIERS: Readonly<Record<string, number>> = {
+  Alt: 1,
+  Ctrl: 2,
+  Control: 2,
+  Meta: 4,
+  Cmd: 4,
+  Command: 4,
+  Super: 4,
+  Shift: 8,
+};
+
+// Minimum key table for named keys the `press` tool promises (Enter, Tab,
+// Escape, ArrowUp, Backspace, …). Printable single-character keys fall
+// through to a computed descriptor below.
+const NAMED_KEY_TABLE: Record<string, Omit<KeyEventDescriptor, "modifiers">> = {
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Return: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Tab: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+  Escape: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  Esc: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+  Backspace: { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+  Delete: { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 },
+  Space: { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+  ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+  ArrowRight: { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+  Home: { key: "Home", code: "Home", windowsVirtualKeyCode: 36 },
+  End: { key: "End", code: "End", windowsVirtualKeyCode: 35 },
+  PageUp: { key: "PageUp", code: "PageUp", windowsVirtualKeyCode: 33 },
+  PageDown: { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 },
+  Insert: { key: "Insert", code: "Insert", windowsVirtualKeyCode: 45 },
+};
+
+for (let fn = 1; fn <= 12; fn++) {
+  NAMED_KEY_TABLE[`F${fn}`] = {
+    key: `F${fn}`,
+    code: `F${fn}`,
+    windowsVirtualKeyCode: 111 + fn,
+  };
+}
+
+function parseKeyEventDescriptor(raw: string): KeyEventDescriptor {
+  const tokens = raw
+    .split("+")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) throw new Error("press: missing key");
+  const keyToken = tokens.pop() as string;
+  let modifiers = 0;
+  for (const mod of tokens) {
+    const mask = KEY_MODIFIERS[mod];
+    if (mask === undefined) throw new Error(`press: unknown modifier '${mod}'`);
+    modifiers |= mask;
+  }
+  const named = NAMED_KEY_TABLE[keyToken];
+  if (named) return { ...named, modifiers };
+  if (keyToken.length === 1) {
+    // Single printable character. For alphanumerics CDP wants the
+    // uppercase keyCode and a "KeyA"/"Digit1"-style code. When Shift is
+    // held, letters produce an uppercase `key`/`text`; non-letter shifted
+    // symbols (Shift+1 = "!") are locale-dependent and intentionally left
+    // to the caller (use `type` for text input, `press` for shortcuts).
+    const ch = keyToken;
+    const upper = ch.toUpperCase();
+    const isLetter = upper >= "A" && upper <= "Z";
+    const isDigit = ch >= "0" && ch <= "9";
+    const shiftHeld = (modifiers & 8) !== 0;
+    const printed = isLetter && shiftHeld ? upper : ch;
+    const code = isLetter ? `Key${upper}` : isDigit ? `Digit${ch}` : "";
+    const windowsVirtualKeyCode = isLetter || isDigit ? upper.charCodeAt(0) : ch.charCodeAt(0);
+    return { key: printed, code, windowsVirtualKeyCode, text: printed, modifiers };
+  }
+  throw new Error(`press: unsupported key '${keyToken}'`);
+}
+
 function parseClip(value: string): { x: number; y: number; width: number; height: number } {
   const parts = value.split(",").map(Number);
   const [x, y, width, height] = parts;
@@ -542,31 +628,48 @@ export class ElectronWebContentsBrowserHost {
     return JSON.stringify(await this.evaluate(expression), null, 2);
   }
 
+  /**
+   * Run `body` with `el` bound to the element. Accepts either a CSS selector
+   * or a snapshot `@ref`. Returns the raw value (use `selectorText` /
+   * `selectorJson` for string/JSON shaping).
+   */
+  private async evaluateOnSelector<T>(selector: string, body: string): Promise<T> {
+    if (selector.startsWith("@")) return this.cdpHost!.evaluateOnRef<T>(selector, body);
+    return this.evaluate<T>(elementScript(selector, body));
+  }
+
+  private async selectorText(selector: string, body: string): Promise<string> {
+    return stringifyResult(await this.evaluateOnSelector(selector, body));
+  }
+
+  private async selectorJson(selector: string, body: string): Promise<string> {
+    return JSON.stringify(await this.evaluateOnSelector(selector, body), null, 2);
+  }
+
   private async html(selector?: string): Promise<string> {
     if (!selector) return this.evaluateText(HTML_SCRIPT);
-    return this.evaluateText(elementScript(selector, "el.innerHTML"));
+    return this.selectorText(selector, "el.innerHTML");
   }
 
   private async css(selector: string | undefined, property: string | undefined): Promise<string> {
     if (!selector || !property) throw new Error("css: missing selector or property");
-    return this.evaluateText(
-      elementScript(selector, `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`),
+    return this.selectorText(
+      selector,
+      `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`,
     );
   }
 
   private async attrs(selector: string | undefined): Promise<string> {
     if (!selector) throw new Error("attrs: missing selector");
-    return this.evaluateJson(
-      elementScript(
-        selector,
-        `Object.fromEntries(Array.from(el.attributes).map((attr) => [attr.name, attr.value]))`,
-      ),
+    return this.selectorJson(
+      selector,
+      `Object.fromEntries(Array.from(el.attributes).map((attr) => [attr.name, attr.value]))`,
     );
   }
 
   private async is(property: string | undefined, selector: string | undefined): Promise<string> {
     if (!property || !selector) throw new Error("is: missing property or selector");
-    return this.evaluateText(elementScript(selector, STATE_SCRIPT(property)));
+    return this.selectorText(selector, STATE_SCRIPT(property));
   }
 
   private async accessibility(): Promise<string> {
@@ -602,17 +705,21 @@ export class ElectronWebContentsBrowserHost {
         .join("\n");
     }
     const selector = args.find((arg) => !arg.startsWith("--")) ?? "body";
-    return this.evaluateJson(elementScript(selector, INSPECT_SCRIPT));
+    return this.selectorJson(selector, INSPECT_SCRIPT);
   }
 
   private async select(selector: string | undefined, value: string): Promise<string> {
     if (!selector || !value) throw new Error("select: missing selector or value");
-    await this.evaluate(elementScript(selector, SELECT_SCRIPT(value)));
+    await this.evaluateOnSelector(selector, SELECT_SCRIPT(value));
     return `Selected "${value}" in ${selector}`;
   }
 
   private async hover(selector: string | undefined): Promise<string> {
     if (!selector) throw new Error("hover: missing selector");
+    if (selector.startsWith("@")) {
+      await this.cdpHost!.hover(selector);
+      return `Hovered ${selector}`;
+    }
     const point = await this.elementCenter(selector);
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
     return `Hovered ${selector}`;
@@ -620,15 +727,17 @@ export class ElectronWebContentsBrowserHost {
 
   private async press(key: string | undefined): Promise<string> {
     if (!key) throw new Error("press: missing key");
-    await this.send("Input.dispatchKeyEvent", { type: "keyDown", key });
-    await this.send("Input.dispatchKeyEvent", { type: "keyUp", key });
+    const event = parseKeyEventDescriptor(key);
+    await this.send("Input.dispatchKeyEvent", { ...event, type: "keyDown" });
+    await this.send("Input.dispatchKeyEvent", { ...event, type: "keyUp" });
     return `Pressed ${key}`;
   }
 
   private async scroll(selector?: string): Promise<string> {
     if (selector) {
-      await this.evaluate(
-        elementScript(selector, "el.scrollIntoView({ block: 'center', inline: 'center' })"),
+      await this.evaluateOnSelector(
+        selector,
+        "el.scrollIntoView({ block: 'center', inline: 'center' })",
       );
       return `Scrolled ${selector} into view`;
     }
@@ -647,11 +756,23 @@ export class ElectronWebContentsBrowserHost {
     }
     if (!selector) throw new Error("wait: missing selector");
     const started = Date.now();
+    const probe = selector.startsWith("@")
+      ? // `@refs` are resolved against the snapshot's ref store, not the
+        // DOM. The element is "present" if the ref still resolves.
+        async (): Promise<boolean> => {
+          try {
+            await this.cdpHost!.evaluateOnRef<boolean>(selector, "true");
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      : async (): Promise<boolean> =>
+          this.evaluate<boolean>(
+            `document.querySelector(${JSON.stringify(selector)}) !== null`,
+          ).catch(() => false);
     while (Date.now() - started < DEFAULT_TIMEOUT_MS) {
-      const found = await this.evaluate<boolean>(
-        `document.querySelector(${JSON.stringify(selector)}) !== null`,
-      ).catch(() => false);
-      if (found) return `Element ${selector} appeared`;
+      if (await probe()) return `Element ${selector} appeared`;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error(`Timed out waiting for ${selector}`);
@@ -724,11 +845,9 @@ export class ElectronWebContentsBrowserHost {
       const index = args[1] === undefined ? this.styleHistory.length - 1 : Number(args[1]);
       const entry = this.styleHistory[index];
       if (!entry) return "(no style modifications)";
-      await this.evaluate(
-        elementScript(
-          entry.selector,
-          `el.style.setProperty(${JSON.stringify(entry.property)}, ${JSON.stringify(entry.oldValue)})`,
-        ),
+      await this.evaluateOnSelector(
+        entry.selector,
+        `el.style.setProperty(${JSON.stringify(entry.property)}, ${JSON.stringify(entry.oldValue)})`,
       );
       this.styleHistory.splice(index, 1);
       return `Reverted modification #${index}`;
@@ -737,14 +856,13 @@ export class ElectronWebContentsBrowserHost {
     const value = valueParts.join(" ");
     if (!selector || !property || !value)
       throw new Error("style: missing selector, property, or value");
-    const oldValue = await this.evaluateText(
-      elementScript(selector, `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`),
+    const oldValue = await this.selectorText(
+      selector,
+      `getComputedStyle(el).getPropertyValue(${JSON.stringify(property)})`,
     );
-    await this.evaluate(
-      elementScript(
-        selector,
-        `el.style.setProperty(${JSON.stringify(property)}, ${JSON.stringify(value)}, "important")`,
-      ),
+    await this.evaluateOnSelector(
+      selector,
+      `el.style.setProperty(${JSON.stringify(property)}, ${JSON.stringify(value)}, "important")`,
     );
     this.styleHistory.push({ selector, property, oldValue, newValue: value });
     return `Style modified: ${selector} { ${property}: ${oldValue || "(none)"} -> ${value} }`;

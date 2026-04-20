@@ -1,8 +1,71 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-19T16:31:58.226Z",
-  "lastProcessedCommit": "40f76668e469ed6d5cf16461f0408b6afac76b71",
+  "generatedAt": "2026-04-20T15:11:48.893Z",
+  "lastProcessedCommit": "59d20d30686426d1d60f00731784cda24ac97b14",
   "groups": [
+    {
+      "date": "2026-04-20",
+      "entries": [
+        {
+          "id": "7dc75fdbf6200331",
+          "title": "Fixed Browser Tool Crashes",
+          "summary": "Resolved a production issue where browser actions such as snapshots, screenshots, page evaluation, and navigation could crash instead of completing successfully.",
+          "category": "fix",
+          "commitShas": ["59d20d30686426d1d60f00731784cda24ac97b14"]
+        },
+        {
+          "id": "979de025457cbfda",
+          "title": "Native Embedded Browser for Board Mode",
+          "summary": "Added a native embedded browser experience that runs inside the desktop app, enabling browser automation to work directly with an in-app browser instead of relying only on a headless browser host.",
+          "category": "feature",
+          "commitShas": [
+            "b04f6eeec2acc26da651e22ba2af3c0375c6077e",
+            "dde3c1bb02393bb46b26cbf372786ec20823cd64",
+            "eab0fedad2a484b3b62171a1564fdf19caa19283",
+            "f410f7dd7cf4e83490ebade62df3db166e3bb611"
+          ]
+        },
+        {
+          "id": "87491ce2620e26cb",
+          "title": "Smarter Browser Host Selection",
+          "summary": "T3 Code can now choose between the embedded desktop browser and the existing headless browser host, giving projects more flexibility while keeping browser actions routed through a consistent automation flow.",
+          "category": "improvement",
+          "commitShas": [
+            "17e893e74fa90210e6492cab9d123e82d1e7cb6c",
+            "b12a9311c3f6f11804e9e04b7688f685de28ea29",
+            "eab0fedad2a484b3b62171a1564fdf19caa19283"
+          ]
+        },
+        {
+          "id": "317df798da9b7fda",
+          "title": "More Reliable Embedded Browser Recovery",
+          "summary": "Improved recovery when the embedded browser’s debugging connection detaches, reducing the chance that browser automation gets stuck after DevTools conflicts or connection interruptions.",
+          "category": "fix",
+          "commitShas": ["d7565b8d49cc0ba75a8bd7ae2639e6a23e11c68e"]
+        },
+        {
+          "id": "5edd0999b7d7a02e",
+          "title": "More Robust Provider Session Cleanup",
+          "summary": "Refined provider session cleanup so stopped or restarted sessions are handled more predictably, improving reliability around long-running agent activity and recovery paths.",
+          "category": "improvement",
+          "commitShas": ["3be95c42076c9655f96146db8e343debbac8bd42"]
+        },
+        {
+          "id": "dbc1e0d7f9fed3b3",
+          "title": "Improved run resume reliability",
+          "summary": "Resuming orchestration runs is now more reliable when a provider turn is already in progress. Long-running turns are tracked by activity instead of a fixed wall-clock timeout, reducing stuck runs and preventing runner state from drifting away from the provider session.",
+          "category": "fix",
+          "commitShas": ["0fef064d0c70937ec10a617a90ba7a1d6176ea5b"]
+        },
+        {
+          "id": "df36b31def03da97",
+          "title": "Added provider profiles",
+          "summary": "T3 Code now supports provider profiles, making it easier to choose and use different configured provider setups from the chat and settings experience.",
+          "category": "feature",
+          "commitShas": ["6704385a351df7e0a6f5826226ed90bf6d1d4a8b"]
+        }
+      ]
+    },
     {
       "date": "2026-04-19",
       "entries": [
@@ -1943,6 +2006,56 @@
           "40f76668e469ed6d5cf16461f0408b6afac76b71"
         ],
         "commitCount": 5,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-20T03:06:19.231Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "40f76668e469ed6d5cf16461f0408b6afac76b71",
+        "toInclusiveCommit": "0fef064d0c70937ec10a617a90ba7a1d6176ea5b",
+        "commitShas": [
+          "08a4c5b2140ea5fd1ae4a189f4619327d202a7c3",
+          "f073ea35625306e629c0edd659071dc4db10a41b",
+          "6704385a351df7e0a6f5826226ed90bf6d1d4a8b",
+          "0fef064d0c70937ec10a617a90ba7a1d6176ea5b"
+        ],
+        "commitCount": 4,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-20T14:41:02.112Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "0fef064d0c70937ec10a617a90ba7a1d6176ea5b",
+        "toInclusiveCommit": "eab0fedad2a484b3b62171a1564fdf19caa19283",
+        "commitShas": [
+          "dde3c1bb02393bb46b26cbf372786ec20823cd64",
+          "2b372223fdf9f848ac08fda17fedb385ed598f8b",
+          "ae7bf74481e095adfd6cb8b887a289ea44d4f5e2",
+          "6d5635ec37fe9658812e987eb18f8bce0dd975ce",
+          "17e893e74fa90210e6492cab9d123e82d1e7cb6c",
+          "b12a9311c3f6f11804e9e04b7688f685de28ea29",
+          "3be95c42076c9655f96146db8e343debbac8bd42",
+          "f410f7dd7cf4e83490ebade62df3db166e3bb611",
+          "b04f6eeec2acc26da651e22ba2af3c0375c6077e",
+          "d7565b8d49cc0ba75a8bd7ae2639e6a23e11c68e",
+          "68a8504e1d0d83fc53773eb8a8ecd66859636892",
+          "d7b78e1382faf13250180e64fe002521c22d6a62",
+          "470548ced3d210e428af0199c57adfda627a27fa",
+          "eab0fedad2a484b3b62171a1564fdf19caa19283"
+        ],
+        "commitCount": 14,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-20T15:11:48.659Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "eab0fedad2a484b3b62171a1564fdf19caa19283",
+        "toInclusiveCommit": "59d20d30686426d1d60f00731784cda24ac97b14",
+        "commitShas": ["59d20d30686426d1d60f00731784cda24ac97b14"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }
