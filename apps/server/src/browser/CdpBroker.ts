@@ -34,6 +34,11 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly targetId: string;
   }) => Promise<string>;
+  readonly printPdf?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly options?: Record<string, unknown>;
+  }) => Promise<string>;
 }
 
 export class CdpBrokerError extends Error {
@@ -221,6 +226,33 @@ export class CdpBroker {
       throw new CdpBrokerError(`CDP attachTarget failed for target ${targetId}`, {
         code: "CDP_ATTACH_TARGET_FAILED",
         details: { viewId, targetId },
+        cause,
+      });
+    }
+  }
+
+  // `Page.printToPDF` is not exposed on Electron's embedded debugger, so the
+  // Electron transport routes PDF requests through `webContents.printToPDF()`
+  // in the main process and returns a base64 blob. Transports without native
+  // PDF support (e.g. Playwright) will throw `CDP_PRINT_PDF_UNAVAILABLE` here;
+  // the host should fall back to `Page.printToPDF` via the regular send path.
+  async printPdf(viewId: string, options?: Record<string, unknown>): Promise<string> {
+    if (!this.transport.printPdf) {
+      throw new CdpBrokerError("printPdf is not available for this transport", {
+        code: "CDP_PRINT_PDF_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    try {
+      return await this.transport.printPdf({
+        id: this.requestId(),
+        viewId,
+        ...(options === undefined ? {} : { options }),
+      });
+    } catch (cause) {
+      throw new CdpBrokerError(`printPdf failed for view ${viewId}`, {
+        code: "CDP_PRINT_PDF_FAILED",
+        details: { viewId },
         cause,
       });
     }

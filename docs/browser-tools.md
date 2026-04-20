@@ -151,7 +151,7 @@ CSS selectors still work as a fallback for any command that takes a `ref` or `se
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `snapshot`                          | Accessibility tree with @refs; supports `interactive`, `compact`, `depth`, `selector`, `diff`, `annotate`, `cursorInteractive`, `heatmap` |
 | `screenshot`                        | PNG — full page, viewport, clipped, or element; disk path or base64 data URI                                                              |
-| `pdf`                               | Export current page as PDF                                                                                                                |
+| `pdf`                               | Export current page as PDF (Electron host uses `webContents.printToPDF`; Playwright host uses `Page.printToPDF`)                          |
 | `responsive`                        | Screenshots at multiple viewport sizes                                                                                                    |
 | `diff`                              | Unified text diff vs previous snapshot                                                                                                    |
 | `tabs`, `tab`, `newtab`, `closetab` | Tab management                                                                                                                            |

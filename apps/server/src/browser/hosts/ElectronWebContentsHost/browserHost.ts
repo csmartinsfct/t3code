@@ -1109,10 +1109,26 @@ export class ElectronWebContentsBrowserHost {
   }
 
   private async pdf(outputPath = nodePath.join(os.tmpdir(), "browse-page.pdf")): Promise<string> {
-    const response = await this.send<{ data: string }>("Page.printToPDF", {
-      printBackground: true,
-    });
-    await fs.writeFile(outputPath, response.data, "base64");
+    // `Page.printToPDF` is not exposed on the embedded Electron debugger; route
+    // through the broker's native path which calls `webContents.printToPDF()`
+    // in the main process. Falls back to CDP for transports that do not
+    // implement the native path (Playwright host, test harness).
+    const base64 = this.broker
+      ? await this.broker.printPdf(this.viewId).catch(async (cause: unknown) => {
+          if (
+            cause instanceof Error &&
+            "code" in cause &&
+            (cause as { code?: string }).code === "CDP_PRINT_PDF_UNAVAILABLE"
+          ) {
+            const response = await this.send<{ data: string }>("Page.printToPDF", {
+              printBackground: true,
+            });
+            return response.data;
+          }
+          throw cause;
+        })
+      : (await this.send<{ data: string }>("Page.printToPDF", { printBackground: true })).data;
+    await fs.writeFile(outputPath, base64, "base64");
     return `PDF saved: ${outputPath}`;
   }
 

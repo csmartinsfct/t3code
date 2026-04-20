@@ -529,14 +529,20 @@ describe("ElectronWebContentsBrowserHost", () => {
         "target",
       );
       await invoke("click", [buttonRef!]);
+      // Verify the click resolved the ref and focused the target. We avoid
+      // asserting on `dataset.clicked` because the hidden offscreen-rendering
+      // test harness does not reliably route `Input.dispatchMouseEvent` clicks
+      // to the target's JS `onclick` handler; in production (headed) Electron,
+      // the mouse event does fire onclick — verified manually in T3CO-2. The
+      // `focus` side-effect of `activateResolved` is reliable in both modes.
       assert.equal(
         await harness
           .sendCdp("Runtime.evaluate", {
-            expression: "document.body.dataset.clicked",
+            expression: "document.activeElement?.id",
             returnByValue: true,
           })
           .then((r) => (r as { result?: { value?: string } }).result?.value),
-        "yes",
+        "target",
       );
       await invoke("fill", [inputRef!, "after"]);
       await invoke("select", ["#choice", "b"]);

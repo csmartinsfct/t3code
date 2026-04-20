@@ -163,6 +163,22 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     }
   }
 
+  async printPdf(
+    request: Parameters<NonNullable<CdpBrokerTransport["printPdf"]>>[0],
+  ): Promise<string> {
+    try {
+      const response = await fetch(brokerUrl(this.baseUrl, "print-pdf"), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(request),
+      });
+      return await parseBrokerResponse<string>(response);
+    } catch (cause) {
+      this.evictOnTransportFailure(cause);
+      throw cause;
+    }
+  }
+
   private headers(): Record<string, string> {
     return {
       authorization: `Bearer ${this.token}`,

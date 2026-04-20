@@ -149,17 +149,16 @@ describe("ElectronWebContentsHost snapshot PoC", () => {
     assert.equal(screenshot.buffer.toString(), "png");
   });
 
-  it("uses Cmd+A on macOS when filling text", async () => {
+  it("clears the field via DOM + input/change events when filling", async () => {
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
     const client: CdpClient = {
       async sendCommand(method, params) {
         calls.push(params === undefined ? { method } : { method, params });
         if (method === "Accessibility.getFullAXTree") return { nodes: axNodes } as never;
-        if (method === "DOM.describeNode") return { node: {} } as never;
-        if (method === "DOM.getBoxModel") {
-          return { model: { border: [0, 0, 10, 0, 10, 10, 0, 10] } } as never;
+        if (method === "DOM.resolveNode") {
+          return { object: { objectId: "obj-1" } } as never;
         }
-        if (method === "Runtime.evaluate") return { result: { value: "MacIntel" } } as never;
+        if (method === "Runtime.callFunctionOn") return { result: { value: undefined } } as never;
         return {} as never;
       },
     };
@@ -167,14 +166,22 @@ describe("ElectronWebContentsHost snapshot PoC", () => {
     await host.snapshot();
     await host.fill("@e4", "hello");
 
+    // Fill now clears via `el.value = ""` + dispatching input/change events
+    // (see T3CO-review changes in 13c749e8) rather than Cmd/Ctrl+A select-all.
+    // Expect the callFunctionOn to carry a body that resets value + dispatches.
+    const clearCall = calls.find(
+      (call) =>
+        call.method === "Runtime.callFunctionOn" &&
+        typeof call.params?.functionDeclaration === "string" &&
+        (call.params.functionDeclaration as string).includes(`el.value = ""`),
+    );
+    assert.isDefined(clearCall, "fill should issue a DOM-level clear via callFunctionOn");
+
+    // And it should NOT dispatch Ctrl/Cmd+A key events anymore.
     const selectAll = calls.filter(
       (call) => call.method === "Input.dispatchKeyEvent" && call.params?.code === "KeyA",
     );
-    assert.equal(selectAll.length, 2);
-    assert.deepEqual(
-      selectAll.map((call) => call.params?.modifiers),
-      [4, 4],
-    );
+    assert.equal(selectAll.length, 0, "fill no longer dispatches Cmd/Ctrl+A");
   });
 
   it("scrolls with a runtime page scroll", async () => {

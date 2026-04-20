@@ -141,6 +141,11 @@ type BrowserCdpAttachTargetRequest = {
   readonly viewId: string;
   readonly targetId: string;
 };
+type BrowserPrintPdfRequest = {
+  readonly id: string;
+  readonly viewId: string;
+  readonly options?: Electron.PrintToPDFOptions;
+};
 type LinuxDesktopNamedApp = Electron.App & {
   setDesktopName?: (desktopName: string) => void;
 };
@@ -1150,6 +1155,11 @@ async function handleBrowserCdpBrokerRequest(
       subscribeEmbeddedBrowserCdpEvents(response, parseCdpSubscribeRequest(body));
       return;
     }
+    if (url.pathname === "/print-pdf") {
+      const base64 = await printEmbeddedBrowserPdf(parsePrintPdfRequest(body));
+      sendBrokerSuccess(response, base64);
+      return;
+    }
     sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1481,6 +1491,22 @@ function parseCdpAttachTargetRequest(value: unknown): BrowserCdpAttachTargetRequ
   return { id, viewId, targetId };
 }
 
+function parsePrintPdfRequest(value: unknown): BrowserPrintPdfRequest {
+  if (!isRecord(value)) throw new Error("invalid printPdf request");
+  const { id, viewId, options } = value;
+  if (typeof id !== "string" || typeof viewId !== "string") {
+    throw new Error("invalid printPdf request");
+  }
+  if (options !== undefined && !isRecord(options)) {
+    throw new Error("invalid printPdf options");
+  }
+  return {
+    id,
+    viewId,
+    ...(options === undefined ? {} : { options: options as Electron.PrintToPDFOptions }),
+  };
+}
+
 function getEmbeddedBrowserWindowState(window: BrowserWindow): EmbeddedBrowserWindowState {
   const existing = embeddedBrowserStateByWindow.get(window);
   if (existing) return existing;
@@ -1736,6 +1762,22 @@ async function attachEmbeddedBrowserCdpTarget(
     throw new Error("CDP Target.attachToTarget did not return a sessionId");
   }
   return response.sessionId;
+}
+
+// Electron's embedded debugger does not expose `Page.printToPDF`, so the
+// server host cannot produce a PDF over the regular CDP send path. This
+// routes through `webContents.printToPDF()` (the native Electron API) and
+// returns a base64-encoded payload so the existing broker response envelope
+// stays a plain JSON string.
+async function printEmbeddedBrowserPdf(request: BrowserPrintPdfRequest): Promise<string> {
+  const embedded = getEmbeddedBrowserForCdp(request.viewId);
+  assertEmbeddedBrowserDebuggerAvailable(embedded);
+  const options: Electron.PrintToPDFOptions = {
+    printBackground: true,
+    ...(request.options ?? {}),
+  };
+  const buffer = await embedded.view.webContents.printToPDF(options);
+  return buffer.toString("base64");
 }
 
 function subscribeEmbeddedBrowserCdpEvents(
