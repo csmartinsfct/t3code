@@ -54,35 +54,49 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly cacheKey: string,
   ) {}
 
   async send(request: Parameters<CdpBrokerTransport["send"]>[0]): Promise<unknown> {
-    const response = await fetch(brokerUrl(this.baseUrl, "send"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(request),
-    });
-    return parseBrokerResponse<unknown>(response);
+    try {
+      const response = await fetch(brokerUrl(this.baseUrl, "send"), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(request),
+      });
+      return await parseBrokerResponse<unknown>(response);
+    } catch (cause) {
+      this.evictOnTransportFailure(cause);
+      throw cause;
+    }
   }
 
   async subscribe(request: Parameters<CdpBrokerTransport["subscribe"]>[0]) {
     const controller = new AbortController();
-    const response = await fetch(brokerUrl(this.baseUrl, "subscribe"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      await parseBrokerResponse<never>(response);
-      throw new CdpBrokerError(`Electron CDP broker subscribe failed (${response.status})`, {
-        code: "ELECTRON_CDP_SUBSCRIBE_FAILED",
+    let response: Response;
+    try {
+      response = await fetch(brokerUrl(this.baseUrl, "subscribe"), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(request),
+        signal: controller.signal,
       });
+      if (!response.ok) {
+        await parseBrokerResponse<never>(response);
+        throw new CdpBrokerError(`Electron CDP broker subscribe failed (${response.status})`, {
+          code: "ELECTRON_CDP_SUBSCRIBE_FAILED",
+        });
+      }
+    } catch (cause) {
+      this.evictOnTransportFailure(cause);
+      throw cause;
     }
     if (!response.body) {
-      throw new CdpBrokerError("Electron CDP broker subscription response had no body", {
+      const cause = new CdpBrokerError("Electron CDP broker subscription response had no body", {
         code: "ELECTRON_CDP_SUBSCRIBE_NO_BODY",
       });
+      this.evictOnTransportFailure(cause);
+      throw cause;
     }
 
     const reader = response.body.getReader();
@@ -94,13 +108,27 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
       try {
         while (!closed) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) {
+            if (!closed) {
+              request.fail(
+                new CdpBrokerError("Electron CDP broker subscription ended unexpectedly", {
+                  code: "ELECTRON_CDP_SUBSCRIBE_ENDED",
+                }),
+              );
+            }
+            break;
+          }
           buffer += decoder.decode(value, { stream: true });
           let newlineIndex = buffer.indexOf("\n");
           while (newlineIndex >= 0) {
             const line = buffer.slice(0, newlineIndex).trim();
             buffer = buffer.slice(newlineIndex + 1);
-            if (line) this.emitLine(line, request.emit);
+            if (line && !this.emitLine(line, request.emit, request.fail)) {
+              closed = true;
+              controller.abort();
+              await reader.cancel().catch(() => {});
+              break;
+            }
             newlineIndex = buffer.indexOf("\n");
           }
         }
@@ -122,12 +150,17 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
   async attachTarget(
     request: Parameters<NonNullable<CdpBrokerTransport["attachTarget"]>>[0],
   ): Promise<string> {
-    const response = await fetch(brokerUrl(this.baseUrl, "attach-target"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(request),
-    });
-    return parseBrokerResponse<string>(response);
+    try {
+      const response = await fetch(brokerUrl(this.baseUrl, "attach-target"), {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(request),
+      });
+      return await parseBrokerResponse<string>(response);
+    } catch (cause) {
+      this.evictOnTransportFailure(cause);
+      throw cause;
+    }
   }
 
   private headers(): Record<string, string> {
@@ -137,13 +170,39 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     };
   }
 
-  private emitLine(line: string, emit: (event: CdpBrokerEvent) => void): void {
-    const payload = JSON.parse(line) as BrokerResponse<CdpBrokerEvent>;
+  private emitLine(
+    line: string,
+    emit: (event: CdpBrokerEvent) => void,
+    fail: (cause: unknown) => void,
+  ): boolean {
+    let payload: BrokerResponse<CdpBrokerEvent>;
+    try {
+      payload = JSON.parse(line) as BrokerResponse<CdpBrokerEvent>;
+    } catch (cause) {
+      fail(
+        new CdpBrokerError("Electron CDP broker subscription returned invalid JSON", {
+          code: "ELECTRON_CDP_SUBSCRIBE_INVALID_JSON",
+          cause,
+        }),
+      );
+      return false;
+    }
     if (payload.ok) {
       emit(payload.result);
-      return;
+      return true;
     }
-    console.warn("Electron CDP broker subscription remote error", payload.error);
+    fail(
+      new CdpBrokerError(payload.error.message, {
+        code: payload.error.code ?? "ELECTRON_CDP_REMOTE_ERROR",
+        details: payload.error.details,
+      }),
+    );
+    return false;
+  }
+
+  private evictOnTransportFailure(cause: unknown): void {
+    if (cause instanceof CdpBrokerError && cause.code === "ELECTRON_CDP_DEVTOOLS_OPEN") return;
+    brokersByEndpoint.delete(this.cacheKey);
   }
 }
 
@@ -160,7 +219,7 @@ export function getElectronCdpBroker(config: ServerConfigShape): CdpBroker | und
   if (existing) return existing;
 
   const broker = new CdpBroker(
-    new ElectronCdpHttpTransport(config.electronCdpBrokerUrl, config.electronCdpBrokerToken),
+    new ElectronCdpHttpTransport(config.electronCdpBrokerUrl, config.electronCdpBrokerToken, key),
     { eventQueueCapacity: 100 },
   );
   brokersByEndpoint.set(key, broker);

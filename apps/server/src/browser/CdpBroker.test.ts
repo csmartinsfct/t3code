@@ -7,7 +7,12 @@ import { ProjectId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 
 import { BROWSER_HOST_TOOL_NAMES, type BrowserHostToolName } from "./BrowserHost.ts";
-import { CdpBroker, type CdpBrokerEvent, type CdpBrokerTransport } from "./CdpBroker.ts";
+import {
+  CdpBroker,
+  CdpBrokerError,
+  type CdpBrokerEvent,
+  type CdpBrokerTransport,
+} from "./CdpBroker.ts";
 import type { ServerConfigShape } from "../config.ts";
 import { getElectronCdpBroker } from "./ElectronCdpHttpTransport.ts";
 import {
@@ -27,6 +32,8 @@ const DAY_1_TOOLS = BROWSER_HOST_TOOL_NAMES.filter(
     !(DEFERRED_NATIVE_TOOLS as readonly string[]).includes(tool) &&
     !(PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS as readonly string[]).includes(tool),
 );
+const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
+  "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
 
 const PAGE_HTML = String.raw`<!doctype html>
 <html>
@@ -173,6 +180,22 @@ async function expectRejectsWithMessage(
   assert.equal((error as Error).message, message);
 }
 
+async function expectRejectsWithBrokerError(
+  run: () => Promise<unknown>,
+  message: string,
+  code: string,
+): Promise<void> {
+  let error: unknown;
+  try {
+    await run();
+  } catch (cause) {
+    error = cause;
+  }
+  assert.instanceOf(error, CdpBrokerError);
+  assert.equal((error as CdpBrokerError).message, message);
+  assert.equal((error as CdpBrokerError).code, code);
+}
+
 describe("CdpBroker", () => {
   it("correlates send requests through each broker instance", async () => {
     const sent: unknown[] = [];
@@ -223,6 +246,37 @@ describe("CdpBroker", () => {
     assert.equal(first.done, false);
     assert.equal(first.value.backpressure?.capacity, 1);
     assert.equal(first.value.backpressure?.dropped, 1);
+    assert.equal(unsubscribed, true);
+  });
+
+  it("propagates asynchronous subscription failures to waiting consumers", async () => {
+    let fail: ((cause: unknown) => void) | undefined;
+    let unsubscribed = false;
+    const broker = new CdpBroker({
+      send: async () => ({}),
+      subscribe: async (request) => {
+        fail = request.fail;
+        return async () => {
+          unsubscribed = true;
+        };
+      },
+    });
+
+    const events = broker.subscribe("view-1", "root", "Runtime.consoleAPICalled");
+    const iterator = events[Symbol.asyncIterator]();
+    const next = iterator.next();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fail?.(
+      new CdpBrokerError(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE, {
+        code: "ELECTRON_CDP_DEVTOOLS_OPEN",
+      }),
+    );
+
+    await expectRejectsWithBrokerError(
+      () => next,
+      EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+      "ELECTRON_CDP_DEVTOOLS_OPEN",
+    );
     assert.equal(unsubscribed, true);
   });
 
@@ -292,6 +346,108 @@ describe("CdpBroker", () => {
       assert.equal(event.done, false);
       assert.equal(event.value.method, "Runtime.consoleAPICalled");
       assert.deepEqual(event.value.params, { text: "hello" });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("surfaces production Electron subscription terminal error frames", async () => {
+    const token = "test-cdp-terminal-error-token";
+    const server = createServer(async (request, response) => {
+      if (request.headers.authorization !== `Bearer ${token}`) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: false, error: { message: "Unauthorized" } }));
+        return;
+      }
+
+      for await (const _chunk of request) {
+        // Drain the request body before responding, matching the desktop broker.
+      }
+      if (request.url === "/subscribe") {
+        response.writeHead(200, { "content-type": "application/x-ndjson" });
+        response.end(
+          `${JSON.stringify({
+            ok: false,
+            error: {
+              message: EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+              code: "ELECTRON_CDP_DEVTOOLS_OPEN",
+            },
+          })}\n`,
+        );
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test broker did not bind");
+
+    const broker = getElectronCdpBroker({
+      electronCdpBrokerUrl: `http://127.0.0.1:${address.port}/`,
+      electronCdpBrokerToken: token,
+    } as ServerConfigShape);
+    assert.isDefined(broker);
+
+    try {
+      const events = broker!.subscribe("view-1", "root", "Runtime.consoleAPICalled");
+      const iterator = events[Symbol.asyncIterator]();
+      await expectRejectsWithBrokerError(
+        () => iterator.next(),
+        EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+        "ELECTRON_CDP_DEVTOOLS_OPEN",
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("surfaces production Electron subscription 409 DevTools errors", async () => {
+    const token = "test-cdp-409-token";
+    const server = createServer(async (request, response) => {
+      if (request.headers.authorization !== `Bearer ${token}`) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: false, error: { message: "Unauthorized" } }));
+        return;
+      }
+
+      for await (const _chunk of request) {
+        // Drain the request body before responding, matching the desktop broker.
+      }
+      if (request.url === "/subscribe") {
+        response.writeHead(409, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            ok: false,
+            error: {
+              message: EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+              code: "ELECTRON_CDP_DEVTOOLS_OPEN",
+            },
+          }),
+        );
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test broker did not bind");
+
+    const broker = getElectronCdpBroker({
+      electronCdpBrokerUrl: `http://127.0.0.1:${address.port}/`,
+      electronCdpBrokerToken: token,
+    } as ServerConfigShape);
+    assert.isDefined(broker);
+
+    try {
+      const events = broker!.subscribe("view-1", "root", "Runtime.consoleAPICalled");
+      const iterator = events[Symbol.asyncIterator]();
+      await expectRejectsWithBrokerError(
+        () => iterator.next(),
+        EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+        "ELECTRON_CDP_DEVTOOLS_OPEN",
+      );
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

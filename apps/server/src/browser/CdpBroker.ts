@@ -27,6 +27,7 @@ export interface CdpBrokerTransport {
     readonly sessionId: string;
     readonly eventName: string;
     readonly emit: (event: CdpBrokerEvent) => void;
+    readonly fail: (cause: unknown) => void;
   }) => Promise<() => Promise<void> | void>;
   readonly attachTarget?: (request: {
     readonly id: string;
@@ -119,11 +120,23 @@ export class CdpBroker {
   subscribe(viewId: string, sessionId: string, eventName: string): AsyncIterable<CdpBrokerEvent> {
     const capacity = this.options.eventQueueCapacity ?? 100;
     const queue: CdpBrokerEvent[] = [];
-    const waiters: Array<(next: IteratorResult<CdpBrokerEvent>) => void> = [];
+    const waiters: Array<{
+      readonly resolve: (next: IteratorResult<CdpBrokerEvent>) => void;
+      readonly reject: (cause: unknown) => void;
+    }> = [];
     let closed = false;
     let unsubscribe: (() => Promise<void> | void) | undefined;
     let setupError: unknown;
+    let streamError: unknown;
     let dropped = 0;
+
+    const fail = (cause: unknown): void => {
+      if (closed) return;
+      streamError = cause;
+      closed = true;
+      for (const waiter of waiters.splice(0)) waiter.reject(cause);
+      void unsubscribe?.();
+    };
 
     const emit = (event: CdpBrokerEvent): void => {
       if (closed) return;
@@ -139,7 +152,7 @@ export class CdpBroker {
         }) satisfies CdpBrokerEvent;
       const waiter = waiters.shift();
       if (waiter) {
-        waiter({ done: false, value: enriched(false) });
+        waiter.resolve({ done: false, value: enriched(false) });
         return;
       }
       if (queue.length >= capacity) {
@@ -158,17 +171,15 @@ export class CdpBroker {
         sessionId,
         eventName,
         emit,
+        fail,
       })
       .then((dispose) => {
         unsubscribe = dispose;
+        if (closed) void unsubscribe();
       })
       .catch((cause: unknown) => {
         setupError = cause;
-        const waiter = waiters.shift();
-        if (waiter) {
-          closed = true;
-          waiter(Promise.reject(cause) as unknown as IteratorResult<CdpBrokerEvent>);
-        }
+        fail(cause);
       });
 
     return {
@@ -178,14 +189,17 @@ export class CdpBroker {
             await setup;
             if (setupError) throw setupError;
             if (queue.length > 0) return { done: false, value: queue.shift()! };
+            if (streamError) throw streamError;
             if (closed) return { done: true, value: undefined };
-            return new Promise<IteratorResult<CdpBrokerEvent>>((resolve) => {
-              waiters.push(resolve);
+            return new Promise<IteratorResult<CdpBrokerEvent>>((resolve, reject) => {
+              waiters.push({ resolve, reject });
             });
           },
           return: async (): Promise<IteratorResult<CdpBrokerEvent>> => {
             closed = true;
-            for (const waiter of waiters.splice(0)) waiter({ done: true, value: undefined });
+            for (const waiter of waiters.splice(0)) {
+              waiter.resolve({ done: true, value: undefined });
+            }
             await unsubscribe?.();
             return { done: true, value: undefined };
           },

@@ -58,7 +58,6 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           .mount(projectId, bounds)
           .then(async () => {
             if (disposedRef.current) {
-              await browserBridge.unmount();
               return;
             }
             mountedRef.current = true;
@@ -110,8 +109,15 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         frameRef.current = null;
       }
       disposedRef.current = true;
+      const pendingMount = mountPromiseRef.current;
+      const shouldUnmount = mountedRef.current || pendingMount !== null;
       mountedRef.current = false;
-      void browserBridge.unmount();
+      void (async () => {
+        await pendingMount?.catch(() => {});
+        if (shouldUnmount) {
+          await browserBridge.unmount();
+        }
+      })();
     };
   }, [browserBridge, scheduleBoundsSync]);
 

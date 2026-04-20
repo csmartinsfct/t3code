@@ -102,10 +102,15 @@ type BrowserViewBounds = {
   readonly width: number;
   readonly height: number;
 };
+type EmbeddedBrowserCdpSubscription = {
+  readonly closeWithError: (error: unknown, code?: string) => void;
+};
 type EmbeddedBrowserViewState = {
   readonly projectId: string;
   readonly handle: string;
   readonly view: WebContentsView;
+  readonly subscriptions: Set<EmbeddedBrowserCdpSubscription>;
+  reattachRetryTimer: ReturnType<typeof setTimeout> | null;
   devtoolsOpen: boolean;
   mounted: boolean;
 };
@@ -1390,6 +1395,23 @@ function sendBrokerError(
   });
 }
 
+function writeBrokerNdjsonError(
+  response: HTTP.ServerResponse,
+  error: unknown,
+  code = "ELECTRON_CDP_BROKER_ERROR",
+): void {
+  if (response.destroyed || response.writableEnded) return;
+  response.write(
+    `${JSON.stringify({
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        code,
+      },
+    })}\n`,
+  );
+}
+
 function isAuthorizedBrowserCdpRequest(request: HTTP.IncomingMessage): boolean {
   return (
     browserCdpBrokerToken.length > 0 &&
@@ -1517,49 +1539,94 @@ function writeBrowserHostAssignment(projectId: string): void {
   }
 }
 
-function sendBrowserCdp(
+function isEmbeddedBrowserDestroyed(embedded: EmbeddedBrowserViewState): boolean {
+  return embedded.view.webContents.isDestroyed();
+}
+
+function failEmbeddedBrowserCdpSubscriptions(
+  embedded: EmbeddedBrowserViewState,
+  error: unknown,
+  code = "ELECTRON_CDP_BROKER_ERROR",
+): void {
+  for (const subscription of Array.from(embedded.subscriptions)) {
+    subscription.closeWithError(error, code);
+  }
+}
+
+async function sendBrowserCdp(
   embedded: EmbeddedBrowserViewState,
   method: string,
   params?: Record<string, unknown>,
-): void {
+): Promise<boolean> {
   try {
-    if (!embedded.view.webContents.debugger.isAttached()) return;
-    void embedded.view.webContents.debugger.sendCommand(method, params);
+    if (isEmbeddedBrowserDestroyed(embedded)) return false;
+    if (!embedded.view.webContents.debugger.isAttached()) return false;
+    await embedded.view.webContents.debugger.sendCommand(method, params);
+    return true;
   } catch (error) {
     console.warn("[desktop/browser] CDP command failed", {
       projectId: embedded.projectId,
       method,
       error,
     });
+    return false;
   }
 }
 
-function attachEmbeddedBrowserDebugger(embedded: EmbeddedBrowserViewState): void {
-  if (embedded.view.webContents.debugger.isAttached()) return;
+function clearEmbeddedBrowserDebuggerRetry(embedded: EmbeddedBrowserViewState): void {
+  if (!embedded.reattachRetryTimer) return;
+  clearTimeout(embedded.reattachRetryTimer);
+  embedded.reattachRetryTimer = null;
+}
+
+function attachEmbeddedBrowserDebugger(embedded: EmbeddedBrowserViewState): boolean {
+  if (isEmbeddedBrowserDestroyed(embedded)) return false;
+  if (embedded.view.webContents.debugger.isAttached()) {
+    embedded.devtoolsOpen = false;
+    clearEmbeddedBrowserDebuggerRetry(embedded);
+    return true;
+  }
   try {
     embedded.view.webContents.debugger.attach("1.3");
     embedded.devtoolsOpen = false;
+    clearEmbeddedBrowserDebuggerRetry(embedded);
+    return true;
   } catch (error) {
     embedded.devtoolsOpen = true;
     console.warn("[desktop/browser] failed to attach debugger", {
       projectId: embedded.projectId,
       error,
     });
+    return false;
   }
 }
 
-function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserViewState): void {
-  sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 20 });
-  sendBrowserCdp(embedded, "Runtime.evaluate", {
+function scheduleEmbeddedBrowserDebuggerRetry(embedded: EmbeddedBrowserViewState): void {
+  if (embedded.reattachRetryTimer || isEmbeddedBrowserDestroyed(embedded)) return;
+  embedded.reattachRetryTimer = setTimeout(() => {
+    embedded.reattachRetryTimer = null;
+    void resumeEmbeddedBrowser(embedded).then((attached) => {
+      if (!attached && !isEmbeddedBrowserDestroyed(embedded)) {
+        scheduleEmbeddedBrowserDebuggerRetry(embedded);
+      }
+    });
+  }, 1000);
+  embedded.reattachRetryTimer.unref?.();
+}
+
+async function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserViewState): Promise<void> {
+  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 20 });
+  await sendBrowserCdp(embedded, "Runtime.evaluate", {
     expression:
-      "for (const media of document.querySelectorAll('video,audio')) { try { media.pause(); } catch {} }",
-    awaitPromise: false,
+      "Promise.resolve().then(() => { for (const media of document.querySelectorAll('video,audio')) { try { media.pause(); } catch {} } })",
+    awaitPromise: true,
   });
 }
 
-function resumeEmbeddedBrowser(embedded: EmbeddedBrowserViewState): void {
-  attachEmbeddedBrowserDebugger(embedded);
-  sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
+async function resumeEmbeddedBrowser(embedded: EmbeddedBrowserViewState): Promise<boolean> {
+  if (!attachEmbeddedBrowserDebugger(embedded)) return false;
+  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
+  return true;
 }
 
 function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
@@ -1568,18 +1635,47 @@ function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow 
 
 function getActiveEmbeddedBrowser(window: BrowserWindow): EmbeddedBrowserViewState | null {
   const state = getEmbeddedBrowserWindowState(window);
-  return state.activeProjectId ? (state.viewsByProjectId.get(state.activeProjectId) ?? null) : null;
+  if (!state.activeProjectId) return null;
+  const embedded = state.viewsByProjectId.get(state.activeProjectId) ?? null;
+  if (embedded && isEmbeddedBrowserDestroyed(embedded)) {
+    cleanupEmbeddedBrowserView(embedded, state);
+    return null;
+  }
+  return embedded;
 }
 
 function cdpSessionId(sessionId: string): string | undefined {
   return sessionId === "root" ? undefined : sessionId;
 }
 
+function cleanupEmbeddedBrowserView(
+  embedded: EmbeddedBrowserViewState,
+  state?: EmbeddedBrowserWindowState,
+): void {
+  clearEmbeddedBrowserDebuggerRetry(embedded);
+  embedded.mounted = false;
+  failEmbeddedBrowserCdpSubscriptions(embedded, "Embedded browser view was destroyed");
+  if (embeddedBrowserViewsByProjectId.get(embedded.projectId) === embedded) {
+    embeddedBrowserViewsByProjectId.delete(embedded.projectId);
+  }
+  if (state?.viewsByProjectId.get(embedded.projectId) === embedded) {
+    state.viewsByProjectId.delete(embedded.projectId);
+  }
+  if (state?.activeProjectId === embedded.projectId) {
+    state.activeProjectId = null;
+  }
+}
+
 function getEmbeddedBrowserForCdp(viewId: string): EmbeddedBrowserViewState {
   const byProject = embeddedBrowserViewsByProjectId.get(viewId);
-  if (byProject) return byProject;
+  if (byProject && !isEmbeddedBrowserDestroyed(byProject)) return byProject;
+  if (byProject) embeddedBrowserViewsByProjectId.delete(viewId);
 
-  for (const embedded of embeddedBrowserViewsByProjectId.values()) {
+  for (const [projectId, embedded] of embeddedBrowserViewsByProjectId) {
+    if (isEmbeddedBrowserDestroyed(embedded)) {
+      embeddedBrowserViewsByProjectId.delete(projectId);
+      continue;
+    }
     if (embedded.handle === viewId) return embedded;
   }
 
@@ -1642,8 +1738,10 @@ function subscribeEmbeddedBrowserCdpEvents(
     connection: "keep-alive",
   });
 
+  let closed = false;
   const writeEvent = (event: unknown, method: string, params: unknown, sessionId?: string) => {
     void event;
+    if (closed) return;
     if (method !== request.eventName) return;
     if ((sessionId ?? undefined) !== expectedSessionId) return;
     response.write(
@@ -1658,14 +1756,29 @@ function subscribeEmbeddedBrowserCdpEvents(
     );
   };
 
+  let subscription: EmbeddedBrowserCdpSubscription | null = null;
   const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (subscription) embedded.subscriptions.delete(subscription);
     embedded.view.webContents.debugger.off("message", writeEvent);
   };
+  const closeWithError = (error: unknown, code = "ELECTRON_CDP_BROKER_ERROR") => {
+    if (closed || response.destroyed || response.writableEnded) return;
+    writeBrokerNdjsonError(response, error, code);
+    response.end();
+    cleanup();
+  };
+  subscription = { closeWithError };
+  embedded.subscriptions.add(subscription);
   embedded.view.webContents.debugger.on("message", writeEvent);
-  response.on("close", cleanup);
+  response.once("close", cleanup);
 }
 
-function createEmbeddedBrowserView(projectId: string): EmbeddedBrowserViewState {
+function createEmbeddedBrowserView(
+  projectId: string,
+  state: EmbeddedBrowserWindowState,
+): EmbeddedBrowserViewState {
   const partition = `persist:${projectId}`;
   const view = new WebContentsView({
     webPreferences: {
@@ -1679,6 +1792,8 @@ function createEmbeddedBrowserView(projectId: string): EmbeddedBrowserViewState 
     projectId,
     handle: `electron-wc:${view.webContents.id}`,
     view,
+    subscriptions: new Set(),
+    reattachRetryTimer: null,
     devtoolsOpen: false,
     mounted: false,
   };
@@ -1689,19 +1804,33 @@ function createEmbeddedBrowserView(projectId: string): EmbeddedBrowserViewState 
       projectId,
       reason,
     });
+    failEmbeddedBrowserCdpSubscriptions(
+      embedded,
+      new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE),
+      "ELECTRON_CDP_DEVTOOLS_OPEN",
+    );
   });
   view.webContents.on("devtools-closed", () => {
-    attachEmbeddedBrowserDebugger(embedded);
-    if (!embedded.devtoolsOpen) resumeEmbeddedBrowser(embedded);
+    void resumeEmbeddedBrowser(embedded).then((attached) => {
+      if (!attached) scheduleEmbeddedBrowserDebuggerRetry(embedded);
+    });
+  });
+  view.webContents.on("did-finish-load", () => {
+    if (embedded.devtoolsOpen) {
+      void resumeEmbeddedBrowser(embedded);
+    }
   });
   view.webContents.on("destroyed", () => {
-    if (embeddedBrowserViewsByProjectId.get(projectId) === embedded) {
-      embeddedBrowserViewsByProjectId.delete(projectId);
-    }
+    cleanupEmbeddedBrowserView(embedded, state);
   });
 
   attachEmbeddedBrowserDebugger(embedded);
-  void view.webContents.loadURL("about:blank");
+  void view.webContents.loadURL("about:blank").catch((error) => {
+    console.warn("[desktop/browser] failed to load embedded browser bootstrap page", {
+      projectId,
+      error,
+    });
+  });
   return embedded;
 }
 
@@ -1730,18 +1859,22 @@ function registerIpcHandlers(): void {
       if (previousActive?.mounted) {
         window.contentView.removeChildView(previousActive.view);
         previousActive.mounted = false;
-        pauseAndThrottleEmbeddedBrowser(previousActive);
+        await pauseAndThrottleEmbeddedBrowser(previousActive);
       }
 
       let embedded = state.viewsByProjectId.get(projectId);
+      if (embedded && isEmbeddedBrowserDestroyed(embedded)) {
+        cleanupEmbeddedBrowserView(embedded, state);
+        embedded = undefined;
+      }
       if (!embedded) {
-        embedded = createEmbeddedBrowserView(projectId);
+        embedded = createEmbeddedBrowserView(projectId, state);
         state.viewsByProjectId.set(projectId, embedded);
         embeddedBrowserViewsByProjectId.set(projectId, embedded);
         writeBrowserHostAssignment(projectId);
       }
 
-      resumeEmbeddedBrowser(embedded);
+      await resumeEmbeddedBrowser(embedded);
       embedded.view.setBounds(bounds);
       if (!embedded.mounted) {
         window.contentView.addChildView(embedded.view);
@@ -1769,7 +1902,7 @@ function registerIpcHandlers(): void {
 
     window.contentView.removeChildView(embedded.view);
     embedded.mounted = false;
-    pauseAndThrottleEmbeddedBrowser(embedded);
+    await pauseAndThrottleEmbeddedBrowser(embedded);
   });
 
   ipcMain.removeHandler(BROWSER_NAVIGATE_CHANNEL);
