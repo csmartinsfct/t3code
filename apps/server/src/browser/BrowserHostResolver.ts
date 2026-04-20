@@ -98,6 +98,18 @@ async function readPersistedHosts(
   return hosts;
 }
 
+async function readPersistedHost(
+  stateDir: string,
+  projectId: ProjectId,
+): Promise<PersistedBrowserHostKind | undefined> {
+  try {
+    return parseHostJson(await fs.readFile(hostJsonPath(stateDir, projectId), "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw err;
+  }
+}
+
 async function writeHostJson(
   stateDir: string,
   projectId: ProjectId,
@@ -113,6 +125,7 @@ interface CreateBrowserHostResolverOptions {
   readonly browser: BrowserManagerServiceShape;
   readonly descriptors: ReadonlyMap<BrowserHostToolName, PlaywrightCommandDescriptor>;
   readonly electronBroker?: CdpBroker;
+  readonly electronBrokerCacheKey?: string;
 }
 
 export async function createBrowserHostResolver({
@@ -138,12 +151,27 @@ export async function createBrowserHostResolver({
   const electronHostOptions = electronBroker === undefined ? undefined : { broker: electronBroker };
 
   const get: BrowserHostResolverShape["get"] = (projectId) =>
-    Effect.try({
-      try: () => {
-        const persisted = state.persisted.get(projectId);
+    Effect.tryPromise({
+      try: async () => {
+        let persisted = state.persisted.get(projectId);
+        if (!persisted) {
+          persisted = await readPersistedHost(stateDir, projectId);
+          if (persisted) {
+            const persistedHost = persisted;
+            updateState((current) => {
+              const nextPersisted = new Map(current.persisted);
+              nextPersisted.set(projectId, persistedHost);
+              return { ...current, persisted: nextPersisted };
+            });
+          }
+        }
         if (persisted !== "electron") return makePlaywrightHost(projectId);
 
-        if (state.reannounceInProgress && !state.announcedElectronProjects.has(projectId)) {
+        if (
+          !electronBroker &&
+          state.reannounceInProgress &&
+          !state.announcedElectronProjects.has(projectId)
+        ) {
           throw new BrowserHostResolverError({
             message:
               "Embedded browser host is recovering after a server restart; retry once the desktop process re-announces active browser views.",
@@ -228,13 +256,14 @@ const cachedResolvers = new Map<string, Promise<BrowserHostResolverShape>>();
 export function getCachedBrowserHostResolver(
   options: CreateBrowserHostResolverOptions,
 ): Promise<BrowserHostResolverShape> {
-  const existing = cachedResolvers.get(options.stateDir);
+  const cacheKey = `${options.stateDir}\0${options.electronBrokerCacheKey ?? "no-electron-broker"}`;
+  const existing = cachedResolvers.get(cacheKey);
   if (existing) return existing;
   const resolver = createBrowserHostResolver(options).catch((cause: unknown) => {
-    cachedResolvers.delete(options.stateDir);
+    cachedResolvers.delete(cacheKey);
     throw cause;
   });
-  cachedResolvers.set(options.stateDir, resolver);
+  cachedResolvers.set(cacheKey, resolver);
   return resolver;
 }
 

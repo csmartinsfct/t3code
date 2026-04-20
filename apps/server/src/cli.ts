@@ -27,6 +27,8 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   authToken: Schema.optional(Schema.String),
+  electronCdpBrokerUrl: Schema.optional(Schema.String),
+  electronCdpBrokerToken: Schema.optional(Schema.String),
   autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
@@ -119,6 +121,14 @@ const EnvServerConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   authToken: Config.string("T3CODE_AUTH_TOKEN").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  electronCdpBrokerUrl: Config.string("T3CODE_ELECTRON_CDP_BROKER_URL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  electronCdpBrokerToken: Config.string("T3CODE_ELECTRON_CDP_BROKER_TOKEN").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -254,6 +264,22 @@ export const resolveServerConfig = (
         ),
       ),
     );
+    const electronCdpBrokerUrl = Option.getOrUndefined(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(env.electronCdpBrokerUrl),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.electronCdpBrokerUrl),
+        ),
+      ),
+    );
+    const electronCdpBrokerToken = Option.getOrUndefined(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(env.electronCdpBrokerToken),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.electronCdpBrokerToken),
+        ),
+      ),
+    );
     const autoBootstrapProjectFromCwd = resolveBooleanFlag(
       flags.autoBootstrapProjectFromCwd,
       Option.getOrElse(
@@ -325,6 +351,8 @@ export const resolveServerConfig = (
       devUrl,
       noBrowser,
       authToken,
+      electronCdpBrokerUrl,
+      electronCdpBrokerToken,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
     };

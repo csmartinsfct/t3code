@@ -16,13 +16,6 @@ interface RuntimeEvaluateResponse<T> {
   };
 }
 
-interface LayoutMetricsResponse {
-  cssVisualViewport?: {
-    clientWidth?: number;
-    clientHeight?: number;
-  };
-}
-
 interface ResolveNodeResponse {
   object: {
     objectId?: string;
@@ -115,11 +108,16 @@ export class ElectronWebContentsHost {
     await this.client.sendCommand("Input.insertText", { text });
   }
 
-  async scroll(deltaY: number, deltaX = 0, point?: { x: number; y: number }): Promise<void> {
-    void point;
-    await this.evaluate<void>(
-      `window.scrollBy(${JSON.stringify(deltaX)}, ${JSON.stringify(deltaY)})`,
-    );
+  async scroll(deltaY: number, deltaX = 0): Promise<void> {
+    await this.client.sendCommand("Runtime.evaluate", {
+      expression: `window.scrollBy(${JSON.stringify({
+        left: deltaX,
+        top: deltaY,
+        behavior: "instant",
+      })})`,
+      awaitPromise: false,
+      returnByValue: true,
+    });
   }
 
   async captureScreenshot(): Promise<ScreenshotResult> {
@@ -168,14 +166,6 @@ export class ElectronWebContentsHost {
     } catch {
       return process.platform === "darwin" ? 4 : 2;
     }
-  }
-
-  private async viewportCenter(): Promise<{ x: number; y: number }> {
-    const metrics = await this.client.sendCommand<LayoutMetricsResponse>("Page.getLayoutMetrics");
-    return {
-      x: (metrics.cssVisualViewport?.clientWidth ?? 0) / 2,
-      y: (metrics.cssVisualViewport?.clientHeight ?? 0) / 2,
-    };
   }
 
   private async centerPoint(resolved: ResolvedRef): Promise<{ x: number; y: number }> {

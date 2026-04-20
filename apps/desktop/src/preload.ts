@@ -13,6 +13,11 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const BROWSER_MOUNT_CHANNEL = "browser:mount";
+const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
+const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
+const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -49,5 +54,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
     };
+  },
+  browser: {
+    mount: (projectId, bounds) => ipcRenderer.invoke(BROWSER_MOUNT_CHANNEL, projectId, bounds),
+    setBounds: (bounds) => ipcRenderer.invoke(BROWSER_SET_BOUNDS_CHANNEL, bounds),
+    unmount: () => ipcRenderer.invoke(BROWSER_UNMOUNT_CHANNEL),
+    navigate: (url) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url),
+    getUrl: () => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL),
   },
 } satisfies DesktopBridge);

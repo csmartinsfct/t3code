@@ -4,9 +4,9 @@ Ticket: T3CO-338
 
 ## Decision
 
-Use **Option beta: Electron `utilityProcess.fork` plus `MessageChannelMain`** for the long-lived main-to-server CDP broker.
+Use an **Electron-main-owned loopback HTTP broker** for the production CDP bridge shipped with the first embedded-browser UI.
 
-Keep the existing `--bootstrap-fd 3` pipe as a one-shot startup envelope only. Do not extend it into CDP traffic.
+Keep the existing `--bootstrap-fd 3` pipe as a one-shot startup envelope only. Do not extend it into CDP traffic. The bootstrap envelope now carries the broker URL and bearer token to the Bun server child.
 
 ## Why
 
@@ -14,13 +14,18 @@ The CDP bridge is not just request/response navigation. It needs request correla
 
 A fresh fd pair with length-prefixed JSON is technically viable and fast, but it makes T3 own the transport protocol details permanently: framing, half-open pipe handling, flow control, listener fanout, and child restart recovery. That is acceptable for a narrow daemon but not for the browser broker that will sit between Electron-owned `WebContentsView` instances and server-side `/api/browser` tools.
 
-`utilityProcess.fork` plus `MessageChannelMain` is a larger launch refactor, but it is the more durable Electron-native substrate:
+`utilityProcess.fork` plus `MessageChannelMain` remains a durable Electron-native substrate, but it requires replacing the current Bun child-process server launch. That refactor is larger than the browser UI wiring needed for Phase 3, and it risks coupling this browser milestone to unrelated server lifecycle behavior.
 
-- structured messages remove bespoke length framing;
-- message ports give an explicit, long-lived channel separate from bootstrap;
-- Electron owns port lifecycle semantics across the main/utility boundary;
-- the model fits a `CdpBroker` with correlated `send`, cancellable `subscribe`, and future `attachTarget`;
-- restart recovery can be expressed as a utility-process lifecycle: main re-announces active views after the server utility process is replaced.
+The loopback broker keeps the current Bun child process model intact while still avoiding bespoke fd framing:
+
+- Electron main listens on `127.0.0.1` with a random bearer token generated at startup;
+- `--bootstrap-fd 3` delivers only `{ electronCdpBrokerUrl, electronCdpBrokerToken }`;
+- server-side `/api/browser` builds a `CdpBroker` transport from that URL/token;
+- `send` and `attachTarget` are JSON POST calls;
+- `subscribe` is an NDJSON streaming POST whose response is cancelled by aborting the request;
+- the broker still exposes the `CdpBroker` shape with correlated `send`, cancellable `subscribe`, and future `attachTarget`.
+
+The future `utilityProcess` refactor can replace the HTTP transport under the same server-side `CdpBrokerTransport` interface if the launch model changes later.
 
 ## Existing Bootstrap Channel
 
@@ -45,7 +50,7 @@ This shows Option alpha has enough raw throughput for CDP-sized traffic. The dec
 
 ## Consequences
 
-Phase 2 should introduce the broker as an Electron-main-owned service with a server-side client facade. The initial implementation can expose only the narrow primitives needed by the day-1 native host, but the protocol should carry:
+Phase 2 introduced the broker as an Electron-main-owned service with a server-side client facade. The initial implementation exposes only the narrow primitives needed by the day-1 native host, but the protocol should carry:
 
 - correlation ids;
 - `viewId` and CDP `sessionId`;
@@ -54,4 +59,4 @@ Phase 2 should introduce the broker as an Electron-main-owned service with a ser
 - subscription ids with explicit unsubscribe;
 - a queue/backpressure signal for high-volume events.
 
-The launch refactor should be tested before implementing broad tool parity, because it is the foundation for backend restart recovery.
+If T3 later moves the backend from `ChildProcess.spawn(Bun)` to `utilityProcess`, the replacement transport should be tested before adding high-volume DevTools or extension-worker subscriptions.

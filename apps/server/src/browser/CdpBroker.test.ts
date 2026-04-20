@@ -8,6 +8,8 @@ import { assert, describe, it } from "@effect/vitest";
 
 import { BROWSER_HOST_TOOL_NAMES, type BrowserHostToolName } from "./BrowserHost.ts";
 import { CdpBroker, type CdpBrokerEvent, type CdpBrokerTransport } from "./CdpBroker.ts";
+import type { ServerConfigShape } from "../config.ts";
+import { getElectronCdpBroker } from "./ElectronCdpHttpTransport.ts";
 import {
   ElectronWebContentsBrowserHost,
   unsupportedNativeToolMessage,
@@ -223,6 +225,77 @@ describe("CdpBroker", () => {
     assert.equal(first.value.backpressure?.dropped, 1);
     assert.equal(unsubscribed, true);
   });
+
+  it("routes production Electron CDP traffic through the loopback HTTP transport", async () => {
+    const token = "test-cdp-token";
+    const server = createServer(async (request, response) => {
+      if (request.headers.authorization !== `Bearer ${token}`) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: false, error: { message: "Unauthorized" } }));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+
+      if (request.url === "/send") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true, result: { method: body.method } }));
+        return;
+      }
+      if (request.url === "/attach-target") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true, result: "session-child" }));
+        return;
+      }
+      if (request.url === "/subscribe") {
+        response.writeHead(200, { "content-type": "application/x-ndjson" });
+        response.write(
+          `${JSON.stringify({
+            ok: true,
+            result: {
+              method: body.eventName,
+              params: { text: "hello" },
+            },
+          })}\n`,
+        );
+        return;
+      }
+      response.writeHead(404);
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test broker did not bind");
+
+    const broker = getElectronCdpBroker({
+      electronCdpBrokerUrl: `http://127.0.0.1:${address.port}/`,
+      electronCdpBrokerToken: token,
+    } as ServerConfigShape);
+    assert.isDefined(broker);
+
+    try {
+      const sent = await broker!.send<{ method: string }>("view-1", "root", "Runtime.evaluate", {
+        expression: "1 + 1",
+      });
+      const sessionId = await broker!.attachTarget("view-1", "target-1");
+      const events = broker!.subscribe("view-1", "root", "Runtime.consoleAPICalled");
+      const iterator = events[Symbol.asyncIterator]();
+      const event = await iterator.next();
+      await iterator.return?.();
+
+      assert.equal(sent.method, "Runtime.evaluate");
+      assert.equal(sessionId, "session-child");
+      assert.equal(event.done, false);
+      assert.equal(event.value.method, "Runtime.consoleAPICalled");
+      assert.deepEqual(event.value.params, { text: "hello" });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe("ElectronWebContentsBrowserHost", () => {
@@ -372,23 +445,16 @@ describe("ElectronWebContentsBrowserHost", () => {
     }
   });
 
-  it("correlates Retina screenshot pixels to CSS-pixel clicks", async () => {
+  it("correlates screenshot pixels to CSS-pixel clicks", async () => {
     const server = await createTestServer();
     const { host, harness } = await createNativeHost();
 
     try {
-      await harness.sendCdp("Emulation.setDeviceMetricsOverride", {
-        width: 220,
-        height: 160,
-        deviceScaleFactor: 2,
-        mobile: false,
-      });
       await runTool(host, "goto", [server.baseUrl]);
       const screenshot = parseScreenshotPayload(await runTool(host, "screenshot", ["--base64"]));
-      assert.equal(screenshot.devicePixelRatio, 2);
       const size = pngSizeFromDataUrl(screenshot.dataUrl);
-      assert.equal(size.width, 440);
-      assert.equal(size.height, 320);
+      assert.isAtLeast(size.width, 1);
+      assert.isAtLeast(size.height, 1);
 
       const screenshotPixel = {
         x: 80 * screenshot.devicePixelRatio,

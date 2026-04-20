@@ -11,6 +11,7 @@ import {
 import { ServerConfig } from "../config";
 import { buildCommandHandlers, playwrightCommandDescriptors, toolDefinitions } from "./handlers";
 import { getCachedBrowserHostResolver } from "./BrowserHostResolver";
+import { electronCdpBrokerCacheKey, getElectronCdpBroker } from "./ElectronCdpHttpTransport";
 import { BrowserManagerService } from "./Services/BrowserManager";
 import type { BrowserInstance } from "./Services/BrowserManager";
 
@@ -65,12 +66,16 @@ const handlePost = Effect.gen(function* () {
 
   const config = yield* ServerConfig;
   const browser = yield* BrowserManagerService;
+  const electronBroker = getElectronCdpBroker(config);
+  const electronBrokerCacheKey = electronCdpBrokerCacheKey(config);
   const resolver = yield* Effect.tryPromise({
     try: () =>
       getCachedBrowserHostResolver({
         stateDir: config.stateDir,
         browser,
         descriptors: playwrightCommandDescriptors,
+        ...(electronBroker ? { electronBroker } : {}),
+        ...(electronBrokerCacheKey ? { electronBrokerCacheKey } : {}),
       }),
     catch: (cause) =>
       new BrowserHttpError({

@@ -211,6 +211,21 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
+export interface BrowserViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DesktopBrowserBridge {
+  mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
+  setBounds: (bounds: BrowserViewBounds) => Promise<void>;
+  unmount: () => Promise<void>;
+  navigate: (url: string) => Promise<void>;
+  getUrl: () => Promise<string>;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -227,6 +242,7 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  browser: DesktopBrowserBridge;
 }
 
 export interface NativeApi {

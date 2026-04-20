@@ -63,8 +63,14 @@ const electronPath = resolveElectronPath();
 
 const HARNESS_MAIN_SOURCE = `
 import { app, BrowserWindow, WebContentsView } from "electron";
+import { mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 
+if (process.env.T3_ELECTRON_HARNESS_USER_DATA) {
+  const userData = process.env.T3_ELECTRON_HARNESS_USER_DATA;
+  mkdirSync(userData, { recursive: true });
+  app.setPath("userData", userData);
+}
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 
@@ -171,6 +177,10 @@ async function sendCdpCommand(sessionId, method, params) {
     return { success: true };
   }
   const { target } = viewForSession(sessionId);
+  if (method === "Page.printToPDF") {
+    const buffer = await target.webContents.printToPDF({ printBackground: true });
+    return { data: buffer.toString("base64") };
+  }
   return target.webContents.debugger.sendCommand(method, params);
 }
 
@@ -218,23 +228,26 @@ async function handle(message) {
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
+  let message;
   try {
-    const message = JSON.parse(line);
+    message = JSON.parse(line);
     const result = await handle(message);
     send({ id: message.id, ok: true, result });
   } catch (error) {
     send({
-      id: message.id,
+      id: message?.id,
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
   }
 });
 
-ensureView().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-  app.quit();
+setImmediate(() => {
+  ensureView().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+    app.quit();
+  });
 });
 `;
 
@@ -253,12 +266,15 @@ export async function createElectronWebContentsHarness(): Promise<ElectronWebCon
   const dir = await mkdtemp(join(tmpdir(), "t3-electron-wc-harness-"));
   const entrypoint = join(dir, "main.mjs");
   await writeFile(entrypoint, HARNESS_MAIN_SOURCE, "utf8");
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+    T3_ELECTRON_HARNESS_USER_DATA: join(dir, "userData"),
+  };
+  if (process.platform === "darwin") delete env.DISPLAY;
 
   const child = spawn(electronPath, [entrypoint], {
-    env: {
-      ...process.env,
-      ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-    },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
 

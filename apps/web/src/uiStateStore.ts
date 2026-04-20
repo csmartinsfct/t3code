@@ -19,7 +19,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export type ViewMode = "chat" | "management";
-export type BoardViewMode = "cards" | "list";
+export type BoardViewMode = "cards" | "list" | "browser";
 
 export interface BoardFilters {
   priorityFilter: string[];
@@ -169,7 +169,9 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
   persistedViewMode =
     parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
   persistedBoardViewMode =
-    parsed.boardViewMode === "cards" || parsed.boardViewMode === "list"
+    parsed.boardViewMode === "cards" ||
+    parsed.boardViewMode === "list" ||
+    parsed.boardViewMode === "browser"
       ? parsed.boardViewMode
       : "cards";
   persistedBoardFiltersByProjectId = {};

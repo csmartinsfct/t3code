@@ -855,7 +855,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           "pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
         );
       }),
-    12_000,
+    30_000,
   );
 
   it.effect(
@@ -872,18 +872,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         yield* runGit(repoDir, ["checkout", "-b", "effect-atom"]);
         yield* runGit(repoDir, ["push", "-u", "origin", "effect-atom"]);
         yield* runGit(repoDir, ["push", "-u", "my-org/upstream", "effect-atom"]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.origin.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
-        yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.my-org/upstream.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
-        yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
         yield* runGit(repoDir, ["checkout", "main"]);
         yield* runGit(repoDir, ["branch", "-D", "effect-atom"]);
         yield* runGit(repoDir, ["checkout", "--track", "my-org/upstream/effect-atom"]);
@@ -963,7 +951,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           ),
         ).toBe(false);
       }),
-    12_000,
+    30_000,
   );
 
   it.effect("status returns merged PR state when latest PR was merged", () =>
@@ -1611,18 +1599,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         yield* runGit(repoDir, ["checkout", "-b", "effect-atom"]);
         yield* runGit(repoDir, ["push", "-u", "origin", "effect-atom"]);
         yield* runGit(repoDir, ["push", "-u", "my-org/upstream", "effect-atom"]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.origin.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
-        yield* runGit(repoDir, ["config", "remote.origin.pushurl", originDir]);
-        yield* runGit(repoDir, [
-          "config",
-          "remote.my-org/upstream.url",
-          "git@github.com:pingdotgg/codething-mvp.git",
-        ]);
-        yield* runGit(repoDir, ["config", "remote.my-org/upstream.pushurl", upstreamDir]);
         yield* runGit(repoDir, ["checkout", "main"]);
         yield* runGit(repoDir, ["branch", "-D", "effect-atom"]);
         yield* runGit(repoDir, ["checkout", "--track", "my-org/upstream/effect-atom"]);

@@ -1,8 +1,10 @@
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
+import * as HTTP from "node:http";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import type { AddressInfo } from "node:net";
 
 import {
   app,
@@ -13,7 +15,9 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
+  session,
   shell,
+  WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
@@ -62,6 +66,11 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const BROWSER_MOUNT_CHANNEL = "browser:mount";
+const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
+const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
+const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
@@ -87,6 +96,41 @@ const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
+type BrowserViewBounds = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+type EmbeddedBrowserViewState = {
+  readonly projectId: string;
+  readonly handle: string;
+  readonly view: WebContentsView;
+  devtoolsOpen: boolean;
+  mounted: boolean;
+};
+type EmbeddedBrowserWindowState = {
+  readonly viewsByProjectId: Map<string, EmbeddedBrowserViewState>;
+  activeProjectId: string | null;
+};
+type BrowserCdpSendRequest = {
+  readonly id: string;
+  readonly viewId: string;
+  readonly sessionId: string;
+  readonly method: string;
+  readonly params?: Record<string, unknown>;
+};
+type BrowserCdpSubscribeRequest = {
+  readonly id: string;
+  readonly viewId: string;
+  readonly sessionId: string;
+  readonly eventName: string;
+};
+type BrowserCdpAttachTargetRequest = {
+  readonly id: string;
+  readonly viewId: string;
+  readonly targetId: string;
+};
 type LinuxDesktopNamedApp = Electron.App & {
   setDesktopName?: (desktopName: string) => void;
 };
@@ -96,6 +140,9 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
+let browserCdpBrokerServer: HTTP.Server | null = null;
+let browserCdpBrokerUrl: string | undefined;
+let browserCdpBrokerToken = "";
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -104,6 +151,10 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
+const embeddedBrowserStateByWindow = new WeakMap<BrowserWindow, EmbeddedBrowserWindowState>();
+const embeddedBrowserViewsByProjectId = new Map<string, EmbeddedBrowserViewState>();
+const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
+  "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
 let backendObservabilitySettings: {
   readonly otlpTracesUrl: string | undefined;
   readonly otlpMetricsUrl: string | undefined;
@@ -1058,6 +1109,74 @@ function scheduleBackendRestart(reason: string): void {
   }, delayMs);
 }
 
+async function handleBrowserCdpBrokerRequest(
+  request: HTTP.IncomingMessage,
+  response: HTTP.ServerResponse,
+): Promise<void> {
+  if (!isAuthorizedBrowserCdpRequest(request)) {
+    sendBrokerError(response, 401, "Unauthorized", "ELECTRON_CDP_UNAUTHORIZED");
+    return;
+  }
+
+  if (request.method !== "POST") {
+    sendBrokerError(response, 405, "Method not allowed", "ELECTRON_CDP_METHOD_NOT_ALLOWED");
+    return;
+  }
+
+  try {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const body = await readBrokerJsonBody(request);
+    if (url.pathname === "/send") {
+      const result = await sendEmbeddedBrowserCdpCommand(parseCdpSendRequest(body));
+      sendBrokerSuccess(response, result);
+      return;
+    }
+    if (url.pathname === "/attach-target") {
+      const sessionId = await attachEmbeddedBrowserCdpTarget(parseCdpAttachTargetRequest(body));
+      sendBrokerSuccess(response, sessionId);
+      return;
+    }
+    if (url.pathname === "/subscribe") {
+      subscribeEmbeddedBrowserCdpEvents(response, parseCdpSubscribeRequest(body));
+      return;
+    }
+    sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sendBrokerError(
+      response,
+      message === EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE ? 409 : 400,
+      error,
+      message === EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE
+        ? "ELECTRON_CDP_DEVTOOLS_OPEN"
+        : "ELECTRON_CDP_REQUEST_FAILED",
+    );
+  }
+}
+
+async function startBrowserCdpBrokerServer(): Promise<void> {
+  if (browserCdpBrokerServer) return;
+  browserCdpBrokerToken = Crypto.randomBytes(24).toString("hex");
+  const server = HTTP.createServer((request, response) => {
+    void handleBrowserCdpBrokerRequest(request, response);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("CDP broker failed to bind a loopback port");
+  }
+  browserCdpBrokerServer = server;
+  browserCdpBrokerUrl = `http://127.0.0.1:${(address as AddressInfo).port}/`;
+  console.info(`[desktop/browser] CDP broker listening at ${browserCdpBrokerUrl}`);
+}
+
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
 
@@ -1097,6 +1216,12 @@ function startBackend(): void {
         port: backendPort,
         t3Home: BASE_DIR,
         authToken: backendAuthToken,
+        ...(browserCdpBrokerUrl && browserCdpBrokerToken
+          ? {
+              electronCdpBrokerUrl: browserCdpBrokerUrl,
+              electronCdpBrokerToken: browserCdpBrokerToken,
+            }
+          : {}),
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
           : {}),
@@ -1175,6 +1300,13 @@ function stopBackend(): void {
   }
 }
 
+function stopBrowserCdpBrokerServer(): void {
+  browserCdpBrokerUrl = undefined;
+  browserCdpBrokerToken = "";
+  browserCdpBrokerServer?.close();
+  browserCdpBrokerServer = null;
+}
+
 async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   if (restartTimer) {
     clearTimeout(restartTimer);
@@ -1227,10 +1359,435 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   });
 }
 
+function sendBrokerJson(
+  response: HTTP.ServerResponse,
+  status: number,
+  payload: Record<string, unknown>,
+): void {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(JSON.stringify(payload));
+}
+
+function sendBrokerSuccess(response: HTTP.ServerResponse, result: unknown): void {
+  sendBrokerJson(response, 200, { ok: true, result });
+}
+
+function sendBrokerError(
+  response: HTTP.ServerResponse,
+  status: number,
+  error: unknown,
+  code = "ELECTRON_CDP_BROKER_ERROR",
+): void {
+  sendBrokerJson(response, status, {
+    ok: false,
+    error: {
+      message: error instanceof Error ? error.message : String(error),
+      code,
+    },
+  });
+}
+
+function isAuthorizedBrowserCdpRequest(request: HTTP.IncomingMessage): boolean {
+  return (
+    browserCdpBrokerToken.length > 0 &&
+    request.headers.authorization === `Bearer ${browserCdpBrokerToken}`
+  );
+}
+
+async function readBrokerJsonBody(request: HTTP.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseCdpSendRequest(value: unknown): BrowserCdpSendRequest {
+  if (!isRecord(value)) throw new Error("invalid CDP send request");
+  const { id, viewId, sessionId, method, params } = value;
+  if (
+    typeof id !== "string" ||
+    typeof viewId !== "string" ||
+    typeof sessionId !== "string" ||
+    typeof method !== "string"
+  ) {
+    throw new Error("invalid CDP send request");
+  }
+  if (params !== undefined && !isRecord(params)) throw new Error("invalid CDP command params");
+  return {
+    id,
+    viewId,
+    sessionId,
+    method,
+    ...(params === undefined ? {} : { params }),
+  };
+}
+
+function parseCdpSubscribeRequest(value: unknown): BrowserCdpSubscribeRequest {
+  if (!isRecord(value)) throw new Error("invalid CDP subscribe request");
+  const { id, viewId, sessionId, eventName } = value;
+  if (
+    typeof id !== "string" ||
+    typeof viewId !== "string" ||
+    typeof sessionId !== "string" ||
+    typeof eventName !== "string"
+  ) {
+    throw new Error("invalid CDP subscribe request");
+  }
+  return { id, viewId, sessionId, eventName };
+}
+
+function parseCdpAttachTargetRequest(value: unknown): BrowserCdpAttachTargetRequest {
+  if (!isRecord(value)) throw new Error("invalid CDP attachTarget request");
+  const { id, viewId, targetId } = value;
+  if (typeof id !== "string" || typeof viewId !== "string" || typeof targetId !== "string") {
+    throw new Error("invalid CDP attachTarget request");
+  }
+  return { id, viewId, targetId };
+}
+
+function getEmbeddedBrowserWindowState(window: BrowserWindow): EmbeddedBrowserWindowState {
+  const existing = embeddedBrowserStateByWindow.get(window);
+  if (existing) return existing;
+  const state: EmbeddedBrowserWindowState = {
+    viewsByProjectId: new Map(),
+    activeProjectId: null,
+  };
+  embeddedBrowserStateByWindow.set(window, state);
+  return state;
+}
+
+function normalizeProjectId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9_.:-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeBrowserBounds(value: unknown): BrowserViewBounds | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const x = Number(record.x);
+  const y = Number(record.y);
+  const width = Number(record.width);
+  const height = Number(record.height);
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  return {
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+    width: Math.max(0, Math.round(width)),
+    height: Math.max(0, Math.round(height)),
+  };
+}
+
+function normalizeBrowserUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const candidate = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(candidate);
+    return ["about:", "http:", "https:"].includes(parsed.protocol) ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function browserHostJsonPath(projectId: string): string {
+  return Path.join(STATE_DIR, "browser", projectId, "host.json");
+}
+
+function writeBrowserHostAssignment(projectId: string): void {
+  try {
+    const file = browserHostJsonPath(projectId);
+    FS.mkdirSync(Path.dirname(file), { recursive: true });
+    FS.writeFileSync(file, `${JSON.stringify({ host: "electron" }, null, 2)}\n`, "utf8");
+  } catch (error) {
+    console.warn("[desktop/browser] failed to persist embedded browser host", {
+      projectId,
+      error,
+    });
+  }
+}
+
+function sendBrowserCdp(
+  embedded: EmbeddedBrowserViewState,
+  method: string,
+  params?: Record<string, unknown>,
+): void {
+  try {
+    if (!embedded.view.webContents.debugger.isAttached()) return;
+    void embedded.view.webContents.debugger.sendCommand(method, params);
+  } catch (error) {
+    console.warn("[desktop/browser] CDP command failed", {
+      projectId: embedded.projectId,
+      method,
+      error,
+    });
+  }
+}
+
+function attachEmbeddedBrowserDebugger(embedded: EmbeddedBrowserViewState): void {
+  if (embedded.view.webContents.debugger.isAttached()) return;
+  try {
+    embedded.view.webContents.debugger.attach("1.3");
+    embedded.devtoolsOpen = false;
+  } catch (error) {
+    embedded.devtoolsOpen = true;
+    console.warn("[desktop/browser] failed to attach debugger", {
+      projectId: embedded.projectId,
+      error,
+    });
+  }
+}
+
+function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserViewState): void {
+  sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 20 });
+  sendBrowserCdp(embedded, "Runtime.evaluate", {
+    expression:
+      "for (const media of document.querySelectorAll('video,audio')) { try { media.pause(); } catch {} }",
+    awaitPromise: false,
+  });
+}
+
+function resumeEmbeddedBrowser(embedded: EmbeddedBrowserViewState): void {
+  attachEmbeddedBrowserDebugger(embedded);
+  sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
+}
+
+function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+}
+
+function getActiveEmbeddedBrowser(window: BrowserWindow): EmbeddedBrowserViewState | null {
+  const state = getEmbeddedBrowserWindowState(window);
+  return state.activeProjectId ? (state.viewsByProjectId.get(state.activeProjectId) ?? null) : null;
+}
+
+function cdpSessionId(sessionId: string): string | undefined {
+  return sessionId === "root" ? undefined : sessionId;
+}
+
+function getEmbeddedBrowserForCdp(viewId: string): EmbeddedBrowserViewState {
+  const byProject = embeddedBrowserViewsByProjectId.get(viewId);
+  if (byProject) return byProject;
+
+  for (const embedded of embeddedBrowserViewsByProjectId.values()) {
+    if (embedded.handle === viewId) return embedded;
+  }
+
+  throw new Error(
+    "Embedded browser host is not connected yet; retry once the desktop process re-announces active browser views.",
+  );
+}
+
+function assertEmbeddedBrowserDebuggerAvailable(embedded: EmbeddedBrowserViewState): void {
+  if (embedded.devtoolsOpen || !embedded.view.webContents.debugger.isAttached()) {
+    throw new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE);
+  }
+}
+
+async function sendEmbeddedBrowserCdpCommand(request: BrowserCdpSendRequest): Promise<unknown> {
+  const embedded = getEmbeddedBrowserForCdp(request.viewId);
+  assertEmbeddedBrowserDebuggerAvailable(embedded);
+  try {
+    return await embedded.view.webContents.debugger.sendCommand(
+      request.method,
+      request.params,
+      cdpSessionId(request.sessionId),
+    );
+  } catch (error) {
+    if (!embedded.view.webContents.debugger.isAttached()) {
+      embedded.devtoolsOpen = true;
+      throw new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE, { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function attachEmbeddedBrowserCdpTarget(
+  request: BrowserCdpAttachTargetRequest,
+): Promise<string> {
+  const response = (await sendEmbeddedBrowserCdpCommand({
+    id: request.id,
+    viewId: request.viewId,
+    sessionId: "root",
+    method: "Target.attachToTarget",
+    params: { targetId: request.targetId, flatten: true },
+  })) as { sessionId?: unknown };
+  if (typeof response.sessionId !== "string") {
+    throw new Error("CDP Target.attachToTarget did not return a sessionId");
+  }
+  return response.sessionId;
+}
+
+function subscribeEmbeddedBrowserCdpEvents(
+  response: HTTP.ServerResponse,
+  request: BrowserCdpSubscribeRequest,
+): void {
+  const embedded = getEmbeddedBrowserForCdp(request.viewId);
+  assertEmbeddedBrowserDebuggerAvailable(embedded);
+
+  const expectedSessionId = cdpSessionId(request.sessionId);
+  response.writeHead(200, {
+    "content-type": "application/x-ndjson; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+  });
+
+  const writeEvent = (event: unknown, method: string, params: unknown, sessionId?: string) => {
+    void event;
+    if (method !== request.eventName) return;
+    if ((sessionId ?? undefined) !== expectedSessionId) return;
+    response.write(
+      `${JSON.stringify({
+        ok: true,
+        result: {
+          method,
+          params,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        },
+      })}\n`,
+    );
+  };
+
+  const cleanup = () => {
+    embedded.view.webContents.debugger.off("message", writeEvent);
+  };
+  embedded.view.webContents.debugger.on("message", writeEvent);
+  response.on("close", cleanup);
+}
+
+function createEmbeddedBrowserView(projectId: string): EmbeddedBrowserViewState {
+  const partition = `persist:${projectId}`;
+  const view = new WebContentsView({
+    webPreferences: {
+      session: session.fromPartition(partition),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  const embedded: EmbeddedBrowserViewState = {
+    projectId,
+    handle: `electron-wc:${view.webContents.id}`,
+    view,
+    devtoolsOpen: false,
+    mounted: false,
+  };
+
+  view.webContents.debugger.on("detach", (_event, reason) => {
+    embedded.devtoolsOpen = true;
+    console.warn("[desktop/browser] debugger detached from embedded browser", {
+      projectId,
+      reason,
+    });
+  });
+  view.webContents.on("devtools-closed", () => {
+    attachEmbeddedBrowserDebugger(embedded);
+    if (!embedded.devtoolsOpen) resumeEmbeddedBrowser(embedded);
+  });
+  view.webContents.on("destroyed", () => {
+    if (embeddedBrowserViewsByProjectId.get(projectId) === embedded) {
+      embeddedBrowserViewsByProjectId.delete(projectId);
+    }
+  });
+
+  attachEmbeddedBrowserDebugger(embedded);
+  void view.webContents.loadURL("about:blank");
+  return embedded;
+}
+
 function registerIpcHandlers(): void {
   ipcMain.removeAllListeners(GET_WS_URL_CHANNEL);
   ipcMain.on(GET_WS_URL_CHANNEL, (event) => {
     event.returnValue = backendWsUrl;
+  });
+
+  ipcMain.removeHandler(BROWSER_MOUNT_CHANNEL);
+  ipcMain.handle(
+    BROWSER_MOUNT_CHANNEL,
+    async (event, rawProjectId: unknown, rawBounds: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const projectId = normalizeProjectId(rawProjectId);
+      const bounds = normalizeBrowserBounds(rawBounds);
+      if (!window || !projectId || !bounds) {
+        throw new Error("invalid embedded browser mount request");
+      }
+
+      const state = getEmbeddedBrowserWindowState(window);
+      const previousActive =
+        state.activeProjectId && state.activeProjectId !== projectId
+          ? state.viewsByProjectId.get(state.activeProjectId)
+          : null;
+      if (previousActive?.mounted) {
+        window.contentView.removeChildView(previousActive.view);
+        previousActive.mounted = false;
+        pauseAndThrottleEmbeddedBrowser(previousActive);
+      }
+
+      let embedded = state.viewsByProjectId.get(projectId);
+      if (!embedded) {
+        embedded = createEmbeddedBrowserView(projectId);
+        state.viewsByProjectId.set(projectId, embedded);
+        embeddedBrowserViewsByProjectId.set(projectId, embedded);
+        writeBrowserHostAssignment(projectId);
+      }
+
+      resumeEmbeddedBrowser(embedded);
+      embedded.view.setBounds(bounds);
+      if (!embedded.mounted) {
+        window.contentView.addChildView(embedded.view);
+        embedded.mounted = true;
+      }
+      state.activeProjectId = projectId;
+      return embedded.handle;
+    },
+  );
+
+  ipcMain.removeHandler(BROWSER_SET_BOUNDS_CHANNEL);
+  ipcMain.handle(BROWSER_SET_BOUNDS_CHANNEL, async (event, rawBounds: unknown) => {
+    const window = getIpcBrowserWindow(event);
+    const bounds = normalizeBrowserBounds(rawBounds);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    if (!embedded || !bounds) return;
+    embedded.view.setBounds(bounds);
+  });
+
+  ipcMain.removeHandler(BROWSER_UNMOUNT_CHANNEL);
+  ipcMain.handle(BROWSER_UNMOUNT_CHANNEL, async (event) => {
+    const window = getIpcBrowserWindow(event);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    if (!window || !embedded || !embedded.mounted) return;
+
+    window.contentView.removeChildView(embedded.view);
+    embedded.mounted = false;
+    pauseAndThrottleEmbeddedBrowser(embedded);
+  });
+
+  ipcMain.removeHandler(BROWSER_NAVIGATE_CHANNEL);
+  ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, async (event, rawUrl: unknown) => {
+    const window = getIpcBrowserWindow(event);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    const url = normalizeBrowserUrl(rawUrl);
+    if (!embedded || !url) {
+      throw new Error("invalid embedded browser navigation request");
+    }
+    await embedded.view.webContents.loadURL(url);
+  });
+
+  ipcMain.removeHandler(BROWSER_GET_URL_CHANNEL);
+  ipcMain.handle(BROWSER_GET_URL_CHANNEL, async (event) => {
+    const window = getIpcBrowserWindow(event);
+    const embedded = window ? getActiveEmbeddedBrowser(window) : null;
+    return embedded?.view.webContents.getURL() ?? "";
   });
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
@@ -1573,6 +2130,8 @@ async function bootstrap(): Promise<void> {
   const baseUrl = `ws://127.0.0.1:${backendPort}`;
   backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
   writeDesktopLogHeader(`bootstrap resolved websocket endpoint baseUrl=${baseUrl}`);
+  await startBrowserCdpBrokerServer();
+  writeDesktopLogHeader("bootstrap browser cdp broker started");
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
@@ -1588,6 +2147,7 @@ app.on("before-quit", () => {
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
   stopBackend();
+  stopBrowserCdpBrokerServer();
   restoreStdIoCapture?.();
 });
 

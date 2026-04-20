@@ -10,6 +10,10 @@ See the `NOTICE` file at `apps/server/src/browser/NOTICE` for the full attributi
 
 T3 Code runs Playwright Chromium in-process, keyed by project id. Each project gets its own persistent Chromium profile so cookies, localStorage, and auth sessions survive server restarts and never bleed between projects. Agents drive the browser through plaintext-returning HTTP commands that use stable `@ref` element identifiers from an accessibility snapshot instead of fragile CSS selectors.
 
+Desktop builds also have a native embedded-browser path behind the management-board browser toggle. The renderer owns a URL bar and a `data-browser-rect` sentinel; Electron main mounts a cached `WebContentsView` over that rect, backed by `session.fromPartition("persist:<projectId>")`, and persists `browser/<projectId>/host.json` with `{ "host": "electron" }` on first mount. Toggling away removes the view from the window but keeps its WebContents alive, applies CDP CPU throttling, and pauses media so hidden pages do not keep decoding.
+
+Agent calls reach that same native view through an Electron-main-owned loopback CDP broker. Desktop startup creates a localhost broker with a random bearer token and sends `{ electronCdpBrokerUrl, electronCdpBrokerToken }` to the Bun server in the one-shot bootstrap envelope. The server wraps that endpoint in `CdpBroker`, so `/api/browser` commands for Electron-authoritative projects drive the visible `WebContentsView`; if Chrome DevTools steals `webContents.debugger`, broker calls return the transient DevTools-open error until the debugger reattaches.
+
 | Field              | Value                                                                       |
 | ------------------ | --------------------------------------------------------------------------- |
 | Endpoint           | `/api/browser`                                                              |

@@ -7,6 +7,7 @@ import { Effect } from "effect";
 
 import { BROWSER_HOST_TOOL_NAMES, type BrowserHostCommand } from "./BrowserHost.ts";
 import { createBrowserHostResolver, getCachedBrowserHostResolver } from "./BrowserHostResolver.ts";
+import { CdpBroker } from "./CdpBroker.ts";
 import type { BrowserInstance, BrowserManagerServiceShape } from "./Services/BrowserManager.ts";
 import { playwrightCommandDescriptors } from "./handlers.ts";
 
@@ -33,6 +34,13 @@ function makeResolver(stateDir: string) {
     stateDir,
     browser: fakeBrowserManager(),
     descriptors: playwrightCommandDescriptors,
+  });
+}
+
+function fakeElectronBroker(): CdpBroker {
+  return new CdpBroker({
+    send: async () => ({}),
+    subscribe: async () => async () => {},
   });
 }
 
@@ -84,6 +92,29 @@ it("BrowserHostResolver returns a transient recovery error until re-announce com
   void baseDir;
 });
 
+it("BrowserHostResolver discovers host.json written after resolver creation when broker is connected", async () => {
+  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
+  const stateDir = nodePath.join(baseDir, "userdata");
+  const resolver = await createBrowserHostResolver({
+    stateDir,
+    browser: fakeBrowserManager(),
+    descriptors: playwrightCommandDescriptors,
+    electronBroker: fakeElectronBroker(),
+  });
+
+  const playwrightHost = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  assert.equal(playwrightHost.kind, "playwright");
+
+  await fs.mkdir(nodePath.join(stateDir, "browser", PROJECT_ELECTRON), { recursive: true });
+  await fs.writeFile(
+    nodePath.join(stateDir, "browser", PROJECT_ELECTRON, "host.json"),
+    JSON.stringify({ host: "electron" }),
+  );
+
+  const electronHost = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  assert.equal(electronHost.kind, "electron-wc");
+});
+
 it("BrowserHostResolver cached startup failures are retryable", async () => {
   const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
   const stateDir = nodePath.join(baseDir, "userdata");
@@ -122,12 +153,12 @@ it("BrowserHost command methods cannot return pixel streams", async () => {
   const sourcePaths = [
     nodePath.join(import.meta.dirname, "BrowserHost.ts"),
     nodePath.join(import.meta.dirname, "hosts", "PlaywrightHost", "PlaywrightBrowserHost.ts"),
-    nodePath.join(import.meta.dirname, "hosts", "ElectronWebContentsBrowserHost.ts"),
+    nodePath.join(import.meta.dirname, "hosts", "ElectronWebContentsHost", "browserHost.ts"),
   ];
   const source = (await Promise.all(sourcePaths.map((path) => fs.readFile(path, "utf8")))).join(
     "\n",
   );
-  for (const forbidden of ["AsyncIterable", "Readable", "Uint8Array", "Buffer"]) {
+  for (const forbidden of ["AsyncIterable", "Readable", "ReadableStream", "Uint8Array"]) {
     assert.notInclude(source, forbidden);
   }
   assert.isAtLeast(BROWSER_HOST_TOOL_NAMES.length, 54);

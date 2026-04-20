@@ -177,35 +177,33 @@ describe("ElectronWebContentsHost snapshot PoC", () => {
     );
   });
 
-  it("scrolls at the viewport center by default and accepts explicit coordinates", async () => {
+  it("scrolls with a runtime page scroll", async () => {
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
     const client: CdpClient = {
       async sendCommand(method, params) {
         calls.push(params === undefined ? { method } : { method, params });
-        if (method === "Page.getLayoutMetrics") {
-          return { cssVisualViewport: { clientWidth: 800, clientHeight: 600 } } as never;
-        }
         return {} as never;
       },
     };
     const host = new ElectronWebContentsHost(client);
     await host.scroll(120);
-    await host.scroll(80, 10, { x: 20, y: 30 });
+    await host.scroll(80, 10);
 
-    const wheelCalls = calls.filter((call) => call.method === "Input.dispatchMouseEvent");
-    assert.deepEqual(wheelCalls[0]?.params, {
-      type: "mouseWheel",
-      x: 400,
-      y: 300,
-      deltaX: 0,
-      deltaY: 120,
+    assert.deepEqual(calls[0], {
+      method: "Runtime.evaluate",
+      params: {
+        expression: 'window.scrollBy({"left":0,"top":120,"behavior":"instant"})',
+        awaitPromise: false,
+        returnByValue: true,
+      },
     });
-    assert.deepEqual(wheelCalls[1]?.params, {
-      type: "mouseWheel",
-      x: 20,
-      y: 30,
-      deltaX: 10,
-      deltaY: 80,
+    assert.deepEqual(calls[1], {
+      method: "Runtime.evaluate",
+      params: {
+        expression: 'window.scrollBy({"left":10,"top":80,"behavior":"instant"})',
+        awaitPromise: false,
+        returnByValue: true,
+      },
     });
   });
 
