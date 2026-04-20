@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import type { HttpServerResponse } from "effect/unstable/http";
 
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
@@ -88,7 +88,21 @@ export interface ToolContext {
 
 export type ToolHandler = (
   input: Record<string, unknown>,
-) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown, never>;
+) => Effect.Effect<HttpServerResponse.HttpServerResponse, BrowserToolError, never>;
+
+class BrowserToolError extends Data.TaggedError("BrowserToolError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toBrowserToolError(error: unknown): BrowserToolError {
+  if (error instanceof BrowserToolError) return error;
+  return new BrowserToolError({ message: errorMessage(error), cause: error });
+}
 
 /** `stop` / `restart` meta-commands call shutdown. The T3 dispatcher never
  *  routes to those (see the excluded meta commands below), but we still pass
@@ -107,11 +121,19 @@ function withVendored<A>(
   }) => Promise<A>,
 ) {
   return Effect.gen(function* () {
-    const instance = yield* ctx.browser.acquire(ctx.projectId);
-    const modules = yield* Effect.promise(() => loadVendoredModules());
+    const instance = yield* ctx.browser
+      .acquire(ctx.projectId)
+      .pipe(Effect.mapError(toBrowserToolError));
+    const modules = yield* Effect.tryPromise({
+      try: () => loadVendoredModules(),
+      catch: toBrowserToolError,
+    });
     const bm = instance.inner as VendoredBrowserManager;
     const session = bm.getActiveSession();
-    return yield* Effect.promise(() => body({ modules, bm, session, instance }));
+    return yield* Effect.tryPromise({
+      try: () => body({ modules, bm, session, instance }),
+      catch: toBrowserToolError,
+    });
   });
 }
 
@@ -890,7 +912,7 @@ function runCommand(
   tool: string,
   ctx: ToolContext,
   input: Record<string, unknown>,
-): Effect.Effect<string, unknown, never> {
+): Effect.Effect<string, BrowserToolError, never> {
   // Tools that require closing + relaunching the Chromium context can't go
   // through the vendored dispatch — the vendored `recreateContext()` assumes
   // `this.browser !== null`, which isn't true under `launchPersistentContext`.
@@ -899,12 +921,12 @@ function runCommand(
   if (layerHandler) return layerHandler(ctx, input);
 
   const spec = SPECS[tool];
-  if (!spec) return Effect.fail(new Error(`unknown tool '${tool}'`));
+  if (!spec) return Effect.fail(new BrowserToolError({ message: `unknown tool '${tool}'` }));
   let args: string[];
   try {
     args = spec.argsFromInput(input, tool);
   } catch (err) {
-    return Effect.fail(err);
+    return Effect.fail(toBrowserToolError(err));
   }
   return withVendored(ctx, ({ modules, bm, session }) => {
     switch (spec.category) {
@@ -927,7 +949,7 @@ function runCommand(
 type LayerHandler = (
   ctx: ToolContext,
   input: Record<string, unknown>,
-) => Effect.Effect<string, unknown, never>;
+) => Effect.Effect<string, BrowserToolError, never>;
 
 const LAYER_HANDLERS: Record<string, LayerHandler> = {
   // T3CO-331: the vendored `useragent` command calls `recreateContext()`
@@ -938,19 +960,23 @@ const LAYER_HANDLERS: Record<string, LayerHandler> = {
   useragent: (ctx, input) => {
     const reset = optBool(input, "reset");
     if (reset) {
-      return ctx.browser
-        .recreate(ctx.projectId, { userAgent: null })
-        .pipe(Effect.map(() => "User agent reset to Playwright default"));
+      return ctx.browser.recreate(ctx.projectId, { userAgent: null }).pipe(
+        Effect.mapError(toBrowserToolError),
+        Effect.map(() => "User agent reset to Playwright default"),
+      );
     }
     const value = optString(input, "value");
     if (!value) {
       return Effect.fail(
-        new Error("useragent: missing required input.value (string), or pass reset=true"),
+        new BrowserToolError({
+          message: "useragent: missing required input.value (string), or pass reset=true",
+        }),
       );
     }
-    return ctx.browser
-      .recreate(ctx.projectId, { userAgent: value })
-      .pipe(Effect.map(() => `User agent set to "${value}"`));
+    return ctx.browser.recreate(ctx.projectId, { userAgent: value }).pipe(
+      Effect.mapError(toBrowserToolError),
+      Effect.map(() => `User agent set to "${value}"`),
+    );
   },
 
   // T3CO-330: let the agent flip the Chromium window between headless and
@@ -961,16 +987,17 @@ const LAYER_HANDLERS: Record<string, LayerHandler> = {
   visibility: (ctx, input) => {
     const mode = optString(input, "mode");
     if (mode !== "headed" && mode !== "headless") {
-      return Effect.fail(new Error("visibility: input.mode must be 'headed' or 'headless'"));
+      return Effect.fail(
+        new BrowserToolError({ message: "visibility: input.mode must be 'headed' or 'headless'" }),
+      );
     }
     const headless = mode === "headless";
-    return ctx.browser
-      .recreate(ctx.projectId, { headless })
-      .pipe(
-        Effect.map(
-          () => `Browser mode set to ${mode}. Chromium relaunched with persistent profile intact.`,
-        ),
-      );
+    return ctx.browser.recreate(ctx.projectId, { headless }).pipe(
+      Effect.mapError(toBrowserToolError),
+      Effect.map(
+        () => `Browser mode set to ${mode}. Chromium relaunched with persistent profile intact.`,
+      ),
+    );
   },
 };
 
@@ -1037,7 +1064,7 @@ export function buildCommandHandlers(ctx: ToolContext): Record<string, ToolHandl
           Effect.catch((error) =>
             Effect.succeed({
               ok: false as const,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage(error),
             }),
           ),
         );
