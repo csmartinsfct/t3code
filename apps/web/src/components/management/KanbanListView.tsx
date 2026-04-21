@@ -173,6 +173,7 @@ function KanbanListSection({
 
 interface KanbanListViewProps {
   filteredTicketsByStatus: Record<TicketStatus, TicketSummary[]>;
+  visibleStatuses?: readonly TicketStatus[];
   epicProgressMap: ReadonlyMap<string, EpicProgress>;
   selectedTicketIds: ReadonlySet<string>;
   collapsedStatuses: ReadonlyArray<string>;
@@ -184,6 +185,7 @@ interface KanbanListViewProps {
 
 export function KanbanListView({
   filteredTicketsByStatus,
+  visibleStatuses = ALL_STATUSES,
   selectedTicketIds,
   collapsedStatuses,
   onToggleCollapsed,
@@ -193,7 +195,7 @@ export function KanbanListView({
 }: KanbanListViewProps) {
   return (
     <div className="min-h-0 w-full flex-1 overflow-y-auto pb-4">
-      {ALL_STATUSES.map((status) => (
+      {visibleStatuses.map((status) => (
         <KanbanListSection
           key={status}
           status={status}

@@ -1,11 +1,68 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-20T17:58:33.766Z",
-  "lastProcessedCommit": "653a110c8278331469034029865a9703c0160adb",
+  "generatedAt": "2026-04-21T02:43:27.510Z",
+  "lastProcessedCommit": "2a224d0f97b4cc6f8489925052d94999d863557f",
   "groups": [
+    {
+      "date": "2026-04-21",
+      "entries": [
+        {
+          "id": "41c56219a5f7cee9",
+          "title": "Reduced Browser Navigation Noise",
+          "summary": "Canceled navigations in the embedded browser are now hidden, keeping browser feedback cleaner during interrupted or redirected page loads.",
+          "category": "improvement",
+          "commitShas": ["2a224d0f97b4cc6f8489925052d94999d863557f"]
+        },
+        {
+          "id": "65b41f0914619fe0",
+          "title": "Browser guidance adapts to the current runtime",
+          "summary": "T3 Code now tailors browser behavior guidance to the active runtime, improving reliability across the embedded desktop browser and web-based environments.",
+          "category": "improvement",
+          "commitShas": ["381e262d357bed78694ab6fd92efc495946a1458"]
+        },
+        {
+          "id": "ec3977955b21dd4e",
+          "title": "Embedded browser tabs are now visible and persistent",
+          "summary": "The embedded browser now includes a tab strip with favicons, close controls, a new-tab button, keyboard shortcuts, and cleaner blank-tab address handling. Tabs persist across restarts, and links that open new windows now open as embedded tabs instead.",
+          "category": "feature",
+          "commitShas": [
+            "66e439def13917d83ba60707c0e4ff41ee6b5971",
+            "dd6c15adced13281e1e58f55b587c359fefbda86"
+          ]
+        }
+      ]
+    },
     {
       "date": "2026-04-20",
       "entries": [
+        {
+          "id": "04659202710f3b9b",
+          "title": "Agents can work across multiple browser tabs",
+          "summary": "The embedded browser now supports agent-controlled tab creation, switching, listing, and closing, with a five-tab limit per project to keep behavior predictable.",
+          "category": "feature",
+          "commitShas": ["e527397e73eaa98defa566c39c8ba17a09fb6310"]
+        },
+        {
+          "id": "9320e66b38271372",
+          "title": "PDF export works in the embedded browser",
+          "summary": "The embedded browser can now export pages to PDF reliably instead of failing when the previous print path was unavailable.",
+          "category": "fix",
+          "commitShas": ["9d3c856988a1722c410fbeb2aa346ffc6ee51aea"]
+        },
+        {
+          "id": "2b97cd1f4d03389f",
+          "title": "Chat focus is preserved during browser navigation",
+          "summary": "Agent-driven browser navigation and reloads no longer steal focus from the chat input, so you can keep typing while the embedded browser loads pages in the background.",
+          "category": "fix",
+          "commitShas": ["f33acd06fbf4751694c63f19e52effb4b3353b03"]
+        },
+        {
+          "id": "09dae3c26b2f7eff",
+          "title": "Embedded browser dialogs no longer interrupt the app",
+          "summary": "Pages that trigger alert, confirm, or prompt dialogs are now handled inside the embedded browser without blurring or blocking the rest of T3 Code. Browser-click actions were also corrected so a single click only fires once.",
+          "category": "fix",
+          "commitShas": ["0d354866208631432cbff12ea51edd5daf3733a3"]
+        },
         {
           "id": "98827136d2f89812",
           "title": "Managed runs shut down more cleanly",
@@ -2106,6 +2163,34 @@
           "653a110c8278331469034029865a9703c0160adb"
         ],
         "commitCount": 5,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-21T02:29:00.344Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "653a110c8278331469034029865a9703c0160adb",
+        "toInclusiveCommit": "381e262d357bed78694ab6fd92efc495946a1458",
+        "commitShas": [
+          "0d354866208631432cbff12ea51edd5daf3733a3",
+          "f33acd06fbf4751694c63f19e52effb4b3353b03",
+          "9d3c856988a1722c410fbeb2aa346ffc6ee51aea",
+          "e527397e73eaa98defa566c39c8ba17a09fb6310",
+          "66e439def13917d83ba60707c0e4ff41ee6b5971",
+          "dd6c15adced13281e1e58f55b587c359fefbda86",
+          "381e262d357bed78694ab6fd92efc495946a1458"
+        ],
+        "commitCount": 7,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-21T02:43:27.504Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "381e262d357bed78694ab6fd92efc495946a1458",
+        "toInclusiveCommit": "2a224d0f97b4cc6f8489925052d94999d863557f",
+        "commitShas": ["2a224d0f97b4cc6f8489925052d94999d863557f"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

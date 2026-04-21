@@ -24,6 +24,7 @@ export type BoardViewMode = "cards" | "list" | "browser";
 export interface BoardFilters {
   priorityFilter: string[];
   labelFilter: string[];
+  statusFilter: string[];
   searchQuery: string;
   collapsedStatuses: string[];
 }
@@ -31,6 +32,7 @@ export interface BoardFilters {
 export const DEFAULT_BOARD_FILTERS: BoardFilters = {
   priorityFilter: [],
   labelFilter: [],
+  statusFilter: [],
   searchQuery: "",
   collapsedStatuses: [],
 };
@@ -52,6 +54,7 @@ interface PersistedUiState {
     {
       priorityFilter?: string[];
       labelFilter?: string[];
+      statusFilter?: string[];
       searchQuery?: string;
       collapsedStatuses?: string[];
     }
@@ -184,6 +187,9 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
           : [],
         labelFilter: Array.isArray(raw.labelFilter)
           ? raw.labelFilter.filter((v): v is string => typeof v === "string")
+          : [],
+        statusFilter: Array.isArray(raw.statusFilter)
+          ? raw.statusFilter.filter((v): v is string => typeof v === "string")
           : [],
         searchQuery: typeof raw.searchQuery === "string" ? raw.searchQuery : "",
         collapsedStatuses: Array.isArray(raw.collapsedStatuses)

@@ -1,4 +1,4 @@
-import type { TicketPriority } from "@t3tools/contracts";
+import type { TicketPriority, TicketStatus } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   GlobeIcon,
@@ -12,10 +12,17 @@ import { useCallback, useRef, useState } from "react";
 import type { BoardViewMode } from "../../uiStateStore";
 import { cn } from "~/lib/utils";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { ALL_PRIORITIES, PRIORITY_CONFIG } from "../settings/ticketUtils";
+import {
+  ALL_PRIORITIES,
+  ALL_STATUSES,
+  PRIORITY_CONFIG,
+  STATUS_CONFIG,
+} from "../settings/ticketUtils";
 import { PriorityIcon } from "./PriorityIcon";
 
 interface BoardToolbarProps {
+  statusFilter: Set<string>;
+  onStatusFilterChange: (filter: Set<string>) => void;
   priorityFilter: Set<string>;
   onPriorityFilterChange: (filter: Set<string>) => void;
   labelFilter: Set<string>;
@@ -53,6 +60,8 @@ function FilterCheck({ checked }: { checked: boolean }) {
 }
 
 export function BoardToolbar({
+  statusFilter,
+  onStatusFilterChange,
   priorityFilter,
   onPriorityFilterChange,
   labelFilter,
@@ -65,6 +74,16 @@ export function BoardToolbar({
 }: BoardToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(!!searchQuery);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleStatus = useCallback(
+    (s: string) => {
+      const next = new Set(statusFilter);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      onStatusFilterChange(next);
+    },
+    [statusFilter, onStatusFilterChange],
+  );
 
   const togglePriority = useCallback(
     (p: string) => {
@@ -86,6 +105,13 @@ export function BoardToolbar({
     [labelFilter, onLabelFilterChange],
   );
 
+  const statusText =
+    statusFilter.size === 0
+      ? "Status"
+      : statusFilter.size === 1
+        ? (STATUS_CONFIG[[...statusFilter][0] as TicketStatus]?.label ?? "Status")
+        : `Status \u00b7 ${statusFilter.size}`;
+
   const priorityText =
     priorityFilter.size === 0
       ? "Priority"
@@ -101,6 +127,51 @@ export function BoardToolbar({
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mr-1">
           filters
         </span>
+        <Popover>
+          <PopoverTrigger
+            className={cn(
+              "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
+              statusFilter.size > 0
+                ? "border-primary/30 bg-primary/5 text-foreground"
+                : "border-border bg-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {statusText}
+            <ChevronDownIcon className="size-3 opacity-50" />
+          </PopoverTrigger>
+          <PopoverPopup side="bottom" align="start" sideOffset={4} className="w-44">
+            <div className="-mx-4 -my-4 py-1">
+              {ALL_STATUSES.map((s) => {
+                const cfg = STATUS_CONFIG[s];
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
+                    onClick={() => toggleStatus(s)}
+                  >
+                    <FilterCheck checked={statusFilter.has(s)} />
+                    <div className={cn("size-2 rounded-full", cfg.dotClass)} />
+                    <span className="text-foreground">{cfg.label}</span>
+                  </button>
+                );
+              })}
+              {statusFilter.size > 0 && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    onClick={() => onStatusFilterChange(new Set())}
+                  >
+                    <XIcon className="size-3" />
+                    Clear
+                  </button>
+                </>
+              )}
+            </div>
+          </PopoverPopup>
+        </Popover>
         <Popover>
           <PopoverTrigger
             className={cn(

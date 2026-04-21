@@ -235,6 +235,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     [boardFilters.priorityFilter],
   );
   const labelFilter = useMemo(() => new Set(boardFilters.labelFilter), [boardFilters.labelFilter]);
+  const statusFilter = useMemo(
+    () => new Set(boardFilters.statusFilter),
+    [boardFilters.statusFilter],
+  );
   const collapsedStatuses = boardFilters.collapsedStatuses;
 
   const setPriorityFilter = useCallback(
@@ -243,6 +247,10 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   );
   const setLabelFilter = useCallback(
     (filter: Set<string>) => storeBoardFilters(typedProjectId, { labelFilter: [...filter] }),
+    [storeBoardFilters, typedProjectId],
+  );
+  const setStatusFilter = useCallback(
+    (filter: Set<string>) => storeBoardFilters(typedProjectId, { statusFilter: [...filter] }),
     [storeBoardFilters, typedProjectId],
   );
   const setSearchQuery = useCallback(
@@ -300,6 +308,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [tickets]);
+
+  const visibleStatuses = useMemo<readonly TicketStatus[]>(
+    () =>
+      statusFilter.size === 0 ? ALL_STATUSES : ALL_STATUSES.filter((s) => statusFilter.has(s)),
+    [statusFilter],
+  );
 
   const filteredTicketsByStatus = useMemo(() => {
     const hasActiveFilters = searchQuery !== "" || priorityFilter.size > 0 || labelFilter.size > 0;
@@ -871,6 +885,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       ) : (
         <>
           <BoardToolbar
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
             priorityFilter={priorityFilter}
             onPriorityFilterChange={setPriorityFilter}
             labelFilter={labelFilter}
@@ -887,6 +903,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             ) : viewMode === "list" ? (
               <KanbanListView
                 filteredTicketsByStatus={filteredTicketsByStatus}
+                visibleStatuses={visibleStatuses}
                 epicProgressMap={epicProgressMap}
                 selectedTicketIds={selectedTicketIds}
                 collapsedStatuses={collapsedStatuses}
@@ -897,7 +914,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               />
             ) : (
               <div className="flex flex-1 overflow-x-auto px-3 sm:px-4">
-                {ALL_STATUSES.map((status) => (
+                {visibleStatuses.map((status) => (
                   <KanbanColumn
                     key={status}
                     status={status}
