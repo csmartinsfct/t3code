@@ -250,10 +250,10 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const atTabCap = tabs.length >= MAX_TABS;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {browserBridge && tabs.length > 0 && (
         <div
-          className="flex h-9 shrink-0 items-end gap-0.5 bg-muted/30 pl-1.5 pr-2 pt-1"
+          className="flex h-9 w-full shrink-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden bg-muted/30 pl-1.5 pr-2 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="tablist"
           aria-label="Browser tabs"
         >
@@ -270,7 +270,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
             type="button"
             onClick={() => void openNewTab()}
             disabled={atTabCap}
-            className="ml-0.5 flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+            className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             aria-label={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab"}
             title={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab (⌘T)"}
           >
@@ -350,7 +350,7 @@ function BrowserTab({ tab, active, onActivate, onClose }: BrowserTabProps) {
       onAuxClick={handleAuxClick}
       onKeyDown={handleKey}
       title={tab.url}
-      className={`group relative flex h-[30px] max-w-[180px] min-w-[96px] cursor-pointer items-center gap-2 rounded-t-md px-2.5 text-xs transition-colors select-none ${
+      className={`group relative flex h-[30px] max-w-[180px] min-w-0 flex-1 basis-[140px] cursor-pointer items-center gap-2 rounded-t-md px-2.5 text-xs transition-colors select-none ${
         active
           ? "bg-background text-foreground shadow-[0_-1px_0_theme(colors.primary/0.7)_inset] after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-background"
           : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"

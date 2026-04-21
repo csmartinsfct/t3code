@@ -116,7 +116,7 @@ If the tools in this session are connected to the wrong instance (e.g. productio
 
 - `T3CODE_PORT` / `--port` — override the dev server port (default `3773`).
 - `T3CODE_WEB_SOURCEMAP` — `0`/`false` disables web build sourcemaps; `hidden` emits hidden sourcemaps.
-- `T3CODE_DISABLE_HMR=1` — disable Vite HMR in the web dev server. The page still serves but code changes require a manual reload. Useful when you don't want the app to auto-reload while iterating. Wired up in `apps/web/vite.config.ts`.
+- `T3CODE_DISABLE_HMR=1` — disable Vite HMR in the web dev server. The page still serves but code changes require a manual reload. Useful when you don't want the app to auto-reload while iterating. Wired up in `apps/web/vite.config.ts`. Can be set via the shell or a gitignored `.env` at the repo root (the Vite config calls `loadEnv` against the monorepo root).
 
 ## Data Directories
 

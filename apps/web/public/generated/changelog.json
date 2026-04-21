@@ -1,11 +1,45 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-20T15:11:48.893Z",
-  "lastProcessedCommit": "59d20d30686426d1d60f00731784cda24ac97b14",
+  "generatedAt": "2026-04-20T17:58:33.766Z",
+  "lastProcessedCommit": "653a110c8278331469034029865a9703c0160adb",
   "groups": [
     {
       "date": "2026-04-20",
       "entries": [
+        {
+          "id": "98827136d2f89812",
+          "title": "Managed runs shut down more cleanly",
+          "summary": "Stopping a managed run now cleans up its process tree more reliably, reducing the chance of leftover background processes after a run ends.",
+          "category": "fix",
+          "commitShas": ["653a110c8278331469034029865a9703c0160adb"]
+        },
+        {
+          "id": "e7c9359c8684bf41",
+          "title": "More reliable embedded browser automation",
+          "summary": "Embedded browser sessions now keep element references consistent across multi-step agent actions, so flows like inspecting a page and then clicking a referenced element are less likely to fail.",
+          "category": "fix",
+          "commitShas": [
+            "13c749e811db52ad7d91327696f91ed2c493e801",
+            "34e70e4cf3106d0b9f9304e94f1b7603979eff35"
+          ]
+        },
+        {
+          "id": "655c69cdc7f78ab1",
+          "title": "Improved browser interactions in desktop sessions",
+          "summary": "Browser tools now handle clicks, form filling, scrolling, hover, style inspection, and keyboard shortcuts more predictably inside the embedded desktop browser.",
+          "category": "fix",
+          "commitShas": ["13c749e811db52ad7d91327696f91ed2c493e801"]
+        },
+        {
+          "id": "dc2a4f55a5740000",
+          "title": "Fixed embedded browser popups and overlays",
+          "summary": "Dialogs, menus, popovers, and other overlays now suspend the embedded browser correctly, preventing browser content from interfering with foreground UI.",
+          "category": "fix",
+          "commitShas": [
+            "3c31f8b5ce6ea0678f0bc8cc534a87558207abd3",
+            "a8026975be3e7bca6059cd917241859111142d35"
+          ]
+        },
         {
           "id": "7dc75fdbf6200331",
           "title": "Fixed Browser Tool Crashes",
@@ -2056,6 +2090,22 @@
         "toInclusiveCommit": "59d20d30686426d1d60f00731784cda24ac97b14",
         "commitShas": ["59d20d30686426d1d60f00731784cda24ac97b14"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-20T17:58:33.629Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "59d20d30686426d1d60f00731784cda24ac97b14",
+        "toInclusiveCommit": "653a110c8278331469034029865a9703c0160adb",
+        "commitShas": [
+          "34e70e4cf3106d0b9f9304e94f1b7603979eff35",
+          "3c31f8b5ce6ea0678f0bc8cc534a87558207abd3",
+          "a8026975be3e7bca6059cd917241859111142d35",
+          "13c749e811db52ad7d91327696f91ed2c493e801",
+          "653a110c8278331469034029865a9703c0160adb"
+        ],
+        "commitCount": 5,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

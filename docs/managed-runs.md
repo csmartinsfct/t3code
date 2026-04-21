@@ -149,6 +149,15 @@ starting → running → completed (exit 0)
 5. After a 1.5s startup grace period, status moves to `"running"`.
 6. Evidence is collected: process PID, detected URLs/ports from output, docker containers.
 
+### Restart trigger actions
+
+Some actions are intentionally short-lived triggers rather than the service they affect. The
+Electron dev restart action uses `scripts/restart-electron-dev.ts` to spawn a detached restart
+supervisor and exit, so the same action can be launched again later. The supervisor then kills
+existing repo-local Electron dev processes and starts `bun run dev:desktop` detached. This is useful
+when agents working inside the Electron dev build need to restart the host process that is currently
+running them; auto-resume can reconnect the session after the new build comes up.
+
 ### Log retention
 
 Logs are retained for 48 hours (`LOG_RETENTION_MS`). A background fiber cleans up expired logs every hour.
