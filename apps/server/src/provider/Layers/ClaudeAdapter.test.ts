@@ -164,6 +164,7 @@ function makeHarness(config?: {
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
   readonly cwd?: string;
   readonly baseDir?: string;
+  readonly settingsOverride?: Parameters<typeof ServerSettingsService.layerTest>[0];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -198,7 +199,7 @@ function makeHarness(config?: {
           config?.baseDir ?? "/tmp",
         ),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ServerSettingsService.layerTest(config?.settingsOverride)),
       Layer.provideMerge(managedRunServiceTestLayer),
       Layer.provideMerge(projectionSnapshotQueryTestLayer),
       Layer.provideMerge(NodeServices.layer),
@@ -337,6 +338,50 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("uses the SDK bundled Claude executable for the default binary setting", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.pathToClaudeCodeExecutable, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("honors an explicitly configured Claude executable path", () => {
+    const harness = makeHarness({
+      settingsOverride: {
+        providers: {
+          claudeAgent: {
+            binaryPath: "/opt/t3/claude",
+          },
+        },
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.pathToClaudeCodeExecutable, "/opt/t3/claude");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses bypass permissions for full-access claude sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -375,6 +420,56 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.effort, "max");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forwards Opus 4.7 xhigh effort into query options", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-7",
+          options: {
+            effort: "xhigh",
+          },
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "xhigh");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("falls back to default effort when unsupported xhigh is requested for Opus 4.6", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+          options: {
+            effort: "xhigh",
+          },
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "high");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

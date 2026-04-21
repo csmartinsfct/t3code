@@ -22,6 +22,9 @@ The DMG will be output to the `release/` directory at the repo root. Drag "T3 Co
 
 - This uses `electron-builder` under the hood via `scripts/build-desktop-artifact.ts`
 - The script automatically runs `bun build:desktop` first (contracts, server, web, desktop bundles)
+- Staged production dependencies are installed with Bun's target `--os` / `--cpu`
+  flags so native optional dependencies, including the Claude Agent SDK binary,
+  match the requested artifact arch rather than the build host.
 - The build is unsigned (ad-hoc signature) for local development
 - For x64 builds, pass `--arch x64` instead
 - For other platforms: `--platform linux` or `--platform win`

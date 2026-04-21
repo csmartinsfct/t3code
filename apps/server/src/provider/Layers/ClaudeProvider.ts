@@ -73,6 +73,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
         { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
         { value: "max", label: "Max" },
         { value: "ultrathink", label: "Ultrathink" },
       ],

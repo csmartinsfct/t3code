@@ -82,6 +82,8 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Configuration: global profile config + project `.mcp.json`.
 - **Profiles:** Multiple named profiles supported. Each profile can have its own binary path, config directory, and custom models. Profiles appear as separate provider entries.
 - Model selection: full Claude model family with per-session model and reasoning effort options.
+- Claude Opus 4.7 exposes `xhigh` effort between High and Max. Older Claude
+  models do not advertise it, and stale `xhigh` selections fall back to High.
 
 ### Gemini (Google)
 

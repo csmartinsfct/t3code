@@ -551,6 +551,12 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+const DEFAULT_CLAUDE_BINARY_PATH = "claude";
+
+const resolveClaudeCodeExecutableOption = (binaryPath: string): string | undefined => {
+  const normalized = binaryPath.trim();
+  return normalized && normalized !== DEFAULT_CLAUDE_BINARY_PATH ? normalized : undefined;
+};
 
 function buildPromptText(input: ProviderSendTurnInput): string {
   const claudeSel =
@@ -3050,7 +3056,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         configDir = claudeSettings.configDir || undefined;
       }
 
-      const claudeBinaryPath = claudeSettings.binaryPath;
+      const claudeBinaryPath = resolveClaudeCodeExecutableOption(claudeSettings.binaryPath);
       const modelSelection =
         input.modelSelection?.provider &&
         baseProviderKind(input.modelSelection.provider) === "claudeAgent"
@@ -3102,7 +3108,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
-        pathToClaudeCodeExecutable: claudeBinaryPath,
+        ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
         settingSources: [...CLAUDE_SETTING_SOURCES],
         ...(effectiveEffort ? { effort: effectiveEffort } : {}),
         ...(permissionMode ? { permissionMode } : {}),

@@ -11,6 +11,9 @@ This document covers how to run desktop releases from one tag, first without sig
   - macOS `x64` DMG
   - Linux `x64` AppImage
   - Windows `x64` NSIS installer
+- Desktop staging runs `bun install --production` with the target `--os` and
+  `--cpu` so native optional dependencies, such as the Claude Agent SDK
+  per-platform binary, match the artifact architecture instead of the CI host.
 - Publishes one GitHub Release with all produced files.
   - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain `X.Y.Z` releases are marked as the repository's latest release.

@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
-import type { ServerProviderModel } from "@t3tools/contracts";
-import { getComposerProviderState } from "./composerProviderRegistry";
+import { describe, expect, it, vi } from "vitest";
+import { isValidElement } from "react";
+import { ThreadId, type ServerProviderModel } from "@t3tools/contracts";
+import {
+  getComposerProviderState,
+  renderProviderTraitsMenuContent,
+} from "./composerProviderRegistry";
 
 const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -24,6 +28,25 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
 ];
 
 const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "claude-opus-4-7",
+    name: "Claude Opus 4.7",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
+        { value: "max", label: "Max" },
+        { value: "ultrathink", label: "Ultrathink" },
+      ],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      supportsPlan: true,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: ["ultrathink"],
+    },
+  },
   {
     slug: "claude-opus-4-6",
     name: "Claude Opus 4.6",
@@ -315,6 +338,50 @@ describe("getComposerProviderState", () => {
     });
   });
 
+  it("preserves Claude Opus 4.7 xhigh effort for dispatch", () => {
+    const state = getComposerProviderState({
+      provider: "claudeAgent",
+      model: "claude-opus-4-7",
+      models: CLAUDE_MODELS,
+      prompt: "",
+      modelOptions: {
+        claudeAgent: {
+          effort: "xhigh",
+        },
+      },
+    });
+
+    expect(state).toEqual({
+      provider: "claudeAgent",
+      promptEffort: "xhigh",
+      modelOptionsForDispatch: {
+        effort: "xhigh",
+      },
+    });
+  });
+
+  it("falls unsupported Claude xhigh back to high for older effort-capable models", () => {
+    const state = getComposerProviderState({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      models: CLAUDE_MODELS,
+      prompt: "",
+      modelOptions: {
+        claudeAgent: {
+          effort: "xhigh",
+        },
+      },
+    });
+
+    expect(state).toEqual({
+      provider: "claudeAgent",
+      promptEffort: "high",
+      modelOptionsForDispatch: {
+        effort: "high",
+      },
+    });
+  });
+
   it("preserves explicit fastMode: false so deepMerge can overwrite a prior true", () => {
     // Regression: normalizeClaudeModelOptionsWithCapabilities used to strip
     // fastMode: false, which meant deepMerge could never clear a previous true.
@@ -421,5 +488,24 @@ describe("getComposerProviderState", () => {
     });
 
     expect(state.modelOptionsForDispatch).not.toHaveProperty("fastMode");
+  });
+});
+
+describe("renderProviderTraitsMenuContent", () => {
+  it("preserves profiled provider keys for trait persistence", () => {
+    const element = renderProviderTraitsMenuContent({
+      provider: "claudeAgent:metric",
+      threadId: ThreadId.makeUnsafe("thread-profiled-provider"),
+      model: "claude-opus-4-7",
+      models: CLAUDE_MODELS,
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: vi.fn(),
+    });
+
+    expect(isValidElement(element)).toBe(true);
+    expect((element as { props: { provider?: unknown } }).props.provider).toBe(
+      "claudeAgent:metric",
+    );
   });
 });

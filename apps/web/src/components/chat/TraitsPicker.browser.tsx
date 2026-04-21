@@ -66,6 +66,26 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-01-01T00:00:00.000Z",
     models: [
       {
+        slug: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High" },
+            { value: "max", label: "Max" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
+          supportsFastMode: true,
+          supportsThinkingToggle: false,
+          supportsPlan: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: ["ultrathink"],
+        },
+      },
+      {
         slug: "claude-opus-4-6",
         name: "Claude Opus 4.6",
         isCustom: false,
@@ -163,7 +183,7 @@ async function mountClaudePicker(props?: {
   prompt?: string;
   options?: ClaudeModelOptions;
   fallbackModelOptions?: {
-    effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    effort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultrathink";
     thinking?: boolean;
     fastMode?: boolean;
   } | null;
@@ -279,8 +299,34 @@ describe("TraitsPicker (Claude)", () => {
       expect(text).toContain("Low");
       expect(text).toContain("Medium");
       expect(text).toContain("High");
+      expect(text).not.toContain("Extra High");
       expect(text).not.toContain("Max");
       expect(text).toContain("Ultrathink");
+    });
+  });
+
+  it("shows and selects Opus 4.7 xhigh only when the model advertises it", async () => {
+    await using _ = await mountClaudePicker({
+      model: "claude-opus-4-7",
+    });
+
+    await page.getByRole("button").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Extra High");
+      expect(text).toContain("Max");
+    });
+    await page.getByRole("menuitemradio", { name: "Extra High" }).click();
+
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent,
+    ).toMatchObject({
+      provider: "claudeAgent",
+      model: "claude-opus-4-7",
+      options: {
+        effort: "xhigh",
+      },
     });
   });
 

@@ -893,6 +893,25 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("stores Claude xhigh model selections in the draft", () => {
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(
+      threadId,
+      modelSelection("claudeAgent", "claude-opus-4-7", {
+        effort: "xhigh",
+      }),
+    );
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
+        .claudeAgent,
+    ).toEqual(
+      modelSelection("claudeAgent", "claude-opus-4-7", {
+        effort: "xhigh",
+      }),
+    );
+  });
+
   it("stores older Gemini fork selections under Gemini when provider was stale", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(
