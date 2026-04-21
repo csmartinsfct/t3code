@@ -192,8 +192,6 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
       { text: "Cover inline status and priority changes", status: "pending" },
       { text: "Cover comments and lazy history", status: "pending" },
     ],
-    implementerModelOverride: null,
-    reviewerModelOverride: null,
     dependencies: [],
     subTickets: [],
     comments: [createComment({ id: "comment-seed", body: "Existing context comment" })],
@@ -236,12 +234,6 @@ describe("TaskDetailPanel browser coverage", () => {
         ...ticket,
         ...(input.status ? { status: input.status } : {}),
         ...(input.priority ? { priority: input.priority } : {}),
-        ...("implementerModelOverride" in input
-          ? { implementerModelOverride: input.implementerModelOverride ?? null }
-          : {}),
-        ...("reviewerModelOverride" in input
-          ? { reviewerModelOverride: input.reviewerModelOverride ?? null }
-          : {}),
       };
       return cloneTicket(ticket);
     });
@@ -386,59 +378,6 @@ describe("TaskDetailPanel browser coverage", () => {
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("Fresh browser coverage comment");
         expect(document.body.textContent ?? "").toContain("Comments (2)");
-      });
-
-      expect(document.body.textContent ?? "").toContain("codex:gpt-5.4");
-      expect(document.body.textContent ?? "").toContain("codex:gpt-5.4-mini");
-
-      const modelSwitchButtons = Array.from(
-        document.querySelectorAll("[data-model-picker-change='true']"),
-      ) as HTMLButtonElement[];
-      if (modelSwitchButtons.length < 2) {
-        throw new Error("Expected implementer and reviewer override controls to be mounted.");
-      }
-
-      modelSwitchButtons[0]?.click();
-      await vi.waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith({
-          id: TICKET_ID,
-          implementerModelOverride: {
-            provider: "claudeAgent",
-            model: "claude-sonnet-4-6",
-          },
-        });
-        expect(document.body.textContent ?? "").toContain("claudeAgent:claude-sonnet-4-6");
-      });
-      await expect.element(page.getByLabelText("Reset Implementer to default")).toBeInTheDocument();
-
-      modelSwitchButtons[1]?.click();
-      await vi.waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith({
-          id: TICKET_ID,
-          reviewerModelOverride: {
-            provider: "claudeAgent",
-            model: "claude-sonnet-4-6",
-          },
-        });
-      });
-      await expect.element(page.getByLabelText("Reset Reviewer to default")).toBeInTheDocument();
-
-      await page.getByLabelText("Reset Reviewer to default").click();
-      await vi.waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith({
-          id: TICKET_ID,
-          reviewerModelOverride: null,
-        });
-        expect(document.body.textContent ?? "").toContain("codex:gpt-5.4-mini");
-      });
-
-      await page.getByLabelText("Reset Implementer to default").click();
-      await vi.waitFor(() => {
-        expect(updateSpy).toHaveBeenCalledWith({
-          id: TICKET_ID,
-          implementerModelOverride: null,
-        });
-        expect(document.body.textContent ?? "").toContain("codex:gpt-5.4");
       });
 
       await page.getByRole("button", { name: "History" }).click();

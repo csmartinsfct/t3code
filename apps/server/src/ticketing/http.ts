@@ -270,42 +270,6 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         description: "Acceptance criteria for the ticket.",
       },
-      implementerModel: {
-        type: "object",
-        optional: true,
-        properties: {
-          provider: {
-            type: "string",
-            enum: ["codex", "claudeAgent", "gemini"],
-            description: "Provider kind.",
-          },
-          model: { type: "string", description: "Model slug." },
-          profileId: {
-            type: "string",
-            optional: true,
-            description: "Provider profile ID (if applicable).",
-          },
-        },
-        description: "Optional model override for the implementer agent during orchestration.",
-      },
-      reviewerModel: {
-        type: "object",
-        optional: true,
-        properties: {
-          provider: {
-            type: "string",
-            enum: ["codex", "claudeAgent", "gemini"],
-            description: "Provider kind.",
-          },
-          model: { type: "string", description: "Model slug." },
-          profileId: {
-            type: "string",
-            optional: true,
-            description: "Provider profile ID (if applicable).",
-          },
-        },
-        description: "Optional model override for the reviewer agent during orchestration.",
-      },
     },
   },
   {
@@ -363,44 +327,6 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
           },
         },
         description: "Replace acceptance criteria. Pass null to clear.",
-      },
-      implementerModel: {
-        type: "object",
-        optional: true,
-        nullable: true,
-        properties: {
-          provider: {
-            type: "string",
-            enum: ["codex", "claudeAgent", "gemini"],
-            description: "Provider kind.",
-          },
-          model: { type: "string", description: "Model slug." },
-          profileId: {
-            type: "string",
-            optional: true,
-            description: "Provider profile ID (if applicable).",
-          },
-        },
-        description: "Model override for the implementer agent. Pass null to clear.",
-      },
-      reviewerModel: {
-        type: "object",
-        optional: true,
-        nullable: true,
-        properties: {
-          provider: {
-            type: "string",
-            enum: ["codex", "claudeAgent", "gemini"],
-            description: "Provider kind.",
-          },
-          model: { type: "string", description: "Model slug." },
-          profileId: {
-            type: "string",
-            optional: true,
-            description: "Provider profile ID (if applicable).",
-          },
-        },
-        description: "Model override for the reviewer agent. Pass null to clear.",
       },
     },
   },
@@ -796,8 +722,6 @@ function toolHandlers(ctx: ToolContext) {
         const acceptanceCriteria = input.acceptanceCriteria as
           | Array<{ text: string; status?: string }>
           | undefined;
-        const implementerModel = input.implementerModel as Record<string, unknown> | undefined;
-        const reviewerModel = input.reviewerModel as Record<string, unknown> | undefined;
 
         const resolvedParentId = parentId ? yield* resolveId(parentId) : undefined;
         const resolvedDepIds = dependencyIds
@@ -825,8 +749,6 @@ function toolHandlers(ctx: ToolContext) {
                 })),
               }
             : {}),
-          ...(implementerModel ? { implementerModelOverride: implementerModel as never } : {}),
-          ...(reviewerModel ? { reviewerModelOverride: reviewerModel as never } : {}),
           ...(threadId ? { originThreadId: threadId } : {}),
         });
         return respondOk(yield* resolveJson(ticket));
@@ -846,11 +768,6 @@ function toolHandlers(ctx: ToolContext) {
           | Array<{ text: string; status?: string }>
           | null
           | undefined;
-        const implementerModel = input.implementerModel as
-          | Record<string, unknown>
-          | null
-          | undefined;
-        const reviewerModel = input.reviewerModel as Record<string, unknown> | null | undefined;
 
         const resolvedId = yield* resolveId(id);
         const resolvedParentId =
@@ -881,10 +798,6 @@ function toolHandlers(ctx: ToolContext) {
           ...(sortOrder !== undefined ? { sortOrder } : {}),
           ...(worktree !== undefined ? { worktree } : {}),
           ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
-          ...(implementerModel !== undefined
-            ? { implementerModelOverride: implementerModel as never }
-            : {}),
-          ...(reviewerModel !== undefined ? { reviewerModelOverride: reviewerModel as never } : {}),
         });
         return respondOk(yield* resolveJson(ticket));
       }),

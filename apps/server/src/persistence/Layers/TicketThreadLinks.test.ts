@@ -92,8 +92,6 @@ const seedTicket = (input: {
         sort_order,
         is_archived,
         worktree,
-        implementer_model_json,
-        reviewer_model_json,
         created_at,
         updated_at
       )
@@ -110,8 +108,6 @@ const seedTicket = (input: {
         'none',
         0,
         0,
-        NULL,
-        NULL,
         NULL,
         '2026-04-09T10:00:00.000Z',
         '2026-04-09T10:00:00.000Z'

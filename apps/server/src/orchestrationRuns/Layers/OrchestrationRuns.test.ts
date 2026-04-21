@@ -72,8 +72,6 @@ const makeTicket = (
     sortOrder: 0,
     isArchived: false,
     worktree: null,
-    implementerModelOverride: null,
-    reviewerModelOverride: null,
     acceptanceCriteria: null,
     labels: [],
     dependencies: [],

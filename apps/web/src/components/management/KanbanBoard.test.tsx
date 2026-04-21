@@ -635,8 +635,6 @@ describe("KanbanBoard", () => {
       subTickets: [],
       comments: [],
       artifacts: [],
-      implementerModelOverride: null,
-      reviewerModelOverride: null,
     };
 
     const resolution = resolveBoardOrchestrateSelectionFromDetail({

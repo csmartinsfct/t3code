@@ -102,8 +102,6 @@ Ticket {
   sortOrder: number                         // REAL for fractional indexing
   isArchived: boolean
   worktree: string | null                   // git worktree/branch name
-  implementerModelOverride: ModelSelection | null  // per-ticket implementer model override
-  reviewerModelOverride: ModelSelection | null      // per-ticket reviewer model override
   acceptanceCriteria: AcceptanceCriterion[] | null
   labels: Label[]
   dependencies: TicketDependency[]

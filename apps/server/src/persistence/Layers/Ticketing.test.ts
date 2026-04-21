@@ -59,8 +59,6 @@ const seedTicket = (input: {
       sortOrder: input.sortOrder,
       isArchived: false,
       worktree: null,
-      implementerModelJson: null,
-      reviewerModelJson: null,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
     });

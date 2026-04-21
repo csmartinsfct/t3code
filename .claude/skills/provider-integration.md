@@ -76,10 +76,6 @@ File: `packages/contracts/src/providerRuntime.ts`
 
 - No contract change is required if the runtime-event schema is already provider-neutral (it is today). Only extend the `raw.source` literal enum if you want lifecycle logs to tag the provider-specific transport (e.g. `gemini.acp.notification`).
 
-File: `packages/contracts/src/ticketing.ts`
-
-- Add `<Provider>` arm to `TicketModelSelection` (separate union kept in sync with `ModelSelection` to avoid a circular import). Orchestration runner uses this for `implementerModel` / `reviewerModel` overrides.
-
 File: `packages/shared/src/model.ts`
 
 - Add `<Provider>` fallback to `inferBaseProviderKindFromModelSlug` (slug-prefix heuristic). This is what `normalizeModelSelectionProvider` uses to correct a model selection whose `provider` field drifted from its slug — a real bug Gemini shipped first (fork fix `b553e7ff`).
@@ -575,7 +571,7 @@ Keep this list in mind during implementation and re-audit during PR review:
 
 Use when auditing or reviewing. Each bullet maps to one or more phases above.
 
-- [ ] Contracts: `BASE_PROVIDER_KINDS`, `ModelSelection` union, `ModelOptions`, `ProviderModelOptions`, `DEFAULT_MODEL_BY_PROVIDER`, `MODEL_SLUG_ALIASES_BY_PROVIDER`, `PROVIDER_DISPLAY_NAMES`, `ProviderSettings`, `ServerSettingsPatch`, `TicketModelSelection`, `isValidProviderKind`. (Phase 1)
+- [ ] Contracts: `BASE_PROVIDER_KINDS`, `ModelSelection` union, `ModelOptions`, `ProviderModelOptions`, `DEFAULT_MODEL_BY_PROVIDER`, `MODEL_SLUG_ALIASES_BY_PROVIDER`, `PROVIDER_DISPLAY_NAMES`, `ProviderSettings`, `ServerSettingsPatch`, `isValidProviderKind`. (Phase 1)
 - [ ] `inferBaseProviderKindFromModelSlug` covers the new slug prefix. (Phase 1)
 - [ ] Provider status service: install, version, auth branches, models, capabilities. Registered in `ProviderRegistryLive`. (Phase 2)
 - [ ] Transport layer: pure args/env builders, pending-request map with timeouts, stderr + notification + incoming-request callbacks, `close()` idempotent. (Phase 3)

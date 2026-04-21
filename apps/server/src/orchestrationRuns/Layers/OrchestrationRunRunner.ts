@@ -1559,30 +1559,6 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
 
             // 4c. Post ticket-started activity for fresh ticket dispatches only.
             if (!shouldResumeExistingTicket) {
-              // Apply ticket-level model overrides if present
-              if (ticket.implementerModelOverride) {
-                yield* dispatchCommand(
-                  {
-                    type: "thread.meta.update",
-                    commandId: runnerCommandId("ticket-implementer-model"),
-                    threadId: workingThreadId,
-                    modelSelection: ticket.implementerModelOverride as ModelSelection,
-                  },
-                  `Failed to apply implementer model override for ${ticket.identifier}`,
-                );
-              }
-              if (ticket.reviewerModelOverride && entry.reviewThreadId) {
-                yield* dispatchCommand(
-                  {
-                    type: "thread.meta.update",
-                    commandId: runnerCommandId("ticket-reviewer-model"),
-                    threadId: entry.reviewThreadId as ThreadId,
-                    modelSelection: ticket.reviewerModelOverride as ModelSelection,
-                  },
-                  `Failed to apply reviewer model override for ${ticket.identifier}`,
-                );
-              }
-
               yield* postActivity({
                 threadId: orchestrationThreadId,
                 kind: "orchestration.run.ticket.started",

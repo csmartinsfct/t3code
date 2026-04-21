@@ -67,8 +67,6 @@ const makeTicket = (overrides: { id: string; identifier: string; title: string }
   sortOrder: 0,
   isArchived: false,
   worktree: null,
-  implementerModelOverride: null,
-  reviewerModelOverride: null,
   acceptanceCriteria: null,
   labels: [],
   dependencies: [],
@@ -1656,86 +1654,6 @@ describe("OrchestrationRunRunner", () => {
     expect(turnStarts.find((command) => command.threadId === reviewThread1)?.message.text).toBe(
       "Project review T3CO-1 :: patch",
     );
-  });
-
-  it("dispatches Gemini ticket model overrides to implementer and reviewer threads", async () => {
-    const dispatchedCommands: OrchestrationCommand[] = [];
-    const implementerModelOverride = {
-      provider: "gemini",
-      profileId: "default",
-      model: "gemini-3.1-pro-preview",
-    } as const;
-    const reviewerModelOverride = {
-      provider: "gemini",
-      profileId: "reviewer",
-      model: "gemini-2.5-flash",
-    } as const;
-    const ticketWithGeminiOverrides: Ticket = {
-      ...ticket1,
-      implementerModelOverride,
-      reviewerModelOverride,
-    };
-    const singleTicketRun = makeRun({
-      ticketOrder: [
-        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
-      ],
-      maxReviewIterations: 1,
-    });
-
-    const layer = makeLayer({
-      dispatchedCommands,
-      readModelThreads: makeCompletedWorkAndReviewThreads(
-        JSON.stringify({
-          changesNeeded: false,
-          summary: "Gemini overrides propagated.",
-          comments: [],
-        }),
-      ),
-      runService: {
-        get: () => Effect.succeed(singleTicketRun),
-        start: () => Effect.succeed(singleTicketRun),
-        updateRunProgress: () =>
-          Effect.succeed(
-            makeRun({
-              ...singleTicketRun,
-              currentTicketIndex: 0,
-              currentPhase: "reviewing",
-            }),
-          ),
-        complete: () => Effect.succeed(makeRun({ ...singleTicketRun, status: "completed" })),
-      },
-      ticketing: {
-        getById: ({ id }) => {
-          if (id === ticket1Id) return Effect.succeed(ticketWithGeminiOverrides);
-          return Effect.die(new Error(`Unknown ticket: ${id}`));
-        },
-      },
-      providerEvents: Stream.fromIterable([
-        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
-        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work" }),
-        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
-        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review" }),
-      ]),
-    });
-
-    await Effect.runPromise(
-      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
-        runner.startRun({ runId }),
-      ).pipe(Effect.provide(layer)),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 25));
-
-    const modelUpdates = dispatchedCommands.filter(
-      (command): command is Extract<OrchestrationCommand, { type: "thread.meta.update" }> =>
-        command.type === "thread.meta.update" && command.modelSelection !== undefined,
-    );
-
-    expect(
-      modelUpdates.find((command) => command.threadId === workingThread1)?.modelSelection,
-    ).toEqual(implementerModelOverride);
-    expect(
-      modelUpdates.find((command) => command.threadId === reviewThread1)?.modelSelection,
-    ).toEqual(reviewerModelOverride);
   });
 
   it("renders the reviewFeedback prompt for follow-up implementation turns", async () => {

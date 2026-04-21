@@ -165,8 +165,6 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     ...makeTicketSummary(overrides),
     description: "Detail description",
     acceptanceCriteria: [],
-    implementerModelOverride: null,
-    reviewerModelOverride: null,
     dependencies: [],
     subTickets: [],
     comments: [],

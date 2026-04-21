@@ -173,8 +173,6 @@ function makePreviewTicket(overrides: Partial<Ticket> = {}): Ticket {
     sortOrder: 0,
     isArchived: false,
     worktree: null,
-    implementerModelOverride: null,
-    reviewerModelOverride: null,
     acceptanceCriteria: [
       { text: "First preview criterion", status: "met" },
       { text: "Second preview criterion", status: "pending" },

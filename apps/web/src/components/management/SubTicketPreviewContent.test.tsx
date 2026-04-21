@@ -28,8 +28,6 @@ preview fenced block
     sortOrder: 0,
     isArchived: false,
     worktree: null,
-    implementerModelOverride: null,
-    reviewerModelOverride: null,
     acceptanceCriteria: [{ text: "Rendered in preview", status: "pending" }],
     labels: [],
     dependencies: [],

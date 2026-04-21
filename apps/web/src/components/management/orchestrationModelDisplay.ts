@@ -16,34 +16,3 @@ export function resolveReviewerConfigurationSummary(
     ? "Enable in the settings"
     : formatModelSelectionSummary(reviewerSelection);
 }
-
-export function resolveTicketModelOverrideState(input: {
-  override: ModelSelection | null | undefined;
-  globalDefault: ModelSelection;
-  disabledHref?: string;
-  disabledText?: string;
-}):
-  | {
-      kind: "disabled";
-      disabledHref: string;
-      disabledText: string;
-    }
-  | {
-      kind: "picker";
-      hasOverride: boolean;
-      effective: ModelSelection;
-    } {
-  if (input.disabledHref && input.disabledText) {
-    return {
-      kind: "disabled",
-      disabledHref: input.disabledHref,
-      disabledText: input.disabledText,
-    };
-  }
-
-  return {
-    kind: "picker",
-    hasOverride: input.override != null,
-    effective: input.override ?? input.globalDefault,
-  };
-}
