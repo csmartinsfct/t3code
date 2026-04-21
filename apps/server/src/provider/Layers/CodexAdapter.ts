@@ -1473,6 +1473,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         appendDeveloperInstructions = buildT3ServiceInjectionPrompt({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
+          isElectron: serverConfig.mode === "desktop",
           projectTitle: checkpointContext.value.projectTitle,
           token: access.token,
           adminPrompts: allCodexSettings.prompts.admin,

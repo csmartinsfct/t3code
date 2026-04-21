@@ -2,6 +2,7 @@ import { DEFAULT_SERVER_SETTINGS, type OrchestrationCommand, ProjectId } from "@
 import { Effect, Layer, Option, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
+import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationRunRepository } from "../../persistence/Services/OrchestrationRuns.ts";
@@ -9,6 +10,45 @@ import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { PromptManagementService } from "../Services/PromptManagement.ts";
 import { PromptManagementLive } from "./PromptManagement.ts";
+
+const testServerConfigLayer = Layer.succeed(ServerConfig, {
+  logLevel: "Error",
+  traceMinLevel: "Info",
+  traceTimingEnabled: true,
+  traceBatchWindowMs: 200,
+  traceMaxBytes: 10 * 1024 * 1024,
+  traceMaxFiles: 10,
+  otlpTracesUrl: undefined,
+  otlpMetricsUrl: undefined,
+  otlpExportIntervalMs: 10_000,
+  otlpServiceName: "t3-server",
+  cwd: "/tmp/project",
+  baseDir: "/tmp/t3",
+  stateDir: "/tmp/t3/dev",
+  dbPath: "/tmp/t3/dev/state.sqlite",
+  keybindingsConfigPath: "/tmp/t3/dev/keybindings.json",
+  settingsPath: "/tmp/t3/dev/settings.json",
+  worktreesDir: "/tmp/t3/worktrees",
+  attachmentsDir: "/tmp/t3/dev/attachments",
+  logsDir: "/tmp/t3/dev/logs",
+  serverLogPath: "/tmp/t3/dev/logs/server.log",
+  serverTracePath: "/tmp/t3/dev/logs/server.trace.ndjson",
+  providerLogsDir: "/tmp/t3/dev/logs/provider",
+  providerEventLogPath: "/tmp/t3/dev/logs/provider/events.log",
+  terminalLogsDir: "/tmp/t3/dev/logs/terminals",
+  anonymousIdPath: "/tmp/t3/dev/anonymous-id",
+  mode: "web",
+  autoBootstrapProjectFromCwd: false,
+  logWebSocketEvents: false,
+  port: 0,
+  host: undefined,
+  authToken: undefined,
+  electronCdpBrokerUrl: undefined,
+  electronCdpBrokerToken: undefined,
+  staticDir: undefined,
+  devUrl: undefined,
+  noBrowser: false,
+});
 
 const projectId = ProjectId.makeUnsafe("project-prompts");
 const now = "2026-04-10T10:00:00.000Z";
@@ -99,6 +139,7 @@ function makePromptManagementLayer(options?: {
         deleteById: () => Effect.void,
       }),
     ),
+    Layer.provide(testServerConfigLayer),
   );
 }
 

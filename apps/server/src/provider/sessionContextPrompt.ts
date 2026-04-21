@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PromptDocumentV1, ThreadId } from "@t3tools/contracts";
+import type { PromptRuntimeContext } from "@t3tools/shared/promptTemplates";
 
 import {
   buildEnvironmentHeader,
@@ -24,19 +25,21 @@ export interface AdminPromptDocuments {
 export function buildT3ServiceInjectionPrompt(input: {
   readonly port: number;
   readonly isDev: boolean;
+  readonly isElectron: boolean;
   readonly projectTitle?: string;
   readonly token: string;
   readonly adminPrompts: AdminPromptDocuments;
 }): string {
-  const { port, isDev, projectTitle, token, adminPrompts } = input;
+  const { port, isDev, isElectron, projectTitle, token, adminPrompts } = input;
+  const runtime: PromptRuntimeContext = { isDev, isElectron };
   const sections: string[] = [
     buildEnvironmentHeader({ port, isDev, ...(projectTitle ? { projectTitle } : {}) }),
     buildRestEndpointSystemPrompt({ port, token }),
-    renderAdminPromptDocument(adminPrompts.general),
-    renderAdminPromptDocument(adminPrompts.managedRuns),
-    renderAdminPromptDocument(adminPrompts.scheduledTasks),
-    renderAdminPromptDocument(adminPrompts.ticketing),
-    renderAdminPromptDocument(adminPrompts.browser),
+    renderAdminPromptDocument(adminPrompts.general, runtime),
+    renderAdminPromptDocument(adminPrompts.managedRuns, runtime),
+    renderAdminPromptDocument(adminPrompts.scheduledTasks, runtime),
+    renderAdminPromptDocument(adminPrompts.ticketing, runtime),
+    renderAdminPromptDocument(adminPrompts.browser, runtime),
   ];
   return sections.join("\n\n");
 }
@@ -51,6 +54,7 @@ interface ProviderSessionContextPromptInput {
   readonly serviceContext?: {
     readonly port: number;
     readonly isDev: boolean;
+    readonly isElectron: boolean;
     readonly token: string;
     readonly adminPrompts: AdminPromptDocuments;
   };
@@ -89,6 +93,7 @@ export function buildProviderSessionContextPrompt(
       buildT3ServiceInjectionPrompt({
         port: input.serviceContext.port,
         isDev: input.serviceContext.isDev,
+        isElectron: input.serviceContext.isElectron,
         projectTitle: input.projectTitle,
         token: input.serviceContext.token,
         adminPrompts: input.serviceContext.adminPrompts,

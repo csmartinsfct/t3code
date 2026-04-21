@@ -8,6 +8,7 @@ import type {
   PromptTemplateDocument,
   PromptTemplateValidationError,
   PromptTemplateVariableDefinition,
+  RuntimeMatch,
 } from "@t3tools/contracts";
 import {
   ADMIN_PROMPT_GROUP_ID,
@@ -15,7 +16,38 @@ import {
   ORCHESTRATION_PROMPT_GROUP_ID,
   ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
   PROMPT_TEMPLATE_VERSION,
+  RUNTIME_MATCH_VALUES,
 } from "@t3tools/contracts";
+
+export type PromptRuntimeContext = {
+  readonly isDev: boolean;
+  readonly isElectron: boolean;
+};
+
+export type PromptRenderOptions = {
+  readonly runtime?: PromptRuntimeContext;
+};
+
+export function matchesRuntime(
+  match: RuntimeMatch,
+  runtime: PromptRuntimeContext | undefined,
+): boolean {
+  if (!runtime) return false;
+  switch (match) {
+    case "devElectron":
+      return runtime.isDev && runtime.isElectron;
+    case "devWeb":
+      return runtime.isDev && !runtime.isElectron;
+    case "prodElectron":
+      return !runtime.isDev && runtime.isElectron;
+    case "prodWeb":
+      return !runtime.isDev && !runtime.isElectron;
+    case "anyDev":
+      return runtime.isDev;
+    case "anyElectron":
+      return runtime.isElectron;
+  }
+}
 
 export const ORCHESTRATION_PROMPT_VARIABLE_REGISTRY = [
   {
@@ -283,11 +315,18 @@ export function validatePromptTemplateDocument(input: {
       }
 
       if (isAdmin) {
-        // Admin prompts: no variable interpolation or conditions — accept text as-is
-        normalizedBlocks.push({
-          when: (block.when as PromptTemplateDocument["blocks"][number]["when"]) ?? null,
-          text: block.text,
+        // Admin prompts: no variable interpolation — but allow runtime conditions
+        const normalizedWhen = normalizeAdminCondition({
+          when: block.when,
+          blockIndex,
+          pushError,
         });
+        if (normalizedWhen !== undefined) {
+          normalizedBlocks.push({
+            when: normalizedWhen,
+            text: block.text,
+          });
+        }
       } else {
         const normalizedText = normalizeBlockText({
           promptId: input.promptId as OrchestrationPromptId,
@@ -332,9 +371,10 @@ export function validatePromptTemplateDocument(input: {
 export function renderPromptTemplate(
   document: PromptTemplateDocument,
   variables: PromptTemplateVariableMap,
+  options?: PromptRenderOptions,
 ): string {
   return document.blocks
-    .filter((block) => shouldRenderBlock(block.when, variables))
+    .filter((block) => shouldRenderBlock(block.when, variables, options?.runtime))
     .map((block) =>
       block.text.replaceAll(/\$\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, variableName: string) => {
         const value = variables[variableName as CanonicalPromptVariableKey];
@@ -414,6 +454,18 @@ function normalizeCondition(input: {
     return undefined;
   }
 
+  if (input.when.type === "runtime") {
+    input.pushError({
+      code: "invalid_condition",
+      message: "Runtime conditions are not allowed for orchestration prompts.",
+      path: ["blocks", String(input.blockIndex), "when"],
+      blockIndex: input.blockIndex,
+      variable: null,
+      token: null,
+    });
+    return undefined;
+  }
+
   if (input.when.type !== "exists" || typeof input.when.variable !== "string") {
     input.pushError({
       code: "invalid_condition",
@@ -442,6 +494,71 @@ function normalizeCondition(input: {
   return {
     type: "exists",
     variable: normalizedVariable,
+  };
+}
+
+function normalizeAdminCondition(input: {
+  readonly when: unknown;
+  readonly blockIndex: number;
+  readonly pushError: (
+    error: Omit<PromptTemplateValidationError, "promptGroupId" | "promptId">,
+  ) => void;
+}): PromptTemplateDocument["blocks"][number]["when"] | undefined {
+  if (input.when === null || input.when === undefined) {
+    return null;
+  }
+
+  if (!isRecord(input.when)) {
+    input.pushError({
+      code: "invalid_condition",
+      message: "Prompt block condition must be null or a runtime condition.",
+      path: ["blocks", String(input.blockIndex), "when"],
+      blockIndex: input.blockIndex,
+      variable: null,
+      token: null,
+    });
+    return undefined;
+  }
+
+  if (input.when.type === "exists") {
+    input.pushError({
+      code: "invalid_condition",
+      message: "Exists conditions are not allowed for admin prompts.",
+      path: ["blocks", String(input.blockIndex), "when"],
+      blockIndex: input.blockIndex,
+      variable: null,
+      token: null,
+    });
+    return undefined;
+  }
+
+  if (input.when.type !== "runtime" || typeof input.when.match !== "string") {
+    input.pushError({
+      code: "invalid_condition",
+      message: 'Admin prompt condition must be { type: "runtime", match: <runtime-match> }.',
+      path: ["blocks", String(input.blockIndex), "when"],
+      blockIndex: input.blockIndex,
+      variable: null,
+      token: null,
+    });
+    return undefined;
+  }
+
+  if (!(RUNTIME_MATCH_VALUES as readonly string[]).includes(input.when.match)) {
+    input.pushError({
+      code: "invalid_condition",
+      message: `Unknown runtime match: ${input.when.match}.`,
+      path: ["blocks", String(input.blockIndex), "when", "match"],
+      blockIndex: input.blockIndex,
+      variable: null,
+      token: null,
+    });
+    return undefined;
+  }
+
+  return {
+    type: "runtime",
+    match: input.when.match as RuntimeMatch,
   };
 }
 
@@ -490,9 +607,13 @@ function normalizeVariableForPrompt(input: {
 function shouldRenderBlock(
   when: PromptTemplateDocument["blocks"][number]["when"],
   variables: PromptTemplateVariableMap,
+  runtime: PromptRuntimeContext | undefined,
 ): boolean {
   if (when === null) {
     return true;
+  }
+  if (when.type === "runtime") {
+    return matchesRuntime(when.match, runtime);
   }
   const value = variables[when.variable];
   return typeof value === "string" ? value.length > 0 : value != null;

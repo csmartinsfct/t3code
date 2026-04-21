@@ -78,6 +78,24 @@ All tool calls require an explicit scope object shape via arguments:
 
 Managed-run bearer tokens are restricted to their issued `projectId` and cannot access global scope. The dev bypass token can access both global and project scope.
 
+## Block Conditions
+
+Each prompt block has an optional `when` condition that controls whether the block is rendered. Two condition families exist:
+
+- `exists` — renders the block when a prompt variable (e.g. `worktree`, `reviewSummary`) has a non-empty value. Supported on orchestration prompts only.
+- `runtime` — renders the block when the current T3 server runtime matches a given mode. Supported on admin prompts only.
+
+The `runtime` condition carries a `match` field with one of:
+
+- `devElectron` — `bun run dev:desktop` (server launched by Electron, dev URL present)
+- `devWeb` — `bun run dev` (standalone dev server, no Electron)
+- `prodElectron` — packaged Electron app (production DMG)
+- `prodWeb` — standalone production server (reserved for future deployed scenarios)
+- `anyDev` — `devElectron || devWeb`
+- `anyElectron` — `devElectron || prodElectron`
+
+At injection time, admin prompt blocks are filtered against the current server runtime (derived from `ServerConfig.devUrl` and `ServerConfig.mode`). Preview rendering in Settings uses the same current runtime so what you see matches what the agent receives.
+
 ## Validation And Preview
 
 Validation uses the shared prompt-template validator from `packages/shared/src/promptTemplates.ts`.

@@ -3071,6 +3071,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         serviceSystemPrompt = buildT3ServiceInjectionPrompt({
           port: serverConfig.port,
           isDev: serverConfig.devUrl !== undefined,
+          isElectron: serverConfig.mode === "desktop",
           projectTitle: checkpointContext.value.projectTitle,
           token: access.token,
           adminPrompts: allSettings.prompts.admin,

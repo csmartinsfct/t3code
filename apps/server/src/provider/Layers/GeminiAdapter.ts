@@ -1314,6 +1314,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
               ? {
                   port: serverConfig.port,
                   isDev: serverConfig.devUrl !== undefined,
+                  isElectron: serverConfig.mode === "desktop",
                   token: (yield* managedRunService.issueMcpAccess(
                     checkpointContext.value.projectId,
                     input.threadId,

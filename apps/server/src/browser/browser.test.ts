@@ -55,6 +55,7 @@ it.effect(
       const output = buildT3ServiceInjectionPrompt({
         port: 3773,
         isDev: true,
+        isElectron: false,
         projectTitle: "T3 Code",
         token: "test-token-xxx",
         adminPrompts: {

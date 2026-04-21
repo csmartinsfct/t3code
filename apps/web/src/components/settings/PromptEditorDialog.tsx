@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type {
   CanonicalPromptVariableKey,
+  PromptDefinitionConstraints,
   PromptDocumentV1,
   PromptId,
   PreviewPromptDocumentResult,
@@ -27,6 +28,7 @@ import type {
   PromptManagementScope,
   PromptTemplateBlock,
   PromptTemplateVariableDefinition,
+  RuntimeMatch,
 } from "@t3tools/contracts";
 
 import { ensureNativeApi } from "../../nativeApi";
@@ -90,8 +92,53 @@ function blocksAreEqual(a: readonly PromptTemplateBlock[], b: EditorBlock[]): bo
     if (block.text !== other.text) return false;
     if (block.when === null && other.when === null) return true;
     if (block.when === null || other.when === null) return false;
-    return block.when.type === other.when.type && block.when.variable === other.when.variable;
+    if (block.when.type !== other.when.type) return false;
+    if (block.when.type === "exists" && other.when.type === "exists") {
+      return block.when.variable === other.when.variable;
+    }
+    if (block.when.type === "runtime" && other.when.type === "runtime") {
+      return block.when.match === other.when.match;
+    }
+    return false;
   });
+}
+
+const RUNTIME_MATCH_OPTIONS: ReadonlyArray<{
+  readonly value: RuntimeMatch;
+  readonly label: string;
+}> = [
+  { value: "devElectron", label: "If Dev Electron" },
+  { value: "devWeb", label: "If Dev Web" },
+  { value: "prodElectron", label: "If Prod Electron" },
+  { value: "prodWeb", label: "If Prod Web" },
+  { value: "anyDev", label: "If Any Dev" },
+  { value: "anyElectron", label: "If Any Electron" },
+];
+
+const ALWAYS_SENTINEL = "__always__";
+const RUNTIME_PREFIX = "__runtime:";
+
+function whenToSelectValue(when: PromptTemplateBlock["when"]): string {
+  if (when === null) return ALWAYS_SENTINEL;
+  if (when.type === "runtime") return `${RUNTIME_PREFIX}${when.match}__`;
+  return when.variable;
+}
+
+function selectValueToWhen(value: string): PromptTemplateBlock["when"] {
+  if (value === ALWAYS_SENTINEL) return null;
+  if (value.startsWith(RUNTIME_PREFIX)) {
+    const match = value.slice(RUNTIME_PREFIX.length, -2) as RuntimeMatch;
+    return { type: "runtime", match };
+  }
+  return { type: "exists", variable: value as CanonicalPromptVariableKey };
+}
+
+function whenToLabel(when: PromptTemplateBlock["when"]): string {
+  if (when === null) return "Always";
+  if (when.type === "runtime") {
+    return RUNTIME_MATCH_OPTIONS.find((o) => o.value === when.match)?.label ?? `If ${when.match}`;
+  }
+  return `If exists: ${when.variable}`;
 }
 
 // ── Sortable Block ─────────────────────────────────────────────────────
@@ -100,6 +147,7 @@ function SortableBlock({
   block,
   index,
   supportedVariables,
+  supportedConditionTypes,
   blockErrors,
   onUpdate,
   onRemove,
@@ -108,6 +156,7 @@ function SortableBlock({
   block: EditorBlock;
   index: number;
   supportedVariables: readonly PromptTemplateVariableDefinition[];
+  supportedConditionTypes: PromptDefinitionConstraints["supportedConditionTypes"];
   blockErrors: string[];
   onUpdate: (index: number, patch: Partial<Pick<EditorBlock, "when" | "text">>) => void;
   onRemove: (index: number) => void;
@@ -122,7 +171,9 @@ function SortableBlock({
     transition,
   };
 
-  const conditionValue = block.when ? block.when.variable : "__always__";
+  const conditionValue = whenToSelectValue(block.when);
+  const supportsExists = supportedConditionTypes.includes("exists");
+  const supportsRuntime = supportedConditionTypes.includes("runtime");
 
   return (
     <div
@@ -154,32 +205,38 @@ function SortableBlock({
             <Select
               value={conditionValue}
               onValueChange={(value) => {
-                if (value === "__always__") {
-                  onUpdate(index, { when: null });
-                } else {
-                  onUpdate(index, {
-                    when: { type: "exists", variable: value as CanonicalPromptVariableKey },
-                  });
-                }
+                if (value === null) return;
+                onUpdate(index, { when: selectValueToWhen(value) });
               }}
             >
               <SelectTrigger
                 className="h-6 w-auto min-w-28 gap-1 px-2 text-[11px]"
                 aria-label="Block condition"
               >
-                <SelectValue>
-                  {block.when ? `If exists: ${block.when.variable}` : "Always"}
-                </SelectValue>
+                <SelectValue>{whenToLabel(block.when)}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="start" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="__always__">
+                <SelectItem hideIndicator value={ALWAYS_SENTINEL}>
                   Always
                 </SelectItem>
-                {supportedVariables.map((v) => (
-                  <SelectItem hideIndicator key={v.key} value={v.key}>
-                    If exists: {v.key}
-                  </SelectItem>
-                ))}
+                {supportsExists
+                  ? supportedVariables.map((v) => (
+                      <SelectItem hideIndicator key={v.key} value={v.key}>
+                        If exists: {v.key}
+                      </SelectItem>
+                    ))
+                  : null}
+                {supportsRuntime
+                  ? RUNTIME_MATCH_OPTIONS.map((opt) => (
+                      <SelectItem
+                        hideIndicator
+                        key={opt.value}
+                        value={`${RUNTIME_PREFIX}${opt.value}__`}
+                      >
+                        {opt.label}
+                      </SelectItem>
+                    ))
+                  : null}
               </SelectPopup>
             </Select>
             <div className="flex-1" />
@@ -236,6 +293,7 @@ export function PromptEditorDialog({
   const definition = documentState?.definition ?? null;
   const promptId = definition?.promptId as PromptId | undefined;
   const supportedVariables = definition?.supportedVariables ?? [];
+  const supportedConditionTypes = definition?.constraints.supportedConditionTypes ?? [];
 
   // Initialize blocks when dialog opens or document changes
   useEffect(() => {
@@ -481,6 +539,7 @@ export function PromptEditorDialog({
                       block={block}
                       index={index}
                       supportedVariables={supportedVariables}
+                      supportedConditionTypes={supportedConditionTypes}
                       blockErrors={blockErrorMap.get(index) ?? []}
                       onUpdate={handleUpdateBlock}
                       onRemove={handleRemoveBlock}

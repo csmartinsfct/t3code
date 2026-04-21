@@ -512,6 +512,135 @@ describe("validatePromptTemplateDocument", () => {
   });
 });
 
+describe("runtime conditions", () => {
+  const RUNTIMES = {
+    devElectron: { isDev: true, isElectron: true },
+    devWeb: { isDev: true, isElectron: false },
+    prodElectron: { isDev: false, isElectron: true },
+    prodWeb: { isDev: false, isElectron: false },
+  } as const;
+
+  it("validates admin prompts with runtime conditions", () => {
+    const result = validatePromptTemplateDocument({
+      groupId: "admin",
+      promptId: "browser",
+      document: {
+        version: 1,
+        blocks: [
+          { when: null, text: "Always block." },
+          { when: { type: "runtime", match: "devElectron" }, text: "Dev electron block." },
+          { when: { type: "runtime", match: "anyDev" }, text: "Any dev block." },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects exists conditions on admin prompts", () => {
+    const result = validatePromptTemplateDocument({
+      groupId: "admin",
+      promptId: "browser",
+      document: {
+        version: 1,
+        blocks: [{ when: { type: "exists", variable: "ticketId" }, text: "nope" }],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        expect.objectContaining({
+          code: "invalid_condition",
+          blockIndex: 0,
+        }),
+      ],
+    });
+  });
+
+  it("rejects runtime conditions on orchestration prompts", () => {
+    const result = validatePromptTemplateDocument({
+      groupId: "orchestration",
+      promptId: "implement",
+      document: {
+        version: 1,
+        blocks: [{ when: { type: "runtime", match: "devElectron" }, text: "nope" }],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        expect.objectContaining({
+          code: "invalid_condition",
+          blockIndex: 0,
+        }),
+      ],
+    });
+  });
+
+  it("rejects unknown runtime match values on admin prompts", () => {
+    const result = validatePromptTemplateDocument({
+      groupId: "admin",
+      promptId: "browser",
+      document: {
+        version: 1,
+        blocks: [{ when: { type: "runtime", match: "bogus" }, text: "nope" }],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        expect.objectContaining({
+          code: "invalid_condition",
+          blockIndex: 0,
+        }),
+      ],
+    });
+  });
+
+  it("renders runtime blocks matching the current runtime", () => {
+    const doc = {
+      version: 1 as const,
+      blocks: [
+        { when: null, text: "[always]" },
+        { when: { type: "runtime" as const, match: "devElectron" as const }, text: "[devE]" },
+        { when: { type: "runtime" as const, match: "devWeb" as const }, text: "[devW]" },
+        { when: { type: "runtime" as const, match: "prodElectron" as const }, text: "[prodE]" },
+        { when: { type: "runtime" as const, match: "prodWeb" as const }, text: "[prodW]" },
+        { when: { type: "runtime" as const, match: "anyDev" as const }, text: "[anyDev]" },
+        { when: { type: "runtime" as const, match: "anyElectron" as const }, text: "[anyE]" },
+      ],
+    };
+
+    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.devElectron })).toBe(
+      "[always][devE][anyDev][anyE]",
+    );
+    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.devWeb })).toBe(
+      "[always][devW][anyDev]",
+    );
+    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.prodElectron })).toBe(
+      "[always][prodE][anyE]",
+    );
+    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.prodWeb })).toBe(
+      "[always][prodW]",
+    );
+  });
+
+  it("drops runtime blocks when runtime context is missing", () => {
+    const doc = {
+      version: 1 as const,
+      blocks: [
+        { when: null, text: "[always]" },
+        { when: { type: "runtime" as const, match: "anyDev" as const }, text: "[anyDev]" },
+      ],
+    };
+
+    expect(renderPromptTemplate(doc, {})).toBe("[always]");
+  });
+});
+
 describe("renderPromptTemplate", () => {
   it("renders blocks in order and skips exists blocks with missing values", () => {
     const text = renderPromptTemplate(

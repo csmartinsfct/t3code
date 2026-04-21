@@ -78,10 +78,37 @@ export const CANONICAL_PROMPT_VARIABLE_KEYS = [
 export type CanonicalPromptVariableKey = (typeof CANONICAL_PROMPT_VARIABLE_KEYS)[number];
 export const CanonicalPromptVariableKey = Schema.Literals(CANONICAL_PROMPT_VARIABLE_KEYS);
 
-export const PromptTemplateCondition = Schema.Struct({
+export const RUNTIME_MATCH_VALUES = [
+  "devElectron",
+  "devWeb",
+  "prodElectron",
+  "prodWeb",
+  "anyDev",
+  "anyElectron",
+] as const;
+export type RuntimeMatch = (typeof RUNTIME_MATCH_VALUES)[number];
+export const RuntimeMatch = Schema.Literals(RUNTIME_MATCH_VALUES);
+
+export const PROMPT_CONDITION_TYPES = ["exists", "runtime"] as const;
+export type PromptConditionType = (typeof PROMPT_CONDITION_TYPES)[number];
+export const PromptConditionType = Schema.Literals(PROMPT_CONDITION_TYPES);
+
+export const PromptTemplateExistsCondition = Schema.Struct({
   type: Schema.Literal("exists"),
   variable: CanonicalPromptVariableKey,
 });
+export type PromptTemplateExistsCondition = typeof PromptTemplateExistsCondition.Type;
+
+export const PromptTemplateRuntimeCondition = Schema.Struct({
+  type: Schema.Literal("runtime"),
+  match: RuntimeMatch,
+});
+export type PromptTemplateRuntimeCondition = typeof PromptTemplateRuntimeCondition.Type;
+
+export const PromptTemplateCondition = Schema.Union([
+  PromptTemplateExistsCondition,
+  PromptTemplateRuntimeCondition,
+]);
 export type PromptTemplateCondition = typeof PromptTemplateCondition.Type;
 
 export const PromptTemplateBlock = Schema.Struct({

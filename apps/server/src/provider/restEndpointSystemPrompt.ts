@@ -1,8 +1,16 @@
 import type { PromptDocumentV1 } from "@t3tools/contracts";
+import { renderPromptTemplate, type PromptRuntimeContext } from "@t3tools/shared/promptTemplates";
 
-/** Render an admin prompt document by joining all block texts. */
-export function renderAdminPromptDocument(document: PromptDocumentV1): string {
-  return document.blocks.map((b) => b.text).join("");
+/**
+ * Render an admin prompt document by joining all block texts whose `when`
+ * matches the current runtime. Admin prompts don't use ${...} interpolation,
+ * so variables are always an empty map.
+ */
+export function renderAdminPromptDocument(
+  document: PromptDocumentV1,
+  runtime: PromptRuntimeContext,
+): string {
+  return renderPromptTemplate(document, {}, { runtime });
 }
 
 /**

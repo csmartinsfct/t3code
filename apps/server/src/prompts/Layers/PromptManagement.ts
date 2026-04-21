@@ -28,9 +28,11 @@ import {
   listPromptTemplateVariables,
   renderPromptTemplate,
   validatePromptTemplateDocument,
+  type PromptRuntimeContext,
 } from "@t3tools/shared/promptTemplates";
 import { Effect, Equal, Layer, Option } from "effect";
 
+import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -75,7 +77,7 @@ const ORCHESTRATION_PROMPT_DEFINITION_CONSTRAINTS = {
 
 const ADMIN_PROMPT_DEFINITION_CONSTRAINTS = {
   documentVersion: 1,
-  supportedConditionTypes: [],
+  supportedConditionTypes: ["runtime"],
   interpolationSyntax: "${variable}",
   orderedBlocksMatter: false,
   supportsGlobalScope: true,
@@ -282,6 +284,11 @@ export const PromptManagementLive = Layer.effect(
     const orchestrationEngine = yield* OrchestrationEngineService;
     const startup = yield* ServerRuntimeStartup;
     const runRepo = yield* OrchestrationRunRepository;
+    const serverConfig = yield* ServerConfig;
+    const currentRuntime: PromptRuntimeContext = {
+      isDev: serverConfig.devUrl !== undefined,
+      isElectron: serverConfig.mode === "desktop",
+    };
 
     const normalizeScope = (
       input:
@@ -633,9 +640,11 @@ export const PromptManagementLive = Layer.effect(
             return yield* validationFailedError(validation.errors);
           }
 
-          // Admin prompts: preview is just the block text joined (no variable interpolation)
+          // Admin prompts: preview filters by runtime condition against the
+          // current server runtime (no variable interpolation).
+          // Orchestration prompts: substitute representative variable values.
           const previewText = isAdminPromptId(input.promptId)
-            ? validation.document.blocks.map((b) => b.text).join("")
+            ? renderPromptTemplate(validation.document, {}, { runtime: currentRuntime })
             : renderPromptTemplate(validation.document, REPRESENTATIVE_PREVIEW_VALUES);
 
           return {

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { OrchestrationRunId, ProjectId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   CanonicalPromptVariableKey as CanonicalPromptVariableKeySchema,
+  PromptConditionType,
   PromptGroupId,
   PromptId as PromptIdSchema,
   PromptDocumentV1,
@@ -33,7 +34,7 @@ export type PromptGroupDefinition = typeof PromptGroupDefinition.Type;
 
 export const PromptDefinitionConstraints = Schema.Struct({
   documentVersion: PromptTemplateVersion,
-  supportedConditionTypes: Schema.Array(Schema.Literal("exists")),
+  supportedConditionTypes: Schema.Array(PromptConditionType),
   interpolationSyntax: Schema.Literal("${variable}"),
   orderedBlocksMatter: Schema.Boolean,
   supportsGlobalScope: Schema.Boolean,
