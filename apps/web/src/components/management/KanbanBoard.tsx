@@ -13,7 +13,7 @@ import type {
 } from "@t3tools/contracts";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { ArrowLeftIcon, LayoutGridIcon } from "lucide-react";
+import { ArrowLeftIcon, GlobeIcon, LayoutGridIcon } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -224,6 +224,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const viewMode = useUiStateStore((s) => s.boardViewMode);
   const setViewMode = useUiStateStore((s) => s.setBoardViewMode);
+  const browserVisible = useUiStateStore((s) => s.browserVisible);
+  const setBrowserVisible = useUiStateStore((s) => s.setBrowserVisible);
   const boardFilters =
     useUiStateStore((s) => s.boardFiltersByProjectId[typedProjectId]) ?? DEFAULT_BOARD_FILTERS;
   const storeBoardFilters = useUiStateStore((s) => s.setBoardFilters);
@@ -863,12 +865,28 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             <span className="min-w-0 truncate">{project?.name ?? projectId}</span>
           </Badge>
         </div>
-        {selectedTicketId ? (
-          <Button variant="outline" size="xs" onClick={handleBackToBoard}>
-            <LayoutGridIcon className="size-3" />
-            Back to board
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          {selectedTicketId ? (
+            <Button variant="outline" size="xs" onClick={handleBackToBoard}>
+              <LayoutGridIcon className="size-3" />
+              Back to board
+            </Button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setBrowserVisible(!browserVisible)}
+            className={cn(
+              "flex size-7 items-center justify-center rounded-md border transition-colors",
+              browserVisible
+                ? "border-primary/30 bg-primary/10 text-primary"
+                : "border-border bg-transparent text-muted-foreground hover:text-foreground",
+            )}
+            aria-pressed={browserVisible}
+            aria-label="Toggle browser"
+          >
+            <GlobeIcon className="size-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Board body */}
@@ -876,6 +894,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         <div className="flex flex-1 items-center justify-center">
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
+      ) : browserVisible ? (
+        <EmbeddedBrowser projectId={typedProjectId} />
       ) : orchestrationSubpage ? (
         <OrchestrationSubpage
           selectedTickets={orchestrationSubpage.tickets}
@@ -909,9 +929,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             onViewModeChange={setViewMode}
           />
           <div ref={boardBodyRef} className="relative flex min-h-0 flex-1">
-            {viewMode === "browser" ? (
-              <EmbeddedBrowser projectId={typedProjectId} />
-            ) : viewMode === "list" ? (
+            {viewMode === "list" ? (
               <KanbanListView
                 filteredTicketsByStatus={filteredTicketsByStatus}
                 visibleStatuses={visibleStatuses}

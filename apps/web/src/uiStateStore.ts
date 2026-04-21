@@ -19,7 +19,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 export type ViewMode = "chat" | "management";
-export type BoardViewMode = "cards" | "list" | "browser";
+export type BoardViewMode = "cards" | "list";
 
 export interface BoardFilters {
   priorityFilter: string[];
@@ -48,7 +48,8 @@ interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   viewMode?: ViewMode;
-  boardViewMode?: BoardViewMode;
+  boardViewMode?: BoardViewMode | "browser";
+  browserVisible?: boolean;
   boardFiltersByProjectId?: Record<
     string,
     {
@@ -80,6 +81,7 @@ export interface UiThreadState {
 export interface UiBoardState {
   managementBoardContext: BoardContext | null;
   boardViewMode: BoardViewMode;
+  browserVisible: boolean;
   boardFiltersByProjectId: Record<string, BoardFilters>;
 }
 
@@ -104,6 +106,7 @@ const initialState: UiState = {
   startupRecoveryStateByThreadId: {},
   managementBoardContext: null,
   boardViewMode: "cards",
+  browserVisible: false,
   boardFiltersByProjectId: {},
   viewMode: "chat",
 };
@@ -112,6 +115,7 @@ const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 let persistedViewMode: ViewMode = "chat";
 let persistedBoardViewMode: BoardViewMode = "cards";
+let persistedBrowserVisible = false;
 let persistedBoardFiltersByProjectId: Record<string, BoardFilters> = {};
 let persistedManagementBoardContext: BoardContext | null = null;
 const currentProjectCwdById = new Map<ProjectId, string>();
@@ -136,6 +140,7 @@ function readPersistedState(): UiState {
           ...initialState,
           viewMode: persistedViewMode,
           boardViewMode: persistedBoardViewMode,
+          browserVisible: persistedBrowserVisible,
           boardFiltersByProjectId: persistedBoardFiltersByProjectId,
           managementBoardContext: persistedManagementBoardContext,
         };
@@ -147,6 +152,7 @@ function readPersistedState(): UiState {
       ...initialState,
       viewMode: persistedViewMode,
       boardViewMode: persistedBoardViewMode,
+      browserVisible: persistedBrowserVisible,
       boardFiltersByProjectId: persistedBoardFiltersByProjectId,
       managementBoardContext: persistedManagementBoardContext,
     };
@@ -171,12 +177,16 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
   }
   persistedViewMode =
     parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
-  persistedBoardViewMode =
-    parsed.boardViewMode === "cards" ||
-    parsed.boardViewMode === "list" ||
-    parsed.boardViewMode === "browser"
-      ? parsed.boardViewMode
-      : "cards";
+  if (parsed.boardViewMode === "browser") {
+    persistedBoardViewMode = "cards";
+    persistedBrowserVisible = true;
+  } else {
+    persistedBoardViewMode =
+      parsed.boardViewMode === "cards" || parsed.boardViewMode === "list"
+        ? parsed.boardViewMode
+        : "cards";
+    persistedBrowserVisible = parsed.browserVisible === true;
+  }
   persistedBoardFiltersByProjectId = {};
   if (parsed.boardFiltersByProjectId && typeof parsed.boardFiltersByProjectId === "object") {
     for (const [projectId, raw] of Object.entries(parsed.boardFiltersByProjectId)) {
@@ -241,6 +251,7 @@ function persistState(state: UiState): void {
         projectOrderCwds,
         viewMode: state.viewMode,
         boardViewMode: state.boardViewMode,
+        browserVisible: state.browserVisible,
         boardFiltersByProjectId: state.boardFiltersByProjectId,
         managementBoardContext: state.managementBoardContext,
       } satisfies PersistedUiState),
@@ -677,6 +688,11 @@ export function setBoardViewMode(state: UiState, mode: BoardViewMode): UiState {
   return { ...state, boardViewMode: mode };
 }
 
+export function setBrowserVisible(state: UiState, visible: boolean): UiState {
+  if (state.browserVisible === visible) return state;
+  return { ...state, browserVisible: visible };
+}
+
 export function setBoardFilters(
   state: UiState,
   projectId: ProjectId,
@@ -785,6 +801,7 @@ interface UiStateStore extends UiState {
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
   setViewMode: (mode: ViewMode) => void;
   setBoardViewMode: (mode: BoardViewMode) => void;
+  setBrowserVisible: (visible: boolean) => void;
   setBoardFilters: (projectId: ProjectId, updates: Partial<BoardFilters>) => void;
   toggleBoardCollapsedStatus: (projectId: ProjectId, status: string) => void;
 }
@@ -822,6 +839,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
   setViewMode: (mode) => set({ viewMode: mode }),
   setBoardViewMode: (mode) => set((state) => setBoardViewMode(state, mode)),
+  setBrowserVisible: (visible) => set((state) => setBrowserVisible(state, visible)),
   setBoardFilters: (projectId, updates) =>
     set((state) => setBoardFilters(state, projectId, updates)),
   toggleBoardCollapsedStatus: (projectId, status) =>

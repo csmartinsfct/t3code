@@ -1,12 +1,5 @@
 import type { TicketPriority, TicketStatus } from "@t3tools/contracts";
-import {
-  ChevronDownIcon,
-  GlobeIcon,
-  LayoutGridIcon,
-  ListIcon,
-  SearchIcon,
-  XIcon,
-} from "lucide-react";
+import { ChevronDownIcon, LayoutGridIcon, ListIcon, SearchIcon, XIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import type { BoardViewMode } from "../../uiStateStore";
@@ -336,7 +329,7 @@ export function BoardToolbar({
           <button
             type="button"
             className={cn(
-              "flex size-6 items-center justify-center transition-colors",
+              "flex size-6 items-center justify-center rounded-r-[5px] transition-colors",
               viewMode === "list"
                 ? "bg-accent text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -344,18 +337,6 @@ export function BoardToolbar({
             onClick={() => onViewModeChange("list")}
           >
             <ListIcon className="size-3" />
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "flex size-6 items-center justify-center rounded-r-[5px] transition-colors",
-              viewMode === "browser"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => onViewModeChange("browser")}
-          >
-            <GlobeIcon className="size-3" />
           </button>
         </div>
       </div>

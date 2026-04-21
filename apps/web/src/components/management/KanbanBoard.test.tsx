@@ -101,7 +101,8 @@ const uiStateStoreState = {
     boardScrollLeft: number;
     updatedAt: string;
   } | null,
-  boardViewMode: "cards" as "cards" | "list" | "browser",
+  boardViewMode: "cards" as "cards" | "list",
+  browserVisible: false,
   boardFiltersByProjectId: {},
   setManagementBoardRoot: vi.fn(),
   pushManagementBoardTicket: vi.fn(),
@@ -109,6 +110,7 @@ const uiStateStoreState = {
   setManagementBoardScrollLeft: vi.fn(),
   sanitizeManagementBoardContext: vi.fn(),
   setBoardViewMode: vi.fn(),
+  setBrowserVisible: vi.fn(),
   setBoardFilters: vi.fn(),
   toggleBoardCollapsedStatus: vi.fn(),
 };
@@ -300,12 +302,14 @@ async function renderBoard({
   tickets = [],
   managementBoardContext = null,
   boardViewMode = "cards",
+  browserVisible = false,
 }: {
   electron?: boolean;
   threadId?: ThreadId | null;
   tickets?: ReadonlyArray<TicketSummary>;
   managementBoardContext?: typeof uiStateStoreState.managementBoardContext;
   boardViewMode?: typeof uiStateStoreState.boardViewMode;
+  browserVisible?: boolean;
 } = {}) {
   vi.resetModules();
   vi.clearAllMocks();
@@ -314,6 +318,7 @@ async function renderBoard({
   selectionStoreState.selectedTickets = new Map();
   uiStateStoreState.managementBoardContext = managementBoardContext;
   uiStateStoreState.boardViewMode = boardViewMode;
+  uiStateStoreState.browserVisible = browserVisible;
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
   columnMockState.lastProps = null;
@@ -434,10 +439,10 @@ describe("KanbanBoard", () => {
     expect(markup).not.toContain("New ticket");
   });
 
-  it("renders the embedded browser when browser board mode is active", async () => {
+  it("renders the embedded browser when the browser toggle is enabled", async () => {
     const markup = await renderBoard({
       tickets: [makeTicket()],
-      boardViewMode: "browser",
+      browserVisible: true,
     });
 
     expect(markup).toContain("EmbeddedBrowser:project-1");
