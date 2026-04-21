@@ -12,6 +12,7 @@
 import {
   asProviderInput,
   baseProviderKind,
+  providerProfileId,
   ModelSelection,
   NonNegativeInt,
   ThreadId,
@@ -460,16 +461,39 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // Binding-fallback resume cursor: when a prior session for this thread
+        // exists and shares the same base provider kind, reuse its resume
+        // cursor. Strict equality is too narrow — the binding stores the full
+        // profiled kind (e.g. "claudeAgent:metric") while callers may pass the
+        // base kind ("claudeAgent") when they don't have the profile handy
+        // (e.g. `SessionRestartService` dispatches a continuation turn without
+        // a modelSelection, so the reactor resolves `preferredProvider` from
+        // `thread.session.providerName`, which is stored as the base kind).
+        // Dropping the resume cursor in that case destroys prior-conversation
+        // context — forbidden by the project rules.
+        const bindingProviderMatches =
+          persistedBinding !== undefined &&
+          baseProviderKind(persistedBinding.provider) === baseProviderKind(input.provider);
         const effectiveResumeCursor =
           input.resumeCursor ??
-          (persistedBinding?.provider === input.provider
-            ? persistedBinding.resumeCursor
-            : undefined);
+          (bindingProviderMatches ? persistedBinding?.resumeCursor : undefined);
+        // Prefer the binding's fully-qualified provider (with profile) when the
+        // input is missing the profile. The adapter recovers the profile from
+        // `modelSelection.profileId` anyway, but passing the full kind keeps
+        // subsequent binding lookups aligned.
+        const effectiveProvider: ProviderKind =
+          bindingProviderMatches &&
+          persistedBinding !== undefined &&
+          providerProfileId(persistedBinding.provider) !== undefined &&
+          providerProfileId(input.provider) === undefined
+            ? persistedBinding.provider
+            : input.provider;
         yield* lfcyl(threadId, {
           scope: "provider-service",
           event: "session.start",
           details: {
-            provider: input.provider,
+            provider: effectiveProvider,
+            requestedProvider: input.provider,
             hasResumeCursor: effectiveResumeCursor !== undefined,
             cursorSource:
               input.resumeCursor !== undefined
@@ -481,9 +505,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             hasCwd: typeof input.cwd === "string" && input.cwd.trim().length > 0,
           },
         });
-        const adapter = yield* registry.getByProvider(input.provider);
+        const adapter = yield* registry.getByProvider(effectiveProvider);
         const session = yield* adapter.startSession({
           ...input,
+          provider: asProviderInput(effectiveProvider),
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
         });
 
