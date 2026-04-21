@@ -2,7 +2,17 @@ import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import type { ProjectId, TicketingError, ThreadId } from "@t3tools/contracts";
-import { LabelId, CommentId, ArtifactId, TemplateId } from "@t3tools/contracts";
+import {
+  LabelId,
+  CommentId,
+  ArtifactId,
+  TemplateId,
+  TicketingOperationError,
+} from "@t3tools/contracts";
+import {
+  ProjectionThreadMessageRepository,
+  type ProjectionThreadMessageRepositoryShape,
+} from "../persistence/Services/ProjectionThreadMessages";
 import {
   parseToolCallBody,
   resolveAuth,
@@ -618,7 +628,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: "create_artifact",
     title: "Create Artifact",
-    description: "Attach an artifact to a ticket or comment.",
+    description:
+      "Attach an artifact to a ticket or comment. For file-backed images the server accepts one of three shapes in payload: {dataUrl,name,mimeType?} to upload a new file, {fromAttachmentId,name?,mimeType?} to copy an existing chat-thread attachment into the ticket (without re-uploading bytes), or {url,alt?,width?,height?} for a remote URL reference.",
     inputSchema: {
       ticketId: {
         type: "string",
@@ -639,7 +650,22 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       payload: {
         type: "object",
         description:
-          "Type-specific payload (e.g. {url} for figma_url, {source} for mermaid, {url, alt} for image).",
+          "Type-specific payload. figma_url: {url,nodeId?}. mermaid: {source}. image: one of {dataUrl,name,mimeType?} (upload), {fromAttachmentId,name?,mimeType?} (copy existing chat attachment), or {url,alt?,width?,height?} (remote URL).",
+      },
+    },
+  },
+  {
+    name: "update_artifact",
+    title: "Update Artifact",
+    description:
+      "Update an artifact's title (human-readable label shown on the card). Pass null to clear the title and fall back to the original filename.",
+    inputSchema: {
+      id: { type: "string", description: "The artifact ID." },
+      title: {
+        type: "string",
+        optional: true,
+        nullable: true,
+        description: "New title (null clears).",
       },
     },
   },
@@ -649,6 +675,19 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     description: "Delete an artifact.",
     inputSchema: { id: { type: "string", description: "The artifact ID." } },
   },
+  {
+    name: "list_chat_attachments",
+    title: "List Chat Attachments",
+    description:
+      "List image attachments sent in the current chat thread. Use the returned id with create_artifact's `fromAttachmentId` shape to copy a chat screenshot onto a ticket without re-uploading bytes.",
+    inputSchema: {
+      limit: {
+        type: "number",
+        optional: true,
+        description: "Max attachments to return (default 50, newest first).",
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -657,12 +696,13 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
 
 type ToolContext = {
   ticketing: TicketingServiceShape;
+  threadMessages: ProjectionThreadMessageRepositoryShape;
   projectId: ProjectId;
   threadId: ThreadId;
 };
 
 function toolHandlers(ctx: ToolContext) {
-  const { ticketing, projectId, threadId } = ctx;
+  const { ticketing, threadMessages, projectId, threadId } = ctx;
 
   /** Resolve a ticket UUID or human-readable identifier within the current project. */
   const resolveId = (idOrIdentifier: string) =>
@@ -1147,11 +1187,69 @@ function toolHandlers(ctx: ToolContext) {
         return respondOk(yield* resolveJson(artifact));
       }),
 
+    update_artifact: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.id as string;
+        const titleInput = input.title;
+        const title =
+          titleInput === null || titleInput === undefined
+            ? (titleInput as null | undefined)
+            : (titleInput as string);
+        const artifact = yield* ticketing.updateArtifact({
+          id: ArtifactId.makeUnsafe(id),
+          ...(title === undefined ? {} : { title }),
+        });
+        return respondOk(yield* resolveJson(artifact));
+      }),
+
     delete_artifact: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
         const id = input.id as string;
         yield* ticketing.deleteArtifact({ id: ArtifactId.makeUnsafe(id) });
         return respondOk({ deleted: true });
+      }),
+
+    list_chat_attachments: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const limit = typeof input.limit === "number" ? input.limit : 50;
+        const messages = yield* threadMessages.listByThreadId({ threadId }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TicketingOperationError({
+                operation: "list_chat_attachments",
+                message: cause instanceof Error ? cause.message : String(cause),
+                cause,
+              }),
+          ),
+        );
+
+        type ChatAttachmentRecord = {
+          id: string;
+          name: string;
+          mimeType: string;
+          sizeBytes: number;
+          createdAt: string;
+          messageId: string;
+          previewUrl: string;
+        };
+
+        const items: ChatAttachmentRecord[] = [];
+        for (const message of messages) {
+          for (const attachment of message.attachments ?? []) {
+            if (attachment.type !== "image") continue;
+            items.push({
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              createdAt: message.createdAt,
+              messageId: message.messageId,
+              previewUrl: `/attachments/${encodeURIComponent(attachment.id)}`,
+            });
+          }
+        }
+        items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return respondOk(items.slice(0, Math.max(0, limit)));
       }),
   } as Record<
     string,
@@ -1183,8 +1281,10 @@ const handlePost = Effect.gen(function* () {
   if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
 
   const ticketing = yield* TicketingService;
+  const threadMessages = yield* ProjectionThreadMessageRepository;
   const handlers = toolHandlers({
     ticketing,
+    threadMessages,
     projectId: auth.projectId,
     threadId: auth.threadId,
   });

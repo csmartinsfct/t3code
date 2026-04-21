@@ -101,6 +101,7 @@ const HISTORY_ACTION_LABELS: Record<TicketHistoryAction, string> = {
   comment_updated: "Updated comment",
   comment_deleted: "Deleted comment",
   artifact_added: "Added artifact",
+  artifact_updated: "Updated artifact",
   artifact_deleted: "Deleted artifact",
 };
 

@@ -106,6 +106,7 @@ const rpcClientMock = {
     deleteComment: vi.fn(),
     listArtifacts: vi.fn(),
     createArtifact: vi.fn(),
+    updateArtifact: vi.fn(),
     deleteArtifact: vi.fn(),
     onEvent: vi.fn(),
   },

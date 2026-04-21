@@ -106,6 +106,7 @@ export function createWsNativeApi(): NativeApi {
       deleteComment: rpcClient.ticketing.deleteComment,
       listArtifacts: rpcClient.ticketing.listArtifacts,
       createArtifact: rpcClient.ticketing.createArtifact,
+      updateArtifact: rpcClient.ticketing.updateArtifact,
       deleteArtifact: rpcClient.ticketing.deleteArtifact,
       listTemplates: rpcClient.ticketing.listTemplates,
       getTemplate: rpcClient.ticketing.getTemplate,

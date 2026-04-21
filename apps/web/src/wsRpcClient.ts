@@ -192,6 +192,7 @@ export interface WsRpcClient {
     readonly deleteComment: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteComment>;
     readonly listArtifacts: RpcUnaryMethod<typeof WS_METHODS.ticketingListArtifacts>;
     readonly createArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingCreateArtifact>;
+    readonly updateArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdateArtifact>;
     readonly deleteArtifact: RpcUnaryMethod<typeof WS_METHODS.ticketingDeleteArtifact>;
     readonly listTemplates: RpcUnaryMethod<typeof WS_METHODS.ticketingListTemplates>;
     readonly getTemplate: RpcUnaryMethod<typeof WS_METHODS.ticketingGetTemplate>;
@@ -414,6 +415,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.ticketingListArtifacts](input)),
       createArtifact: (input) =>
         transport.request((client) => client[WS_METHODS.ticketingCreateArtifact](input)),
+      updateArtifact: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUpdateArtifact](input)),
       deleteArtifact: (input) =>
         transport.request((client) => client[WS_METHODS.ticketingDeleteArtifact](input)),
       listTemplates: (input) =>

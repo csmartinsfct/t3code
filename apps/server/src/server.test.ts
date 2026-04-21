@@ -52,6 +52,7 @@ import {
 } from "./prompts/Services/PromptManagement.ts";
 import { ScheduledTaskService } from "./scheduledTasks/Services/ScheduledTasks.ts";
 import { SessionRestartService } from "./sessionRestart/Services/SessionRestart.ts";
+import { ProjectionThreadMessageRepository } from "./persistence/Services/ProjectionThreadMessages.ts";
 import { TicketingService } from "./ticketing/Services/Ticketing.ts";
 import { OrchestrationRunService } from "./orchestrationRuns/Services/OrchestrationRuns.ts";
 import { OrchestrationRunRunner } from "./orchestrationRuns/Services/OrchestrationRunRunner.ts";
@@ -373,6 +374,15 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
+        Layer.succeed(ProjectionThreadMessageRepository, {
+          upsert: () => Effect.void,
+          getByMessageId: () => Effect.succeed(Option.none()),
+          listByThreadId: () => Effect.succeed([]),
+          deleteByThreadId: () => Effect.void,
+          deleteByMessageIds: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
         Layer.succeed(TicketingService, {
           resolveId: () => Effect.die(new Error("not mocked")),
           resolveIdentifiers: () => Effect.succeed(new Map()),
@@ -405,6 +415,7 @@ const buildAppUnderTest = (options?: {
           deleteComment: () => Effect.void,
           listArtifacts: () => Effect.succeed([]),
           createArtifact: () => Effect.die(new Error("not mocked")),
+          updateArtifact: () => Effect.die(new Error("not mocked")),
           deleteArtifact: () => Effect.void,
           listTemplates: () => Effect.succeed([]),
           getTemplate: () => Effect.die(new Error("not mocked")),

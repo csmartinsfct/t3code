@@ -26,12 +26,23 @@ import {
   type TicketingStreamEvent,
   type TicketStatus,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, PubSub, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, PubSub, Stream } from "effect";
 
+import {
+  AttachmentIngestError,
+  copyExistingAttachment,
+  deleteAttachmentFile,
+  ingestDataUrl,
+  type AttachmentOwner,
+} from "../../attachments/AttachmentFiles.ts";
+import { ServerConfig } from "../../config.ts";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { TicketingRepository } from "../../persistence/Services/Ticketing.ts";
-import type { PersistedTicket } from "../../persistence/Services/Ticketing.ts";
+import type {
+  PersistedTicket,
+  PersistedTicketingAttachment,
+} from "../../persistence/Services/Ticketing.ts";
 import { TicketThreadLinkRepository } from "../../persistence/Services/TicketThreadLinks.ts";
 import type { TicketThreadLinkLookupRow } from "../../persistence/Services/TicketThreadLinks.ts";
 import { TicketingService, type TicketingServiceShape } from "../Services/Ticketing.ts";
@@ -100,7 +111,19 @@ const makeTicketingService = Effect.gen(function* () {
   const repo = yield* TicketingRepository;
   const projectionThreadRepository = yield* ProjectionThreadRepository;
   const ticketThreadLinkRepository = yield* TicketThreadLinkRepository;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
+  const serverConfig = yield* ServerConfig;
   const eventsPubSub = yield* PubSub.unbounded<TicketingStreamEvent>();
+
+  // Pre-bind the FileSystem + Path requirement so later helpers are `never`.
+  const provideFsPath = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, pathService),
+    );
+  const provideFs = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+    effect.pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
 
   const publishEvent = (event: TicketingStreamEvent) =>
     PubSub.publish(eventsPubSub, event).pipe(Effect.asVoid);
@@ -611,9 +634,45 @@ const makeTicketingService = Effect.gen(function* () {
       return full;
     });
 
+  const cleanupOwnerAttachments = (owner: AttachmentOwner): Effect.Effect<void, TicketingError> =>
+    Effect.gen(function* () {
+      const rows = yield* repo
+        .deleteTicketingAttachmentsByOwner({ ownerKind: owner.kind, ownerId: owner.id })
+        .pipe(Effect.mapError(toOperationError("cleanupOwnerAttachments")));
+      yield* Effect.forEach(
+        rows,
+        (row) =>
+          provideFs(
+            deleteAttachmentFile({
+              attachmentsDir: serverConfig.attachmentsDir,
+              relativePath: row.relativePath,
+            }),
+          ).pipe(Effect.catch(() => Effect.void)),
+        { concurrency: "unbounded" },
+      );
+    });
+
   const del: TicketingServiceShape["delete"] = (input) =>
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(input.id);
+
+      // Collect the subtree so we can clean up attachments for every descendant
+      // before the SQL CASCADE drops their rows.
+      const subtree: ReadonlyArray<PersistedTicket> = yield* collectSubtree(input.id).pipe(
+        Effect.catch(() => Effect.succeed<ReadonlyArray<PersistedTicket>>([])),
+      );
+      const commentOwnerIds: string[] = [];
+      for (const t of subtree) {
+        const comments = yield* repo
+          .listCommentsByTicket({ ticketId: t.id, limit: 10_000, offset: 0 })
+          .pipe(Effect.mapError(toOperationError("delete")));
+        for (const c of comments) commentOwnerIds.push(c.id);
+        yield* cleanupOwnerAttachments({ kind: "ticket", id: t.id });
+      }
+      for (const commentId of commentOwnerIds) {
+        yield* cleanupOwnerAttachments({ kind: "comment", id: commentId });
+      }
+
       yield* repo.deleteTicket({ id: input.id }).pipe(Effect.mapError(toOperationError("delete")));
       yield* publishEvent({
         type: "ticket_deleted",
@@ -1124,6 +1183,7 @@ const makeTicketingService = Effect.gen(function* () {
           Effect.fail<TicketingError>(new CommentNotFoundError({ commentId: input.id })),
         onSome: Effect.succeed,
       });
+      yield* cleanupOwnerAttachments({ kind: "comment", id: input.id });
       yield* repo
         .deleteComment({ id: input.id })
         .pipe(Effect.mapError(toOperationError("deleteComment")));
@@ -1150,6 +1210,89 @@ const makeTicketingService = Effect.gen(function* () {
       Effect.mapError(toOperationError("listArtifacts")),
     );
 
+  const ingestIfImagePayload = (
+    type: string,
+    payload: unknown,
+    owner: AttachmentOwner,
+  ): Effect.Effect<
+    { payload: unknown; storedAttachment: PersistedTicketingAttachment | null },
+    TicketingError
+  > =>
+    Effect.gen(function* () {
+      if (type !== "image" || typeof payload !== "object" || payload === null) {
+        return { payload, storedAttachment: null } as const;
+      }
+      const obj = payload as Record<string, unknown>;
+
+      const rawDataUrl = typeof obj.dataUrl === "string" ? obj.dataUrl : null;
+      const rawFromAttachmentId =
+        typeof obj.fromAttachmentId === "string" ? obj.fromAttachmentId : null;
+      const rawName = typeof obj.name === "string" ? obj.name : null;
+      const rawMime = typeof obj.mimeType === "string" ? obj.mimeType : null;
+      const alt = typeof obj.alt === "string" ? obj.alt : null;
+      const width = typeof obj.width === "number" ? obj.width : null;
+      const height = typeof obj.height === "number" ? obj.height : null;
+
+      if (!rawDataUrl && !rawFromAttachmentId) {
+        return { payload, storedAttachment: null } as const;
+      }
+
+      const ingested = yield* (
+        rawDataUrl
+          ? provideFsPath(
+              ingestDataUrl({
+                attachmentsDir: serverConfig.attachmentsDir,
+                owner,
+                dataUrl: rawDataUrl,
+                name: rawName ?? "attachment",
+              }),
+            )
+          : provideFsPath(
+              copyExistingAttachment({
+                attachmentsDir: serverConfig.attachmentsDir,
+                owner,
+                sourceAttachmentId: rawFromAttachmentId!,
+                name: rawName ?? rawFromAttachmentId!,
+                mimeType: rawMime ?? "image/png",
+              }),
+            )
+      ).pipe(
+        Effect.mapError((cause: AttachmentIngestError) =>
+          toOperationError("createArtifact")(cause),
+        ),
+      );
+
+      const storedAttachment: PersistedTicketingAttachment = {
+        id: ingested.id,
+        ownerKind: owner.kind,
+        ownerId: owner.id,
+        relativePath: ingested.relativePath,
+        name: ingested.name,
+        mimeType: ingested.mimeType,
+        sizeBytes: ingested.sizeBytes,
+        width,
+        height,
+        alt,
+        createdAt: nowIso(),
+      };
+      yield* repo
+        .createTicketingAttachment(storedAttachment)
+        .pipe(Effect.mapError(toOperationError("createArtifact")));
+
+      const resolvedPayload = {
+        storage: "local",
+        attachmentId: ingested.id,
+        name: ingested.name,
+        mimeType: ingested.mimeType,
+        sizeBytes: ingested.sizeBytes,
+        ...(width !== null ? { width } : {}),
+        ...(height !== null ? { height } : {}),
+        ...(alt !== null ? { alt } : {}),
+      };
+
+      return { payload: resolvedPayload, storedAttachment } as const;
+    });
+
   const createArtifact: TicketingServiceShape["createArtifact"] = (input) =>
     Effect.gen(function* () {
       const ticketId = input.ticketId ?? null;
@@ -1167,6 +1310,12 @@ const makeTicketingService = Effect.gen(function* () {
         });
       }
 
+      const owner: AttachmentOwner = ticketId
+        ? { kind: "ticket", id: ticketId }
+        : { kind: "comment", id: commentId! };
+
+      const { payload } = yield* ingestIfImagePayload(input.type, input.payload, owner);
+
       const now = nowIso();
       const id = ArtifactId.makeUnsafe(crypto.randomUUID());
       const artifact = {
@@ -1175,7 +1324,7 @@ const makeTicketingService = Effect.gen(function* () {
         commentId,
         type: input.type,
         title: input.title ?? null,
-        payload: input.payload,
+        payload,
         createdAt: now,
         updatedAt: now,
       };
@@ -1189,7 +1338,61 @@ const makeTicketingService = Effect.gen(function* () {
         );
       }
 
+      yield* publishEvent({
+        type: "artifact_upserted",
+        ticketId,
+        commentId,
+        artifact: artifact as Artifact,
+      });
+
       return artifact as Artifact;
+    });
+
+  const updateArtifact: TicketingServiceShape["updateArtifact"] = (input) =>
+    Effect.gen(function* () {
+      const existing = yield* repo
+        .getArtifact({ id: input.id })
+        .pipe(Effect.mapError(toOperationError("updateArtifact")));
+      const current = yield* Option.match(existing, {
+        onNone: () =>
+          Effect.fail<TicketingError>(
+            new TicketingOperationError({
+              operation: "updateArtifact",
+              message: `Artifact not found: ${input.id}`,
+            }),
+          ),
+        onSome: Effect.succeed,
+      });
+
+      const now = nowIso();
+      const nextTitle = input.title === undefined ? current.title : input.title;
+      yield* repo
+        .updateArtifactTitle({ id: input.id, title: nextTitle, updatedAt: now })
+        .pipe(Effect.mapError(toOperationError("updateArtifact")));
+
+      const updated: Artifact = {
+        ...(current as Artifact),
+        title: nextTitle,
+        updatedAt: now,
+      };
+
+      if (current.ticketId) {
+        yield* recordHistory(
+          current.ticketId,
+          "artifact_updated",
+          { artifactId: input.id, title: nextTitle },
+          "user",
+        ).pipe(Effect.mapError(toOperationError("updateArtifact")));
+      }
+
+      yield* publishEvent({
+        type: "artifact_upserted",
+        ticketId: current.ticketId,
+        commentId: current.commentId,
+        artifact: updated,
+      });
+
+      return updated;
     });
 
   const deleteArtifact: TicketingServiceShape["deleteArtifact"] = (input) =>
@@ -1207,6 +1410,37 @@ const makeTicketingService = Effect.gen(function* () {
           ),
         onSome: Effect.succeed,
       });
+      // Best-effort clean up any local attachment file referenced by the
+      // artifact payload before removing the artifact row.
+      const payloadObj =
+        artifact.payload && typeof artifact.payload === "object"
+          ? (artifact.payload as Record<string, unknown>)
+          : null;
+      const maybeAttachmentId =
+        payloadObj && payloadObj.storage === "local" && typeof payloadObj.attachmentId === "string"
+          ? payloadObj.attachmentId
+          : null;
+      if (maybeAttachmentId) {
+        const attachment = yield* repo
+          .getTicketingAttachment({ id: maybeAttachmentId })
+          .pipe(Effect.mapError(toOperationError("deleteArtifact")));
+        yield* Option.match(attachment, {
+          onNone: () => Effect.void,
+          onSome: (row) =>
+            Effect.gen(function* () {
+              yield* repo
+                .deleteTicketingAttachment({ id: row.id })
+                .pipe(Effect.mapError(toOperationError("deleteArtifact")));
+              yield* provideFs(
+                deleteAttachmentFile({
+                  attachmentsDir: serverConfig.attachmentsDir,
+                  relativePath: row.relativePath,
+                }),
+              ).pipe(Effect.catch(() => Effect.void));
+            }),
+        });
+      }
+
       yield* repo
         .deleteArtifact({ id: input.id })
         .pipe(Effect.mapError(toOperationError("deleteArtifact")));
@@ -1218,6 +1452,13 @@ const makeTicketingService = Effect.gen(function* () {
           "user",
         ).pipe(Effect.mapError(toOperationError("deleteArtifact")));
       }
+
+      yield* publishEvent({
+        type: "artifact_deleted",
+        ticketId: artifact.ticketId,
+        commentId: artifact.commentId,
+        artifactId: input.id,
+      });
     });
 
   // Templates
@@ -1375,6 +1616,7 @@ const makeTicketingService = Effect.gen(function* () {
     deleteComment,
     listArtifacts,
     createArtifact,
+    updateArtifact,
     deleteArtifact,
     streamEvents: Stream.fromPubSub(eventsPubSub),
   } satisfies TicketingServiceShape;

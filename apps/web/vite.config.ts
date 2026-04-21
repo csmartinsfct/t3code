@@ -67,6 +67,18 @@ export default defineConfig(({ mode }) => {
             protocol: "ws",
             host: "localhost",
           },
+      proxy: {
+        // Forward backend-owned paths to the T3 server so the dev UI can load
+        // attachment bytes and call REST/MCP endpoints without CORS.
+        "/attachments": {
+          target: `http://localhost:${Number(env.T3CODE_PORT ?? 3773)}`,
+          changeOrigin: true,
+        },
+        "/api": {
+          target: `http://localhost:${Number(env.T3CODE_PORT ?? 3773)}`,
+          changeOrigin: true,
+        },
+      },
     },
     build: {
       outDir: "dist",

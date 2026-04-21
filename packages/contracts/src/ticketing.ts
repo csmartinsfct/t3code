@@ -63,6 +63,7 @@ export const TicketHistoryAction = Schema.Literals([
   "comment_updated",
   "comment_deleted",
   "artifact_added",
+  "artifact_updated",
   "artifact_deleted",
 ]);
 export type TicketHistoryAction = typeof TicketHistoryAction.Type;
@@ -464,6 +465,12 @@ export const ArtifactCreateInput = Schema.Struct({
 });
 export type ArtifactCreateInput = typeof ArtifactCreateInput.Type;
 
+export const ArtifactUpdateInput = Schema.Struct({
+  id: ArtifactId,
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type ArtifactUpdateInput = typeof ArtifactUpdateInput.Type;
+
 export const ArtifactDeleteInput = Schema.Struct({ id: ArtifactId });
 export type ArtifactDeleteInput = typeof ArtifactDeleteInput.Type;
 
@@ -509,6 +516,18 @@ export const TicketingStreamEvent = Schema.Union([
     type: Schema.Literal("comment_deleted"),
     ticketId: TicketId,
     commentId: CommentId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("artifact_upserted"),
+    ticketId: Schema.NullOr(TicketId),
+    commentId: Schema.NullOr(CommentId),
+    artifact: Artifact,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("artifact_deleted"),
+    ticketId: Schema.NullOr(TicketId),
+    commentId: Schema.NullOr(CommentId),
+    artifactId: ArtifactId,
   }),
   Schema.Struct({
     type: Schema.Literal("template_upserted"),

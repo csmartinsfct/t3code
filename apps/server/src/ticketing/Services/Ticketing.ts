@@ -3,6 +3,7 @@ import type {
   ArtifactCreateInput,
   ArtifactDeleteInput,
   ArtifactListInput,
+  ArtifactUpdateInput,
   Comment,
   CommentCreateInput,
   CommentDeleteInput,
@@ -131,6 +132,7 @@ export interface TicketingServiceShape {
     input: ArtifactListInput,
   ) => Effect.Effect<ReadonlyArray<Artifact>, TicketingError>;
   readonly createArtifact: (input: ArtifactCreateInput) => Effect.Effect<Artifact, TicketingError>;
+  readonly updateArtifact: (input: ArtifactUpdateInput) => Effect.Effect<Artifact, TicketingError>;
   readonly deleteArtifact: (input: ArtifactDeleteInput) => Effect.Effect<void, TicketingError>;
 
   // Streaming

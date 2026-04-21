@@ -1,7 +1,9 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
+import { ServerConfig } from "../../config.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -13,6 +15,11 @@ import { TicketThreadLinkRepository } from "../../persistence/Services/TicketThr
 import { TicketingService } from "../Services/Ticketing.ts";
 import { TicketingServiceLive } from "./Ticketing.ts";
 
+const PlatformSupport = Layer.provideMerge(
+  ServerConfig.layerTest(process.cwd(), { prefix: "t3-ticketing-test" }),
+  NodeServices.layer,
+);
+
 const TicketingTestLayer = it.layer(
   Layer.mergeAll(
     TicketingServiceLive.pipe(
@@ -20,6 +27,7 @@ const TicketingTestLayer = it.layer(
       Layer.provide(ProjectionThreadRepositoryLive),
       Layer.provide(TicketingRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
+      Layer.provide(PlatformSupport),
     ),
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
@@ -377,6 +385,146 @@ TicketingTestLayer("TicketingService", (it) => {
       assert.strictEqual(afterUnarchive.length, 3);
       for (const t of afterUnarchive) {
         assert.strictEqual(t.isArchived, false);
+      }
+    }),
+  );
+
+  it.effect("ingests an image dataUrl and rewrites the artifact payload to storage=local", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-attach-ingest");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "IngestProject");
+
+      const ticket = yield* ticketing.create({ projectId, title: "Attach ingest ticket" });
+
+      // 1x1 transparent PNG
+      const tinyPngBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+      const artifact = yield* ticketing.createArtifact({
+        ticketId: ticket.id,
+        type: "image",
+        title: "Tiny PNG",
+        payload: {
+          dataUrl: `data:image/png;base64,${tinyPngBase64}`,
+          name: "tiny.png",
+          mimeType: "image/png",
+        },
+      });
+
+      const payload = artifact.payload as Record<string, unknown>;
+      assert.strictEqual(payload.storage, "local");
+      assert.strictEqual(typeof payload.attachmentId, "string");
+      assert.strictEqual(payload.mimeType, "image/png");
+      assert.strictEqual(typeof payload.sizeBytes, "number");
+    }),
+  );
+
+  it.effect("rejects a non-image MIME type when ingesting via dataUrl", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-attach-badmime");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BadMimeProject");
+      const ticket = yield* ticketing.create({ projectId, title: "Bad MIME" });
+
+      const exit = yield* Effect.exit(
+        ticketing.createArtifact({
+          ticketId: ticket.id,
+          type: "image",
+          payload: {
+            dataUrl: "data:application/octet-stream;base64,AAAA",
+            name: "file.bin",
+            mimeType: "application/octet-stream",
+          },
+        }),
+      );
+      assert.strictEqual(exit._tag, "Failure");
+    }),
+  );
+
+  it.effect("stores figma_url and mermaid payloads verbatim (no ingest)", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-attach-other");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "OtherTypesProject");
+      const ticket = yield* ticketing.create({ projectId, title: "Other artifact types" });
+
+      const figma = yield* ticketing.createArtifact({
+        ticketId: ticket.id,
+        type: "figma_url",
+        payload: { url: "https://figma.com/design/abc", nodeId: "1:2" },
+      });
+      const mermaid = yield* ticketing.createArtifact({
+        ticketId: ticket.id,
+        type: "mermaid",
+        payload: { source: "graph TD; A-->B" },
+      });
+
+      assert.deepStrictEqual(figma.payload, {
+        url: "https://figma.com/design/abc",
+        nodeId: "1:2",
+      });
+      assert.deepStrictEqual(mermaid.payload, { source: "graph TD; A-->B" });
+    }),
+  );
+
+  it.effect("updateArtifact changes the title and leaves payload untouched", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-attach-rename");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "RenameProject");
+      const ticket = yield* ticketing.create({ projectId, title: "Rename target" });
+
+      const figma = yield* ticketing.createArtifact({
+        ticketId: ticket.id,
+        type: "figma_url",
+        title: "Original",
+        payload: { url: "https://figma.com/design/xyz" },
+      });
+
+      const renamed = yield* ticketing.updateArtifact({
+        id: figma.id,
+        title: "Renamed",
+      });
+      assert.strictEqual(renamed.title, "Renamed");
+      assert.deepStrictEqual(renamed.payload, { url: "https://figma.com/design/xyz" });
+
+      // null clears the title
+      const cleared = yield* ticketing.updateArtifact({ id: figma.id, title: null });
+      assert.strictEqual(cleared.title, null);
+    }),
+  );
+
+  it.effect("updateArtifact publishes an artifact_upserted stream event", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-attach-stream");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "StreamProject");
+      const ticket = yield* ticketing.create({ projectId, title: "Stream target" });
+
+      const figma = yield* ticketing.createArtifact({
+        ticketId: ticket.id,
+        type: "figma_url",
+        title: "Before",
+        payload: { url: "https://figma.com/design/s" },
+      });
+
+      const eventsFiber = yield* ticketing.streamEvents.pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+
+      yield* ticketing.updateArtifact({ id: figma.id, title: "After" });
+
+      const collected = yield* Fiber.join(eventsFiber);
+      const events = Array.from(collected);
+      assert.strictEqual(events.length, 1);
+      const first = events[0]!;
+      assert.strictEqual(first.type, "artifact_upserted");
+      if (first.type === "artifact_upserted") {
+        assert.strictEqual(first.artifact.id, figma.id);
+        assert.strictEqual(first.artifact.title, "After");
       }
     }),
   );

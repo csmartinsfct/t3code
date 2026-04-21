@@ -27,12 +27,16 @@ import {
   PersistedTemplate,
   PersistedTicket,
   PersistedTicketHistoryEntry,
+  PersistedTicketingAttachment,
   SetDependenciesRepoInput,
   TemplateLookupInput,
   TemplateRow,
   TemplatesByProjectInput,
   TicketHistoryRow,
   TicketIdentifierLookupInput,
+  TicketingAttachmentLookupInput,
+  TicketingAttachmentRow,
+  TicketingAttachmentsByOwnerInput,
   TicketingRepository,
   type TicketingRepositoryShape,
   TicketLabelAssocInput,
@@ -102,6 +106,20 @@ const ARTIFACT_SELECT = `
   payload_json AS "payload",
   created_at AS "createdAt",
   updated_at AS "updatedAt"
+`;
+
+const TICKETING_ATTACHMENT_SELECT = `
+  id,
+  owner_kind AS "ownerKind",
+  owner_id AS "ownerId",
+  relative_path AS "relativePath",
+  name,
+  mime_type AS "mimeType",
+  size_bytes AS "sizeBytes",
+  width,
+  height,
+  alt,
+  created_at AS "createdAt"
 `;
 
 const HISTORY_SELECT = `
@@ -381,6 +399,34 @@ const makeTicketingRepository = Effect.gen(function* () {
     Result: ArtifactRow,
     execute: ({ commentId }) =>
       sql`SELECT ${sql.literal(ARTIFACT_SELECT)} FROM artifacts WHERE comment_id = ${commentId} ORDER BY created_at ASC`,
+  });
+
+  // ---- Ticketing attachments (file-backed, polymorphic owner) ----
+
+  const writeTicketingAttachment = SqlSchema.void({
+    Request: PersistedTicketingAttachment,
+    execute: (row) =>
+      sql`
+        INSERT INTO ticketing_attachments (
+          id, owner_kind, owner_id, relative_path, name, mime_type, size_bytes, width, height, alt, created_at
+        ) VALUES (
+          ${row.id}, ${row.ownerKind}, ${row.ownerId}, ${row.relativePath}, ${row.name}, ${row.mimeType}, ${row.sizeBytes}, ${row.width}, ${row.height}, ${row.alt}, ${row.createdAt}
+        )
+      `,
+  });
+
+  const getTicketingAttachment_ = SqlSchema.findOneOption({
+    Request: TicketingAttachmentLookupInput,
+    Result: TicketingAttachmentRow,
+    execute: ({ id }) =>
+      sql`SELECT ${sql.literal(TICKETING_ATTACHMENT_SELECT)} FROM ticketing_attachments WHERE id = ${id}`,
+  });
+
+  const listTicketingAttachmentsByOwner_ = SqlSchema.findAll({
+    Request: TicketingAttachmentsByOwnerInput,
+    Result: TicketingAttachmentRow,
+    execute: ({ ownerKind, ownerId }) =>
+      sql`SELECT ${sql.literal(TICKETING_ATTACHMENT_SELECT)} FROM ticketing_attachments WHERE owner_kind = ${ownerKind} AND owner_id = ${ownerId} ORDER BY created_at ASC`,
   });
 
   // ---- History ----
@@ -797,6 +843,51 @@ const makeTicketingRepository = Effect.gen(function* () {
     listArtifactsByComment: (input) =>
       listArtifactsByComment_(input).pipe(
         Effect.mapError(toPersistenceSqlError("TicketingRepository.listArtifactsByComment:query")),
+      ),
+    // Ticketing attachments (file-backed)
+    createTicketingAttachment: (input) =>
+      writeTicketingAttachment(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("TicketingRepository.createTicketingAttachment:query"),
+        ),
+      ),
+    getTicketingAttachment: (input) =>
+      getTicketingAttachment_(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.getTicketingAttachment:query")),
+      ),
+    listTicketingAttachmentsByOwner: (input) =>
+      listTicketingAttachmentsByOwner_(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("TicketingRepository.listTicketingAttachmentsByOwner:query"),
+        ),
+      ),
+    deleteTicketingAttachment: ({ id }) =>
+      sql`DELETE FROM ticketing_attachments WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(
+          toPersistenceSqlError("TicketingRepository.deleteTicketingAttachment:query"),
+        ),
+      ),
+    deleteTicketingAttachmentsByOwner: ({ ownerKind, ownerId }) =>
+      Effect.gen(function* () {
+        const rows = yield* listTicketingAttachmentsByOwner_({ ownerKind, ownerId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlError("TicketingRepository.deleteTicketingAttachmentsByOwner:query"),
+          ),
+        );
+        yield* sql`DELETE FROM ticketing_attachments WHERE owner_kind = ${ownerKind} AND owner_id = ${ownerId}`.pipe(
+          Effect.asVoid,
+          Effect.mapError(
+            toPersistenceSqlError("TicketingRepository.deleteTicketingAttachmentsByOwner:query"),
+          ),
+        );
+        return rows;
+      }),
+
+    updateArtifactTitle: ({ id, title, updatedAt }) =>
+      sql`UPDATE artifacts SET title = ${title}, updated_at = ${updatedAt} WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.updateArtifactTitle:query")),
       ),
     deleteArtifact: ({ id }) =>
       sql`DELETE FROM artifacts WHERE id = ${id}`.pipe(

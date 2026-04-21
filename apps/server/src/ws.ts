@@ -1178,6 +1178,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.ticketingCreateArtifact, ticketing.createArtifact(input), {
           "rpc.aggregate": "ticketing",
         }),
+      [WS_METHODS.ticketingUpdateArtifact]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUpdateArtifact, ticketing.updateArtifact(input), {
+          "rpc.aggregate": "ticketing",
+        }),
       [WS_METHODS.ticketingDeleteArtifact]: (input) =>
         observeRpcEffect(WS_METHODS.ticketingDeleteArtifact, ticketing.deleteArtifact(input), {
           "rpc.aggregate": "ticketing",

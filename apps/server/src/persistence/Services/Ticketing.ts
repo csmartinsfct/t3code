@@ -76,6 +76,43 @@ export const PersistedArtifact = Schema.Struct({
 });
 export type PersistedArtifact = typeof PersistedArtifact.Type;
 
+// ---------------------------------------------------------------------------
+// Polymorphic ticketing attachment rows (file-backed, shared by ticket &
+// comment owners via (owner_kind, owner_id)). Separate from the legacy
+// thread-scoped chat attachments.
+// ---------------------------------------------------------------------------
+
+export const AttachmentOwnerKindSchema = Schema.Literals(["ticket", "comment"]);
+export type AttachmentOwnerKindSchema = typeof AttachmentOwnerKindSchema.Type;
+
+export const PersistedTicketingAttachment = Schema.Struct({
+  id: Schema.String,
+  ownerKind: AttachmentOwnerKindSchema,
+  ownerId: Schema.String,
+  relativePath: Schema.String,
+  name: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+  width: Schema.NullOr(Schema.Number),
+  height: Schema.NullOr(Schema.Number),
+  alt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+export type PersistedTicketingAttachment = typeof PersistedTicketingAttachment.Type;
+
+export const TicketingAttachmentRow = Schema.Struct({
+  ...PersistedTicketingAttachment.fields,
+});
+
+export const TicketingAttachmentLookupInput = Schema.Struct({ id: Schema.String });
+export type TicketingAttachmentLookupInput = typeof TicketingAttachmentLookupInput.Type;
+
+export const TicketingAttachmentsByOwnerInput = Schema.Struct({
+  ownerKind: AttachmentOwnerKindSchema,
+  ownerId: Schema.String,
+});
+export type TicketingAttachmentsByOwnerInput = typeof TicketingAttachmentsByOwnerInput.Type;
+
 export const PersistedTicketHistoryEntry = Schema.Struct({
   id: TicketHistoryId,
   ticketId: TicketId,
@@ -400,9 +437,31 @@ export interface TicketingRepositoryShape {
   readonly listArtifactsByComment: (
     input: ArtifactsByCommentInput,
   ) => Effect.Effect<ReadonlyArray<PersistedArtifact>, ProjectionRepositoryError>;
+  readonly updateArtifactTitle: (input: {
+    readonly id: ArtifactId;
+    readonly title: string | null;
+    readonly updatedAt: string;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly deleteArtifact: (
     input: ArtifactLookupInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  // Ticketing attachments (file-backed)
+  readonly createTicketingAttachment: (
+    input: PersistedTicketingAttachment,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly getTicketingAttachment: (
+    input: TicketingAttachmentLookupInput,
+  ) => Effect.Effect<Option.Option<PersistedTicketingAttachment>, ProjectionRepositoryError>;
+  readonly listTicketingAttachmentsByOwner: (
+    input: TicketingAttachmentsByOwnerInput,
+  ) => Effect.Effect<ReadonlyArray<PersistedTicketingAttachment>, ProjectionRepositoryError>;
+  readonly deleteTicketingAttachment: (
+    input: TicketingAttachmentLookupInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly deleteTicketingAttachmentsByOwner: (
+    input: TicketingAttachmentsByOwnerInput,
+  ) => Effect.Effect<ReadonlyArray<PersistedTicketingAttachment>, ProjectionRepositoryError>;
 
   // History
   readonly recordHistory: (

@@ -85,6 +85,7 @@ import {
   ArtifactCreateInput,
   ArtifactDeleteInput,
   ArtifactListInput,
+  ArtifactUpdateInput,
   CommentCreateInput,
   CommentDeleteInput,
   CommentListInput,
@@ -289,6 +290,7 @@ export const WS_METHODS = {
   ticketingDeleteComment: "ticketing.deleteComment",
   ticketingListArtifacts: "ticketing.listArtifacts",
   ticketingCreateArtifact: "ticketing.createArtifact",
+  ticketingUpdateArtifact: "ticketing.updateArtifact",
   ticketingDeleteArtifact: "ticketing.deleteArtifact",
   ticketingListTemplates: "ticketing.listTemplates",
   ticketingGetTemplate: "ticketing.getTemplate",
@@ -976,6 +978,12 @@ export const WsTicketingCreateArtifactRpc = Rpc.make(WS_METHODS.ticketingCreateA
   error: TicketingError,
 });
 
+export const WsTicketingUpdateArtifactRpc = Rpc.make(WS_METHODS.ticketingUpdateArtifact, {
+  payload: ArtifactUpdateInput,
+  success: Artifact,
+  error: TicketingError,
+});
+
 export const WsTicketingDeleteArtifactRpc = Rpc.make(WS_METHODS.ticketingDeleteArtifact, {
   payload: ArtifactDeleteInput,
   error: TicketingError,
@@ -1105,6 +1113,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingDeleteCommentRpc,
   WsTicketingListArtifactsRpc,
   WsTicketingCreateArtifactRpc,
+  WsTicketingUpdateArtifactRpc,
   WsTicketingDeleteArtifactRpc,
   WsTicketingListTemplatesRpc,
   WsTicketingGetTemplateRpc,

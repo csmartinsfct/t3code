@@ -70,6 +70,7 @@ import type {
   ArtifactCreateInput,
   ArtifactDeleteInput,
   ArtifactListInput,
+  ArtifactUpdateInput,
   Template,
   TemplateCreateInput,
   TemplateDeleteInput,
@@ -400,6 +401,7 @@ export interface NativeApi {
     deleteComment: (input: CommentDeleteInput) => Promise<void>;
     listArtifacts: (input: ArtifactListInput) => Promise<ReadonlyArray<Artifact>>;
     createArtifact: (input: ArtifactCreateInput) => Promise<Artifact>;
+    updateArtifact: (input: ArtifactUpdateInput) => Promise<Artifact>;
     deleteArtifact: (input: ArtifactDeleteInput) => Promise<void>;
     listTemplates: (input: TemplateListInput) => Promise<ReadonlyArray<Template>>;
     getTemplate: (input: TemplateGetInput) => Promise<Template>;

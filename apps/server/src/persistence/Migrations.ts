@@ -50,6 +50,7 @@ import Migration0033 from "./Migrations/033_TicketIdentifiersProjectScope.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadMessageMetadata.ts";
 import Migration0035 from "./Migrations/035_TicketingGlobalLabelsAndTemplates.ts";
 import Migration0036 from "./Migrations/036_OrchestrationRunPromptOverrides.ts";
+import Migration0037 from "./Migrations/037_TicketingAttachments.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -98,6 +99,7 @@ export const migrationEntries = [
   [34, "ProjectionThreadMessageMetadata", Migration0034],
   [35, "TicketingGlobalLabelsAndTemplates", Migration0035],
   [36, "OrchestrationRunPromptOverrides", Migration0036],
+  [37, "TicketingAttachments", Migration0037],
 ] as const;
 
 const migrationEntryById = new Map<number, string>(

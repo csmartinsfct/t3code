@@ -304,6 +304,7 @@ const makeTicketingService = (
   deleteComment: () => Effect.void,
   listArtifacts: () => Effect.succeed([]),
   createArtifact: () => Effect.die(new Error("not mocked")),
+  updateArtifact: () => Effect.die(new Error("not mocked")),
   deleteArtifact: () => Effect.void,
   listTemplates: () => Effect.succeed([]),
   getTemplate: () => Effect.die(new Error("not mocked")),

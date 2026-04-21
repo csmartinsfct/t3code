@@ -29,6 +29,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
+import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
 import {
   AlertDialog,
@@ -452,6 +453,13 @@ export function resolveTicketDetailStreamEventAction(
 
   if (
     (event.type === "comment_upserted" || event.type === "comment_deleted") &&
+    event.ticketId === ticketId
+  ) {
+    return "refetch";
+  }
+
+  if (
+    (event.type === "artifact_upserted" || event.type === "artifact_deleted") &&
     event.ticketId === ticketId
   ) {
     return "refetch";
@@ -1065,6 +1073,13 @@ export function KanbanTicketDetail({
             onSave={saveDescription}
           />
         </div>
+
+        {/* Attachments */}
+        <TicketAttachments
+          ticketId={ticketId}
+          artifacts={ticket.artifacts}
+          onUpdated={() => void fetchTicket()}
+        />
 
         {/* Acceptance Criteria */}
         <TicketAcceptanceCriteria
