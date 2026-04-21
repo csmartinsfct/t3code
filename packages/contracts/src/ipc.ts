@@ -218,6 +218,19 @@ export interface BrowserViewBounds {
   height: number;
 }
 
+export interface BrowserTabSummary {
+  id: number;
+  url: string;
+  title: string;
+  favicon: string | null;
+  active: boolean;
+}
+
+export interface BrowserTabListing {
+  tabs: readonly BrowserTabSummary[];
+  activeTabId: number;
+}
+
 export interface DesktopBrowserBridge {
   mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
   setBounds: (bounds: BrowserViewBounds) => Promise<void>;
@@ -226,6 +239,17 @@ export interface DesktopBrowserBridge {
   resumeFromModal: () => Promise<void>;
   navigate: (url: string) => Promise<void>;
   getUrl: () => Promise<string>;
+  listTabs: () => Promise<BrowserTabListing>;
+  newTab: (url?: string) => Promise<number>;
+  switchTab: (tabId: number) => Promise<void>;
+  closeTab: (tabId: number) => Promise<number>;
+  onTabsChanged: (
+    listener: (payload: {
+      projectId: string;
+      tabs: readonly BrowserTabSummary[];
+      activeTabId: number;
+    }) => void,
+  ) => () => void;
 }
 
 export interface DesktopBridge {

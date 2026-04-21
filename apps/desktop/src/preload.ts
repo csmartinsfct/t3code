@@ -20,6 +20,11 @@ const BROWSER_SUSPEND_CHANNEL = "browser:suspendForModal";
 const BROWSER_RESUME_CHANNEL = "browser:resumeFromModal";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
 const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
+const BROWSER_LIST_TABS_CHANNEL = "browser:listTabs";
+const BROWSER_NEW_TAB_CHANNEL = "browser:newTab";
+const BROWSER_SWITCH_TAB_CHANNEL = "browser:switchTab";
+const BROWSER_CLOSE_TAB_CHANNEL = "browser:closeTab";
+const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -65,5 +70,19 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     resumeFromModal: () => ipcRenderer.invoke(BROWSER_RESUME_CHANNEL),
     navigate: (url) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url),
     getUrl: () => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL),
+    listTabs: () => ipcRenderer.invoke(BROWSER_LIST_TABS_CHANNEL),
+    newTab: (url) => ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, url),
+    switchTab: (tabId) => ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, tabId),
+    closeTab: (tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, tabId),
+    onTabsChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (typeof payload !== "object" || payload === null) return;
+        listener(payload as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(BROWSER_TABS_CHANGED_CHANNEL, wrapped);
+      return () => {
+        ipcRenderer.removeListener(BROWSER_TABS_CHANGED_CHANNEL, wrapped);
+      };
+    },
   },
 } satisfies DesktopBridge);

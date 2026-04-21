@@ -1628,17 +1628,59 @@ function browserHostJsonPath(projectId: string): string {
   return Path.join(STATE_DIR, "browser", projectId, "host.json");
 }
 
+interface PersistedBrowserHostFile {
+  readonly host: "electron";
+  readonly tabs?: ReadonlyArray<{
+    readonly id: number;
+    readonly url: string;
+    readonly title?: string;
+  }>;
+  readonly activeTabId?: number;
+  readonly nextTabId?: number;
+}
+
 function writeBrowserHostAssignment(projectId: string): void {
+  writeBrowserHostFile(projectId, readBrowserHostFile(projectId));
+}
+
+function writeBrowserHostFile(projectId: string, state: PersistedBrowserHostFile): void {
   try {
     const file = browserHostJsonPath(projectId);
     FS.mkdirSync(Path.dirname(file), { recursive: true });
-    FS.writeFileSync(file, `${JSON.stringify({ host: "electron" }, null, 2)}\n`, "utf8");
+    FS.writeFileSync(file, `${JSON.stringify({ ...state, host: "electron" }, null, 2)}\n`, "utf8");
   } catch (error) {
     console.warn("[desktop/browser] failed to persist embedded browser host", {
       projectId,
       error,
     });
   }
+}
+
+function readBrowserHostFile(projectId: string): PersistedBrowserHostFile {
+  try {
+    const raw = FS.readFileSync(browserHostJsonPath(projectId), "utf8");
+    const parsed = JSON.parse(raw) as Partial<PersistedBrowserHostFile>;
+    return { host: "electron", ...parsed };
+  } catch {
+    return { host: "electron" };
+  }
+}
+
+function persistProjectTabs(project: EmbeddedBrowserProjectState): void {
+  const tabs = Array.from(project.tabs.values())
+    .filter((tab) => !isEmbeddedBrowserDestroyed(tab))
+    .map((tab) => ({
+      id: tab.tabId,
+      url: tab.view.webContents.getURL() || "about:blank",
+      title: tab.title || tab.view.webContents.getTitle(),
+    }))
+    .sort((a, b) => a.id - b.id);
+  writeBrowserHostFile(project.projectId, {
+    host: "electron",
+    tabs,
+    activeTabId: project.activeTabId,
+    nextTabId: project.nextTabId,
+  });
 }
 
 function isEmbeddedBrowserDestroyed(embedded: EmbeddedBrowserTabState): boolean {
@@ -2031,6 +2073,7 @@ function createEmbeddedBrowserProject(
   projectId: string,
   state: EmbeddedBrowserWindowState,
 ): EmbeddedBrowserProjectState {
+  const persisted = readBrowserHostFile(projectId);
   const project: EmbeddedBrowserProjectState = {
     projectId,
     handle: `electron-wc:${projectId}`,
@@ -2041,8 +2084,26 @@ function createEmbeddedBrowserProject(
     suspendedForModal: false,
     bounds: null,
   };
-  const rootTab = createEmbeddedBrowserTab(project, 0, state, "about:blank");
-  project.tabs.set(0, rootTab);
+  // Restore tabs from host.json if present — capped to protect against a
+  // corrupt/forged file. If no persisted tabs (or parsing fails), fall
+  // through to the single-root-tab bootstrap.
+  const persistedTabs = (persisted.tabs ?? []).slice(0, MAX_TABS_PER_PROJECT);
+  if (persistedTabs.length > 0) {
+    for (const entry of persistedTabs) {
+      const tab = createEmbeddedBrowserTab(project, entry.id, state, entry.url || "about:blank");
+      if (entry.title) tab.title = entry.title;
+      project.tabs.set(entry.id, tab);
+    }
+    const maxId = Math.max(...persistedTabs.map((entry) => entry.id));
+    project.nextTabId = Math.max(maxId + 1, persisted.nextTabId ?? maxId + 1);
+    project.activeTabId =
+      persisted.activeTabId !== undefined && project.tabs.has(persisted.activeTabId)
+        ? persisted.activeTabId
+        : persistedTabs[0]!.id;
+  } else {
+    const rootTab = createEmbeddedBrowserTab(project, 0, state, "about:blank");
+    project.tabs.set(0, rootTab);
+  }
   embeddedBrowserProjectsByProjectId.set(projectId, project);
   return project;
 }
@@ -2102,6 +2163,52 @@ function createEmbeddedBrowserTab(
     tab.title = title;
     notifyEmbeddedBrowserTabsChanged(project);
   });
+  // Cmd/Ctrl-click (and window.open, target="_blank", etc.) normally spawn a
+  // separate Electron window. Intercept and route into a new tab in this
+  // project instead, so the flow stays contained in the chat shell. The new
+  // tab is created in the background — we do not switch to it, matching
+  // standard browser behavior for modifier-clicks.
+  view.webContents.setWindowOpenHandler((details) => {
+    try {
+      openNewBrowserTab(project, details.url || "about:blank");
+    } catch (error) {
+      console.warn("[desktop/browser] failed to open link in new tab", {
+        projectId,
+        url: details.url,
+        error,
+      });
+    }
+    return { action: "deny" };
+  });
+  // Tab keyboard shortcuts — intercepted here so they fire even while focus is
+  // inside the webview (where the React shell's window-level keydown listener
+  // never sees them). Cmd/Ctrl+T opens a new tab and switches to it, Cmd/Ctrl+W
+  // closes the active tab. Cmd/Ctrl+<number> is intentionally NOT bound — that
+  // range is owned by the chat-thread navigation shortcut.
+  view.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const mod = input.meta || input.control;
+    if (!mod || input.alt) return;
+    const owner = findEmbeddedBrowserOwnerWindow(tab);
+    if (!owner || owner.isDestroyed()) return;
+    const key = input.key.toLowerCase();
+    if (key === "t") {
+      event.preventDefault();
+      try {
+        const newTabId = openNewBrowserTab(project, "about:blank");
+        void switchBrowserTab(project, newTabId, owner);
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut newTab failed", { projectId, error });
+      }
+      return;
+    }
+    if (key === "w") {
+      event.preventDefault();
+      void closeBrowserTab(project, project.activeTabId, owner).catch((error: unknown) => {
+        console.warn("[desktop/browser] shortcut closeTab failed", { projectId, error });
+      });
+    }
+  });
   view.webContents.on("page-favicon-updated", (_event, favicons) => {
     tab.favicon = favicons[0] ?? null;
     notifyEmbeddedBrowserTabsChanged(project);
@@ -2139,7 +2246,9 @@ function createEmbeddedBrowserTab(
 
 // Push "tabs changed" updates to any interested BrowserWindow that hosts this
 // project so the tab strip in the chat shell can re-render without polling.
+// Also persists the current tab state to host.json so tabs survive restarts.
 function notifyEmbeddedBrowserTabsChanged(project: EmbeddedBrowserProjectState): void {
+  persistProjectTabs(project);
   const payload = summarizeEmbeddedBrowserTabs(project);
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;

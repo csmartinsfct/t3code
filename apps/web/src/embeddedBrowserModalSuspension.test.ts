@@ -17,6 +17,11 @@ function installBrowserBridge() {
     resumeFromModal: vi.fn(async () => undefined),
     navigate: vi.fn(async () => undefined),
     getUrl: vi.fn(async () => "about:blank"),
+    listTabs: vi.fn(async () => ({ tabs: [], activeTabId: 0 })),
+    newTab: vi.fn(async () => 0),
+    switchTab: vi.fn(async () => undefined),
+    closeTab: vi.fn(async () => 0),
+    onTabsChanged: vi.fn(() => () => undefined),
   } satisfies DesktopBrowserBridge;
 
   vi.stubGlobal("window", {
