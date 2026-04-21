@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
+  baseProviderKind,
   CommandId,
   MessageId,
   type OAuthUsageTier,
@@ -1390,6 +1391,35 @@ const make = Effect.fn("make")(function* () {
           );
         }
 
+        // Prefer whichever of (stored, incoming) is profile-scoped when they
+        // share the same base provider kind. This protects against two failure
+        // modes at once:
+        //   1. A stray runtime event with a bare provider (e.g. "claudeAgent"
+        //      from an older adapter path) overwriting a stored profile-scoped
+        //      value like "claudeAgent:metric" — this caused the reactor to see
+        //      the session's provider as "changed" on every subsequent turn and
+        //      triggered spurious restarts.
+        //   2. A thread that was polluted by (1) before this fix lands can
+        //      still be upgraded in-place: the next profile-scoped event will
+        //      replace the bare stored value, restoring correctness.
+        // Only the bare-vs-profiled case on the same base kind is treated as a
+        // no-op swap. A true profile change (e.g. "claudeAgent:metric" →
+        // "claudeAgent:zbd") must fall through to the normal overwrite path so
+        // the reactor's providerChanged check sees it.
+        const incomingProvider = event.provider;
+        const storedProviderName = thread.session?.providerName ?? null;
+        const storedIsProfiled =
+          storedProviderName !== null && storedProviderName.includes(":");
+        const incomingIsProfiled = incomingProvider.includes(":");
+        const sameBaseKind =
+          storedProviderName !== null &&
+          baseProviderKind(storedProviderName as ProviderKind) ===
+            baseProviderKind(incomingProvider);
+        const preservedProviderName =
+          sameBaseKind && storedIsProfiled && !incomingIsProfiled
+            ? storedProviderName
+            : incomingProvider;
+
         yield* orchestrationEngine.dispatch({
           type: "thread.session.set",
           commandId: providerCommandId(event, "thread-session-set"),
@@ -1397,7 +1427,7 @@ const make = Effect.fn("make")(function* () {
           session: {
             threadId: thread.id,
             status,
-            providerName: event.provider,
+            providerName: preservedProviderName,
             runtimeMode: thread.session?.runtimeMode ?? "full-access",
             activeTurnId: nextActiveTurnId,
             lastError,
