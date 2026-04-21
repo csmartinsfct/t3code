@@ -422,6 +422,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
         subTickets={[subTicketOne, subTicketTwo]}
         onNavigateToTicket={() => {}}
         onMoveToBoardRequest={() => {}}
+        onArchiveRequest={() => {}}
       />,
       { container: dragHost },
     );

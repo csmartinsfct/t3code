@@ -1086,6 +1086,14 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.ticketingDelete, ticketing.delete(input), {
           "rpc.aggregate": "ticketing",
         }),
+      [WS_METHODS.ticketingArchive]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingArchive, ticketing.archive(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingUnarchive]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingUnarchive, ticketing.unarchive(input), {
+          "rpc.aggregate": "ticketing",
+        }),
       [WS_METHODS.ticketingReorder]: (input) =>
         observeRpcEffect(WS_METHODS.ticketingReorder, ticketing.reorder(input), {
           "rpc.aggregate": "ticketing",

@@ -18,6 +18,8 @@ import {
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
+  type TicketSummary,
+  type TicketingStreamEvent,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -2181,6 +2183,279 @@ export function ArchivedThreadsPanel() {
                         });
                       })
                     }
+                  >
+                    <ArchiveX className="size-3.5" />
+                    <span>Unarchive</span>
+                  </Button>
+                </div>
+              ))}
+            </SettingsSection>
+          ))}
+        </>
+      )}
+    </SettingsPageContainer>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Archived tickets panel
+// ---------------------------------------------------------------------------
+
+interface ArchivedTicketsByProject {
+  readonly project: { id: string; name: string; cwd: string };
+  readonly tickets: ReadonlyArray<TicketSummary>;
+}
+
+function useArchivedTicketsByProject(): {
+  groups: ReadonlyArray<ArchivedTicketsByProject>;
+  refetch: () => Promise<void>;
+  loading: boolean;
+} {
+  const projects = useStore((store) => store.projects);
+  const [byProject, setByProject] = useState<ReadonlyMap<string, ReadonlyArray<TicketSummary>>>(
+    new Map(),
+  );
+  const [loading, setLoading] = useState(true);
+
+  const fetchAll = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) return;
+    const results = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          const tickets = await api.ticketing.list({
+            projectId: project.id as never,
+            includeArchived: true,
+          });
+          return [project.id, tickets.filter((t) => t.isArchived)] as const;
+        } catch (error) {
+          console.error("Failed to list archived tickets for project", project.id, error);
+          return [project.id, [] as ReadonlyArray<TicketSummary>] as const;
+        }
+      }),
+    );
+    setByProject(new Map(results));
+    setLoading(false);
+  }, [projects]);
+
+  useEffect(() => {
+    setLoading(true);
+    void fetchAll();
+  }, [fetchAll]);
+
+  // Keep the view in sync with ticketing events. Any upsert/delete in an archived
+  // context should refresh; do a debounced refetch rather than diff the events.
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void fetchAll();
+      }, 100);
+    };
+    return api.ticketing.onEvent((_event: TicketingStreamEvent) => {
+      schedule();
+    });
+  }, [fetchAll]);
+
+  const groups = useMemo<ReadonlyArray<ArchivedTicketsByProject>>(() => {
+    return projects
+      .map((project) => ({
+        project,
+        tickets: (byProject.get(project.id) ?? []).toSorted((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        ),
+      }))
+      .filter((group) => group.tickets.length > 0);
+  }, [projects, byProject]);
+
+  return { groups, refetch: fetchAll, loading };
+}
+
+export function ArchivedTicketsPanel() {
+  const { groups, refetch } = useArchivedTicketsByProject();
+  const [busyTicketId, setBusyTicketId] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const allArchivedIds = useMemo(
+    () => groups.flatMap(({ tickets }) => tickets.map((t) => t.id)),
+    [groups],
+  );
+
+  const unarchive = useCallback(
+    async (ticket: TicketSummary) => {
+      const api = readNativeApi();
+      if (!api) return;
+      setBusyTicketId(ticket.id as string);
+      try {
+        await api.ticketing.unarchive({ id: ticket.id });
+        await refetch();
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to unarchive ticket",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      } finally {
+        setBusyTicketId(null);
+      }
+    },
+    [refetch],
+  );
+
+  const deleteTicket = useCallback(
+    async (ticket: TicketSummary) => {
+      const api = readNativeApi();
+      if (!api) return;
+      const confirmed = await api.dialogs.confirm(
+        [
+          `Delete "${ticket.identifier}: ${ticket.title}"?`,
+          "This permanently removes the ticket and its data. This action cannot be undone.",
+        ].join("\n"),
+      );
+      if (!confirmed) return;
+      setBusyTicketId(ticket.id as string);
+      try {
+        await api.ticketing.delete({ id: ticket.id });
+        await refetch();
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to delete ticket",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      } finally {
+        setBusyTicketId(null);
+      }
+    },
+    [refetch],
+  );
+
+  const handleDeleteAll = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) return;
+    const count = allArchivedIds.length;
+    if (count === 0) return;
+    const confirmed = await api.dialogs.confirm(
+      [
+        `Delete ${count} archived ticket${count === 1 ? "" : "s"}?`,
+        "This permanently removes these tickets and their data. This action cannot be undone.",
+      ].join("\n"),
+    );
+    if (!confirmed) return;
+
+    setIsDeletingAll(true);
+    try {
+      await Promise.all(allArchivedIds.map((id) => api.ticketing.delete({ id })));
+      await refetch();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Failed to delete archived tickets",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    } finally {
+      setIsDeletingAll(false);
+    }
+  }, [allArchivedIds, refetch]);
+
+  const handleContextMenu = useCallback(
+    async (ticket: TicketSummary, position: { x: number; y: number }) => {
+      const api = readNativeApi();
+      if (!api) return;
+      const clicked = await api.contextMenu.show(
+        [
+          { id: "unarchive", label: "Unarchive" },
+          { id: "delete", label: "Delete", destructive: true },
+        ],
+        position,
+      );
+      if (clicked === "unarchive") {
+        await unarchive(ticket);
+      } else if (clicked === "delete") {
+        await deleteTicket(ticket);
+      }
+    },
+    [deleteTicket, unarchive],
+  );
+
+  return (
+    <SettingsPageContainer>
+      {groups.length === 0 ? (
+        <SettingsSection title="Archived tickets">
+          <Empty className="min-h-88">
+            <EmptyMedia variant="icon">
+              <ArchiveIcon />
+            </EmptyMedia>
+            <EmptyHeader>
+              <EmptyTitle>No archived tickets</EmptyTitle>
+              <EmptyDescription>Archived tickets will appear here.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </SettingsSection>
+      ) : (
+        <>
+          <SettingsSection
+            title="Archived tickets"
+            headerAction={
+              <Button
+                type="button"
+                variant="destructive-outline"
+                size="sm"
+                className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                disabled={isDeletingAll}
+                onClick={() => void handleDeleteAll()}
+              >
+                {isDeletingAll ? (
+                  <LoaderIcon className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2Icon className="size-3.5" />
+                )}
+                <span>{isDeletingAll ? "Deleting..." : "Delete all"}</span>
+              </Button>
+            }
+          >
+            <div />
+          </SettingsSection>
+          {groups.map(({ project, tickets }) => (
+            <SettingsSection
+              key={project.id}
+              title={project.name}
+              icon={<ProjectFavicon cwd={project.cwd} />}
+            >
+              {tickets.map((ticket) => (
+                <div
+                  key={ticket.id}
+                  className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    void handleContextMenu(ticket, {
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-sm font-medium text-foreground">
+                      <span className="text-muted-foreground">{ticket.identifier}</span>{" "}
+                      {ticket.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Updated {formatRelativeTimeLabel(ticket.updatedAt)}
+                      {" \u00b7 Created "}
+                      {formatRelativeTimeLabel(ticket.createdAt)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                    disabled={busyTicketId === ticket.id || isDeletingAll}
+                    onClick={() => void unarchive(ticket)}
                   >
                     <ArchiveX className="size-3.5" />
                     <span>Unarchive</span>

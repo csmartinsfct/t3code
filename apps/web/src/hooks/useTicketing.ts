@@ -218,6 +218,10 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
         if (selectedProjectId && event.projectId !== selectedProjectId) return;
         setTickets((current) => {
           const idx = current.findIndex((t) => t.id === event.ticket.id);
+          // Archived tickets are never surfaced on the board; drop them on upsert.
+          if (event.ticket.isArchived) {
+            return idx >= 0 ? current.filter((_, i) => i !== idx) : current;
+          }
           if (idx >= 0) {
             const next = [...current];
             next[idx] = event.ticket;

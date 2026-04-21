@@ -98,6 +98,17 @@ export function resolveBoardOrchestrateSelectionFromContextMenu(input: {
   return new Map([[input.ticket.id, input.ticket]]);
 }
 
+export function resolveBoardArchiveSelectionFromContextMenu(input: {
+  ticket: TicketSummary;
+  selectedTicketIds: ReadonlySet<TicketId>;
+}): readonly TicketId[] {
+  const isInSelection = input.selectedTicketIds.has(input.ticket.id);
+  if (isInSelection && input.selectedTicketIds.size > 0) {
+    return [...input.selectedTicketIds];
+  }
+  return [input.ticket.id];
+}
+
 export function resolveBoardOrchestrateSelectionFromSelectionBar(
   selectedTickets: ReadonlyMap<TicketId, TicketSummary>,
 ): ReadonlyMap<TicketId, TicketSummary> {
@@ -471,21 +482,36 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       const api = ensureNativeApi();
       const isInSelection = selectedTicketIds.has(ticket.id);
       const count = isInSelection ? selectedTicketIds.size : 1;
-      const label = count > 1 ? `Orchestrate (${count})` : "Orchestrate";
+      const orchestrateLabel = count > 1 ? `Orchestrate (${count})` : "Orchestrate";
+      const archiveLabel = count > 1 ? `Archive (${count})` : "Archive";
 
-      const clicked = await api.contextMenu.show([{ id: "orchestrate", label }], {
-        x: e.clientX,
-        y: e.clientY,
-      });
-      const nextSelection = resolveBoardOrchestrateSelectionFromContextMenu({
-        clickedItem: clicked,
-        ticket,
-        selectedTicketIds,
-        selectedTickets,
-      });
+      const clicked = await api.contextMenu.show(
+        [
+          { id: "orchestrate", label: orchestrateLabel },
+          { id: "archive", label: archiveLabel },
+        ],
+        {
+          x: e.clientX,
+          y: e.clientY,
+        },
+      );
 
-      if (nextSelection) {
-        setOrchestrationSubpage({ tickets: nextSelection });
+      if (clicked === "orchestrate") {
+        const nextSelection = resolveBoardOrchestrateSelectionFromContextMenu({
+          clickedItem: clicked,
+          ticket,
+          selectedTicketIds,
+          selectedTickets,
+        });
+        if (nextSelection) {
+          setOrchestrationSubpage({ tickets: nextSelection });
+        }
+        return;
+      }
+
+      if (clicked === "archive") {
+        const ids = resolveBoardArchiveSelectionFromContextMenu({ ticket, selectedTicketIds });
+        setPendingArchiveIds(ids);
       }
     },
     [selectedTicketIds, selectedTickets],
@@ -499,10 +525,17 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const [pendingDeleteIds, setPendingDeleteIds] = useState<readonly TicketId[] | null>(null);
   const [deletingSelection, setDeletingSelection] = useState(false);
+  const [pendingArchiveIds, setPendingArchiveIds] = useState<readonly TicketId[] | null>(null);
+  const [archivingSelection, setArchivingSelection] = useState(false);
 
   const openDeleteConfirmForSelection = useCallback(() => {
     if (selectedTicketIds.size === 0) return;
     setPendingDeleteIds([...selectedTicketIds]);
+  }, [selectedTicketIds]);
+
+  const openArchiveConfirmForSelection = useCallback(() => {
+    if (selectedTicketIds.size === 0) return;
+    setPendingArchiveIds([...selectedTicketIds]);
   }, [selectedTicketIds]);
 
   const handleConfirmDeleteSelection = useCallback(async () => {
@@ -528,6 +561,30 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       setDeletingSelection(false);
     }
   }, [clearSelection, pendingDeleteIds]);
+
+  const handleConfirmArchiveSelection = useCallback(async () => {
+    const ids = pendingArchiveIds;
+    if (!ids || ids.length === 0) {
+      setPendingArchiveIds(null);
+      return;
+    }
+    setArchivingSelection(true);
+    try {
+      const api = ensureNativeApi();
+      await Promise.all(ids.map((id) => api.ticketing.archive({ id })));
+      clearSelection();
+      setPendingArchiveIds(null);
+    } catch (error) {
+      console.error("Failed to archive tickets:", error);
+      toastManager.add({
+        type: "error",
+        title: "Archive failed",
+        description: "One or more tickets could not be archived.",
+      });
+    } finally {
+      setArchivingSelection(false);
+    }
+  }, [clearSelection, pendingArchiveIds]);
 
   const handleOrchestrateFromDetail = useCallback(
     (ticket: Ticket) => {
@@ -962,6 +1019,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               <KanbanSelectionBar
                 selectedCount={selectedTicketIds.size}
                 onOrchestrate={openOrchestrateForSelection}
+                onArchive={openArchiveConfirmForSelection}
                 onDelete={openDeleteConfirmForSelection}
                 onClear={clearSelection}
               />
@@ -990,6 +1048,36 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
                   disabled={deletingSelection}
                 >
                   {deletingSelection ? "Deleting..." : "Delete"}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
+          <AlertDialog
+            open={pendingArchiveIds !== null}
+            onOpenChange={(open) => {
+              if (!open) setPendingArchiveIds(null);
+            }}
+          >
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {(pendingArchiveIds?.length ?? 0) === 1
+                    ? "Archive this ticket?"
+                    : `Archive ${pendingArchiveIds?.length ?? 0} tickets?`}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Sub-tickets will also be archived. You can restore them from Settings → Archived
+                  tickets.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+                <Button
+                  variant="destructive"
+                  onClick={handleConfirmArchiveSelection}
+                  disabled={archivingSelection}
+                >
+                  {archivingSelection ? "Archiving..." : "Archive"}
                 </Button>
               </AlertDialogFooter>
             </AlertDialogPopup>

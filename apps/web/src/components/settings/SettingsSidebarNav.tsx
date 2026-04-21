@@ -24,6 +24,7 @@ import {
 export type SettingsSectionPath =
   | "/settings/general"
   | "/settings/archived"
+  | "/settings/archived-tickets"
   | "/settings/scheduled-tasks"
   | "/settings/runs"
   | "/settings/prompts"
@@ -41,7 +42,8 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "Prompts", to: "/settings/prompts", icon: ScrollTextIcon },
   { label: "Tickets", to: "/settings/tickets", icon: TagIcon },
 
-  { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
+  { label: "Archived threads", to: "/settings/archived", icon: ArchiveIcon },
+  { label: "Archived tickets", to: "/settings/archived-tickets", icon: ArchiveIcon },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {

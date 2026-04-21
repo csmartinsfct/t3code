@@ -168,6 +168,8 @@ export interface WsRpcClient {
     readonly create: RpcUnaryMethod<typeof WS_METHODS.ticketingCreate>;
     readonly update: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdate>;
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.ticketingDelete>;
+    readonly archive: RpcUnaryMethod<typeof WS_METHODS.ticketingArchive>;
+    readonly unarchive: RpcUnaryMethod<typeof WS_METHODS.ticketingUnarchive>;
     readonly reorder: RpcUnaryMethod<typeof WS_METHODS.ticketingReorder>;
     readonly search: RpcUnaryMethod<typeof WS_METHODS.ticketingSearch>;
     readonly getTree: RpcUnaryMethod<typeof WS_METHODS.ticketingGetTree>;
@@ -371,6 +373,9 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       create: (input) => transport.request((client) => client[WS_METHODS.ticketingCreate](input)),
       update: (input) => transport.request((client) => client[WS_METHODS.ticketingUpdate](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.ticketingDelete](input)),
+      archive: (input) => transport.request((client) => client[WS_METHODS.ticketingArchive](input)),
+      unarchive: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingUnarchive](input)),
       reorder: (input) => transport.request((client) => client[WS_METHODS.ticketingReorder](input)),
       search: (input) => transport.request((client) => client[WS_METHODS.ticketingSearch](input)),
       getTree: (input) =>

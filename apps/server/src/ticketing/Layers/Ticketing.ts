@@ -627,6 +627,112 @@ const makeTicketingService = Effect.gen(function* () {
       }
     });
 
+  /**
+   * BFS over parentId to collect the root plus all descendants.
+   * Used by archive/unarchive to cascade the operation through the subtree.
+   */
+  const collectSubtree = (
+    rootId: TicketId,
+  ): Effect.Effect<ReadonlyArray<PersistedTicket>, TicketingError> =>
+    Effect.gen(function* () {
+      const root = yield* resolveTicketOrFail(rootId);
+      const collected: PersistedTicket[] = [root];
+      const queue: TicketId[] = [root.id];
+      while (queue.length > 0) {
+        const currentId = queue.shift() as TicketId;
+        const children = yield* repo
+          .listByParent({ parentId: currentId })
+          .pipe(Effect.mapError(toOperationError("collectSubtree")));
+        for (const child of children) {
+          collected.push(child);
+          queue.push(child.id);
+        }
+      }
+      return collected;
+    });
+
+  const archive: TicketingServiceShape["archive"] = (input) =>
+    Effect.gen(function* () {
+      const subtree = yield* collectSubtree(input.id);
+      const now = nowIso();
+      for (const node of subtree) {
+        if (node.isArchived) continue;
+        yield* repo
+          .archiveTicket({ id: node.id })
+          .pipe(Effect.mapError(toOperationError("archive")));
+        yield* recordHistory(
+          node.id,
+          "updated",
+          { isArchived: { old: false, new: true } },
+          "user",
+        ).pipe(Effect.mapError(toOperationError("archive")));
+        const updated = { ...node, isArchived: true, updatedAt: now } as PersistedTicket;
+        yield* publishEvent({
+          type: "ticket_upserted",
+          projectId: updated.projectId,
+          ticket: yield* Effect.gen(function* () {
+            const labels = yield* repo
+              .listLabelsForTicket({ ticketId: updated.id })
+              .pipe(Effect.mapError(toOperationError("archive")));
+            const subTicketCount = yield* repo
+              .countByParent({ parentId: updated.id })
+              .pipe(Effect.mapError(toOperationError("archive")));
+            const deps = yield* repo
+              .listDependencies({ ticketId: updated.id })
+              .pipe(Effect.mapError(toOperationError("archive")));
+            return buildTicketSummary(updated, labels as Label[], subTicketCount, deps.length);
+          }),
+        });
+      }
+      const rootAfter = yield* resolveTicketOrFail(input.id);
+      // Notify the parent so boards drop the archived card (subTicketCount unchanged
+      // but the archived card should no longer appear in the default filtered list).
+      if (rootAfter.parentId) {
+        yield* notifyParent(rootAfter.parentId);
+      }
+      return yield* buildFullTicket(rootAfter);
+    });
+
+  const unarchive: TicketingServiceShape["unarchive"] = (input) =>
+    Effect.gen(function* () {
+      const subtree = yield* collectSubtree(input.id);
+      const now = nowIso();
+      for (const node of subtree) {
+        if (!node.isArchived) continue;
+        yield* repo
+          .unarchiveTicket({ id: node.id })
+          .pipe(Effect.mapError(toOperationError("unarchive")));
+        yield* recordHistory(
+          node.id,
+          "updated",
+          { isArchived: { old: true, new: false } },
+          "user",
+        ).pipe(Effect.mapError(toOperationError("unarchive")));
+        const updated = { ...node, isArchived: false, updatedAt: now } as PersistedTicket;
+        yield* publishEvent({
+          type: "ticket_upserted",
+          projectId: updated.projectId,
+          ticket: yield* Effect.gen(function* () {
+            const labels = yield* repo
+              .listLabelsForTicket({ ticketId: updated.id })
+              .pipe(Effect.mapError(toOperationError("unarchive")));
+            const subTicketCount = yield* repo
+              .countByParent({ parentId: updated.id })
+              .pipe(Effect.mapError(toOperationError("unarchive")));
+            const deps = yield* repo
+              .listDependencies({ ticketId: updated.id })
+              .pipe(Effect.mapError(toOperationError("unarchive")));
+            return buildTicketSummary(updated, labels as Label[], subTicketCount, deps.length);
+          }),
+        });
+      }
+      const rootAfter = yield* resolveTicketOrFail(input.id);
+      if (rootAfter.parentId) {
+        yield* notifyParent(rootAfter.parentId);
+      }
+      return yield* buildFullTicket(rootAfter);
+    });
+
   const reorder: TicketingServiceShape["reorder"] = (input) =>
     Effect.gen(function* () {
       for (const item of input.items) {
@@ -1241,6 +1347,8 @@ const makeTicketingService = Effect.gen(function* () {
     create,
     update,
     delete: del,
+    archive,
+    unarchive,
     reorder,
     search,
     getTree,

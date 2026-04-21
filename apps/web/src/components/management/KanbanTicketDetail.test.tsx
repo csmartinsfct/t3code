@@ -254,6 +254,7 @@ describe("KanbanTicketDetail", () => {
       ticket,
       onOrchestrate,
       onDecompose,
+      onArchive: () => undefined,
       onDelete,
     });
 
@@ -306,6 +307,7 @@ describe("KanbanTicketDetail", () => {
       ticket: makeTicket(),
       onOrchestrate: () => undefined,
       onDecompose,
+      onArchive: () => undefined,
       onDelete: () => undefined,
     });
 
@@ -313,6 +315,7 @@ describe("KanbanTicketDetail", () => {
       "orchestrate",
       "decompose",
       "separator",
+      "archive",
       "delete",
     ]);
 

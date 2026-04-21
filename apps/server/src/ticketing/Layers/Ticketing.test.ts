@@ -320,4 +320,64 @@ TicketingTestLayer("TicketingService", (it) => {
       );
     }),
   );
+
+  it.effect("archives a ticket (hidden from default list, visible with includeArchived)", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-archive-basic");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BasicArchiveTest");
+
+      const ticket = yield* ticketing.create({ projectId, title: "Archive me" });
+
+      yield* ticketing.archive({ id: ticket.id });
+
+      const defaultList = yield* ticketing.list({ projectId });
+      assert.deepStrictEqual(
+        defaultList.map((t) => t.id),
+        [],
+      );
+
+      const withArchived = yield* ticketing.list({ projectId, includeArchived: true });
+      assert.strictEqual(withArchived.length, 1);
+      assert.strictEqual(withArchived[0]?.isArchived, true);
+
+      yield* ticketing.unarchive({ id: ticket.id });
+      const afterUnarchive = yield* ticketing.list({ projectId });
+      assert.strictEqual(afterUnarchive.length, 1);
+      assert.strictEqual(afterUnarchive[0]?.isArchived, false);
+    }),
+  );
+
+  it.effect("archive cascades to sub-tickets", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-archive-cascade");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "CascadeArchiveTest");
+
+      const parent = yield* ticketing.create({ projectId, title: "Parent" });
+      const child = yield* ticketing.create({
+        projectId,
+        title: "Child",
+        parentId: parent.id,
+      });
+      const grandchild = yield* ticketing.create({
+        projectId,
+        title: "Grandchild",
+        parentId: child.id,
+      });
+
+      yield* ticketing.archive({ id: parent.id });
+
+      const withArchived = yield* ticketing.list({ projectId, includeArchived: true });
+      const archivedIds = withArchived.filter((t) => t.isArchived).map((t) => t.id);
+      assert.deepStrictEqual(new Set(archivedIds), new Set([parent.id, child.id, grandchild.id]));
+
+      yield* ticketing.unarchive({ id: parent.id });
+      const afterUnarchive = yield* ticketing.list({ projectId });
+      assert.strictEqual(afterUnarchive.length, 3);
+      for (const t of afterUnarchive) {
+        assert.strictEqual(t.isArchived, false);
+      }
+    }),
+  );
 });

@@ -1,10 +1,11 @@
-import { PlayIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArchiveIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
 
 interface KanbanSelectionBarProps {
   selectedCount: number;
   onOrchestrate: () => void;
+  onArchive: () => void;
   onDelete: () => void;
   onClear: () => void;
 }
@@ -12,6 +13,7 @@ interface KanbanSelectionBarProps {
 export function KanbanSelectionBar({
   selectedCount,
   onOrchestrate,
+  onArchive,
   onDelete,
   onClear,
 }: KanbanSelectionBarProps) {
@@ -32,6 +34,15 @@ export function KanbanSelectionBar({
         >
           <Trash2Icon className="size-3" />
           Delete
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1.5 rounded-full px-3 text-xs"
+          onClick={onArchive}
+        >
+          <ArchiveIcon className="size-3" />
+          Archive
         </Button>
         <Button size="sm" className="h-7 gap-1.5 rounded-full px-3 text-xs" onClick={onOrchestrate}>
           <PlayIcon className="size-3" />

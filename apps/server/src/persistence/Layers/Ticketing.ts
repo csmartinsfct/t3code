@@ -501,6 +501,11 @@ const makeTicketingRepository = Effect.gen(function* () {
         Effect.asVoid,
         Effect.mapError(toPersistenceSqlError("TicketingRepository.archiveTicket:query")),
       ),
+    unarchiveTicket: ({ id }) =>
+      sql`UPDATE tickets SET is_archived = 0, updated_at = ${new Date().toISOString()} WHERE id = ${id}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.unarchiveTicket:query")),
+      ),
     deleteTicket: ({ id }) =>
       sql`DELETE FROM tickets WHERE id = ${id}`.pipe(
         Effect.asVoid,

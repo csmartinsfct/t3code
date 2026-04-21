@@ -321,6 +321,12 @@ export type TicketGetByIdentifierInput = typeof TicketGetByIdentifierInput.Type;
 export const TicketDeleteInput = Schema.Struct({ id: TicketId });
 export type TicketDeleteInput = typeof TicketDeleteInput.Type;
 
+export const TicketArchiveInput = Schema.Struct({ id: TicketId });
+export type TicketArchiveInput = typeof TicketArchiveInput.Type;
+
+export const TicketUnarchiveInput = Schema.Struct({ id: TicketId });
+export type TicketUnarchiveInput = typeof TicketUnarchiveInput.Type;
+
 export const TicketSearchInput = Schema.Struct({
   projectId: ProjectId,
   query: Schema.String,

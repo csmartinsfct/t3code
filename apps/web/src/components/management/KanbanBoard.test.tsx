@@ -61,6 +61,7 @@ const selectionBarMockState: {
   lastProps: {
     selectedCount: number;
     onOrchestrate: () => void;
+    onArchive: () => void;
     onDelete: () => void;
     onClear: () => void;
   } | null;
@@ -200,6 +201,7 @@ vi.mock("./KanbanSelectionBar", () => ({
   KanbanSelectionBar: (props: {
     selectedCount: number;
     onOrchestrate: () => void;
+    onArchive: () => void;
     onDelete: () => void;
     onClear: () => void;
   }) => {

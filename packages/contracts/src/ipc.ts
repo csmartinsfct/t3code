@@ -89,9 +89,11 @@ import type {
   LabelUpdateInput,
   SetDependenciesInput,
   Ticket,
+  TicketArchiveInput,
   TicketCreateInput,
   TicketUpdateInput,
   TicketDeleteInput,
+  TicketUnarchiveInput,
   TicketGetByIdInput,
   TicketGetByIdentifierInput,
   TicketHistoryEntry,
@@ -376,6 +378,8 @@ export interface NativeApi {
     create: (input: TicketCreateInput) => Promise<Ticket>;
     update: (input: TicketUpdateInput) => Promise<Ticket>;
     delete: (input: TicketDeleteInput) => Promise<void>;
+    archive: (input: TicketArchiveInput) => Promise<Ticket>;
+    unarchive: (input: TicketUnarchiveInput) => Promise<Ticket>;
     reorder: (input: TicketReorderInput) => Promise<void>;
     search: (input: TicketSearchInput) => Promise<ReadonlyArray<TicketSummary>>;
     getTree: (input: TicketTreeInput) => Promise<ReadonlyArray<TicketTreeNode>>;

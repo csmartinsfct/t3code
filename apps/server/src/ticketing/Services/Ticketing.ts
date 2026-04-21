@@ -22,9 +22,11 @@ import type {
   TemplateListInput,
   TemplateUpdateInput,
   Ticket,
+  TicketArchiveInput,
   TicketCreateInput,
   TicketUpdateInput,
   TicketDeleteInput,
+  TicketUnarchiveInput,
   TicketGetByIdInput,
   TicketGetByIdentifierInput,
   TicketHistoryEntry,
@@ -69,6 +71,8 @@ export interface TicketingServiceShape {
   readonly create: (input: TicketCreateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly update: (input: TicketUpdateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly delete: (input: TicketDeleteInput) => Effect.Effect<void, TicketingError>;
+  readonly archive: (input: TicketArchiveInput) => Effect.Effect<Ticket, TicketingError>;
+  readonly unarchive: (input: TicketUnarchiveInput) => Effect.Effect<Ticket, TicketingError>;
   readonly reorder: (input: TicketReorderInput) => Effect.Effect<void, TicketingError>;
   readonly search: (
     input: TicketSearchInput,

@@ -84,6 +84,8 @@ export function createWsNativeApi(): NativeApi {
       create: rpcClient.ticketing.create,
       update: rpcClient.ticketing.update,
       delete: rpcClient.ticketing.delete,
+      archive: rpcClient.ticketing.archive,
+      unarchive: rpcClient.ticketing.unarchive,
       reorder: rpcClient.ticketing.reorder,
       search: rpcClient.ticketing.search,
       getTree: rpcClient.ticketing.getTree as never,

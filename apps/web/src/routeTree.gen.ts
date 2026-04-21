@@ -18,6 +18,7 @@ import { Route as SettingsRunsRouteImport } from './routes/settings.runs'
 import { Route as SettingsPromptsRouteImport } from './routes/settings.prompts'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsChangelogRouteImport } from './routes/settings.changelog'
+import { Route as SettingsArchivedTicketsRouteImport } from './routes/settings.archived-tickets'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
 import { Route as SettingsScheduledTasksIndexRouteImport } from './routes/settings.scheduled-tasks.index'
@@ -67,6 +68,11 @@ const SettingsChangelogRoute = SettingsChangelogRouteImport.update({
   path: '/changelog',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsArchivedTicketsRoute = SettingsArchivedTicketsRouteImport.update({
+  id: '/archived-tickets',
+  path: '/archived-tickets',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/archived-tickets': typeof SettingsArchivedTicketsRoute
   '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/archived-tickets': typeof SettingsArchivedTicketsRoute
   '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
@@ -123,6 +131,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/archived-tickets': typeof SettingsArchivedTicketsRoute
   '/settings/changelog': typeof SettingsChangelogRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/prompts': typeof SettingsPromptsRoute
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
+    | '/settings/archived-tickets'
     | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/$threadId'
     | '/settings/archived'
+    | '/settings/archived-tickets'
     | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
@@ -167,6 +178,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/_chat/$threadId'
     | '/settings/archived'
+    | '/settings/archived-tickets'
     | '/settings/changelog'
     | '/settings/general'
     | '/settings/prompts'
@@ -248,6 +260,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsChangelogRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/archived-tickets': {
+      id: '/settings/archived-tickets'
+      path: '/archived-tickets'
+      fullPath: '/settings/archived-tickets'
+      preLoaderRoute: typeof SettingsArchivedTicketsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/archived': {
       id: '/settings/archived'
       path: '/archived'
@@ -309,6 +328,7 @@ const SettingsScheduledTasksRouteWithChildren =
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
+  SettingsArchivedTicketsRoute: typeof SettingsArchivedTicketsRoute
   SettingsChangelogRoute: typeof SettingsChangelogRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsPromptsRoute: typeof SettingsPromptsRoute
@@ -319,6 +339,7 @@ interface SettingsRouteChildren {
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
+  SettingsArchivedTicketsRoute: SettingsArchivedTicketsRoute,
   SettingsChangelogRoute: SettingsChangelogRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsPromptsRoute: SettingsPromptsRoute,

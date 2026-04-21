@@ -96,9 +96,11 @@ import {
   LabelUpdateInput,
   SetDependenciesInput,
   Ticket,
+  TicketArchiveInput,
   TicketCreateInput,
   TicketUpdateInput,
   TicketDeleteInput,
+  TicketUnarchiveInput,
   TicketGetByIdInput,
   TicketGetByIdentifierInput,
   TicketHistoryEntry,
@@ -265,6 +267,8 @@ export const WS_METHODS = {
   ticketingCreate: "ticketing.create",
   ticketingUpdate: "ticketing.update",
   ticketingDelete: "ticketing.delete",
+  ticketingArchive: "ticketing.archive",
+  ticketingUnarchive: "ticketing.unarchive",
   ticketingReorder: "ticketing.reorder",
   ticketingSearch: "ticketing.search",
   ticketingGetTree: "ticketing.getTree",
@@ -845,6 +849,18 @@ export const WsTicketingDeleteRpc = Rpc.make(WS_METHODS.ticketingDelete, {
   error: TicketingError,
 });
 
+export const WsTicketingArchiveRpc = Rpc.make(WS_METHODS.ticketingArchive, {
+  payload: TicketArchiveInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
+export const WsTicketingUnarchiveRpc = Rpc.make(WS_METHODS.ticketingUnarchive, {
+  payload: TicketUnarchiveInput,
+  success: Ticket,
+  error: TicketingError,
+});
+
 export const WsTicketingReorderRpc = Rpc.make(WS_METHODS.ticketingReorder, {
   payload: TicketReorderInput,
   error: TicketingError,
@@ -1067,6 +1083,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingCreateRpc,
   WsTicketingUpdateRpc,
   WsTicketingDeleteRpc,
+  WsTicketingArchiveRpc,
+  WsTicketingUnarchiveRpc,
   WsTicketingReorderRpc,
   WsTicketingSearchRpc,
   WsTicketingGetTreeRpc,

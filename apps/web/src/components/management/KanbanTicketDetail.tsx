@@ -13,6 +13,7 @@ import type {
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
 import {
+  ArchiveIcon,
   EllipsisVerticalIcon,
   GitBranchIcon,
   ListTreeIcon,
@@ -182,12 +183,14 @@ function TicketDetailActionsMenu({
   onOrchestrate,
   onDecompose,
   onMoveToBoard,
+  onArchive,
   onDelete,
 }: {
   ticket: Ticket;
   onOrchestrate: ((ticket: Ticket) => void) | undefined;
   onDecompose: () => void;
   onMoveToBoard?: (() => void) | undefined;
+  onArchive: () => void;
   onDelete: () => void;
 }) {
   const actions = buildTicketDetailActionItems({
@@ -195,6 +198,7 @@ function TicketDetailActionsMenu({
     onOrchestrate,
     onDecompose,
     onMoveToBoard,
+    onArchive,
     onDelete,
   });
 
@@ -251,6 +255,7 @@ export function buildTicketDetailActionItems(input: {
   onOrchestrate: ((ticket: Ticket) => void) | undefined;
   onDecompose: () => void;
   onMoveToBoard?: (() => void) | undefined;
+  onArchive: () => void;
   onDelete: () => void;
 }): TicketDetailActionItem[] {
   return [
@@ -282,6 +287,13 @@ export function buildTicketDetailActionItems(input: {
     {
       key: "separator",
       kind: "separator",
+    },
+    {
+      key: "archive",
+      kind: "item",
+      label: "Archive",
+      icon: <ArchiveIcon className="size-3.5" />,
+      onSelect: input.onArchive,
     },
     {
       key: "delete",
@@ -484,6 +496,11 @@ export function KanbanTicketDetail({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiveSubTicketsDialog, setArchiveSubTicketsDialog] = useState<
+    readonly TicketSummary[] | null
+  >(null);
+  const [archivingSubTickets, setArchivingSubTickets] = useState(false);
   const [moveToBoardDialogOpen, setMoveToBoardDialogOpen] = useState(false);
   const [moveToBoardTickets, setMoveToBoardTickets] = useState<readonly TicketSummary[]>([]);
   const [movingToBoard, setMovingToBoard] = useState(false);
@@ -756,6 +773,41 @@ export function KanbanTicketDetail({
     }
   }, [ticketId, onBack]);
 
+  const handleArchive = useCallback(async () => {
+    try {
+      const api = ensureNativeApi();
+      await api.ticketing.archive({ id: ticketId });
+      onBack();
+    } catch (error) {
+      console.error("Failed to archive ticket:", error);
+    }
+  }, [ticketId, onBack]);
+
+  const handleArchiveSubTicketsRequest = useCallback((tickets: readonly TicketSummary[]) => {
+    if (tickets.length === 0) return;
+    setArchiveSubTicketsDialog(tickets);
+  }, []);
+
+  const handleConfirmArchiveSubTickets = useCallback(async () => {
+    const targets = archiveSubTicketsDialog;
+    if (!targets || targets.length === 0) {
+      setArchiveSubTicketsDialog(null);
+      return;
+    }
+    setArchivingSubTickets(true);
+    try {
+      const api = ensureNativeApi();
+      await Promise.all(targets.map((t) => api.ticketing.archive({ id: t.id })));
+      removeFromSelection(targets.map((t) => t.id));
+      setArchiveSubTicketsDialog(null);
+      await fetchTicket();
+    } catch (error) {
+      console.error("Failed to archive sub-tickets:", error);
+    } finally {
+      setArchivingSubTickets(false);
+    }
+  }, [archiveSubTicketsDialog, fetchTicket, removeFromSelection]);
+
   const handleMoveToBoardRequest = useCallback((tickets: readonly TicketSummary[]) => {
     if (tickets.length === 0) return;
     setMoveToBoardTickets(tickets);
@@ -880,6 +932,7 @@ export function KanbanTicketDetail({
               onOrchestrate={onOrchestrate}
               onDecompose={handleDecompose}
               onMoveToBoard={handleMoveCurrentTicketToBoard}
+              onArchive={() => setArchiveDialogOpen(true)}
               onDelete={() => setDeleteDialogOpen(true)}
             />
           </div>
@@ -1048,6 +1101,7 @@ export function KanbanTicketDetail({
             subTickets={ticket.subTickets}
             onNavigateToTicket={onNavigateToTicket}
             onMoveToBoardRequest={handleMoveToBoardRequest}
+            onArchiveRequest={handleArchiveSubTicketsRequest}
           />
         )}
 
@@ -1095,6 +1149,66 @@ export function KanbanTicketDetail({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+      {/* Archive confirmation */}
+      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive ticket?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{ticket.identifier}: {ticket.title}" and any sub-tickets will be archived. You can
+              restore them from Settings → Archived tickets.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose>
+              <Button variant="outline" size="sm">
+                Cancel
+              </Button>
+            </AlertDialogClose>
+            <Button variant="destructive" size="sm" onClick={() => void handleArchive()}>
+              Archive
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+      {/* Archive sub-tickets confirmation */}
+      <AlertDialog
+        open={archiveSubTicketsDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !archivingSubTickets) {
+            setArchiveSubTicketsDialog(null);
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {(archiveSubTicketsDialog?.length ?? 0) === 1
+                ? "Archive this ticket?"
+                : `Archive ${archiveSubTicketsDialog?.length ?? 0} tickets?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Sub-tickets will also be archived. You can restore them from Settings → Archived
+              tickets.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose>
+              <Button variant="outline" size="sm" disabled={archivingSubTickets}>
+                Cancel
+              </Button>
+            </AlertDialogClose>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleConfirmArchiveSubTickets()}
+              disabled={archivingSubTickets}
+            >
+              {archivingSubTickets ? "Archiving..." : "Archive"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </div>
   );
 }
@@ -1108,11 +1222,13 @@ export function SubTicketsList({
   subTickets,
   onNavigateToTicket,
   onMoveToBoardRequest,
+  onArchiveRequest,
 }: {
   projectId: string;
   subTickets: readonly TicketSummary[];
   onNavigateToTicket: (ticketId: TicketId) => void;
   onMoveToBoardRequest: (tickets: readonly TicketSummary[]) => void;
+  onArchiveRequest: (tickets: readonly TicketSummary[]) => void;
 }) {
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const selectedTickets = useTicketSelectionStore((s) => s.selectedTickets);
@@ -1193,6 +1309,7 @@ export function SubTicketsList({
             }}
             onMultiSelectClick={handleSubTicketMultiSelectClick}
             onMoveToBoardRequest={onMoveToBoardRequest}
+            onArchiveRequest={onArchiveRequest}
             selectedTicketIds={selectedTicketIds}
             selectedTickets={selectedSubTickets}
             fetchPreview={fetchPreview}
@@ -1210,6 +1327,7 @@ function DraggableSubTicket({
   onNavigate,
   onMultiSelectClick,
   onMoveToBoardRequest,
+  onArchiveRequest,
   selectedTicketIds,
   selectedTickets,
   fetchPreview,
@@ -1220,6 +1338,7 @@ function DraggableSubTicket({
   onNavigate: () => void;
   onMultiSelectClick: (e: React.MouseEvent, sub: TicketSummary) => void;
   onMoveToBoardRequest: (tickets: readonly TicketSummary[]) => void;
+  onArchiveRequest: (tickets: readonly TicketSummary[]) => void;
   selectedTicketIds: ReadonlySet<TicketId>;
   selectedTickets: readonly TicketSummary[];
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
@@ -1241,6 +1360,10 @@ function DraggableSubTicket({
             id: "move-to-board",
             label: selection.length > 1 ? "Move all tickets to the board" : "Move to board",
           },
+          {
+            id: "archive",
+            label: selection.length > 1 ? `Archive (${selection.length})` : "Archive",
+          },
         ],
         {
           x: e.clientX,
@@ -1249,9 +1372,11 @@ function DraggableSubTicket({
       );
       if (clicked === "move-to-board") {
         onMoveToBoardRequest(selection);
+      } else if (clicked === "archive") {
+        onArchiveRequest(selection);
       }
     },
-    [onMoveToBoardRequest, selectedTicketIds, selectedTickets, sub],
+    [onArchiveRequest, onMoveToBoardRequest, selectedTicketIds, selectedTickets, sub],
   );
 
   return (

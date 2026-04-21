@@ -266,6 +266,9 @@ export interface TicketingRepositoryShape {
   readonly archiveTicket: (
     input: TicketLookupInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly unarchiveTicket: (
+    input: TicketLookupInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly deleteTicket: (
     input: TicketLookupInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;

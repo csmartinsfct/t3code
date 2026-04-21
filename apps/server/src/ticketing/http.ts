@@ -339,6 +339,29 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "archive_ticket",
+    title: "Archive Ticket",
+    description:
+      "Archive a ticket (and all descendants). Archived tickets are hidden from default listings but can be restored.",
+    inputSchema: {
+      ticketId: {
+        type: "string",
+        description: "The ticket identifier (e.g. 'ZBD-7') to archive.",
+      },
+    },
+  },
+  {
+    name: "unarchive_ticket",
+    title: "Unarchive Ticket",
+    description: "Unarchive a previously archived ticket (and its descendants).",
+    inputSchema: {
+      ticketId: {
+        type: "string",
+        description: "The ticket identifier (e.g. 'ZBD-7') to unarchive.",
+      },
+    },
+  },
+  {
     name: "search_tickets",
     title: "Search Tickets",
     description: withTicketChatLinkReminder("Search tickets by text query."),
@@ -808,6 +831,22 @@ function toolHandlers(ctx: ToolContext) {
         const resolvedId = yield* resolveId(id);
         yield* ticketing.delete({ id: resolvedId });
         return respondOk({ deleted: true });
+      }),
+
+    archive_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.ticketId as string;
+        const resolvedId = yield* resolveId(id);
+        const ticket = yield* ticketing.archive({ id: resolvedId });
+        return respondOk(yield* resolveJson(ticket));
+      }),
+
+    unarchive_ticket: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const id = input.ticketId as string;
+        const resolvedId = yield* resolveId(id);
+        const ticket = yield* ticketing.unarchive({ id: resolvedId });
+        return respondOk(yield* resolveJson(ticket));
       }),
 
     search_tickets: (input: Record<string, unknown>) =>

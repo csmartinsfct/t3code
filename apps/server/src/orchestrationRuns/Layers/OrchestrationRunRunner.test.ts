@@ -282,6 +282,8 @@ const makeTicketingService = (
       ...changes,
     } as Ticket),
   delete: () => Effect.void,
+  archive: () => Effect.die(new Error("not mocked")),
+  unarchive: () => Effect.die(new Error("not mocked")),
   reorder: () => Effect.void,
   search: () => Effect.succeed([]),
   getTree: () => Effect.succeed([]),
