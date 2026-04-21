@@ -13,7 +13,7 @@ import type {
 } from "@t3tools/contracts";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, LayoutGridIcon } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -814,6 +814,11 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     popManagementBoardTicket();
   }, [clearSelection, popManagementBoardTicket]);
 
+  const handleBackToBoard = useCallback(() => {
+    clearSelection();
+    setManagementBoardRoot(typedProjectId);
+  }, [clearSelection, setManagementBoardRoot, typedProjectId]);
+
   const handleOrchestrationBack = useCallback(() => {
     setOrchestrationSubpage(null);
   }, []);
@@ -858,6 +863,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
             <span className="min-w-0 truncate">{project?.name ?? projectId}</span>
           </Badge>
         </div>
+        {selectedTicketId ? (
+          <Button variant="outline" size="xs" onClick={handleBackToBoard}>
+            <LayoutGridIcon className="size-3" />
+            Back to board
+          </Button>
+        ) : null}
       </div>
 
       {/* Board body */}
