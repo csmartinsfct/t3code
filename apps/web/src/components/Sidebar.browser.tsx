@@ -11,8 +11,9 @@ import { findButtonByText, waitForElement } from "~/test-utils/browser";
 import { seedSidebarTestStores } from "~/test-utils/sidebar";
 import { SidebarProvider } from "./ui/sidebar";
 
-const { contextMenuShowSpy } = vi.hoisted(() => ({
+const { contextMenuShowSpy, openInEditorSpy } = vi.hoisted(() => ({
   contextMenuShowSpy: vi.fn(),
+  openInEditorSpy: vi.fn(async () => undefined),
 }));
 const toastAddSpy = vi.fn();
 
@@ -98,6 +99,7 @@ vi.mock("../hooks/useSettings.ts", () => settingsHookMock);
 
 vi.mock("../rpc/serverState", () => ({
   resetServerStateForTests: vi.fn(),
+  useServerAvailableEditors: () => ["vscode"],
   useServerKeybindings: () => [],
   useServerProviders: () => [],
 }));
@@ -117,8 +119,10 @@ vi.mock("./ui/toast", () => ({
 const {
   buildForkModelSelection,
   buildMoveThreadConfirmationMessage,
+  buildProjectContextMenuItems,
   buildThreadContextMenuItems,
   default: Sidebar,
+  resolveOpenInEditorContextMenuLabel,
 } = await import("./Sidebar");
 
 function createProvider(input: {
@@ -147,6 +151,7 @@ function createProvider(input: {
 
 function installNativeApi() {
   contextMenuShowSpy.mockReset();
+  openInEditorSpy.mockReset();
   window.nativeApi = {
     contextMenu: {
       show: contextMenuShowSpy,
@@ -165,6 +170,12 @@ function installNativeApi() {
     },
     shell: {
       openExternal: vi.fn(async () => undefined),
+      openInEditor: openInEditorSpy,
+    },
+    server: {
+      getConfig: vi.fn(async () => ({
+        availableEditors: ["vscode"],
+      })),
     },
   } as unknown as NativeApi;
 }
@@ -275,6 +286,38 @@ describe("Sidebar thread context menu helpers", () => {
     expect(activeThreadItems.find((item) => item.id === "move")?.disabled).toBe(true);
   });
 
+  it("adds open-in-editor entries with preferred editor and worktree context", () => {
+    window.localStorage.setItem("t3code:last-editor", JSON.stringify("cursor"));
+
+    const items = buildThreadContextMenuItems({
+      serverProviders: [],
+      projects: [{ id: "project-1" as ProjectId, name: "Alpha" }],
+      threadProjectId: "project-1" as ProjectId,
+      hasActiveSession: false,
+      openInEditorLabel: resolveOpenInEditorContextMenuLabel({
+        availableEditors: ["cursor", "vscode"],
+        worktreePath: "/repo/alpha/.worktrees/feature-ticket",
+      }),
+      canOpenInEditor: true,
+    });
+    const projectItems = buildProjectContextMenuItems({
+      openInEditorLabel: resolveOpenInEditorContextMenuLabel({
+        availableEditors: ["cursor", "vscode"],
+      }),
+      canOpenInEditor: true,
+    });
+
+    expect(items.find((item) => item.id === "open-in-editor")).toMatchObject({
+      label: "Open in Cursor (worktree: feature-ticket)",
+      disabled: false,
+    });
+    expect(projectItems.find((item) => item.id === "open-in-editor")).toMatchObject({
+      label: "Open in Cursor",
+      disabled: false,
+    });
+    window.localStorage.removeItem("t3code:last-editor");
+  });
+
   it("mentions cleared worktree and branch associations only when needed", () => {
     expect(
       buildMoveThreadConfirmationMessage({
@@ -297,6 +340,7 @@ describe("Sidebar thread context menu helpers", () => {
 describe("Sidebar project system prompt entry", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    window.localStorage.removeItem("t3code:last-editor");
     __resetNativeApiForTests();
     delete window.nativeApi;
     toastAddSpy.mockReset();
@@ -306,8 +350,121 @@ describe("Sidebar project system prompt entry", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+    window.localStorage.removeItem("t3code:last-editor");
     __resetNativeApiForTests();
     delete window.nativeApi;
+  });
+
+  it("opens the project cwd from the project context menu", async () => {
+    contextMenuShowSpy.mockImplementation(async (items: Array<{ id: string; label: string }>) => {
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "open-in-editor", label: "Open in VS Code" }),
+        ]),
+      );
+      return "open-in-editor";
+    });
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SidebarProvider defaultOpen>
+          <Sidebar />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+
+    try {
+      const projectButton = await waitForElement(
+        () => findButtonByText(document.body, "Alpha"),
+        "Unable to find the Alpha project row.",
+      );
+      projectButton.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 24,
+          clientY: 24,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(openInEditorSpy).toHaveBeenCalledWith("/repo/alpha", "vscode");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens a thread worktree from the thread context menu when present", async () => {
+    seedSidebarTestStores({
+      sidebarThreadsById: {
+        "thread-worktree": {
+          id: "thread-worktree",
+          projectId: "project-1",
+          title: "Feature ticket",
+          interactionMode: "default",
+          session: null,
+          createdAt: "2026-04-11T00:00:00.000Z",
+          archivedAt: null,
+          updatedAt: "2026-04-11T00:00:00.000Z",
+          latestTurn: null,
+          branch: null,
+          worktreePath: "/repo/alpha/.worktrees/feature-ticket",
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          isOrchestrationThread: false,
+          parentThreadId: null,
+        },
+      },
+      threadIdsByProjectId: {
+        "project-1": ["thread-worktree"],
+      },
+    });
+    contextMenuShowSpy.mockImplementation(async (items: Array<{ id: string; label: string }>) => {
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "open-in-editor",
+            label: "Open in VS Code (worktree: feature-ticket)",
+          }),
+        ]),
+      );
+      return "open-in-editor";
+    });
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SidebarProvider defaultOpen>
+          <Sidebar />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+
+    try {
+      const threadButton = await waitForElement(
+        () => findButtonByText(document.body, "Feature ticket"),
+        "Unable to find the worktree thread row.",
+      );
+      threadButton.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 32,
+          clientY: 48,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(openInEditorSpy).toHaveBeenCalledWith(
+          "/repo/alpha/.worktrees/feature-ticket",
+          "vscode",
+        );
+      });
+    } finally {
+      await screen.unmount();
+    }
   });
 
   it("offers the project system prompt action and opens the hydrated dialog", async () => {

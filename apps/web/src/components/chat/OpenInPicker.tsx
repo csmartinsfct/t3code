@@ -106,19 +106,7 @@ export const OpenInPicker = memo(function OpenInPicker({
     [keybindings],
   );
 
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      const api = readNativeApi();
-      if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
-      if (!api || !openInCwd) return;
-      if (!preferredEditor) return;
-
-      e.preventDefault();
-      void api.shell.openInEditor(openInCwd, preferredEditor);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [preferredEditor, keybindings, openInCwd]);
+  useOpenFavoriteEditorShortcut({ keybindings, openInCwd, preferredEditor });
 
   return (
     <Group aria-label="Subscription actions">
@@ -154,3 +142,41 @@ export const OpenInPicker = memo(function OpenInPicker({
     </Group>
   );
 });
+
+export const OpenFavoriteEditorShortcut = memo(function OpenFavoriteEditorShortcut({
+  keybindings,
+  availableEditors,
+  openInCwd,
+}: {
+  keybindings: ResolvedKeybindingsConfig;
+  availableEditors: ReadonlyArray<EditorId>;
+  openInCwd: string | null;
+}) {
+  const [preferredEditor] = usePreferredEditor(availableEditors);
+  useOpenFavoriteEditorShortcut({ keybindings, openInCwd, preferredEditor });
+  return null;
+});
+
+function useOpenFavoriteEditorShortcut({
+  keybindings,
+  openInCwd,
+  preferredEditor,
+}: {
+  keybindings: ResolvedKeybindingsConfig;
+  openInCwd: string | null;
+  preferredEditor: EditorId | null;
+}) {
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      const api = readNativeApi();
+      if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
+      if (!api || !openInCwd) return;
+      if (!preferredEditor) return;
+
+      e.preventDefault();
+      void api.shell.openInEditor(openInCwd, preferredEditor);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [preferredEditor, keybindings, openInCwd]);
+}

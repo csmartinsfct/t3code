@@ -5187,8 +5187,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           gitCwd={gitCwd}
           multiRepoStatus={multiRepoStatus}
           diffOpen={diffOpen}
-          fileExplorerOpen={fileExplorerOpen}
-          fileExplorerAvailable={activeProject !== undefined}
           onTogglePlanSidebar={togglePlanSidebar}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
@@ -5198,7 +5196,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
-          onToggleFileExplorer={onToggleFileExplorer}
           orchestrationSwitcher={orchestrationSwitcher.visible ? orchestrationSwitcher : null}
           onSwitchThread={onSwitchThread}
           activeTicketBadge={

@@ -9,7 +9,7 @@ import { memo } from "react";
 import type { MultiRepoGitStatus } from "../../lib/multiRepoTypes";
 import type { UseOrchestrationSwitcherReturn } from "../../hooks/useOrchestrationSwitcher";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, FolderOpenIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -18,7 +18,7 @@ import ManagedRunsControl from "../ManagedRunsControl";
 import { Toggle } from "../ui/toggle";
 import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { useUiStateStore } from "../../uiStateStore";
-import { OpenInPicker } from "./OpenInPicker";
+import { OpenFavoriteEditorShortcut } from "./OpenInPicker";
 import { ThreadSwitcherDropdown } from "./ThreadSwitcherDropdown";
 import { TicketIdentifierBadge } from "../TicketIdentifierBadge";
 
@@ -42,8 +42,6 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   multiRepoStatus: MultiRepoGitStatus;
   diffOpen: boolean;
-  fileExplorerOpen: boolean;
-  fileExplorerAvailable: boolean;
   onTogglePlanSidebar: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
@@ -51,7 +49,6 @@ interface ChatHeaderProps {
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
-  onToggleFileExplorer: () => void;
   orchestrationSwitcher: UseOrchestrationSwitcherReturn | null;
   onSwitchThread: ((threadId: string) => void) | undefined;
   activeTicketBadge?:
@@ -90,8 +87,6 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   multiRepoStatus,
   diffOpen,
-  fileExplorerOpen,
-  fileExplorerAvailable,
   onTogglePlanSidebar,
   onRunProjectScript,
   onAddProjectScript,
@@ -99,13 +94,17 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onToggleTerminal,
   onToggleDiff,
-  onToggleFileExplorer,
   orchestrationSwitcher,
   onSwitchThread,
   activeTicketBadge,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
+      <OpenFavoriteEditorShortcut
+        keybindings={keybindings}
+        availableEditors={availableEditors}
+        openInCwd={openInCwd}
+      />
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <ChatHeaderSidebarTrigger />
         {orchestrationSwitcher?.visible && onSwitchThread ? (
@@ -180,13 +179,6 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && (
-          <OpenInPicker
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
-        )}
-        {activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
             multiRepoStatus={multiRepoStatus}
@@ -215,30 +207,6 @@ export const ChatHeader = memo(function ChatHeader({
               : terminalToggleShortcutLabel
                 ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
                 : "Toggle terminal drawer"}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={fileExplorerOpen}
-                onPressedChange={onToggleFileExplorer}
-                aria-label="Toggle file explorer"
-                variant="outline"
-                size="xs"
-                disabled={!fileExplorerAvailable}
-              >
-                <FolderOpenIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!fileExplorerAvailable
-              ? "File explorer is unavailable until this thread has an active project."
-              : fileExplorerOpen
-                ? "Close file explorer"
-                : "Open file explorer"}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>

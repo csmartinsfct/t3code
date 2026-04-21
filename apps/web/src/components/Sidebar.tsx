@@ -48,6 +48,8 @@ import {
   type ContextMenuItem,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
+  EDITORS,
+  type EditorId,
   type ModelSelection,
   ProjectId,
   providerDisplayName,
@@ -146,10 +148,17 @@ import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SystemPromptDialog } from "./SystemPromptDialog";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings, useServerProviders } from "../rpc/serverState";
+import {
+  useServerAvailableEditors,
+  useServerKeybindings,
+  useServerProviders,
+} from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
 import { useOrchestrationRunStatusSync } from "../hooks/useOrchestrationRunStatusSync";
+import { openInPreferredEditor, resolvePreferredEditor } from "../editorPreferences";
+import { projectScriptCwd } from "../projectScripts";
+import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -193,6 +202,8 @@ export function buildThreadContextMenuItems(input: {
   readonly projects: ReadonlyArray<ThreadContextMenuProjectOption>;
   readonly threadProjectId: ProjectId;
   readonly hasActiveSession: boolean;
+  readonly openInEditorLabel?: string;
+  readonly canOpenInEditor?: boolean;
 }): ReadonlyArray<ContextMenuItem<string>> {
   const forkChildren = input.serverProviders
     .filter((provider) => provider.enabled && provider.status === "ready")
@@ -211,6 +222,11 @@ export function buildThreadContextMenuItems(input: {
     { id: "rename", label: "Rename thread" },
     { id: "mark-unread", label: "Mark unread" },
     {
+      id: "open-in-editor",
+      label: input.openInEditorLabel ?? "Open in Editor",
+      disabled: input.canOpenInEditor === false,
+    },
+    {
       id: "fork",
       label: "Fork with model",
       children: forkChildren,
@@ -226,6 +242,35 @@ export function buildThreadContextMenuItems(input: {
     { id: "copy-thread-id", label: "Copy Thread ID" },
     { id: "delete", label: "Delete", destructive: true },
   ];
+}
+
+export function buildProjectContextMenuItems(input: {
+  readonly openInEditorLabel?: string;
+  readonly canOpenInEditor?: boolean;
+}): ReadonlyArray<ContextMenuItem<string>> {
+  return [
+    { id: "rename", label: "Rename project" },
+    { id: "system-prompt", label: "Manage system prompt" },
+    {
+      id: "open-in-editor",
+      label: input.openInEditorLabel ?? "Open in Editor",
+      disabled: input.canOpenInEditor === false,
+    },
+    { id: "copy-path", label: "Copy Project Path" },
+    { id: "delete", label: "Remove project", destructive: true },
+  ];
+}
+
+export function resolveOpenInEditorContextMenuLabel(input: {
+  readonly availableEditors: ReadonlyArray<EditorId>;
+  readonly worktreePath?: string | null;
+}): string {
+  const editorId = resolvePreferredEditor(input.availableEditors);
+  const editorLabel = EDITORS.find((editor) => editor.id === editorId)?.label ?? "Editor";
+  if (!input.worktreePath) {
+    return `Open in ${editorLabel}`;
+  }
+  return `Open in ${editorLabel} (worktree: ${formatWorktreePathForDisplay(input.worktreePath)})`;
 }
 
 export function buildForkModelSelection(provider: ProviderKind, model: string): ModelSelection {
@@ -853,6 +898,7 @@ export default function Sidebar() {
   });
   const keybindings = useServerKeybindings();
   const serverProviders = useServerProviders();
+  const availableEditors = useServerAvailableEditors();
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
@@ -908,6 +954,10 @@ export default function Sidebar() {
   const sidebarThreads = useMemo(() => Object.values(sidebarThreadsById), [sidebarThreadsById]);
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
+    [projects],
+  );
+  const projectById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project] as const)),
     [projects],
   );
   const routeTerminalOpen = routeThreadId
@@ -1283,12 +1333,19 @@ export default function Sidebar() {
       if (!api) return;
       const thread = sidebarThreadsById[threadId];
       if (!thread) return;
-      const threadWorkspacePath =
-        thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null;
+      const threadProject = projectById.get(thread.projectId) ?? null;
+      const threadWorkspacePath = threadProject
+        ? projectScriptCwd({
+            project: threadProject,
+            worktreePath: thread.worktreePath,
+          })
+        : null;
 
       const hasActiveSession =
         thread.session != null &&
         (thread.session.status === "running" || thread.session.status === "connecting");
+      const canOpenInEditor =
+        threadWorkspacePath !== null && resolvePreferredEditor(availableEditors) !== null;
 
       const clicked = await api.contextMenu.show(
         buildThreadContextMenuItems({
@@ -1296,6 +1353,11 @@ export default function Sidebar() {
           projects: projects.map((project) => ({ id: project.id, name: project.name })),
           threadProjectId: thread.projectId,
           hasActiveSession,
+          openInEditorLabel: resolveOpenInEditorContextMenuLabel({
+            availableEditors,
+            worktreePath: thread.worktreePath,
+          }),
+          canOpenInEditor,
         }),
         position,
       );
@@ -1395,6 +1457,26 @@ export default function Sidebar() {
         markThreadUnread(threadId, thread.latestTurn?.completedAt);
         return;
       }
+      if (clicked === "open-in-editor") {
+        if (!threadWorkspacePath) {
+          toastManager.add({
+            type: "error",
+            title: "Path unavailable",
+            description: "This thread does not have a workspace path to open.",
+          });
+          return;
+        }
+        try {
+          await openInPreferredEditor(api, threadWorkspacePath);
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to open editor",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
       if (clicked === "copy-path") {
         if (!threadWorkspacePath) {
           toastManager.add({
@@ -1427,14 +1509,14 @@ export default function Sidebar() {
     },
     [
       appSettings.confirmThreadDelete,
+      availableEditors,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
       markThreadUnread,
       navigate,
-      projectCwdById,
+      projectById,
       projects,
-      routeThreadId,
       serverProviders,
       sidebarThreadsById,
     ],
@@ -1554,12 +1636,10 @@ export default function Sidebar() {
       if (!project) return;
 
       const clicked = await api.contextMenu.show(
-        [
-          { id: "rename", label: "Rename project" },
-          { id: "system-prompt", label: "Manage system prompt" },
-          { id: "copy-path", label: "Copy Project Path" },
-          { id: "delete", label: "Remove project", destructive: true },
-        ],
+        buildProjectContextMenuItems({
+          openInEditorLabel: resolveOpenInEditorContextMenuLabel({ availableEditors }),
+          canOpenInEditor: resolvePreferredEditor(availableEditors) !== null,
+        }),
         position,
       );
       if (clicked === "rename") {
@@ -1570,6 +1650,18 @@ export default function Sidebar() {
       }
       if (clicked === "system-prompt") {
         setSystemPromptDialogProjectId(projectId);
+        return;
+      }
+      if (clicked === "open-in-editor") {
+        try {
+          await openInPreferredEditor(api, project.cwd);
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to open editor",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
         return;
       }
       if (clicked === "copy-path") {
@@ -1615,6 +1707,7 @@ export default function Sidebar() {
       }
     },
     [
+      availableEditors,
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
       copyPathToClipboard,

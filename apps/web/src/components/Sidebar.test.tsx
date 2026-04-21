@@ -102,6 +102,7 @@ vi.mock("../hooks/useSettings", () => settingsHookMock);
 vi.mock("../hooks/useSettings.ts", () => settingsHookMock);
 
 vi.mock("../rpc/serverState", () => ({
+  useServerAvailableEditors: () => ["vscode"],
   useServerKeybindings: () => [],
   useServerProviders: () => [],
 }));
@@ -180,6 +181,12 @@ function installNativeApi() {
     },
     shell: {
       openExternal: vi.fn(async () => undefined),
+      openInEditor: vi.fn(async () => undefined),
+    },
+    server: {
+      getConfig: vi.fn(async () => ({
+        availableEditors: ["vscode"],
+      })),
     },
   } as unknown as NativeApi;
 }
