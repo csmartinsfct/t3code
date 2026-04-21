@@ -2207,6 +2207,25 @@ describe("ProviderRuntimeIngestion", () => {
           lastOutputTokens: 50,
           lastReasoningOutputTokens: 25,
           compactsAutomatically: true,
+          breakdown: {
+            totalTokens: 1075,
+            maxTokens: 128_000,
+            categories: [
+              { name: "System prompt", tokens: 300, color: "#64748b" },
+              { name: "Messages", tokens: 775, color: "#22c55e" },
+            ],
+            messageBreakdown: {
+              toolCallTokens: 25,
+              toolResultTokens: 50,
+              attachmentTokens: 0,
+              assistantMessageTokens: 300,
+              userMessageTokens: 700,
+              redirectedContextTokens: 0,
+              unattributedTokens: 0,
+              toolCallsByType: [{ name: "Bash", callTokens: 25, resultTokens: 50 }],
+              attachmentsByType: [],
+            },
+          },
         },
       },
     });
@@ -2231,6 +2250,16 @@ describe("ProviderRuntimeIngestion", () => {
       reasoningOutputTokens: 25,
       lastUsedTokens: 1075,
       compactsAutomatically: true,
+      breakdown: {
+        categories: [
+          { name: "System prompt", tokens: 300, color: "#64748b" },
+          { name: "Messages", tokens: 775, color: "#22c55e" },
+        ],
+        messageBreakdown: {
+          toolCallTokens: 25,
+          toolResultTokens: 50,
+        },
+      },
     });
   });
 

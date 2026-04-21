@@ -153,6 +153,26 @@ describe("ProviderRuntimeEvent", () => {
           maxTokens: 200000,
           toolUses: 25,
           durationMs: 43567,
+          breakdown: {
+            totalTokens: 31251,
+            maxTokens: 200000,
+            model: "claude-opus-4-6",
+            categories: [
+              { name: "System prompt", tokens: 12_000, color: "#64748b" },
+              { name: "Messages", tokens: 19_251, color: "#22c55e" },
+            ],
+            messageBreakdown: {
+              toolCallTokens: 1000,
+              toolResultTokens: 7000,
+              attachmentTokens: 0,
+              assistantMessageTokens: 12_000,
+              userMessageTokens: 11_251,
+              redirectedContextTokens: 0,
+              unattributedTokens: 0,
+              toolCallsByType: [{ name: "Bash", callTokens: 1000, resultTokens: 7000 }],
+              attachmentsByType: [],
+            },
+          },
         },
       },
     });
@@ -163,5 +183,7 @@ describe("ProviderRuntimeEvent", () => {
     }
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
+    expect(parsed.payload.usage.breakdown?.categories[0]?.name).toBe("System prompt");
+    expect(parsed.payload.usage.breakdown?.messageBreakdown?.toolResultTokens).toBe(7000);
   });
 });

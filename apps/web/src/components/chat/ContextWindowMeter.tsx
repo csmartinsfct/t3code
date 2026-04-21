@@ -18,10 +18,39 @@ function barColor(pct: number): string {
   return "var(--color-muted-foreground)";
 }
 
+const HIDDEN_CONTEXT_CATEGORY_NAMES = new Set(["autocompact buffer", "free space"]);
+
+const SDK_CONTEXT_COLOR_MAP: Record<string, string> = {
+  claude: "var(--color-primary)",
+  inactive: "var(--color-muted-foreground)",
+  promptBorder: "var(--color-muted-foreground)",
+  purple_FOR_SUBAGENTS_ONLY: "#a78bfa",
+  warning: "var(--color-warning, #f59e0b)",
+};
+
+function categoryColor(color: string | undefined): string {
+  if (!color) {
+    return "var(--color-muted-foreground)";
+  }
+  return SDK_CONTEXT_COLOR_MAP[color] ?? color;
+}
+
+function showsCategory(
+  category: NonNullable<ContextWindowSnapshot["breakdown"]>["categories"][number],
+): boolean {
+  return (
+    category.tokens > 0 &&
+    !category.isDeferred &&
+    !HIDDEN_CONTEXT_CATEGORY_NAMES.has(category.name.toLowerCase())
+  );
+}
+
 export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
   const { usage } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
+  const categories = (usage.breakdown?.categories ?? []).filter(showsCategory).slice(0, 6);
+  const contextTotal = usage.breakdown?.totalTokens ?? usage.usedTokens;
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (normalizedPercentage / 100) * circumference;
@@ -83,8 +112,8 @@ export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
           </button>
         }
       />
-      <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2.5">
-        <div className="min-w-[180px] space-y-2 leading-tight">
+      <PopoverPopup tooltipStyle side="top" align="end" className="w-[260px] px-3 py-2.5">
+        <div className="space-y-2.5 leading-tight">
           {/* Header */}
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Context window
@@ -116,6 +145,51 @@ export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
               {formatContextWindowTokens(usage.usedTokens)} tokens
             </div>
           )}
+
+          {categories.length > 0 ? (
+            <div className="space-y-1.5 border-t border-border/60 pt-2">
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
+                <span>Breakdown</span>
+                {usage.breakdown?.model ? (
+                  <span className="max-w-[130px] truncate normal-case tracking-normal">
+                    {usage.breakdown.model}
+                  </span>
+                ) : null}
+              </div>
+              <div className="space-y-1.5">
+                {categories.map((category) => {
+                  const pct =
+                    contextTotal > 0
+                      ? Math.max(0, Math.min(100, (category.tokens / contextTotal) * 100))
+                      : 0;
+                  const color = categoryColor(category.color);
+                  return (
+                    <div key={`${category.name}-${category.tokens}`} className="space-y-1">
+                      <div className="flex min-w-0 items-center justify-between gap-2 text-[11px]">
+                        <span className="flex min-w-0 items-center gap-1.5 text-foreground/90">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: color }}
+                            aria-hidden="true"
+                          />
+                          <span className="truncate">{category.name}</span>
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {formatContextWindowTokens(category.tokens)}
+                        </span>
+                      </div>
+                      <div className="h-[2px] overflow-hidden rounded-full bg-muted/50">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${pct}%`, backgroundColor: color }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {/* Total processed (only if meaningfully different from used) */}
           {(usage.totalProcessedTokens ?? null) !== null &&
