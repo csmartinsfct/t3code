@@ -31,6 +31,7 @@ import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
+import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { resolveT3StateDir } from "@t3tools/shared/paths";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
@@ -2234,6 +2235,16 @@ function createEmbeddedBrowserTab(
 
   attachEmbeddedBrowserDebugger(tab);
   void view.webContents.loadURL(initialUrl).catch((error) => {
+    if (isBrowserNavigationAbortError(error)) {
+      console.warn("[desktop/browser] embedded browser initial navigation canceled", {
+        projectId,
+        tabId,
+        requestedUrl: initialUrl,
+        currentUrl: view.webContents.getURL(),
+      });
+      return;
+    }
+
     console.warn("[desktop/browser] failed to load embedded browser tab", {
       projectId,
       tabId,
@@ -2485,7 +2496,20 @@ function registerIpcHandlers(): void {
     if (!activeTab || !url) {
       throw new Error("invalid embedded browser navigation request");
     }
-    await activeTab.view.webContents.loadURL(url);
+    try {
+      await activeTab.view.webContents.loadURL(url);
+    } catch (cause) {
+      if (isBrowserNavigationAbortError(cause)) {
+        console.warn("[desktop/browser] embedded browser navigation canceled", {
+          projectId: activeTab.projectId,
+          tabId: activeTab.tabId,
+          requestedUrl: url,
+          currentUrl: activeTab.view.webContents.getURL(),
+        });
+        return;
+      }
+      throw cause;
+    }
   });
 
   ipcMain.removeHandler(BROWSER_GET_URL_CHANNEL);

@@ -1,4 +1,5 @@
 import type { BrowserTabListing, BrowserTabSummary, ProjectId } from "@t3tools/contracts";
+import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import { ArrowRightIcon, GlobeIcon, PlusIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
@@ -186,6 +187,11 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         const currentUrl = await browserBridge.getUrl();
         setUrl(currentUrl || nextUrl);
       } catch (cause) {
+        if (isBrowserNavigationAbortError(cause)) {
+          const currentUrl = await browserBridge.getUrl().catch(() => "");
+          setUrl(currentUrl || nextUrl);
+          return;
+        }
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         setLoading(false);

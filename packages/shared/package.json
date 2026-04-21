@@ -75,6 +75,10 @@
     "./paths": {
       "types": "./src/paths.ts",
       "import": "./src/paths.ts"
+    },
+    "./browserNavigationErrors": {
+      "types": "./src/browserNavigationErrors.ts",
+      "import": "./src/browserNavigationErrors.ts"
     }
   },
   "scripts": {

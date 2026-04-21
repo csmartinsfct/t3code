@@ -623,9 +623,7 @@ describe("runtime conditions", () => {
     expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.prodElectron })).toBe(
       "[always][prodE][anyE]",
     );
-    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.prodWeb })).toBe(
-      "[always][prodW]",
-    );
+    expect(renderPromptTemplate(doc, {}, { runtime: RUNTIMES.prodWeb })).toBe("[always][prodW]");
   });
 
   it("drops runtime blocks when runtime context is missing", () => {
