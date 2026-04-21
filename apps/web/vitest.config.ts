@@ -2,12 +2,12 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
+import { resolveConfigExport } from "./vitest.shared";
 
 const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
-export default mergeConfig(
-  viteConfig,
-  defineConfig({
+export default defineConfig(async (env) =>
+  mergeConfig(await resolveConfigExport(viteConfig, env), {
     resolve: {
       alias: {
         "~": srcPath,

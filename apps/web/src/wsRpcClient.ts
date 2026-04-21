@@ -248,6 +248,7 @@ export interface WsRpcClient {
     readonly getStartupSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getStartupSnapshot
     >;
+    readonly listProjects: RpcUnaryNoArgMethod<typeof ORCHESTRATION_WS_METHODS.listProjects>;
     readonly getThreadContent: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getThreadContent>;
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
@@ -514,6 +515,21 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
           return result;
         } catch (error) {
           logWebTimeline("orchestration.startup-snapshot.error", { error });
+          throw error;
+        }
+      },
+      listProjects: async () => {
+        logWebTimeline("orchestration.projects.start", {});
+        try {
+          const result = await transport.request((client) =>
+            client[ORCHESTRATION_WS_METHODS.listProjects]({}),
+          );
+          logWebTimeline("orchestration.projects.success", {
+            projectCount: result.length,
+          });
+          return result;
+        } catch (error) {
+          logWebTimeline("orchestration.projects.error", { error });
           throw error;
         }
       },

@@ -164,6 +164,7 @@ export function createWsNativeApi(): NativeApi {
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,
       getStartupSnapshot: rpcClient.orchestration.getStartupSnapshot,
+      listProjects: () => rpcClient.orchestration.listProjects().then((projects) => [...projects]),
       getThreadContent: rpcClient.orchestration.getThreadContent,
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,

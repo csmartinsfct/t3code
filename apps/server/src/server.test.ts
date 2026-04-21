@@ -279,6 +279,7 @@ const buildAppUnderTest = (options?: {
         Layer.mock(ProjectionSnapshotQuery)({
           getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
           getStartupSnapshot: () => Effect.die("unused"),
+          listProjects: () => Effect.die("unused"),
           getThreadContent: () => Effect.die("unused"),
           getThreadById: () => Effect.succeed(Option.none()),
           hasThreadUserMessages: () => Effect.succeed(Option.none()),
@@ -1456,6 +1457,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot as any),
+            listProjects: () => Effect.succeed(snapshot.projects as any),
           },
           checkpointDiffQuery: {
             getTurnDiff: () =>
@@ -1481,6 +1483,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
       );
       assert.equal(snapshotResult.snapshotSequence, 1);
+
+      const projectsResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.listProjects]({})),
+      );
+      assert.equal(projectsResult.length, 1);
+      assert.equal(projectsResult[0]?.title, "Project A");
 
       const dispatchResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

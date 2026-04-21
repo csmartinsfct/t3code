@@ -3,7 +3,7 @@ import { ArrowLeftIcon, PlayIcon, PencilIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 
-import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
+import { useOrchestrationProjectOptions } from "../../hooks/useOrchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import {
   AlertDialog,
@@ -45,27 +45,23 @@ export function ScheduledTaskDetailPanel() {
   const { taskId: rawTaskId } = useParams({ from: "/settings/scheduled-tasks/$taskId" });
   const taskId = rawTaskId as ScheduledTaskId;
   const navigate = useNavigate();
+  const projects = useOrchestrationProjectOptions();
 
   const [task, setTask] = useState<ScheduledTask | null>(null);
   const [runs, setRuns] = useState<ReadonlyArray<ScheduledTaskRun>>([]);
   const [loading, setLoading] = useState(true);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [projects, setProjects] = useState<
-    ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>
-  >([]);
 
   const fetchData = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const [taskData, runsData, projectOptions] = await Promise.all([
+      const [taskData, runsData] = await Promise.all([
         api.scheduledTasks.get({ jobId: taskId }),
         api.scheduledTasks.listRuns({ jobId: taskId, limit: 50 }),
-        getOrchestrationProjectOptions(api),
       ]);
       setTask(taskData);
       setRuns(runsData);
-      setProjects(projectOptions);
     } catch (error) {
       console.error("Failed to fetch scheduled task details:", error);
     } finally {

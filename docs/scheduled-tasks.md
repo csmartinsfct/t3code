@@ -224,7 +224,7 @@ Injected into Codex, Claude, and Gemini sessions alongside the managed runs guid
 - **Sidebar nav**: `apps/web/src/components/settings/SettingsSidebarNav.tsx` — "Scheduled Tasks" tab with ClockIcon.
 - **Routes**: `apps/web/src/routes/settings.scheduled-tasks.tsx` (layout), `settings.scheduled-tasks.index.tsx` (list), `settings.scheduled-tasks.$jobId.tsx` (detail).
 
-The settings list/detail pages load project dropdown options through the shared startup snapshot helper (`orchestration.getStartupSnapshot`). They no longer request the full orchestration snapshot just to render project names.
+The settings list/detail pages render task data independently from project dropdown metadata. Project options come from the already-hydrated client project store, with the shared project-options helper backed by the narrow `orchestration.listProjects` RPC for contexts that need an explicit refresh. They do not request the full startup snapshot just to render project names.
 
 ### Propose Card (Chat)
 
@@ -232,7 +232,7 @@ The settings list/detail pages load project dropdown options through the shared 
 - **Card**: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx` — interactive card with editable name/description/cron/prompt, project dropdown, Accept/Reject buttons.
 - **Wiring**: `ChatMarkdown.tsx` → `MessagesTimeline.tsx` → `ChatView.tsx` (`handleProposeScheduledTask`).
 
-The card also uses the startup snapshot helper for project options, preserving the initially supplied project while avoiding full thread-content hydration during message rendering.
+The card uses the already-hydrated client project store for project options, preserving the initially supplied project when the store is not ready yet. It avoids fetching startup snapshots during message rendering.
 
 See [Chat Model-to-User Prompts](chat-model-to-user-prompts.md) for the full data flow.
 

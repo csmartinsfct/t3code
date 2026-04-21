@@ -72,6 +72,14 @@ export interface ProjectionSnapshotQueryShape {
   >;
 
   /**
+   * Read active and archived project metadata without hydrating thread rows.
+   */
+  readonly listProjects: () => Effect.Effect<
+    ReadonlyArray<OrchestrationProject>,
+    ProjectionRepositoryError
+  >;
+
+  /**
    * Read one thread's nested content directly from projection tables.
    *
    * The returned sequence is the projection cursor observed in the same

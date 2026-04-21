@@ -19,6 +19,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetStartupSnapshotError,
+  OrchestrationListProjectsError,
   OrchestrationGetThreadContentError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -282,6 +283,20 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new OrchestrationGetStartupSnapshotError({
                   message: "Failed to load orchestration startup snapshot",
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "orchestration" },
+        ),
+      [ORCHESTRATION_WS_METHODS.listProjects]: (_input) =>
+        observeRpcEffect(
+          ORCHESTRATION_WS_METHODS.listProjects,
+          projectionSnapshotQuery.listProjects().pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationListProjectsError({
+                  message: "Failed to list orchestration projects",
                   cause,
                 }),
             ),

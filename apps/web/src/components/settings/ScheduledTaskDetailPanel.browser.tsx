@@ -14,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { __resetNativeApiForTests } from "../../nativeApi";
+import { useStore } from "../../store";
 import { waitForElement } from "../../test-utils/browser";
+import type { Project } from "../../types";
 import { ScheduledTaskDetailPanel } from "./ScheduledTaskDetailPanel";
 
 const { mockNavigate, routeTaskIdState } = vi.hoisted(() => ({
@@ -35,6 +37,15 @@ vi.mock("@tanstack/react-router", async () => {
 const PROJECT_ID = "project-1" as ProjectId;
 const THREAD_ID = "thread-run-open" as ThreadId;
 const NOW_ISO = "2026-04-11T12:00:00.000Z";
+const PROJECT_ALPHA: Project = {
+  id: PROJECT_ID,
+  name: "Project Alpha",
+  cwd: "/repo/project-alpha",
+  defaultModelSelection: null,
+  systemPrompt: null,
+  promptOverrides: { orchestration: {} },
+  scripts: [],
+};
 
 function createScheduledTask(input?: Partial<ScheduledTask>): ScheduledTask {
   return {
@@ -75,11 +86,13 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
     mockNavigate.mockClear();
     routeTaskIdState.current = "job-detail";
     __resetNativeApiForTests();
+    useStore.setState({ projects: [PROJECT_ALPHA] });
   });
 
   afterEach(() => {
     __resetNativeApiForTests();
     delete window.nativeApi;
+    useStore.setState({ projects: [] });
     document.body.innerHTML = "";
   });
 
@@ -122,17 +135,6 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
         delete: deleteSpy,
         create: vi.fn(),
         update: updateSpy,
-      },
-      orchestration: {
-        getStartupSnapshot: vi.fn(async () => ({
-          projects: [
-            {
-              id: PROJECT_ID,
-              title: "Project Alpha",
-              workspaceRoot: "/repo/project-alpha",
-            },
-          ],
-        })),
       },
       server: {
         resolveSkills: vi.fn(async () => ({ skills: [] })),

@@ -363,7 +363,7 @@ ScheduledTask {
 - Create, edit, enable/disable, and delete scheduled tasks in Settings → Scheduled Tasks.
 - View task detail with cron expression, project selector, prompt configuration.
 - Browse execution history with success/failure status.
-- Settings list/detail pages and chat proposal cards hydrate their project dropdowns from the shallow startup snapshot, so opening scheduled-task UI does not load every thread's message/activity content.
+- Settings list/detail pages and chat proposal cards hydrate their project dropdowns from the client project store, with `orchestration.listProjects` available for narrow project-only refreshes. Opening scheduled-task UI does not wait for startup snapshot hydration.
 
 **Agent interaction (REST API — `/api/scheduled-tasks`):**
 

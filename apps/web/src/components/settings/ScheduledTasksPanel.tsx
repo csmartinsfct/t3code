@@ -3,7 +3,7 @@ import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { getOrchestrationProjectOptions } from "../../lib/orchestrationProjectOptions";
+import { useOrchestrationProjectOptions } from "../../hooks/useOrchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -49,22 +49,16 @@ function formatRelativeDate(iso: string | null): string {
 
 export function ScheduledTasksPanel() {
   const navigate = useNavigate();
+  const projects = useOrchestrationProjectOptions();
   const [jobs, setJobs] = useState<ReadonlyArray<ScheduledTask>>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [projects, setProjects] = useState<
-    ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>
-  >([]);
 
   const fetchJobs = useCallback(async () => {
     try {
       const api = ensureNativeApi();
-      const [jobsList, projectOptions] = await Promise.all([
-        api.scheduledTasks.list(),
-        getOrchestrationProjectOptions(api),
-      ]);
+      const jobsList = await api.scheduledTasks.list();
       setJobs(jobsList);
-      setProjects(projectOptions);
     } catch (error) {
       console.error("Failed to fetch scheduled tasks:", error);
     } finally {

@@ -142,6 +142,9 @@ const rpcClientMock = {
   },
   orchestration: {
     getSnapshot: vi.fn(),
+    getStartupSnapshot: vi.fn(),
+    listProjects: vi.fn(),
+    getThreadContent: vi.fn(),
     dispatchCommand: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),

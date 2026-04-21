@@ -26,6 +26,7 @@ import { TicketId } from "./ticketing";
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
   getStartupSnapshot: "orchestration.getStartupSnapshot",
+  listProjects: "orchestration.listProjects",
   getThreadContent: "orchestration.getThreadContent",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
@@ -1312,6 +1313,11 @@ const OrchestrationGetStartupSnapshotResult = OrchestrationStartupSnapshot;
 export type OrchestrationGetStartupSnapshotResult =
   typeof OrchestrationGetStartupSnapshotResult.Type;
 
+export const OrchestrationListProjectsInput = Schema.Struct({});
+export type OrchestrationListProjectsInput = typeof OrchestrationListProjectsInput.Type;
+const OrchestrationListProjectsResult = Schema.Array(OrchestrationProject);
+export type OrchestrationListProjectsResult = typeof OrchestrationListProjectsResult.Type;
+
 export const OrchestrationGetThreadContentInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -1541,6 +1547,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetStartupSnapshotInput,
     output: OrchestrationGetStartupSnapshotResult,
   },
+  listProjects: {
+    input: OrchestrationListProjectsInput,
+    output: OrchestrationListProjectsResult,
+  },
   getThreadContent: {
     input: OrchestrationGetThreadContentInput,
     output: OrchestrationGetThreadContentResult,
@@ -1609,6 +1619,14 @@ export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<Orche
 
 export class OrchestrationGetStartupSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetStartupSnapshotError>()(
   "OrchestrationGetStartupSnapshotError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationListProjectsError extends Schema.TaggedErrorClass<OrchestrationListProjectsError>()(
+  "OrchestrationListProjectsError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

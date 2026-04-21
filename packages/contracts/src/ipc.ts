@@ -151,6 +151,7 @@ import type {
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
+  OrchestrationProject,
   OrchestrationListRunsInput,
   OrchestrationReadModel,
   OrchestrationRun,
@@ -413,6 +414,7 @@ export interface NativeApi {
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getStartupSnapshot: () => Promise<OrchestrationGetStartupSnapshotResult>;
+    listProjects: () => Promise<OrchestrationProject[]>;
     getThreadContent: (
       input: OrchestrationGetThreadContentInput,
     ) => Promise<OrchestrationGetThreadContentResult>;

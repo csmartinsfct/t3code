@@ -81,6 +81,7 @@ function makeProjectionSnapshotQueryTestLayer(
   return Layer.succeed(ProjectionSnapshotQuery, {
     getSnapshot: () => Effect.die(new Error("not mocked")),
     getStartupSnapshot: () => Effect.die(new Error("not mocked")),
+    listProjects: () => Effect.die(new Error("not mocked")),
     getThreadContent: () => Effect.die(new Error("not mocked")),
     getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
     getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),

@@ -1408,8 +1408,7 @@ const make = Effect.fn("make")(function* () {
         // the reactor's providerChanged check sees it.
         const incomingProvider = event.provider;
         const storedProviderName = thread.session?.providerName ?? null;
-        const storedIsProfiled =
-          storedProviderName !== null && storedProviderName.includes(":");
+        const storedIsProfiled = storedProviderName !== null && storedProviderName.includes(":");
         const incomingIsProfiled = incomingProvider.includes(":");
         const sameBaseKind =
           storedProviderName !== null &&

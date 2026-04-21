@@ -566,6 +566,7 @@ const makeLayer = (opts: {
             projects: [...readModelProjects],
             threads: [...readModelThreads],
           } as any),
+        listProjects: () => Effect.succeed([...readModelProjects] as any),
         getThreadContent: (threadId) => {
           const thread = readModelThreads.find((entry) => entry.id === threadId);
           return Effect.succeed({

@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { __resetNativeApiForTests } from "../../nativeApi";
+import { useStore } from "../../store";
 import { waitForElement } from "../../test-utils/browser";
+import type { Project } from "../../types";
 import { ScheduledTasksPanel } from "./ScheduledTasksPanel";
 
 const { mockNavigate } = vi.hoisted(() => ({
@@ -25,6 +27,26 @@ vi.mock("@tanstack/react-router", async () => {
 const PROJECT_ALPHA = "project-alpha" as ProjectId;
 const PROJECT_BETA = "project-beta" as ProjectId;
 const NOW_ISO = "2026-04-11T12:00:00.000Z";
+const PROJECTS: Project[] = [
+  {
+    id: PROJECT_ALPHA,
+    name: "Project Alpha",
+    cwd: "/repo/project-alpha",
+    defaultModelSelection: null,
+    systemPrompt: null,
+    promptOverrides: { orchestration: {} },
+    scripts: [],
+  },
+  {
+    id: PROJECT_BETA,
+    name: "Project Beta",
+    cwd: "/repo/project-beta",
+    defaultModelSelection: null,
+    systemPrompt: null,
+    promptOverrides: { orchestration: {} },
+    scripts: [],
+  },
+];
 
 function createScheduledTask(input: {
   jobId: string;
@@ -58,11 +80,13 @@ describe("TasksPanel browser coverage", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     __resetNativeApiForTests();
+    useStore.setState({ projects: PROJECTS });
   });
 
   afterEach(() => {
     __resetNativeApiForTests();
     delete window.nativeApi;
+    useStore.setState({ projects: [] });
     document.body.innerHTML = "";
   });
 
@@ -99,22 +123,6 @@ describe("TasksPanel browser coverage", () => {
           jobs = jobs.map((job) => (job.jobId === jobId ? updated : job));
           return updated;
         }),
-      },
-      orchestration: {
-        getStartupSnapshot: vi.fn(async () => ({
-          projects: [
-            {
-              id: PROJECT_ALPHA,
-              title: "Project Alpha",
-              workspaceRoot: "/repo/project-alpha",
-            },
-            {
-              id: PROJECT_BETA,
-              title: "Project Beta",
-              workspaceRoot: "/repo/project-beta",
-            },
-          ],
-        })),
       },
       server: {
         resolveSkills: vi.fn(async () => ({ skills: [] })),

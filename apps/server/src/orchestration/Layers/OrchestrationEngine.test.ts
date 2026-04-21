@@ -155,6 +155,7 @@ describe("OrchestrationEngine", () => {
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () => Effect.succeed(projectionSnapshot),
           getStartupSnapshot: () => Effect.succeed(projectionSnapshot),
+          listProjects: () => Effect.succeed(projectionSnapshot.projects),
           getThreadContent: () => Effect.die("unused"),
           getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 1 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),

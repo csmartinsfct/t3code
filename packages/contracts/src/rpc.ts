@@ -39,6 +39,8 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetStartupSnapshotError,
   OrchestrationGetStartupSnapshotInput,
+  OrchestrationListProjectsError,
+  OrchestrationListProjectsInput,
   OrchestrationGetThreadContentError,
   OrchestrationGetThreadContentInput,
   OrchestrationGetSnapshotError,
@@ -607,6 +609,12 @@ export const WsOrchestrationGetStartupSnapshotRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationListProjectsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listProjects, {
+  payload: OrchestrationListProjectsInput,
+  success: OrchestrationRpcSchemas.listProjects.output,
+  error: OrchestrationListProjectsError,
+});
+
 export const WsOrchestrationGetThreadContentRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getThreadContent,
   {
@@ -1123,6 +1131,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTicketingEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationGetStartupSnapshotRpc,
+  WsOrchestrationListProjectsRpc,
   WsOrchestrationGetThreadContentRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

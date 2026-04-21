@@ -1,12 +1,9 @@
-import { useState, useCallback, useEffect, memo } from "react";
+import { useState, useCallback, memo } from "react";
 import { CheckIcon, ClockIcon, XIcon } from "lucide-react";
 
 import type { ProposeScheduledTaskPayload } from "../../lib/proposeScheduledTaskParser";
-import {
-  getOrchestrationProjectOptions,
-  type OrchestrationProjectOption,
-} from "../../lib/orchestrationProjectOptions";
-import { ensureNativeApi } from "../../nativeApi";
+import type { OrchestrationProjectOption } from "../../lib/orchestrationProjectOptions";
+import { useOrchestrationProjectOptions } from "../../hooks/useOrchestrationProjectOptions";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -46,19 +43,13 @@ function ProposeScheduledTaskCard({
   const [projectId, setProjectId] = useState(initialProjectId);
   const [prompt, setPrompt] = useState(initialPrompt ?? "");
   const [status, setStatus] = useState<"pending" | "accepted" | "rejected">("pending");
-  const [projects, setProjects] = useState<ReadonlyArray<OrchestrationProjectOption>>([
-    { id: initialProjectId, title: initialProjectName, workspaceRoot: "" },
-  ]);
+  const storeProjectOptions = useOrchestrationProjectOptions();
+  const projects: ReadonlyArray<OrchestrationProjectOption> =
+    storeProjectOptions.length > 0
+      ? storeProjectOptions
+      : [{ id: initialProjectId, title: initialProjectName, workspaceRoot: "" }];
 
   const disabled = isStreaming || status !== "pending";
-
-  useEffect(() => {
-    void getOrchestrationProjectOptions(ensureNativeApi())
-      .then((projectOptions) => {
-        if (projectOptions.length > 0) setProjects(projectOptions);
-      })
-      .catch(() => {});
-  }, []);
 
   const selectedProjectName = projects.find((p) => p.id === projectId)?.title ?? projectId;
 

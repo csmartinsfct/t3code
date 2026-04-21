@@ -61,6 +61,27 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     promptOverrides: Schema.fromJsonString(ProjectPromptOverrides),
   }),
 );
+
+function toOrchestrationProject(
+  row: typeof ProjectionProjectDbRowSchema.Type,
+): OrchestrationProject {
+  return {
+    id: row.projectId,
+    title: row.title,
+    workspaceRoot: row.workspaceRoot,
+    defaultModelSelection:
+      row.defaultModelSelection === null
+        ? null
+        : normalizeModelSelectionProvider(row.defaultModelSelection),
+    systemPrompt: row.systemPrompt,
+    promptOverrides: row.promptOverrides,
+    scripts: row.scripts,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
+  };
+}
+
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
@@ -368,6 +389,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ORDER BY created_at ASC, project_id ASC
       `,
   });
+
+  const listProjects: ProjectionSnapshotQueryShape["listProjects"] = () =>
+    listProjectRows(undefined).pipe(
+      Effect.map((rows) => rows.map(toOrchestrationProject)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listProjects:query",
+          "ProjectionSnapshotQuery.listProjects:decodeRows",
+        ),
+      ),
+    );
 
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
@@ -1131,21 +1163,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             sessionsByThread.set(row.threadId, toSession(row));
           }
 
-          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            defaultModelSelection:
-              row.defaultModelSelection === null
-                ? null
-                : normalizeModelSelectionProvider(row.defaultModelSelection),
-            systemPrompt: row.systemPrompt,
-            promptOverrides: row.promptOverrides,
-            scripts: row.scripts,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-          }));
+          const projects: ReadonlyArray<OrchestrationProject> =
+            projectRows.map(toOrchestrationProject);
 
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
             id: row.threadId,
@@ -1374,21 +1393,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             }
           }
 
-          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            defaultModelSelection:
-              row.defaultModelSelection === null
-                ? null
-                : normalizeModelSelectionProvider(row.defaultModelSelection),
-            systemPrompt: row.systemPrompt,
-            promptOverrides: row.promptOverrides,
-            scripts: row.scripts,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-          }));
+          const projects: ReadonlyArray<OrchestrationProject> =
+            projectRows.map(toOrchestrationProject);
 
           const threads = threadRows.map((row) => {
             const session = sessionsByThread.get(row.threadId) ?? null;
@@ -1707,6 +1713,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   return {
     getSnapshot,
     getStartupSnapshot,
+    listProjects,
     getThreadContent,
     getCounts,
     getActiveProjectByWorkspaceRoot,
