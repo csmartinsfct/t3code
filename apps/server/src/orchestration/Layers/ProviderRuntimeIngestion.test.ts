@@ -2577,6 +2577,47 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completedPayload?.detail).toBe("format passed\nlint failed\nquality-gate Exit code 1");
   });
 
+  it("omits successful Claude hook exit codes from activity details", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "hook.completed",
+      eventId: asEventId("evt-hook-success"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "Stop",
+        hookEvent: "Stop",
+        outcome: "success",
+        stdout: "format passed",
+        stderr: "lint passed",
+        exitCode: 0,
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-success",
+      ),
+    );
+
+    const completed = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-success",
+    );
+    const completedPayload =
+      completed?.payload && typeof completed.payload === "object"
+        ? (completed.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(completed?.summary).toBe("Hook - Stop completed");
+    expect(completed?.tone).toBe("info");
+    expect(completedPayload?.detail).toBe("format passed\nlint passed");
+  });
+
   it("projects structured user input request and resolution as thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

@@ -368,10 +368,10 @@ function hookActivityDetail(payload: {
   const lines = hookOutputLines(payload);
   const statusParts: string[] = [];
   const hookName = payload.hookName?.trim();
-  if (hookName) {
-    statusParts.push(hookName);
-  }
-  if (payload.exitCode !== undefined) {
+  if (payload.exitCode !== undefined && payload.exitCode !== 0) {
+    if (hookName) {
+      statusParts.push(hookName);
+    }
     statusParts.push(`Exit code ${payload.exitCode}`);
   }
   if (statusParts.length > 0) {
