@@ -2184,8 +2184,11 @@ function createEmbeddedBrowserTab(
   // Tab keyboard shortcuts — intercepted here so they fire even while focus is
   // inside the webview (where the React shell's window-level keydown listener
   // never sees them). Cmd/Ctrl+T opens a new tab and switches to it, Cmd/Ctrl+W
-  // closes the active tab. Cmd/Ctrl+<number> is intentionally NOT bound — that
-  // range is owned by the chat-thread navigation shortcut.
+  // closes the active tab, Cmd/Ctrl+R reloads the active tab (Shift for a
+  // cache-bypassing reload). Without the reload intercept the menu's
+  // `role: "reload"` accelerator would reload the host T3 Code window instead.
+  // Cmd/Ctrl+<number> is intentionally NOT bound — that range is owned by the
+  // chat-thread navigation shortcut.
   view.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
     const mod = input.meta || input.control;
@@ -2208,6 +2211,65 @@ function createEmbeddedBrowserTab(
       void closeBrowserTab(project, project.activeTabId, owner).catch((error: unknown) => {
         console.warn("[desktop/browser] shortcut closeTab failed", { projectId, error });
       });
+      return;
+    }
+    if (key === "r") {
+      event.preventDefault();
+      try {
+        if (input.shift) {
+          view.webContents.reloadIgnoringCache();
+        } else {
+          view.webContents.reload();
+        }
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut reload failed", { projectId, error });
+      }
+      return;
+    }
+    // Zoom shortcuts — intercepted for the same reason as reload. The menu's
+    // zoomIn/zoomOut/resetZoom roles would otherwise zoom the host T3 Code
+    // window. Cmd/Ctrl+= (and shift variant "+") zoom in, Cmd/Ctrl+- zooms out,
+    // Cmd/Ctrl+0 resets. Levels are clamped to Chromium's typical UI range.
+    if (key === "=" || key === "+") {
+      event.preventDefault();
+      try {
+        const next = Math.min(9, view.webContents.getZoomLevel() + 1);
+        view.webContents.setZoomLevel(next);
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut zoomIn failed", { projectId, error });
+      }
+      return;
+    }
+    if (key === "-") {
+      event.preventDefault();
+      try {
+        const next = Math.max(-3, view.webContents.getZoomLevel() - 1);
+        view.webContents.setZoomLevel(next);
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut zoomOut failed", { projectId, error });
+      }
+      return;
+    }
+    if (key === "0") {
+      event.preventDefault();
+      try {
+        view.webContents.setZoomLevel(0);
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut zoomReset failed", { projectId, error });
+      }
+    }
+  });
+  // Trackpad pinch zoom on macOS. Electron fires `zoom-changed` on every pinch
+  // tick but does not apply the zoom itself — we translate the direction into a
+  // level delta and clamp to the same range as the keyboard shortcuts.
+  view.webContents.on("zoom-changed", (_event, zoomDirection) => {
+    try {
+      const current = view.webContents.getZoomLevel();
+      const next =
+        zoomDirection === "in" ? Math.min(9, current + 0.5) : Math.max(-3, current - 0.5);
+      view.webContents.setZoomLevel(next);
+    } catch (error) {
+      console.warn("[desktop/browser] pinch zoom failed", { projectId, error });
     }
   });
   view.webContents.on("page-favicon-updated", (_event, favicons) => {
