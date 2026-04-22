@@ -2219,7 +2219,12 @@ function createEmbeddedBrowserTab(
         if (view.webContents.isDevToolsOpened()) {
           view.webContents.closeDevTools();
         } else {
-          view.webContents.openDevTools({ mode: "detach" });
+          // Default to docked on the right side of the host BrowserWindow.
+          // WebContentsView can't dock inside its own view region — Chromium
+          // docks against BrowserWindow — so "right" puts the inspector next
+          // to the whole T3 Code window. The DevTools toolbar's dock-side
+          // picker still lets users undock to a separate window at any time.
+          view.webContents.openDevTools({ mode: "right" });
         }
       } catch (error) {
         console.warn("[desktop/browser] shortcut toggleDevTools failed", { projectId, error });
