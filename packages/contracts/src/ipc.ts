@@ -237,16 +237,16 @@ export interface BrowserTabListing {
 
 export interface DesktopBrowserBridge {
   mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
-  setBounds: (bounds: BrowserViewBounds) => Promise<void>;
-  unmount: () => Promise<void>;
+  setBounds: (projectId: string, bounds: BrowserViewBounds) => Promise<void>;
+  unmount: (projectId: string) => Promise<void>;
   suspendForModal: () => Promise<void>;
   resumeFromModal: () => Promise<void>;
-  navigate: (url: string) => Promise<void>;
-  getUrl: () => Promise<string>;
-  listTabs: () => Promise<BrowserTabListing>;
-  newTab: (url?: string) => Promise<number>;
-  switchTab: (tabId: number) => Promise<void>;
-  closeTab: (tabId: number) => Promise<number>;
+  navigate: (projectId: string, url: string) => Promise<void>;
+  getUrl: (projectId: string) => Promise<string>;
+  listTabs: (projectId: string) => Promise<BrowserTabListing>;
+  newTab: (projectId: string, url?: string) => Promise<number>;
+  switchTab: (projectId: string, tabId: number) => Promise<void>;
+  closeTab: (projectId: string, tabId: number) => Promise<number>;
   onTabsChanged: (
     listener: (payload: {
       projectId: string;

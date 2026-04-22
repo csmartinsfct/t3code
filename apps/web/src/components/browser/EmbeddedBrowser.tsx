@@ -60,7 +60,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const frameRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
   const mountPromiseRef = useRef<Promise<void> | null>(null);
-  const disposedRef = useRef(false);
+  const lifecycleIdRef = useRef(0);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const [url, setUrl] = useState(displayUrl(DEFAULT_URL));
   const [loading, setLoading] = useState(false);
@@ -79,50 +79,65 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     if (activeTab) setUrl(displayUrl(activeTab.url));
   }, []);
 
+  const isCurrentLifecycle = useCallback((lifecycleId: number) => {
+    return lifecycleIdRef.current === lifecycleId;
+  }, []);
+
   const refreshTabs = useCallback(async () => {
     if (!browserBridge) return;
+    const lifecycleId = lifecycleIdRef.current;
     try {
-      applyTabListing(await browserBridge.listTabs());
+      const listing = await browserBridge.listTabs(projectId);
+      if (!isCurrentLifecycle(lifecycleId)) return;
+      applyTabListing(listing);
     } catch (cause) {
+      if (!isCurrentLifecycle(lifecycleId)) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [applyTabListing, browserBridge]);
+  }, [applyTabListing, browserBridge, isCurrentLifecycle, projectId]);
 
   const syncBounds = useCallback(async () => {
     const element = rectRef.current;
     if (!element || !browserBridge) return;
+    const lifecycleId = lifecycleIdRef.current;
     const bounds = readElementRect(element);
     if (bounds.width <= 0 || bounds.height <= 0) return;
 
     if (!mountedRef.current) {
       if (!mountPromiseRef.current) {
-        mountPromiseRef.current = browserBridge
+        const mountPromise = browserBridge
           .mount(projectId, bounds)
           .then(async () => {
-            if (disposedRef.current) return;
+            if (!isCurrentLifecycle(lifecycleId)) return;
             mountedRef.current = true;
             setEmbeddedBrowserMountedForModalSuspension(true);
-            const currentUrl = await browserBridge.getUrl();
+            const currentUrl = await browserBridge.getUrl(projectId);
+            if (!isCurrentLifecycle(lifecycleId)) return;
             setUrl(displayUrl(currentUrl));
             await refreshTabs();
           })
           .catch((cause: unknown) => {
+            if (!isCurrentLifecycle(lifecycleId)) return;
             setError(cause instanceof Error ? cause.message : String(cause));
           })
           .finally(() => {
-            mountPromiseRef.current = null;
+            if (mountPromiseRef.current === mountPromise) {
+              mountPromiseRef.current = null;
+            }
           });
+        mountPromiseRef.current = mountPromise;
       }
       await mountPromiseRef.current;
       return;
     }
 
     try {
-      await browserBridge.setBounds(bounds);
+      await browserBridge.setBounds(projectId, bounds);
     } catch (cause) {
+      if (!isCurrentLifecycle(lifecycleId)) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [browserBridge, projectId, refreshTabs]);
+  }, [browserBridge, isCurrentLifecycle, projectId, refreshTabs]);
 
   const scheduleBoundsSync = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
@@ -137,7 +152,15 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     const element = rectRef.current;
     if (!element) return;
 
-    disposedRef.current = false;
+    const lifecycleId = lifecycleIdRef.current + 1;
+    lifecycleIdRef.current = lifecycleId;
+    mountPromiseRef.current = null;
+    mountedRef.current = false;
+    setTabs([]);
+    setActiveTabId(0);
+    setUrl(displayUrl(DEFAULT_URL));
+    setLoading(false);
+    setError(null);
     scheduleBoundsSync();
     const observer = new ResizeObserver(scheduleBoundsSync);
     observer.observe(element);
@@ -150,19 +173,24 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
       }
-      disposedRef.current = true;
+      if (lifecycleIdRef.current === lifecycleId) {
+        lifecycleIdRef.current += 1;
+      }
       const pendingMount = mountPromiseRef.current;
       const shouldUnmount = mountedRef.current || pendingMount !== null;
+      if (mountPromiseRef.current === pendingMount) {
+        mountPromiseRef.current = null;
+      }
       mountedRef.current = false;
       setEmbeddedBrowserMountedForModalSuspension(false);
       void (async () => {
         await pendingMount?.catch(() => {});
         if (shouldUnmount) {
-          await browserBridge.unmount();
+          await browserBridge.unmount(projectId);
         }
       })();
     };
-  }, [browserBridge, scheduleBoundsSync]);
+  }, [browserBridge, projectId, scheduleBoundsSync]);
 
   // Subscribe to tab updates pushed from the main process on project mount
   // (title / favicon / navigation / new-tab / close-tab from either the agent
@@ -179,31 +207,37 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const navigate = useCallback(
     async (targetUrl: string) => {
       if (!browserBridge) return;
+      const lifecycleId = lifecycleIdRef.current;
       const nextUrl = normalizeUrlInput(targetUrl);
       setLoading(true);
       setError(null);
       try {
-        await browserBridge.navigate(nextUrl);
-        const currentUrl = await browserBridge.getUrl();
+        await browserBridge.navigate(projectId, nextUrl);
+        const currentUrl = await browserBridge.getUrl(projectId);
+        if (!isCurrentLifecycle(lifecycleId)) return;
         setUrl(currentUrl || nextUrl);
       } catch (cause) {
         if (isBrowserNavigationAbortError(cause)) {
-          const currentUrl = await browserBridge.getUrl().catch(() => "");
+          const currentUrl = await browserBridge.getUrl(projectId).catch(() => "");
+          if (!isCurrentLifecycle(lifecycleId)) return;
           setUrl(currentUrl || nextUrl);
           return;
         }
+        if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
-        setLoading(false);
+        if (isCurrentLifecycle(lifecycleId)) setLoading(false);
       }
     },
-    [browserBridge],
+    [browserBridge, isCurrentLifecycle, projectId],
   );
 
   const openNewTab = useCallback(async () => {
     if (!browserBridge) return;
+    const lifecycleId = lifecycleIdRef.current;
     try {
-      await browserBridge.newTab();
+      await browserBridge.newTab(projectId);
+      if (!isCurrentLifecycle(lifecycleId)) return;
       await refreshTabs();
       // Focus the URL input after the DOM has rendered the empty state so the
       // user can just start typing.
@@ -212,34 +246,41 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         urlInputRef.current?.select();
       });
     } catch (cause) {
+      if (!isCurrentLifecycle(lifecycleId)) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [browserBridge, refreshTabs]);
+  }, [browserBridge, isCurrentLifecycle, projectId, refreshTabs]);
 
   const activateTab = useCallback(
     async (tabId: number) => {
       if (!browserBridge || tabId === activeTabId) return;
+      const lifecycleId = lifecycleIdRef.current;
       try {
-        await browserBridge.switchTab(tabId);
+        await browserBridge.switchTab(projectId, tabId);
+        if (!isCurrentLifecycle(lifecycleId)) return;
         await refreshTabs();
       } catch (cause) {
+        if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [activeTabId, browserBridge, refreshTabs],
+    [activeTabId, browserBridge, isCurrentLifecycle, projectId, refreshTabs],
   );
 
   const closeTab = useCallback(
     async (tabId: number) => {
       if (!browserBridge) return;
+      const lifecycleId = lifecycleIdRef.current;
       try {
-        await browserBridge.closeTab(tabId);
+        await browserBridge.closeTab(projectId, tabId);
+        if (!isCurrentLifecycle(lifecycleId)) return;
         await refreshTabs();
       } catch (cause) {
+        if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [browserBridge, refreshTabs],
+    [browserBridge, isCurrentLifecycle, projectId, refreshTabs],
   );
 
   // Tab keyboard shortcuts (Cmd/Ctrl+T, Cmd/Ctrl+W) are handled

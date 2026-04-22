@@ -143,6 +143,7 @@ type EmbeddedBrowserProjectState = {
 type EmbeddedBrowserWindowState = {
   readonly projectsByProjectId: Map<string, EmbeddedBrowserProjectState>;
   activeProjectId: string | null;
+  mountRequestId: number;
 };
 const MAX_TABS_PER_PROJECT = 5;
 type BrowserCdpSendRequest = {
@@ -1585,6 +1586,7 @@ function getEmbeddedBrowserWindowState(window: BrowserWindow): EmbeddedBrowserWi
   const state: EmbeddedBrowserWindowState = {
     projectsByProjectId: new Map(),
     activeProjectId: null,
+    mountRequestId: 0,
   };
   embeddedBrowserStateByWindow.set(window, state);
   return state;
@@ -1787,17 +1789,38 @@ function findEmbeddedBrowserOwnerWindow(tab: EmbeddedBrowserTabState): BrowserWi
   return null;
 }
 
-function getActiveEmbeddedBrowserTab(window: BrowserWindow): EmbeddedBrowserTabState | null {
-  const project = getActiveEmbeddedBrowserProject(window);
-  return project ? (project.tabs.get(project.activeTabId) ?? null) : null;
-}
-
 function getActiveEmbeddedBrowserProject(
   window: BrowserWindow,
 ): EmbeddedBrowserProjectState | null {
   const state = getEmbeddedBrowserWindowState(window);
   if (!state.activeProjectId) return null;
   const project = state.projectsByProjectId.get(state.activeProjectId) ?? null;
+  if (project && isEmbeddedBrowserProjectDestroyed(project)) {
+    cleanupEmbeddedBrowserProject(project, state);
+    return null;
+  }
+  return project;
+}
+
+function getProjectScopedEmbeddedBrowserProject(
+  window: BrowserWindow,
+  rawProjectId: unknown,
+  action: string,
+): EmbeddedBrowserProjectState | null {
+  const projectId = normalizeProjectId(rawProjectId);
+  if (!projectId) throw new Error(`invalid embedded browser ${action} request`);
+
+  const state = getEmbeddedBrowserWindowState(window);
+  if (state.activeProjectId !== projectId) {
+    console.warn("[desktop/browser] ignored stale embedded browser request", {
+      action,
+      requestedProjectId: projectId,
+      activeProjectId: state.activeProjectId,
+    });
+    return null;
+  }
+
+  const project = state.projectsByProjectId.get(projectId) ?? null;
   if (project && isEmbeddedBrowserProjectDestroyed(project)) {
     cleanupEmbeddedBrowserProject(project, state);
     return null;
@@ -2384,15 +2407,18 @@ async function mountActiveTabInWindow(
   project: EmbeddedBrowserProjectState,
   window: BrowserWindow,
   bounds: BrowserViewBounds,
-): Promise<void> {
+): Promise<boolean> {
   const activeTab = project.tabs.get(project.activeTabId);
-  if (!activeTab) return;
+  if (!activeTab) return false;
   await resumeEmbeddedBrowser(activeTab);
+  const state = embeddedBrowserStateByWindow.get(window);
+  if (state?.activeProjectId !== project.projectId) return false;
   activeTab.view.setBounds(bounds);
   if (!project.mounted) {
     window.contentView.addChildView(activeTab.view);
     project.mounted = true;
   }
+  return true;
 }
 
 function openNewBrowserTab(project: EmbeddedBrowserProjectState, url: string): number {
@@ -2504,6 +2530,7 @@ function registerIpcHandlers(): void {
       }
 
       const state = getEmbeddedBrowserWindowState(window);
+      const mountRequestId = ++state.mountRequestId;
       const previousActive =
         state.activeProjectId && state.activeProjectId !== projectId
           ? state.projectsByProjectId.get(state.activeProjectId)
@@ -2531,27 +2558,40 @@ function registerIpcHandlers(): void {
 
       project.bounds = bounds;
       project.suspendedForModal = false;
-      await mountActiveTabInWindow(project, window, bounds);
       state.activeProjectId = projectId;
+      await mountActiveTabInWindow(project, window, bounds);
+      if (state.mountRequestId !== mountRequestId) {
+        console.warn("[desktop/browser] embedded browser mount completed after newer request", {
+          projectId,
+          activeProjectId: state.activeProjectId,
+        });
+      }
       return project.handle;
     },
   );
 
   ipcMain.removeHandler(BROWSER_SET_BOUNDS_CHANNEL);
-  ipcMain.handle(BROWSER_SET_BOUNDS_CHANNEL, async (event, rawBounds: unknown) => {
-    const window = getIpcBrowserWindow(event);
-    const bounds = normalizeBrowserBounds(rawBounds);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
-    if (!project || !bounds) return;
-    project.bounds = bounds;
-    const activeTab = project.tabs.get(project.activeTabId);
-    if (activeTab) activeTab.view.setBounds(bounds);
-  });
+  ipcMain.handle(
+    BROWSER_SET_BOUNDS_CHANNEL,
+    async (event, rawProjectId: unknown, rawBounds: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const bounds = normalizeBrowserBounds(rawBounds);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "setBounds")
+        : null;
+      if (!project || !bounds) return;
+      project.bounds = bounds;
+      const activeTab = project.tabs.get(project.activeTabId);
+      if (activeTab) activeTab.view.setBounds(bounds);
+    },
+  );
 
   ipcMain.removeHandler(BROWSER_UNMOUNT_CHANNEL);
-  ipcMain.handle(BROWSER_UNMOUNT_CHANNEL, async (event) => {
+  ipcMain.handle(BROWSER_UNMOUNT_CHANNEL, async (event, rawProjectId: unknown) => {
     const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "unmount")
+      : null;
     if (!window || !project) return;
 
     const activeTab = project.tabs.get(project.activeTabId);
@@ -2588,50 +2628,63 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_NAVIGATE_CHANNEL);
-  ipcMain.handle(BROWSER_NAVIGATE_CHANNEL, async (event, rawUrl: unknown) => {
-    const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
-    const url = normalizeBrowserUrl(rawUrl);
-    const activeTab = project?.tabs.get(project.activeTabId);
-    if (!activeTab || !url) {
-      throw new Error("invalid embedded browser navigation request");
-    }
-    try {
-      await activeTab.view.webContents.loadURL(url);
-    } catch (cause) {
-      if (isBrowserNavigationAbortError(cause)) {
-        console.warn("[desktop/browser] embedded browser navigation canceled", {
-          projectId: activeTab.projectId,
-          tabId: activeTab.tabId,
-          requestedUrl: url,
-          currentUrl: activeTab.view.webContents.getURL(),
-        });
-        return;
+  ipcMain.handle(
+    BROWSER_NAVIGATE_CHANNEL,
+    async (event, rawProjectId: unknown, rawUrl: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "navigate")
+        : null;
+      const url = normalizeBrowserUrl(rawUrl);
+      const activeTab = project?.tabs.get(project.activeTabId);
+      if (!project) return;
+      if (!activeTab || !url) {
+        throw new Error("invalid embedded browser navigation request");
       }
-      throw cause;
-    }
-  });
+      try {
+        await activeTab.view.webContents.loadURL(url);
+      } catch (cause) {
+        if (isBrowserNavigationAbortError(cause)) {
+          console.warn("[desktop/browser] embedded browser navigation canceled", {
+            projectId: activeTab.projectId,
+            tabId: activeTab.tabId,
+            requestedUrl: url,
+            currentUrl: activeTab.view.webContents.getURL(),
+          });
+          return;
+        }
+        throw cause;
+      }
+    },
+  );
 
   ipcMain.removeHandler(BROWSER_GET_URL_CHANNEL);
-  ipcMain.handle(BROWSER_GET_URL_CHANNEL, async (event) => {
+  ipcMain.handle(BROWSER_GET_URL_CHANNEL, async (event, rawProjectId: unknown) => {
     const window = getIpcBrowserWindow(event);
-    const tab = window ? getActiveEmbeddedBrowserTab(window) : null;
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "getUrl")
+      : null;
+    const tab = project ? (project.tabs.get(project.activeTabId) ?? null) : null;
     return tab?.view.webContents.getURL() ?? "";
   });
 
   ipcMain.removeHandler(BROWSER_LIST_TABS_CHANNEL);
-  ipcMain.handle(BROWSER_LIST_TABS_CHANNEL, async (event) => {
+  ipcMain.handle(BROWSER_LIST_TABS_CHANNEL, async (event, rawProjectId: unknown) => {
     const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "listTabs")
+      : null;
     if (!project) return { tabs: [], activeTabId: 0 };
     return { tabs: summarizeEmbeddedBrowserTabs(project), activeTabId: project.activeTabId };
   });
 
   ipcMain.removeHandler(BROWSER_NEW_TAB_CHANNEL);
-  ipcMain.handle(BROWSER_NEW_TAB_CHANNEL, async (event, rawUrl: unknown) => {
+  ipcMain.handle(BROWSER_NEW_TAB_CHANNEL, async (event, rawProjectId: unknown, rawUrl: unknown) => {
     const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
-    if (!window || !project) throw new Error("no active browser project");
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "newTab")
+      : null;
+    if (!window || !project) return 0;
     const url = rawUrl == null ? "about:blank" : (normalizeBrowserUrl(rawUrl) ?? "about:blank");
     const tabId = openNewBrowserTab(project, url);
     await switchBrowserTab(project, tabId, window);
@@ -2639,24 +2692,34 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_SWITCH_TAB_CHANNEL);
-  ipcMain.handle(BROWSER_SWITCH_TAB_CHANNEL, async (event, rawTabId: unknown) => {
-    const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
-    if (!window || !project) throw new Error("no active browser project");
-    const tabId = Number(rawTabId);
-    if (!project.tabs.has(tabId)) throw new Error(`unknown tab id ${rawTabId}`);
-    await switchBrowserTab(project, tabId, window);
-  });
+  ipcMain.handle(
+    BROWSER_SWITCH_TAB_CHANNEL,
+    async (event, rawProjectId: unknown, rawTabId: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "switchTab")
+        : null;
+      if (!window || !project) return;
+      const tabId = Number(rawTabId);
+      if (!project.tabs.has(tabId)) throw new Error(`unknown tab id ${rawTabId}`);
+      await switchBrowserTab(project, tabId, window);
+    },
+  );
 
   ipcMain.removeHandler(BROWSER_CLOSE_TAB_CHANNEL);
-  ipcMain.handle(BROWSER_CLOSE_TAB_CHANNEL, async (event, rawTabId: unknown) => {
-    const window = getIpcBrowserWindow(event);
-    const project = window ? getActiveEmbeddedBrowserProject(window) : null;
-    if (!window || !project) throw new Error("no active browser project");
-    const tabId = Number(rawTabId);
-    await closeBrowserTab(project, tabId, window);
-    return project.activeTabId;
-  });
+  ipcMain.handle(
+    BROWSER_CLOSE_TAB_CHANNEL,
+    async (event, rawProjectId: unknown, rawTabId: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "closeTab")
+        : null;
+      if (!window || !project) return 0;
+      const tabId = Number(rawTabId);
+      await closeBrowserTab(project, tabId, window);
+      return project.activeTabId;
+    },
+  );
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {

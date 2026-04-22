@@ -279,15 +279,21 @@ Implementation: `apps/server/src/browser/BrowserHostResolver.ts` (`get` at line 
 
 ### Bounds protocol (renderer ↔ main)
 
-The renderer is the source of truth for the browser's on-screen rect. `EmbeddedBrowser.tsx` renders a `data-browser-rect` DOM sentinel and calls `getBoundingClientRect()` on mount, resize, and layout change. The preload bridge (`apps/desktop/src/preload.ts`) exposes three IPC channels:
+The renderer is the source of truth for the browser's on-screen rect. `EmbeddedBrowser.tsx` renders a `data-browser-rect` DOM sentinel and calls `getBoundingClientRect()` on mount, resize, and layout change. The preload bridge (`apps/desktop/src/preload.ts`) exposes project-scoped IPC channels:
 
-| Channel                      | Renderer call                      | Main handler                                                                      |
-| ---------------------------- | ---------------------------------- | --------------------------------------------------------------------------------- |
-| `BROWSER_MOUNT_CHANNEL`      | `browserBridge.mount(pid, bounds)` | create/retrieve `WebContentsView`, `setBounds`, `window.contentView.addChildView` |
-| `BROWSER_SET_BOUNDS_CHANNEL` | `browserBridge.setBounds(bounds)`  | `.setBounds(bounds)` on active view                                               |
-| `BROWSER_UNMOUNT_CHANNEL`    | `browserBridge.unmount()`          | `removeChildView` + pause & throttle                                              |
+| Channel                      | Renderer call                          | Main handler                                                                      |
+| ---------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| `BROWSER_MOUNT_CHANNEL`      | `browserBridge.mount(pid, bounds)`     | create/retrieve `WebContentsView`, `setBounds`, `window.contentView.addChildView` |
+| `BROWSER_SET_BOUNDS_CHANNEL` | `browserBridge.setBounds(pid, bounds)` | `.setBounds(bounds)` on the project-scoped active view                            |
+| `BROWSER_UNMOUNT_CHANNEL`    | `browserBridge.unmount(pid)`           | project-scoped `removeChildView` + pause & throttle                               |
+| `BROWSER_GET_URL_CHANNEL`    | `browserBridge.getUrl(pid)`            | read the project-scoped active tab URL                                            |
+| `BROWSER_LIST_TABS_CHANNEL`  | `browserBridge.listTabs(pid)`          | summarize project-scoped tabs                                                     |
+| `BROWSER_NAVIGATE_CHANNEL`   | `browserBridge.navigate(pid, url)`     | navigate the project-scoped active tab                                            |
+| `BROWSER_NEW_TAB_CHANNEL`    | `browserBridge.newTab(pid, url?)`      | open a project-scoped tab                                                         |
+| `BROWSER_SWITCH_TAB_CHANNEL` | `browserBridge.switchTab(pid, tabId)`  | switch project-scoped tabs                                                        |
+| `BROWSER_CLOSE_TAB_CHANNEL`  | `browserBridge.closeTab(pid, tabId)`   | close a project-scoped tab                                                        |
 
-The view is cached per project for the life of the Electron main process — unmount removes it from the window but keeps the `WebContents` alive so cookies, scroll position, and JS state survive toggling. See `apps/desktop/src/main.ts` around the `BROWSER_*_CHANNEL` handlers and `createEmbeddedBrowserView` for the lifecycle.
+The view is cached per project for the life of the Electron main process — unmount removes it from the window but keeps the `WebContents` alive so cookies, scroll position, and JS state survive toggling. Every post-mount renderer IPC call includes the expected project id; Electron main ignores stale calls when that id no longer matches the window's active embedded-browser project. This prevents delayed bounds, unmount, URL, tab, or navigation requests from a previous project from attaching or reading the newly active project's browser surface. See `apps/desktop/src/main.ts` around the `BROWSER_*_CHANNEL` handlers and `createEmbeddedBrowserView` for the lifecycle.
 
 ### Hidden-view throttling
 

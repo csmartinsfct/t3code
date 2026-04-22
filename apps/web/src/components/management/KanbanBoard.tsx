@@ -952,7 +952,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
       ) : browserVisible ? (
-        <EmbeddedBrowser projectId={typedProjectId} />
+        <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
       ) : orchestrationSubpage ? (
         <OrchestrationSubpage
           selectedTickets={orchestrationSubpage.tickets}

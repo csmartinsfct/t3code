@@ -64,16 +64,18 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   browser: {
     mount: (projectId, bounds) => ipcRenderer.invoke(BROWSER_MOUNT_CHANNEL, projectId, bounds),
-    setBounds: (bounds) => ipcRenderer.invoke(BROWSER_SET_BOUNDS_CHANNEL, bounds),
-    unmount: () => ipcRenderer.invoke(BROWSER_UNMOUNT_CHANNEL),
+    setBounds: (projectId, bounds) =>
+      ipcRenderer.invoke(BROWSER_SET_BOUNDS_CHANNEL, projectId, bounds),
+    unmount: (projectId) => ipcRenderer.invoke(BROWSER_UNMOUNT_CHANNEL, projectId),
     suspendForModal: () => ipcRenderer.invoke(BROWSER_SUSPEND_CHANNEL),
     resumeFromModal: () => ipcRenderer.invoke(BROWSER_RESUME_CHANNEL),
-    navigate: (url) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, url),
-    getUrl: () => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL),
-    listTabs: () => ipcRenderer.invoke(BROWSER_LIST_TABS_CHANNEL),
-    newTab: (url) => ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, url),
-    switchTab: (tabId) => ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, tabId),
-    closeTab: (tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, tabId),
+    navigate: (projectId, url) => ipcRenderer.invoke(BROWSER_NAVIGATE_CHANNEL, projectId, url),
+    getUrl: (projectId) => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL, projectId),
+    listTabs: (projectId) => ipcRenderer.invoke(BROWSER_LIST_TABS_CHANNEL, projectId),
+    newTab: (projectId, url) => ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, projectId, url),
+    switchTab: (projectId, tabId) =>
+      ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId),
+    closeTab: (projectId, tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId),
     onTabsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
         if (typeof payload !== "object" || payload === null) return;
