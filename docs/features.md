@@ -82,6 +82,21 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Configuration: global profile config + project `.mcp.json`.
 - **Profiles:** Multiple named profiles supported. Each profile can have its own binary path, config directory, and custom models. Profiles appear as separate provider entries.
 - Model selection: full Claude model family with per-session model and reasoning effort options.
+- Claude Opus 4.7 exposes `xhigh` effort between High and Max. Older Claude
+  models do not advertise it, and stale `xhigh` selections fall back to High.
+- Context usage: when the Claude SDK exposes `getContextUsage()`, T3 records the
+  categorized context breakdown on turn completion and shows the top categories
+  in the chat composer context-window hover card.
+- Terminal reasons: when Claude returns a structured `terminal_reason`, T3 keeps
+  it on the latest turn and surfaces non-success reasons in the response
+  divider, for example `Response • Worked for 2m • Limit reached`. Limit and
+  recoverable stop reasons leave the session ready so the user can retry or
+  continue.
+- Hook lifecycle visibility: Claude hook start/progress/completion events are
+  included in the SDK stream and projected into the chat work log with hook
+  name, hook event, outcome, exit code, and truncated output when available.
+  Failed or cancelled hooks use error tone so `hook_stopped` /
+  `stop_hook_prevented` terminal reasons have visible context.
 
 ### Gemini (Google)
 

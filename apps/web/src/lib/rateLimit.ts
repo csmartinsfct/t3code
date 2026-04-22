@@ -59,6 +59,7 @@ const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
   seven_day_sonnet: "Weekly (Sonnet)",
   seven_day_oauth_apps: "Weekly (OAuth apps)",
   seven_day_cowork: "Weekly (Cowork)",
+  seven_day_omelette: "Claude Design",
   "gemini-2.5-flash": "2.5 Flash",
   "gemini-2.5-flash-lite": "2.5 Flash-Lite",
   "gemini-2.5-pro": "2.5 Pro",

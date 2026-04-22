@@ -333,6 +333,56 @@ function buildContextWindowActivityPayload(
   return event.payload.usage;
 }
 
+function hookDisplayName(hookEvent: string | undefined): string {
+  return hookEvent && hookEvent.trim().length > 0 ? hookEvent.trim() : "hook";
+}
+
+function hookOutputLines(payload: {
+  stdout?: string | undefined;
+  stderr?: string | undefined;
+  output?: string | undefined;
+}): string[] {
+  const lines: string[] = [];
+  const stdout = payload.stdout?.trim();
+  if (stdout) {
+    lines.push(stdout);
+  }
+  const stderr = payload.stderr?.trim();
+  if (stderr && !lines.includes(stderr)) {
+    lines.push(stderr);
+  }
+  const output = payload.output?.trim();
+  if (output && lines.length === 0) {
+    lines.push(output);
+  }
+  return lines;
+}
+
+function hookActivityDetail(payload: {
+  hookName?: string | undefined;
+  stdout?: string | undefined;
+  stderr?: string | undefined;
+  output?: string | undefined;
+  exitCode?: number | undefined;
+}): string | undefined {
+  const lines = hookOutputLines(payload);
+  const statusParts: string[] = [];
+  const hookName = payload.hookName?.trim();
+  if (payload.exitCode !== undefined && payload.exitCode !== 0) {
+    if (hookName) {
+      statusParts.push(hookName);
+    }
+    statusParts.push(`Exit code ${payload.exitCode}`);
+  }
+  if (statusParts.length > 0) {
+    lines.push(statusParts.join(" "));
+  }
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return truncateDetail(lines.join("\n"));
+}
+
 /**
  * Map a structured `terminal_reason` from the SDK result (≥ 0.2.91) to a
  * human-readable message suitable for the thread error banner.  Returns `null`
@@ -369,6 +419,20 @@ function humanReadableTerminalReason(reason: string | undefined): string | null 
  */
 function isRecoverableTerminalReason(reason: string | undefined): boolean {
   return reason === "max_turns" || reason === "blocking_limit" || reason === "rapid_refill_breaker";
+}
+
+function latestTurnStateFromRuntimeCompletion(
+  state: string | undefined,
+  terminalReason: string | undefined,
+): "completed" | "error" | "interrupted" {
+  const normalized = normalizeRuntimeTurnState(state);
+  if (normalized === "interrupted" || normalized === "cancelled") {
+    return "interrupted";
+  }
+  if (normalized === "failed") {
+    return isRecoverableTerminalReason(terminalReason) ? "completed" : "error";
+  }
+  return "completed";
 }
 
 function normalizeRuntimeTurnState(
@@ -646,6 +710,87 @@ function runtimeEventToActivities(
             status: event.payload.status,
             ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "hook.started": {
+      const hookEvent = hookDisplayName(event.payload.hookEvent);
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "hook.started",
+          summary: `Hook - ${hookEvent} started`,
+          payload: {
+            hookId: event.payload.hookId,
+            hookName: event.payload.hookName,
+            hookEvent: event.payload.hookEvent,
+            detail: event.payload.hookName,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "hook.progress": {
+      const detail = hookActivityDetail(event.payload);
+      if (!detail) {
+        return [];
+      }
+      const hookEvent = hookDisplayName(event.payload.hookEvent);
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "hook.progress",
+          summary: `Hook - ${hookEvent} output`,
+          payload: {
+            hookId: event.payload.hookId,
+            ...(event.payload.hookName ? { hookName: event.payload.hookName } : {}),
+            ...(event.payload.hookEvent ? { hookEvent: event.payload.hookEvent } : {}),
+            detail,
+            ...(event.payload.output ? { output: truncateDetail(event.payload.output) } : {}),
+            ...(event.payload.stdout ? { stdout: truncateDetail(event.payload.stdout) } : {}),
+            ...(event.payload.stderr ? { stderr: truncateDetail(event.payload.stderr) } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "hook.completed": {
+      const hookEvent = hookDisplayName(event.payload.hookEvent);
+      const failed =
+        event.payload.outcome !== "success" ||
+        (event.payload.exitCode !== undefined && event.payload.exitCode !== 0);
+      const detail = hookActivityDetail(event.payload);
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: failed ? "error" : "info",
+          kind: "hook.completed",
+          summary: failed
+            ? `Hook - ${hookEvent} ${event.payload.outcome}`
+            : `Hook - ${hookEvent} completed`,
+          payload: {
+            hookId: event.payload.hookId,
+            ...(event.payload.hookName ? { hookName: event.payload.hookName } : {}),
+            ...(event.payload.hookEvent ? { hookEvent: event.payload.hookEvent } : {}),
+            outcome: event.payload.outcome,
+            ...(detail ? { detail } : {}),
+            ...(event.payload.exitCode !== undefined ? { exitCode: event.payload.exitCode } : {}),
+            ...(event.payload.output ? { output: truncateDetail(event.payload.output) } : {}),
+            ...(event.payload.stdout ? { stdout: truncateDetail(event.payload.stdout) } : {}),
+            ...(event.payload.stderr ? { stderr: truncateDetail(event.payload.stderr) } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -1261,6 +1406,7 @@ const make = Effect.fn("make")(function* () {
           ? {
               state: event.payload.state,
               errorMessage: event.payload.errorMessage ?? null,
+              terminalReason: event.payload.terminalReason ?? null,
             }
           : {}),
       }),
@@ -1432,6 +1578,21 @@ const make = Effect.fn("make")(function* () {
             lastError,
             updatedAt: now,
           },
+          ...(event.type === "turn.completed" && eventTurnId
+            ? {
+                completedTurn: {
+                  turnId: eventTurnId,
+                  state: latestTurnStateFromRuntimeCompletion(
+                    event.payload.state,
+                    event.payload.terminalReason,
+                  ),
+                  completedAt: now,
+                  ...(event.payload.terminalReason
+                    ? { terminalReason: event.payload.terminalReason }
+                    : {}),
+                },
+              }
+            : {}),
           createdAt: now,
         });
         yield* Effect.logInfo(

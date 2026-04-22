@@ -36,6 +36,7 @@ export type ComposerProviderState = {
 type ProviderRegistryEntry = {
   getState: (input: ComposerProviderStateInput) => ComposerProviderState;
   renderTraitsMenuContent: (input: {
+    provider: ProviderKind;
     threadId: ThreadId;
     model: string;
     models: ReadonlyArray<ServerProviderModel>;
@@ -44,6 +45,7 @@ type ProviderRegistryEntry = {
     onPromptChange: (prompt: string) => void;
   }) => ReactNode;
   renderTraitsPicker: (input: {
+    provider: ProviderKind;
     threadId: ThreadId;
     model: string;
     models: ReadonlyArray<ServerProviderModel>;
@@ -109,9 +111,10 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
       modelOptions,
       prompt,
       onPromptChange,
+      provider,
     }) => (
       <TraitsMenuContent
-        provider="codex"
+        provider={provider}
         models={models}
         threadId={threadId}
         model={model}
@@ -120,9 +123,17 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+      provider,
+    }) => (
       <TraitsPicker
-        provider="codex"
+        provider={provider}
         models={models}
         threadId={threadId}
         model={model}
@@ -141,9 +152,10 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
       modelOptions,
       prompt,
       onPromptChange,
+      provider,
     }) => (
       <TraitsMenuContent
-        provider="claudeAgent"
+        provider={provider}
         models={models}
         threadId={threadId}
         model={model}
@@ -152,9 +164,17 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+      provider,
+    }) => (
       <TraitsPicker
-        provider="claudeAgent"
+        provider={provider}
         models={models}
         threadId={threadId}
         model={model}
@@ -185,6 +205,7 @@ export function renderProviderTraitsMenuContent(input: {
   onPromptChange: (prompt: string) => void;
 }): ReactNode {
   return composerProviderRegistry[baseProviderKind(input.provider)].renderTraitsMenuContent({
+    provider: input.provider,
     threadId: input.threadId,
     model: input.model,
     models: input.models,
@@ -204,6 +225,7 @@ export function renderProviderTraitsPicker(input: {
   onPromptChange: (prompt: string) => void;
 }): ReactNode {
   return composerProviderRegistry[baseProviderKind(input.provider)].renderTraitsPicker({
+    provider: input.provider,
     threadId: input.threadId,
     model: input.model,
     models: input.models,

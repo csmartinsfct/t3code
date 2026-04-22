@@ -40,6 +40,7 @@ const claudeCaps: ModelCapabilities = {
   reasoningEffortLevels: [
     { value: "medium", label: "Medium" },
     { value: "high", label: "High", isDefault: true },
+    { value: "xhigh", label: "Extra High" },
     { value: "ultrathink", label: "Ultrathink" },
   ],
   supportsFastMode: false,
@@ -153,6 +154,7 @@ describe("resolveEffort", () => {
     expect(resolveEffort(codexCaps, "xhigh")).toBe("xhigh");
     expect(resolveEffort(codexCaps, "high")).toBe("high");
     expect(resolveEffort(claudeCaps, "medium")).toBe("medium");
+    expect(resolveEffort(claudeCaps, "xhigh")).toBe("xhigh");
   });
 
   it("falls back to default when value is unsupported", () => {

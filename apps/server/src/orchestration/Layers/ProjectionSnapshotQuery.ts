@@ -124,6 +124,7 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  terminalReason: Schema.NullOr(Schema.String),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
 });
@@ -318,6 +319,7 @@ function toLatestTurn(row: Schema.Schema.Type<typeof ProjectionLatestTurnDbRowSc
     startedAt: row.startedAt,
     completedAt: row.completedAt,
     assistantMessageId: row.assistantMessageId,
+    ...(row.terminalReason ? { terminalReason: row.terminalReason } : {}),
     ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
       ? {
           sourceProposedPlan: {
@@ -804,6 +806,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           projection_turns.started_at AS "startedAt",
           projection_turns.completed_at AS "completedAt",
           projection_turns.assistant_message_id AS "assistantMessageId",
+          projection_turns.terminal_reason AS "terminalReason",
           projection_turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           projection_turns.source_proposed_plan_id AS "sourceProposedPlanId"
         FROM projection_turns
@@ -828,6 +831,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           started_at AS "startedAt",
           completed_at AS "completedAt",
           assistant_message_id AS "assistantMessageId",
+          terminal_reason AS "terminalReason",
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId"
         FROM projection_turns

@@ -400,6 +400,8 @@ describe("ProviderRuntimeIngestion", () => {
       );
       expect(thread.session?.status).toBe("ready");
       expect(thread.session?.lastError).toBe(testCase.expectedError);
+      expect(thread.latestTurn?.state).toBe("completed");
+      expect(thread.latestTurn?.terminalReason).toBe(testCase.reason);
     }
   });
 
@@ -468,6 +470,8 @@ describe("ProviderRuntimeIngestion", () => {
       );
       expect(thread.session?.status).toBe("error");
       expect(thread.session?.lastError).toBe(testCase.expectedError);
+      expect(thread.latestTurn?.state).toBe("error");
+      expect(thread.latestTurn?.terminalReason).toBe(testCase.reason);
     }
   });
 
@@ -2207,6 +2211,25 @@ describe("ProviderRuntimeIngestion", () => {
           lastOutputTokens: 50,
           lastReasoningOutputTokens: 25,
           compactsAutomatically: true,
+          breakdown: {
+            totalTokens: 1075,
+            maxTokens: 128_000,
+            categories: [
+              { name: "System prompt", tokens: 300, color: "#64748b" },
+              { name: "Messages", tokens: 775, color: "#22c55e" },
+            ],
+            messageBreakdown: {
+              toolCallTokens: 25,
+              toolResultTokens: 50,
+              attachmentTokens: 0,
+              assistantMessageTokens: 300,
+              userMessageTokens: 700,
+              redirectedContextTokens: 0,
+              unattributedTokens: 0,
+              toolCallsByType: [{ name: "Bash", callTokens: 25, resultTokens: 50 }],
+              attachmentsByType: [],
+            },
+          },
         },
       },
     });
@@ -2231,6 +2254,16 @@ describe("ProviderRuntimeIngestion", () => {
       reasoningOutputTokens: 25,
       lastUsedTokens: 1075,
       compactsAutomatically: true,
+      breakdown: {
+        categories: [
+          { name: "System prompt", tokens: 300, color: "#64748b" },
+          { name: "Messages", tokens: 775, color: "#22c55e" },
+        ],
+        messageBreakdown: {
+          toolCallTokens: 25,
+          toolResultTokens: 50,
+        },
+      },
     });
   });
 
@@ -2462,6 +2495,127 @@ describe("ProviderRuntimeIngestion", () => {
         (entry: ProviderRuntimeTestProposedPlan) => entry.id === "plan:thread-1:turn:turn-task-1",
       )?.planMarkdown,
     ).toBe("# Plan title");
+  });
+
+  it("projects Claude hook lifecycle events into thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "hook.started",
+      eventId: asEventId("evt-hook-started"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+      },
+    });
+
+    harness.emit({
+      type: "hook.progress",
+      eventId: asEventId("evt-hook-progress"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+        stderr: "running lint",
+      },
+    });
+
+    harness.emit({
+      type: "hook.completed",
+      eventId: asEventId("evt-hook-completed"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+        outcome: "error",
+        stdout: "format passed",
+        stderr: "lint failed",
+        exitCode: 1,
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "hook.completed",
+      ),
+    );
+
+    const started = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-started",
+    );
+    const progress = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-progress",
+    );
+    const completed = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-completed",
+    );
+    const completedPayload =
+      completed?.payload && typeof completed.payload === "object"
+        ? (completed.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(started?.summary).toBe("Hook - Stop started");
+    expect(progress?.summary).toBe("Hook - Stop output");
+    expect(completed?.summary).toBe("Hook - Stop error");
+    expect(completed?.tone).toBe("error");
+    expect(completedPayload?.hookName).toBe("quality-gate");
+    expect(completedPayload?.hookEvent).toBe("Stop");
+    expect(completedPayload?.detail).toBe("format passed\nlint failed\nquality-gate Exit code 1");
+  });
+
+  it("omits successful Claude hook exit codes from activity details", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "hook.completed",
+      eventId: asEventId("evt-hook-success"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "Stop",
+        hookEvent: "Stop",
+        outcome: "success",
+        stdout: "format passed",
+        stderr: "lint passed",
+        exitCode: 0,
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-success",
+      ),
+    );
+
+    const completed = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-success",
+    );
+    const completedPayload =
+      completed?.payload && typeof completed.payload === "object"
+        ? (completed.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(completed?.summary).toBe("Hook - Stop completed");
+    expect(completed?.tone).toBe("info");
+    expect(completedPayload?.detail).toBe("format passed\nlint passed");
   });
 
   it("projects structured user input request and resolution as thread activities", async () => {

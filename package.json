@@ -54,7 +54,7 @@
     "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.92"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.116"
   },
   "devDependencies": {
     "@types/node": "catalog:",

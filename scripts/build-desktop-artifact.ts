@@ -106,6 +106,14 @@ function getDefaultArch(platform: typeof BuildPlatform.Type): typeof BuildArch.T
   return config.archChoices[0] ?? "x64";
 }
 
+function desktopPlatformToOptionalDependencyOs(
+  platform: typeof BuildPlatform.Type,
+): "darwin" | "linux" | "win32" {
+  if (platform === "mac") return "darwin";
+  if (platform === "win") return "win32";
+  return "linux";
+}
+
 class BuildScriptError extends Data.TaggedError("BuildScriptError")<{
   readonly message: string;
   readonly cause?: unknown;
@@ -751,6 +759,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // `extraResources`.
   const bunPlatform = desktopPlatformToBunPlatform(options.platform);
   const bunArch = desktopArchToBunArch(options.arch);
+  const optionalDependencyOs = desktopPlatformToOptionalDependencyOs(options.platform);
   const bunExe = options.platform === "win" ? "bun.exe" : "bun";
   const stagedBinDir = path.join(stageAppDir, "bin");
   const stagedBunPath = path.join(stagedBinDir, bunExe);
@@ -823,14 +832,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
-  yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
+  yield* Effect.log(
+    `[desktop-artifact] Installing staged production dependencies for ${optionalDependencyOs}-${bunArch}...`,
+  );
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
-    })`bun install --production`,
+    })`bun install --production --os ${optionalDependencyOs} --cpu ${bunArch}`,
   );
 
   // Bundle Playwright Chromium into the staged app so the packaged desktop

@@ -298,6 +298,110 @@ const ThreadMetadataUpdatedPayload = Schema.Struct({
 });
 export type ThreadMetadataUpdatedPayload = typeof ThreadMetadataUpdatedPayload.Type;
 
+export const ThreadContextUsageCategory = Schema.Struct({
+  name: Schema.String,
+  tokens: NonNegativeInt,
+  color: Schema.optional(Schema.String),
+  isDeferred: Schema.optional(Schema.Boolean),
+});
+export type ThreadContextUsageCategory = typeof ThreadContextUsageCategory.Type;
+
+export const ThreadContextUsageNamedTokenCount = Schema.Struct({
+  name: Schema.String,
+  tokens: NonNegativeInt,
+});
+export type ThreadContextUsageNamedTokenCount = typeof ThreadContextUsageNamedTokenCount.Type;
+
+export const ThreadContextUsageToolTokenCount = Schema.Struct({
+  name: Schema.String,
+  serverName: Schema.optional(Schema.String),
+  tokens: NonNegativeInt,
+  isLoaded: Schema.optional(Schema.Boolean),
+});
+export type ThreadContextUsageToolTokenCount = typeof ThreadContextUsageToolTokenCount.Type;
+
+export const ThreadContextUsagePathTokenCount = Schema.Struct({
+  path: Schema.String,
+  type: Schema.optional(Schema.String),
+  tokens: NonNegativeInt,
+});
+export type ThreadContextUsagePathTokenCount = typeof ThreadContextUsagePathTokenCount.Type;
+
+export const ThreadContextUsageAgentTokenCount = Schema.Struct({
+  agentType: Schema.String,
+  source: Schema.optional(Schema.String),
+  tokens: NonNegativeInt,
+});
+export type ThreadContextUsageAgentTokenCount = typeof ThreadContextUsageAgentTokenCount.Type;
+
+export const ThreadContextUsageMessageBreakdown = Schema.Struct({
+  toolCallTokens: NonNegativeInt,
+  toolResultTokens: NonNegativeInt,
+  attachmentTokens: NonNegativeInt,
+  assistantMessageTokens: NonNegativeInt,
+  userMessageTokens: NonNegativeInt,
+  redirectedContextTokens: NonNegativeInt,
+  unattributedTokens: NonNegativeInt,
+  toolCallsByType: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      callTokens: NonNegativeInt,
+      resultTokens: NonNegativeInt,
+    }),
+  ),
+  attachmentsByType: Schema.Array(ThreadContextUsageNamedTokenCount),
+});
+export type ThreadContextUsageMessageBreakdown = typeof ThreadContextUsageMessageBreakdown.Type;
+
+export const ThreadContextUsageApiUsage = Schema.Struct({
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  cacheCreationInputTokens: NonNegativeInt,
+  cacheReadInputTokens: NonNegativeInt,
+});
+export type ThreadContextUsageApiUsage = typeof ThreadContextUsageApiUsage.Type;
+
+export const ThreadContextUsageBreakdown = Schema.Struct({
+  totalTokens: NonNegativeInt,
+  maxTokens: PositiveInt,
+  rawMaxTokens: Schema.optional(PositiveInt),
+  percentage: Schema.optional(Schema.Number),
+  model: Schema.optional(Schema.String),
+  categories: Schema.Array(ThreadContextUsageCategory),
+  memoryFiles: Schema.optional(Schema.Array(ThreadContextUsagePathTokenCount)),
+  mcpTools: Schema.optional(Schema.Array(ThreadContextUsageToolTokenCount)),
+  deferredBuiltinTools: Schema.optional(Schema.Array(ThreadContextUsageToolTokenCount)),
+  systemTools: Schema.optional(Schema.Array(ThreadContextUsageNamedTokenCount)),
+  systemPromptSections: Schema.optional(Schema.Array(ThreadContextUsageNamedTokenCount)),
+  agents: Schema.optional(Schema.Array(ThreadContextUsageAgentTokenCount)),
+  slashCommands: Schema.optional(
+    Schema.Struct({
+      totalCommands: NonNegativeInt,
+      includedCommands: NonNegativeInt,
+      tokens: NonNegativeInt,
+    }),
+  ),
+  skills: Schema.optional(
+    Schema.Struct({
+      totalSkills: NonNegativeInt,
+      includedSkills: NonNegativeInt,
+      tokens: NonNegativeInt,
+      skillFrontmatter: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          source: Schema.optional(Schema.String),
+          tokens: NonNegativeInt,
+        }),
+      ),
+    }),
+  ),
+  messageBreakdown: Schema.optional(ThreadContextUsageMessageBreakdown),
+  apiUsage: Schema.optional(ThreadContextUsageApiUsage),
+  isAutoCompactEnabled: Schema.optional(Schema.Boolean),
+  autoCompactThreshold: Schema.optional(NonNegativeInt),
+});
+export type ThreadContextUsageBreakdown = typeof ThreadContextUsageBreakdown.Type;
+
 export const ThreadTokenUsageSnapshot = Schema.Struct({
   usedTokens: NonNegativeInt,
   totalProcessedTokens: Schema.optional(NonNegativeInt),
@@ -314,6 +418,7 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+  breakdown: Schema.optional(ThreadContextUsageBreakdown),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 
@@ -488,6 +593,8 @@ export type HookStartedPayload = typeof HookStartedPayload.Type;
 
 const HookProgressPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
+  hookName: Schema.optional(TrimmedNonEmptyStringSchema),
+  hookEvent: Schema.optional(TrimmedNonEmptyStringSchema),
   output: Schema.optional(Schema.String),
   stdout: Schema.optional(Schema.String),
   stderr: Schema.optional(Schema.String),
@@ -496,6 +603,8 @@ export type HookProgressPayload = typeof HookProgressPayload.Type;
 
 const HookCompletedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
+  hookName: Schema.optional(TrimmedNonEmptyStringSchema),
+  hookEvent: Schema.optional(TrimmedNonEmptyStringSchema),
   outcome: Schema.Literals(["success", "error", "cancelled"]),
   output: Schema.optional(Schema.String),
   stdout: Schema.optional(Schema.String),

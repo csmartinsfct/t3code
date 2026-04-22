@@ -9,6 +9,7 @@
 import {
   type CanUseTool,
   query,
+  type SDKControlGetContextUsageResponse,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -34,6 +35,8 @@ import {
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
   type ProviderSession,
+  type ThreadContextUsageBreakdown,
+  type ThreadContextUsageNamedTokenCount,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -195,6 +198,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
+  readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   readonly close: () => void;
 }
 
@@ -345,6 +349,281 @@ function maxClaudeContextWindowFromModelUsage(modelUsage: unknown): number | und
 
 function safeInt(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : undefined;
+}
+
+function safeNonNegativeInt(value: unknown): number | undefined {
+  const int = safeInt(value);
+  return int !== undefined && int >= 0 ? int : undefined;
+}
+
+function safePositiveInt(value: unknown): number | undefined {
+  const int = safeInt(value);
+  return int !== undefined && int > 0 ? int : undefined;
+}
+
+function safeString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function safeBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeNamedTokenCount(value: unknown): ThreadContextUsageNamedTokenCount | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const name = safeString(record.name);
+  const tokens = safeNonNegativeInt(record.tokens);
+  if (name === undefined || tokens === undefined) {
+    return undefined;
+  }
+
+  return { name, tokens };
+}
+
+function normalizeArray<T>(
+  arrayValue: unknown,
+  normalize: (item: unknown) => T | undefined,
+): Array<T> | undefined {
+  if (!Array.isArray(arrayValue)) {
+    return undefined;
+  }
+  return arrayValue.flatMap((item) => {
+    const normalized = normalize(item);
+    return normalized === undefined ? [] : [normalized];
+  });
+}
+
+function normalizeClaudeContextUsageBreakdown(
+  value: SDKControlGetContextUsageResponse | undefined,
+): ThreadContextUsageBreakdown | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const totalTokens = safeNonNegativeInt(record.totalTokens);
+  const maxTokens = safePositiveInt(record.maxTokens);
+  if (totalTokens === undefined || maxTokens === undefined) {
+    return undefined;
+  }
+
+  const categories = Array.isArray(record.categories)
+    ? record.categories.flatMap((category) => {
+        if (!category || typeof category !== "object") {
+          return [];
+        }
+        const categoryRecord = category as Record<string, unknown>;
+        const name = safeString(categoryRecord.name);
+        const tokens = safeNonNegativeInt(categoryRecord.tokens);
+        if (name === undefined || tokens === undefined) {
+          return [];
+        }
+        return [
+          {
+            name,
+            tokens,
+            ...(safeString(categoryRecord.color) !== undefined
+              ? { color: safeString(categoryRecord.color) }
+              : {}),
+            ...(safeBoolean(categoryRecord.isDeferred) !== undefined
+              ? { isDeferred: safeBoolean(categoryRecord.isDeferred) }
+              : {}),
+          },
+        ];
+      })
+    : [];
+
+  const memoryFiles = normalizeArray(record.memoryFiles, (item) => {
+    if (!item || typeof item !== "object") {
+      return undefined;
+    }
+    const itemRecord = item as Record<string, unknown>;
+    const path = safeString(itemRecord.path);
+    const tokens = safeNonNegativeInt(itemRecord.tokens);
+    if (path === undefined || tokens === undefined) {
+      return undefined;
+    }
+    return {
+      path,
+      tokens,
+      ...(safeString(itemRecord.type) !== undefined ? { type: safeString(itemRecord.type) } : {}),
+    };
+  });
+
+  const normalizeTool = (item: unknown) => {
+    if (!item || typeof item !== "object") {
+      return undefined;
+    }
+    const itemRecord = item as Record<string, unknown>;
+    const name = safeString(itemRecord.name);
+    const tokens = safeNonNegativeInt(itemRecord.tokens);
+    if (name === undefined || tokens === undefined) {
+      return undefined;
+    }
+    return {
+      name,
+      tokens,
+      ...(safeString(itemRecord.serverName) !== undefined
+        ? { serverName: safeString(itemRecord.serverName) }
+        : {}),
+      ...(safeBoolean(itemRecord.isLoaded) !== undefined
+        ? { isLoaded: safeBoolean(itemRecord.isLoaded) }
+        : {}),
+    };
+  };
+
+  const agents = normalizeArray(record.agents, (item) => {
+    if (!item || typeof item !== "object") {
+      return undefined;
+    }
+    const itemRecord = item as Record<string, unknown>;
+    const agentType = safeString(itemRecord.agentType);
+    const tokens = safeNonNegativeInt(itemRecord.tokens);
+    if (agentType === undefined || tokens === undefined) {
+      return undefined;
+    }
+    return {
+      agentType,
+      tokens,
+      ...(safeString(itemRecord.source) !== undefined
+        ? { source: safeString(itemRecord.source) }
+        : {}),
+    };
+  });
+
+  const messageBreakdown =
+    record.messageBreakdown && typeof record.messageBreakdown === "object"
+      ? ((): ThreadContextUsageBreakdown["messageBreakdown"] => {
+          const messageRecord = record.messageBreakdown as Record<string, unknown>;
+          return {
+            toolCallTokens: safeNonNegativeInt(messageRecord.toolCallTokens) ?? 0,
+            toolResultTokens: safeNonNegativeInt(messageRecord.toolResultTokens) ?? 0,
+            attachmentTokens: safeNonNegativeInt(messageRecord.attachmentTokens) ?? 0,
+            assistantMessageTokens: safeNonNegativeInt(messageRecord.assistantMessageTokens) ?? 0,
+            userMessageTokens: safeNonNegativeInt(messageRecord.userMessageTokens) ?? 0,
+            redirectedContextTokens: safeNonNegativeInt(messageRecord.redirectedContextTokens) ?? 0,
+            unattributedTokens: safeNonNegativeInt(messageRecord.unattributedTokens) ?? 0,
+            toolCallsByType:
+              normalizeArray(messageRecord.toolCallsByType, (item) => {
+                if (!item || typeof item !== "object") {
+                  return undefined;
+                }
+                const itemRecord = item as Record<string, unknown>;
+                const name = safeString(itemRecord.name);
+                if (name === undefined) {
+                  return undefined;
+                }
+                return {
+                  name,
+                  callTokens: safeNonNegativeInt(itemRecord.callTokens) ?? 0,
+                  resultTokens: safeNonNegativeInt(itemRecord.resultTokens) ?? 0,
+                };
+              }) ?? [],
+            attachmentsByType:
+              normalizeArray(messageRecord.attachmentsByType, normalizeNamedTokenCount) ?? [],
+          };
+        })()
+      : undefined;
+
+  const apiUsage =
+    record.apiUsage && typeof record.apiUsage === "object"
+      ? (() => {
+          const apiRecord = record.apiUsage as Record<string, unknown>;
+          return {
+            inputTokens: safeNonNegativeInt(apiRecord.input_tokens) ?? 0,
+            outputTokens: safeNonNegativeInt(apiRecord.output_tokens) ?? 0,
+            cacheCreationInputTokens:
+              safeNonNegativeInt(apiRecord.cache_creation_input_tokens) ?? 0,
+            cacheReadInputTokens: safeNonNegativeInt(apiRecord.cache_read_input_tokens) ?? 0,
+          };
+        })()
+      : undefined;
+  const rawMaxTokens = safePositiveInt(record.rawMaxTokens);
+  const model = safeString(record.model);
+  const mcpTools = normalizeArray(record.mcpTools, normalizeTool);
+  const deferredBuiltinTools = normalizeArray(record.deferredBuiltinTools, normalizeTool);
+  const systemTools = normalizeArray(record.systemTools, normalizeNamedTokenCount);
+  const systemPromptSections = normalizeArray(
+    record.systemPromptSections,
+    normalizeNamedTokenCount,
+  );
+  const isAutoCompactEnabled = safeBoolean(record.isAutoCompactEnabled);
+  const autoCompactThreshold = safeNonNegativeInt(record.autoCompactThreshold);
+
+  return {
+    totalTokens,
+    maxTokens,
+    categories,
+    ...(rawMaxTokens !== undefined ? { rawMaxTokens } : {}),
+    ...(typeof record.percentage === "number" && Number.isFinite(record.percentage)
+      ? { percentage: record.percentage }
+      : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(memoryFiles !== undefined ? { memoryFiles } : {}),
+    ...(mcpTools !== undefined ? { mcpTools } : {}),
+    ...(deferredBuiltinTools !== undefined ? { deferredBuiltinTools } : {}),
+    ...(systemTools !== undefined ? { systemTools } : {}),
+    ...(systemPromptSections !== undefined ? { systemPromptSections } : {}),
+    ...(agents !== undefined ? { agents } : {}),
+    ...(record.slashCommands && typeof record.slashCommands === "object"
+      ? {
+          slashCommands: {
+            totalCommands:
+              safeNonNegativeInt((record.slashCommands as Record<string, unknown>).totalCommands) ??
+              0,
+            includedCommands:
+              safeNonNegativeInt(
+                (record.slashCommands as Record<string, unknown>).includedCommands,
+              ) ?? 0,
+            tokens:
+              safeNonNegativeInt((record.slashCommands as Record<string, unknown>).tokens) ?? 0,
+          },
+        }
+      : {}),
+    ...(record.skills && typeof record.skills === "object"
+      ? {
+          skills: {
+            totalSkills:
+              safeNonNegativeInt((record.skills as Record<string, unknown>).totalSkills) ?? 0,
+            includedSkills:
+              safeNonNegativeInt((record.skills as Record<string, unknown>).includedSkills) ?? 0,
+            tokens: safeNonNegativeInt((record.skills as Record<string, unknown>).tokens) ?? 0,
+            skillFrontmatter:
+              normalizeArray(
+                (record.skills as Record<string, unknown>).skillFrontmatter,
+                (item) => {
+                  const normalized = normalizeNamedTokenCount(item);
+                  if (!normalized || !item || typeof item !== "object") {
+                    return normalized;
+                  }
+                  const source = safeString((item as Record<string, unknown>).source);
+                  return source === undefined ? normalized : { ...normalized, source };
+                },
+              ) ?? [],
+          },
+        }
+      : {}),
+    ...(messageBreakdown !== undefined ? { messageBreakdown } : {}),
+    ...(apiUsage !== undefined ? { apiUsage } : {}),
+    ...(isAutoCompactEnabled !== undefined ? { isAutoCompactEnabled } : {}),
+    ...(autoCompactThreshold !== undefined ? { autoCompactThreshold } : {}),
+  };
+}
+
+function contextUsageSnapshotFromBreakdown(
+  breakdown: ThreadContextUsageBreakdown,
+): ThreadTokenUsageSnapshot {
+  return {
+    usedTokens: breakdown.totalTokens,
+    lastUsedTokens: breakdown.totalTokens,
+    maxTokens: breakdown.maxTokens,
+    compactsAutomatically: breakdown.isAutoCompactEnabled ?? true,
+    breakdown,
+  };
 }
 
 function normalizeClaudeTokenUsage(
@@ -551,6 +830,12 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+const DEFAULT_CLAUDE_BINARY_PATH = "claude";
+
+const resolveClaudeCodeExecutableOption = (binaryPath: string): string | undefined => {
+  const normalized = binaryPath.trim();
+  return normalized && normalized !== DEFAULT_CLAUDE_BINARY_PATH ? normalized : undefined;
+};
 
 function buildPromptText(input: ProviderSendTurnInput): string {
   const claudeSel =
@@ -1417,6 +1702,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     status: ProviderRuntimeTurnStatus,
     errorMessage?: string,
     result?: SDKResultMessage,
+    terminalReason?: string,
   ) {
     yield* lfcyl(context.session.threadId, {
       scope: "claude-adapter",
@@ -1459,10 +1745,50 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             : {}),
         }
       : accumulatedSnapshot;
-    // Claude auto-compacts context when approaching the limit.
-    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = baseSnapshot
-      ? { ...baseSnapshot, compactsAutomatically: true }
+
+    const sdkContextUsage = context.query.getContextUsage
+      ? yield* Effect.tryPromise({
+          try: () => context.query.getContextUsage!(),
+          catch: (cause) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: context.session.threadId,
+              detail: toMessage(cause, "Failed to read Claude context usage."),
+              cause,
+            }),
+        }).pipe(
+          Effect.catch((error) =>
+            lfcyl(context.session.threadId, {
+              scope: "claude-adapter",
+              event: "context-usage.fetch.failed",
+              sessionId: context.resumeSessionId ?? undefined,
+              turnId: context.turnState?.turnId,
+              details: {
+                message: error.message,
+              },
+            }).pipe(Effect.as(undefined as SDKControlGetContextUsageResponse | undefined)),
+          ),
+        )
       : undefined;
+    const contextUsageBreakdown = normalizeClaudeContextUsageBreakdown(sdkContextUsage);
+    if (contextUsageBreakdown) {
+      context.lastKnownContextWindow = contextUsageBreakdown.maxTokens;
+    }
+    const contextUsageSnapshot = contextUsageBreakdown
+      ? contextUsageSnapshotFromBreakdown(contextUsageBreakdown)
+      : undefined;
+
+    // Claude auto-compacts context when approaching the limit.
+    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = contextUsageSnapshot
+      ? baseSnapshot
+        ? { ...baseSnapshot, ...contextUsageSnapshot }
+        : contextUsageSnapshot
+      : baseSnapshot
+        ? { ...baseSnapshot, compactsAutomatically: true }
+        : undefined;
+    if (usageSnapshot) {
+      context.lastKnownTokenUsage = usageSnapshot;
+    }
 
     const turnState = context.turnState;
     if (!turnState) {
@@ -1491,7 +1817,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         payload: {
           state: status,
           ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-          ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
+          ...((terminalReason ?? result?.terminal_reason)
+            ? { terminalReason: terminalReason ?? result?.terminal_reason }
+            : {}),
           ...(result?.usage ? { usage: result.usage } : {}),
           ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
           ...(typeof result?.total_cost_usd === "number"
@@ -1576,7 +1904,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         state: status,
         ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-        ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
+        ...((terminalReason ?? result?.terminal_reason)
+          ? { terminalReason: terminalReason ?? result?.terminal_reason }
+          : {}),
         ...(result?.usage ? { usage: result.usage } : {}),
         ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
         ...(typeof result?.total_cost_usd === "number"
@@ -2096,6 +2426,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "hook.progress",
           payload: {
             hookId: message.hook_id,
+            hookName: message.hook_name,
+            hookEvent: message.hook_event,
             output: message.output,
             stdout: message.stdout,
             stderr: message.stderr,
@@ -2108,6 +2440,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "hook.completed",
           payload: {
             hookId: message.hook_id,
+            hookName: message.hook_name,
+            hookEvent: message.hook_event,
             outcome: message.outcome,
             output: message.output,
             stdout: message.stdout,
@@ -2389,7 +2723,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         );
         yield* emitRuntimeError(context, message, Cause.pretty(exit.cause));
         if (context.turnState) {
-          yield* completeTurn(context, "failed", message);
+          yield* completeTurn(context, "failed", message, undefined, "blocking_limit");
         }
 
         yield* lfcyl(context.session.threadId, {
@@ -3050,7 +3384,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         configDir = claudeSettings.configDir || undefined;
       }
 
-      const claudeBinaryPath = claudeSettings.binaryPath;
+      const claudeBinaryPath = resolveClaudeCodeExecutableOption(claudeSettings.binaryPath);
       const modelSelection =
         input.modelSelection?.provider &&
         baseProviderKind(input.modelSelection.provider) === "claudeAgent"
@@ -3102,7 +3436,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
-        pathToClaudeCodeExecutable: claudeBinaryPath,
+        ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
         settingSources: [...CLAUDE_SETTING_SOURCES],
         ...(effectiveEffort ? { effort: effectiveEffort } : {}),
         ...(permissionMode ? { permissionMode } : {}),
@@ -3118,6 +3452,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ? { sessionId: newSessionId }
             : {}),
         includePartialMessages: true,
+        includeHookEvents: true,
         canUseTool,
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),

@@ -7,6 +7,7 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
+  SDKControlGetContextUsageResponse,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -42,6 +43,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
+  public getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -165,6 +167,7 @@ function makeHarness(config?: {
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
   readonly cwd?: string;
   readonly baseDir?: string;
+  readonly settingsOverride?: Parameters<typeof ServerSettingsService.layerTest>[0];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -199,7 +202,7 @@ function makeHarness(config?: {
           config?.baseDir ?? "/tmp",
         ),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ServerSettingsService.layerTest(config?.settingsOverride)),
       Layer.provideMerge(managedRunServiceTestLayer),
       Layer.provideMerge(projectionSnapshotQueryTestLayer),
       Layer.provideMerge(NodeServices.layer),
@@ -332,6 +335,52 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
+      assert.equal(createInput?.options.includeHookEvents, true);
+      assert.equal(createInput?.options.includePartialMessages, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("uses the SDK bundled Claude executable for the default binary setting", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.pathToClaudeCodeExecutable, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("honors an explicitly configured Claude executable path", () => {
+    const harness = makeHarness({
+      settingsOverride: {
+        providers: {
+          claudeAgent: {
+            binaryPath: "/opt/t3/claude",
+          },
+        },
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.pathToClaudeCodeExecutable, "/opt/t3/claude");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -376,6 +425,56 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.effort, "max");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forwards Opus 4.7 xhigh effort into query options", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-7",
+          options: {
+            effort: "xhigh",
+          },
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "xhigh");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("falls back to default effort when unsupported xhigh is requested for Opus 4.6", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+          options: {
+            effort: "xhigh",
+          },
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "high");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -1380,7 +1479,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1437,6 +1536,108 @@ describe("ClaudeAdapterLive", () => {
             compactsAutomatically: true,
           },
         });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits Claude categorized context usage when the SDK reports it", () => {
+    const harness = makeHarness();
+    let getContextUsageCalls = 0;
+    harness.query.getContextUsage = async () => {
+      getContextUsageCalls += 1;
+      return {
+        categories: [
+          { name: "System prompt", tokens: 12_000, color: "#64748b" },
+          { name: "Messages", tokens: 45_000, color: "#22c55e" },
+          { name: "Tools", tokens: 8_000, color: "#f59e0b", isDeferred: false },
+        ],
+        totalTokens: 65_000,
+        maxTokens: 200_000,
+        rawMaxTokens: 200_000,
+        percentage: 32.5,
+        gridRows: [],
+        model: "claude-opus-4-6",
+        memoryFiles: [],
+        mcpTools: [{ name: "ticketing", serverName: "t3", tokens: 1200, isLoaded: true }],
+        deferredBuiltinTools: [],
+        systemTools: [{ name: "Bash", tokens: 600 }],
+        systemPromptSections: [{ name: "Admin", tokens: 12_000 }],
+        agents: [],
+        messageBreakdown: {
+          toolCallTokens: 1000,
+          toolResultTokens: 7000,
+          attachmentTokens: 0,
+          assistantMessageTokens: 20_000,
+          userMessageTokens: 25_000,
+          redirectedContextTokens: 0,
+          unattributedTokens: 0,
+          toolCallsByType: [{ name: "Bash", callTokens: 1000, resultTokens: 7000 }],
+          attachmentsByType: [],
+        },
+        apiUsage: null,
+        isAutoCompactEnabled: true,
+      };
+    };
+
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-context-usage",
+        usage: {
+          input_tokens: 4,
+          cache_creation_input_tokens: 2715,
+          cache_read_input_tokens: 21144,
+          output_tokens: 679,
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvent = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
+      assert.equal(getContextUsageCalls, 1);
+      assert.equal(usageEvent?.type, "thread.token-usage.updated");
+      if (usageEvent?.type === "thread.token-usage.updated") {
+        assert.equal(usageEvent.payload.usage.usedTokens, 65_000);
+        assert.equal(usageEvent.payload.usage.maxTokens, 200_000);
+        assert.equal(usageEvent.payload.usage.breakdown?.model, "claude-opus-4-6");
+        assert.deepEqual(usageEvent.payload.usage.breakdown?.categories, [
+          { name: "System prompt", tokens: 12_000, color: "#64748b" },
+          { name: "Messages", tokens: 45_000, color: "#22c55e" },
+          { name: "Tools", tokens: 8_000, color: "#f59e0b", isDeferred: false },
+        ]);
+        assert.deepEqual(usageEvent.payload.usage.breakdown?.mcpTools, [
+          { name: "ticketing", serverName: "t3", tokens: 1200, isLoaded: true },
+        ]);
+        assert.equal(usageEvent.payload.usage.breakdown?.messageBreakdown?.toolResultTokens, 7000);
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

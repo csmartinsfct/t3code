@@ -429,6 +429,7 @@ export const OrchestrationLatestTurn = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  terminalReason: Schema.optional(TrimmedNonEmptyString),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
@@ -787,6 +788,14 @@ const ThreadSessionSetCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   session: OrchestrationSession,
+  completedTurn: Schema.optional(
+    Schema.Struct({
+      turnId: TurnId,
+      state: OrchestrationLatestTurnState,
+      completedAt: IsoDateTime,
+      terminalReason: Schema.optional(TrimmedNonEmptyString),
+    }),
+  ),
   createdAt: IsoDateTime,
 });
 
@@ -1061,6 +1070,14 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
+  completedTurn: Schema.optional(
+    Schema.Struct({
+      turnId: TurnId,
+      state: OrchestrationLatestTurnState,
+      completedAt: IsoDateTime,
+      terminalReason: Schema.optional(TrimmedNonEmptyString),
+    }),
+  ),
 });
 
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({

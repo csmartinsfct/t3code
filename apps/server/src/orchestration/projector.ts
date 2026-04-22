@@ -481,8 +481,28 @@ export function projectStartupSnapshotEvent(
           ...nextBase,
           threads: nextBase.threads.map((thread) => {
             if (thread.id !== payload.threadId) return thread;
-            const latestTurn =
-              session.status === "running" && session.activeTurnId !== null
+            const latestTurn = payload.completedTurn
+              ? {
+                  turnId: payload.completedTurn.turnId,
+                  state: payload.completedTurn.state,
+                  requestedAt:
+                    thread.latestTurn?.turnId === payload.completedTurn.turnId
+                      ? thread.latestTurn.requestedAt
+                      : payload.completedTurn.completedAt,
+                  startedAt:
+                    thread.latestTurn?.turnId === payload.completedTurn.turnId
+                      ? (thread.latestTurn.startedAt ?? payload.completedTurn.completedAt)
+                      : payload.completedTurn.completedAt,
+                  completedAt: payload.completedTurn.completedAt,
+                  assistantMessageId:
+                    thread.latestTurn?.turnId === payload.completedTurn.turnId
+                      ? thread.latestTurn.assistantMessageId
+                      : null,
+                  ...(payload.completedTurn.terminalReason
+                    ? { terminalReason: payload.completedTurn.terminalReason }
+                    : {}),
+                }
+              : session.status === "running" && session.activeTurnId !== null
                 ? {
                     turnId: session.activeTurnId,
                     state: "running" as const,
@@ -557,21 +577,28 @@ export function projectStartupSnapshotEvent(
         event.type,
         "payload",
       ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateMetadataThread(nextBase.threads, payload.threadId, {
-            latestTurn: {
-              turnId: payload.turnId,
-              state: checkpointStatusToLatestTurnState(payload.status),
-              requestedAt: payload.completedAt,
-              startedAt: payload.completedAt,
-              completedAt: payload.completedAt,
-              assistantMessageId: payload.assistantMessageId,
-            },
-            latestTurnStatus: checkpointStatusToLatestTurnState(payload.status),
-            updatedAt: event.occurredAt,
-          }),
-        })),
+        Effect.map((payload) => {
+          const existingThread = nextBase.threads.find((thread) => thread.id === payload.threadId);
+          return {
+            ...nextBase,
+            threads: updateMetadataThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                turnId: payload.turnId,
+                state: checkpointStatusToLatestTurnState(payload.status),
+                requestedAt: payload.completedAt,
+                startedAt: payload.completedAt,
+                completedAt: payload.completedAt,
+                assistantMessageId: payload.assistantMessageId,
+                ...(existingThread?.latestTurn?.turnId === payload.turnId &&
+                existingThread.latestTurn.terminalReason
+                  ? { terminalReason: existingThread.latestTurn.terminalReason }
+                  : {}),
+              },
+              latestTurnStatus: checkpointStatusToLatestTurnState(payload.status),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
       );
 
     case "thread.reverted":
