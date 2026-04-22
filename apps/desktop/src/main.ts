@@ -2131,6 +2131,15 @@ function createEmbeddedBrowserTab(
       disableDialogs: true,
     },
   });
+  // Electron disables Chromium's native pinch-to-zoom path by default. Without
+  // this call, macOS trackpad pinch gestures inside the webview are swallowed
+  // entirely — `zoom-changed` only fires for Ctrl+wheel, not for native pinch.
+  // Matching Chrome/Safari behavior by enabling visual zoom in a reasonable
+  // range. Page zoom (Cmd+=/−/0) still handled separately via before-input-event.
+  view.webContents.setVisualZoomLevelLimits(1, 3).catch((error: unknown) => {
+    console.warn("[desktop/browser] setVisualZoomLevelLimits failed", { projectId, error });
+  });
+
   const tab: EmbeddedBrowserTabState = {
     projectId,
     tabId,
