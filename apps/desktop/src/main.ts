@@ -2201,10 +2201,34 @@ function createEmbeddedBrowserTab(
   view.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
     const mod = input.meta || input.control;
-    if (!mod || input.alt) return;
+    if (!mod) return;
     const owner = findEmbeddedBrowserOwnerWindow(tab);
     if (!owner || owner.isDestroyed()) return;
     const key = input.key.toLowerCase();
+    // DevTools toggle — matches Chrome's shortcuts: Cmd+Alt+I (mac) and
+    // Ctrl+Shift+I (win/linux). Detached mode keeps the page visible alongside
+    // the inspector. Opening DevTools detaches our CDP debugger (Chromium's
+    // protocol is single-client); `devtools-closed` re-attaches it — see T3CO-341.
+    // Use `input.code` (physical key) rather than `input.key` because macOS
+    // mangles the key char when Option is held (Cmd+Opt+I yields key="ˆ"), so a
+    // `key === "i"` check would miss the match and let the menu accelerator
+    // (which opens DevTools for the host window) win.
+    if (input.code === "KeyI" && (input.alt || input.shift)) {
+      event.preventDefault();
+      try {
+        if (view.webContents.isDevToolsOpened()) {
+          view.webContents.closeDevTools();
+        } else {
+          view.webContents.openDevTools({ mode: "detach" });
+        }
+      } catch (error) {
+        console.warn("[desktop/browser] shortcut toggleDevTools failed", { projectId, error });
+      }
+      return;
+    }
+    // Remaining shortcuts reject alt so Option-modified keys (text composition
+    // etc.) pass through to the page.
+    if (input.alt) return;
     if (key === "t") {
       event.preventDefault();
       try {
