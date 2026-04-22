@@ -631,6 +631,45 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
+  it("collapses hook lifecycle entries by hook id", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "hook-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "hook.started",
+        summary: "Hook - Stop started",
+        tone: "info",
+        payload: {
+          hookId: "hook-1",
+          hookName: "quality-gate",
+          hookEvent: "Stop",
+          detail: "quality-gate",
+        },
+      }),
+      makeActivity({
+        id: "hook-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "hook.completed",
+        summary: "Hook - Stop error",
+        tone: "error",
+        payload: {
+          hookId: "hook-1",
+          hookName: "quality-gate",
+          hookEvent: "Stop",
+          outcome: "error",
+          detail: "quality-gate\nlint failed\nExit code 1",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("hook-complete");
+    expect(entries[0]?.label).toBe("Hook - Stop error");
+    expect(entries[0]?.tone).toBe("error");
+    expect(entries[0]?.detail).toBe("quality-gate\nlint failed\nExit code 1");
+  });
+
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),

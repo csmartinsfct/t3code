@@ -2497,6 +2497,85 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe("# Plan title");
   });
 
+  it("projects Claude hook lifecycle events into thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "hook.started",
+      eventId: asEventId("evt-hook-started"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+      },
+    });
+
+    harness.emit({
+      type: "hook.progress",
+      eventId: asEventId("evt-hook-progress"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+        stderr: "running lint",
+      },
+    });
+
+    harness.emit({
+      type: "hook.completed",
+      eventId: asEventId("evt-hook-completed"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hook-1"),
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+        outcome: "error",
+        stderr: "lint failed",
+        exitCode: 1,
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "hook.completed",
+      ),
+    );
+
+    const started = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-started",
+    );
+    const progress = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-progress",
+    );
+    const completed = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-hook-completed",
+    );
+    const completedPayload =
+      completed?.payload && typeof completed.payload === "object"
+        ? (completed.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(started?.summary).toBe("Hook - Stop started");
+    expect(progress?.summary).toBe("Hook - Stop output");
+    expect(completed?.summary).toBe("Hook - Stop error");
+    expect(completed?.tone).toBe("error");
+    expect(completedPayload?.hookName).toBe("quality-gate");
+    expect(completedPayload?.hookEvent).toBe("Stop");
+    expect(completedPayload?.detail).toBe("quality-gate\nlint failed\nExit code 1");
+  });
+
   it("projects structured user input request and resolution as thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

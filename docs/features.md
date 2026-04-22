@@ -92,6 +92,11 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   divider, for example `Response • Worked for 2m • Limit reached`. Limit and
   recoverable stop reasons leave the session ready so the user can retry or
   continue.
+- Hook lifecycle visibility: Claude hook start/progress/completion events are
+  included in the SDK stream and projected into the chat work log with hook
+  name, hook event, outcome, exit code, and truncated output when available.
+  Failed or cancelled hooks use error tone so `hook_stopped` /
+  `stop_hook_prevented` terminal reasons have visible context.
 
 ### Gemini (Google)
 

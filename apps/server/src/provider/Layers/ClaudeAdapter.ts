@@ -2426,6 +2426,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "hook.progress",
           payload: {
             hookId: message.hook_id,
+            hookName: message.hook_name,
+            hookEvent: message.hook_event,
             output: message.output,
             stdout: message.stdout,
             stderr: message.stderr,
@@ -2438,6 +2440,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "hook.completed",
           payload: {
             hookId: message.hook_id,
+            hookName: message.hook_name,
+            hookEvent: message.hook_event,
             outcome: message.outcome,
             output: message.output,
             stdout: message.stdout,
@@ -3448,6 +3452,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ? { sessionId: newSessionId }
             : {}),
         includePartialMessages: true,
+        includeHookEvents: true,
         canUseTool,
         env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),

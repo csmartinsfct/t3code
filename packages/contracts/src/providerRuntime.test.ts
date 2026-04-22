@@ -186,4 +186,32 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.breakdown?.categories[0]?.name).toBe("System prompt");
     expect(parsed.payload.usage.breakdown?.messageBreakdown?.toolResultTokens).toBe(7000);
   });
+
+  it("decodes hook lifecycle metadata", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "hook.completed",
+      eventId: "event-hook-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        hookId: "hook-1",
+        hookName: "quality-gate",
+        hookEvent: "Stop",
+        outcome: "error",
+        stderr: "lint failed",
+        exitCode: 1,
+      },
+    });
+
+    expect(parsed.type).toBe("hook.completed");
+    if (parsed.type !== "hook.completed") {
+      throw new Error("expected hook.completed");
+    }
+    expect(parsed.payload.hookName).toBe("quality-gate");
+    expect(parsed.payload.hookEvent).toBe("Stop");
+    expect(parsed.payload.stderr).toBe("lint failed");
+    expect(parsed.payload.exitCode).toBe(1);
+  });
 });

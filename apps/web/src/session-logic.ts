@@ -589,7 +589,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (requestKind) {
     entry.requestKind = requestKind;
   }
-  const collapseKey = deriveToolLifecycleCollapseKey(entry);
+  const collapseKey = deriveWorkLogCollapseKey(entry, payload);
   if (collapseKey) {
     entry.collapseKey = collapseKey;
   }
@@ -615,16 +615,26 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
-  if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
+  if (!isCollapsibleActivityKind(previous.activityKind)) {
     return false;
   }
-  if (next.activityKind !== "tool.updated" && next.activityKind !== "tool.completed") {
+  if (!isCollapsibleActivityKind(next.activityKind)) {
     return false;
   }
-  if (previous.activityKind === "tool.completed") {
+  if (previous.activityKind === "tool.completed" || previous.activityKind === "hook.completed") {
     return false;
   }
   return previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey;
+}
+
+function isCollapsibleActivityKind(kind: OrchestrationThreadActivity["kind"]): boolean {
+  return (
+    kind === "tool.updated" ||
+    kind === "tool.completed" ||
+    kind === "hook.started" ||
+    kind === "hook.progress" ||
+    kind === "hook.completed"
+  );
 }
 
 function mergeDerivedWorkLogEntries(
@@ -662,7 +672,15 @@ function mergeChangedFiles(
   return [...new Set(merged)];
 }
 
-function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
+function deriveWorkLogCollapseKey(
+  entry: DerivedWorkLogEntry,
+  payload: Record<string, unknown> | null,
+): string | undefined {
+  const hookId = typeof payload?.hookId === "string" ? payload.hookId.trim() : "";
+  if (hookId.length > 0 && entry.activityKind.startsWith("hook.")) {
+    return `hook\u001f${hookId}`;
+  }
+
   if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
     return undefined;
   }
