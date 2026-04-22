@@ -20,21 +20,6 @@ function barColor(pct: number): string {
 
 const HIDDEN_CONTEXT_CATEGORY_NAMES = new Set(["autocompact buffer", "free space"]);
 
-const SDK_CONTEXT_COLOR_MAP: Record<string, string> = {
-  claude: "var(--color-primary)",
-  inactive: "var(--color-muted-foreground)",
-  promptBorder: "var(--color-muted-foreground)",
-  purple_FOR_SUBAGENTS_ONLY: "#a78bfa",
-  warning: "var(--color-warning, #f59e0b)",
-};
-
-function categoryColor(color: string | undefined): string {
-  if (!color) {
-    return "var(--color-muted-foreground)";
-  }
-  return SDK_CONTEXT_COLOR_MAP[color] ?? color;
-}
-
 function showsCategory(
   category: NonNullable<ContextWindowSnapshot["breakdown"]>["categories"][number],
 ): boolean {
@@ -148,13 +133,8 @@ export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
 
           {categories.length > 0 ? (
             <div className="space-y-1.5 border-t border-border/60 pt-2">
-              <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
-                <span>Breakdown</span>
-                {usage.breakdown?.model ? (
-                  <span className="max-w-[130px] truncate normal-case tracking-normal">
-                    {usage.breakdown.model}
-                  </span>
-                ) : null}
+              <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
+                Breakdown
               </div>
               <div className="space-y-1.5">
                 {categories.map((category) => {
@@ -162,26 +142,21 @@ export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
                     contextTotal > 0
                       ? Math.max(0, Math.min(100, (category.tokens / contextTotal) * 100))
                       : 0;
-                  const color = categoryColor(category.color);
                   return (
                     <div key={`${category.name}-${category.tokens}`} className="space-y-1">
                       <div className="flex min-w-0 items-center justify-between gap-2 text-[11px]">
-                        <span className="flex min-w-0 items-center gap-1.5 text-foreground/90">
-                          <span
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: color }}
-                            aria-hidden="true"
-                          />
-                          <span className="truncate">{category.name}</span>
-                        </span>
-                        <span className="shrink-0 text-muted-foreground">
+                        <span className="truncate text-muted-foreground">{category.name}</span>
+                        <span className="shrink-0 font-medium text-foreground/90">
                           {formatContextWindowTokens(category.tokens)}
                         </span>
                       </div>
                       <div className="h-[2px] overflow-hidden rounded-full bg-muted/50">
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${pct}%`, backgroundColor: color }}
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: "var(--color-muted-foreground)",
+                          }}
                         />
                       </div>
                     </div>
