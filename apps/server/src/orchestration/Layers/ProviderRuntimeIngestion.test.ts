@@ -2542,6 +2542,7 @@ describe("ProviderRuntimeIngestion", () => {
         hookName: "quality-gate",
         hookEvent: "Stop",
         outcome: "error",
+        stdout: "format passed",
         stderr: "lint failed",
         exitCode: 1,
       },
@@ -2573,7 +2574,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completed?.tone).toBe("error");
     expect(completedPayload?.hookName).toBe("quality-gate");
     expect(completedPayload?.hookEvent).toBe("Stop");
-    expect(completedPayload?.detail).toBe("quality-gate\nlint failed\nExit code 1");
+    expect(completedPayload?.detail).toBe("format passed\nlint failed\nquality-gate Exit code 1");
   });
 
   it("projects structured user input request and resolution as thread activities", async () => {

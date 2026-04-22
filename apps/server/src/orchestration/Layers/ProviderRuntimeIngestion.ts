@@ -337,18 +337,25 @@ function hookDisplayName(hookEvent: string | undefined): string {
   return hookEvent && hookEvent.trim().length > 0 ? hookEvent.trim() : "hook";
 }
 
-function firstNonEmptyHookOutput(payload: {
+function hookOutputLines(payload: {
   stdout?: string | undefined;
   stderr?: string | undefined;
   output?: string | undefined;
-}): string | undefined {
-  const stderr = payload.stderr?.trim();
-  if (stderr) return stderr;
-  const output = payload.output?.trim();
-  if (output) return output;
+}): string[] {
+  const lines: string[] = [];
   const stdout = payload.stdout?.trim();
-  if (stdout) return stdout;
-  return undefined;
+  if (stdout) {
+    lines.push(stdout);
+  }
+  const stderr = payload.stderr?.trim();
+  if (stderr && !lines.includes(stderr)) {
+    lines.push(stderr);
+  }
+  const output = payload.output?.trim();
+  if (output && lines.length === 0) {
+    lines.push(output);
+  }
+  return lines;
 }
 
 function hookActivityDetail(payload: {
@@ -358,16 +365,17 @@ function hookActivityDetail(payload: {
   output?: string | undefined;
   exitCode?: number | undefined;
 }): string | undefined {
-  const lines: string[] = [];
-  if (payload.hookName && payload.hookName.trim().length > 0) {
-    lines.push(payload.hookName.trim());
-  }
-  const output = firstNonEmptyHookOutput(payload);
-  if (output) {
-    lines.push(output);
+  const lines = hookOutputLines(payload);
+  const statusParts: string[] = [];
+  const hookName = payload.hookName?.trim();
+  if (hookName) {
+    statusParts.push(hookName);
   }
   if (payload.exitCode !== undefined) {
-    lines.push(`Exit code ${payload.exitCode}`);
+    statusParts.push(`Exit code ${payload.exitCode}`);
+  }
+  if (statusParts.length > 0) {
+    lines.push(statusParts.join(" "));
   }
   if (lines.length === 0) {
     return undefined;
