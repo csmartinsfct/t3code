@@ -371,6 +371,20 @@ function isRecoverableTerminalReason(reason: string | undefined): boolean {
   return reason === "max_turns" || reason === "blocking_limit" || reason === "rapid_refill_breaker";
 }
 
+function latestTurnStateFromRuntimeCompletion(
+  state: string | undefined,
+  terminalReason: string | undefined,
+): "completed" | "error" | "interrupted" {
+  const normalized = normalizeRuntimeTurnState(state);
+  if (normalized === "interrupted" || normalized === "cancelled") {
+    return "interrupted";
+  }
+  if (normalized === "failed") {
+    return isRecoverableTerminalReason(terminalReason) ? "completed" : "error";
+  }
+  return "completed";
+}
+
 function normalizeRuntimeTurnState(
   value: string | undefined,
 ): "completed" | "failed" | "interrupted" | "cancelled" {
@@ -1261,6 +1275,7 @@ const make = Effect.fn("make")(function* () {
           ? {
               state: event.payload.state,
               errorMessage: event.payload.errorMessage ?? null,
+              terminalReason: event.payload.terminalReason ?? null,
             }
           : {}),
       }),
@@ -1432,6 +1447,21 @@ const make = Effect.fn("make")(function* () {
             lastError,
             updatedAt: now,
           },
+          ...(event.type === "turn.completed" && eventTurnId
+            ? {
+                completedTurn: {
+                  turnId: eventTurnId,
+                  state: latestTurnStateFromRuntimeCompletion(
+                    event.payload.state,
+                    event.payload.terminalReason,
+                  ),
+                  completedAt: now,
+                  ...(event.payload.terminalReason
+                    ? { terminalReason: event.payload.terminalReason }
+                    : {}),
+                },
+              }
+            : {}),
           createdAt: now,
         });
         yield* Effect.logInfo(

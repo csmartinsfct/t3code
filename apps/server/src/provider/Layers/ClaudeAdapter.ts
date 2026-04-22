@@ -1702,6 +1702,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     status: ProviderRuntimeTurnStatus,
     errorMessage?: string,
     result?: SDKResultMessage,
+    terminalReason?: string,
   ) {
     yield* lfcyl(context.session.threadId, {
       scope: "claude-adapter",
@@ -1816,7 +1817,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         payload: {
           state: status,
           ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-          ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
+          ...((terminalReason ?? result?.terminal_reason)
+            ? { terminalReason: terminalReason ?? result?.terminal_reason }
+            : {}),
           ...(result?.usage ? { usage: result.usage } : {}),
           ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
           ...(typeof result?.total_cost_usd === "number"
@@ -1901,7 +1904,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         state: status,
         ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-        ...(result?.terminal_reason ? { terminalReason: result.terminal_reason } : {}),
+        ...((terminalReason ?? result?.terminal_reason)
+          ? { terminalReason: terminalReason ?? result?.terminal_reason }
+          : {}),
         ...(result?.usage ? { usage: result.usage } : {}),
         ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
         ...(typeof result?.total_cost_usd === "number"
@@ -2714,7 +2719,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         );
         yield* emitRuntimeError(context, message, Cause.pretty(exit.cause));
         if (context.turnState) {
-          yield* completeTurn(context, "failed", message);
+          yield* completeTurn(context, "failed", message, undefined, "blocking_limit");
         }
 
         yield* lfcyl(context.session.threadId, {

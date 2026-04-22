@@ -15,7 +15,11 @@ import {
   type VirtualItem,
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import {
+  deriveTimelineEntries,
+  formatElapsed,
+  type TerminalReasonPresentation,
+} from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -81,6 +85,7 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
+  completionTerminalReason?: TerminalReasonPresentation | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
@@ -130,6 +135,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
+  completionTerminalReason = null,
   turnDiffSummaryByAssistantMessageId,
   nowIso,
   expandedWorkGroups,
@@ -535,7 +541,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <div className="my-3 flex items-center gap-3">
                     <span className="h-px flex-1 bg-border" />
                     <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                      {completionSummary ? `Response • ${completionSummary}` : "Response"}
+                      Response
+                      {completionSummary ? <> • {completionSummary}</> : null}
+                      {completionTerminalReason ? (
+                        <>
+                          {" "}
+                          •{" "}
+                          <span
+                            className={cn(
+                              completionTerminalReason.tone === "error"
+                                ? "text-destructive"
+                                : "text-warning",
+                            )}
+                          >
+                            {completionTerminalReason.label}
+                          </span>
+                        </>
+                      ) : null}
                     </span>
                     <span className="h-px flex-1 bg-border" />
                   </div>

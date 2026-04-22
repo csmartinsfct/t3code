@@ -21,6 +21,7 @@ import {
   hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
+  terminalReasonPresentation,
 } from "./session-logic";
 
 function makeActivity(overrides: {
@@ -45,6 +46,25 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("terminalReasonPresentation", () => {
+  it("maps Claude limit reasons to warning labels", () => {
+    expect(terminalReasonPresentation("blocking_limit")).toEqual({
+      label: "Limit reached",
+      tone: "warning",
+    });
+    expect(terminalReasonPresentation("rapid_refill_breaker")).toEqual({
+      label: "Temporarily rate limited",
+      tone: "warning",
+    });
+  });
+
+  it("suppresses non-error completion and abort reasons", () => {
+    expect(terminalReasonPresentation("completed")).toBeNull();
+    expect(terminalReasonPresentation("aborted_streaming")).toBeNull();
+    expect(terminalReasonPresentation(undefined)).toBeNull();
+  });
+});
 
 describe("derivePendingApprovals", () => {
   it("tracks open approvals and removes resolved ones", () => {

@@ -87,6 +87,11 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Context usage: when the Claude SDK exposes `getContextUsage()`, T3 records the
   categorized context breakdown on turn completion and shows the top categories
   in the chat composer context-window hover card.
+- Terminal reasons: when Claude returns a structured `terminal_reason`, T3 keeps
+  it on the latest turn and surfaces non-success reasons in the response
+  divider, for example `Response • Worked for 2m • Limit reached`. Limit and
+  recoverable stop reasons leave the session ready so the user can retry or
+  continue.
 
 ### Gemini (Google)
 

@@ -715,6 +715,7 @@ function buildLatestTurn(params: {
   startedAt: string | null;
   completedAt: string | null;
   assistantMessageId: NonNullable<Thread["latestTurn"]>["assistantMessageId"];
+  terminalReason?: NonNullable<Thread["latestTurn"]>["terminalReason"];
   sourceProposedPlan?: Thread["pendingSourceProposedPlan"];
 }): NonNullable<Thread["latestTurn"]> {
   const resolvedPlan =
@@ -728,6 +729,7 @@ function buildLatestTurn(params: {
     startedAt: params.startedAt,
     completedAt: params.completedAt,
     assistantMessageId: params.assistantMessageId,
+    ...(params.terminalReason ? { terminalReason: params.terminalReason } : {}),
     ...(resolvedPlan ? { sourceProposedPlan: resolvedPlan } : {}),
   };
 }
@@ -1440,8 +1442,30 @@ function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent)
         ...thread,
         session: mapSession(event.payload.session),
         error: event.payload.session.lastError ?? null,
-        latestTurn:
-          event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
+        latestTurn: event.payload.completedTurn
+          ? buildLatestTurn({
+              previous: thread.latestTurn,
+              turnId: event.payload.completedTurn.turnId,
+              state: event.payload.completedTurn.state,
+              requestedAt:
+                thread.latestTurn?.turnId === event.payload.completedTurn.turnId
+                  ? thread.latestTurn.requestedAt
+                  : event.payload.completedTurn.completedAt,
+              startedAt:
+                thread.latestTurn?.turnId === event.payload.completedTurn.turnId
+                  ? (thread.latestTurn.startedAt ?? event.payload.completedTurn.completedAt)
+                  : event.payload.completedTurn.completedAt,
+              completedAt: event.payload.completedTurn.completedAt,
+              assistantMessageId:
+                thread.latestTurn?.turnId === event.payload.completedTurn.turnId
+                  ? thread.latestTurn.assistantMessageId
+                  : null,
+              ...(event.payload.completedTurn.terminalReason
+                ? { terminalReason: event.payload.completedTurn.terminalReason }
+                : {}),
+            })
+          : event.payload.session.status === "running" &&
+              event.payload.session.activeTurnId !== null
             ? buildLatestTurn({
                 previous: thread.latestTurn,
                 turnId: event.payload.session.activeTurnId,
@@ -1548,6 +1572,10 @@ function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent)
                 startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
                 completedAt: event.payload.completedAt,
                 assistantMessageId: event.payload.assistantMessageId,
+                ...(thread.latestTurn?.turnId === event.payload.turnId &&
+                thread.latestTurn.terminalReason
+                  ? { terminalReason: thread.latestTurn.terminalReason }
+                  : {}),
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
               })
             : thread.latestTurn;

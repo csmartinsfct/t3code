@@ -78,6 +78,7 @@ import {
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  terminalReasonPresentation,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
 import {
@@ -1887,11 +1888,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     latestTurnHasToolActivity,
     latestTurnSettled,
   ]);
+  const completionTerminalReason = useMemo(
+    () =>
+      latestTurnSettled
+        ? terminalReasonPresentation(activeLatestTurn?.terminalReason ?? null)
+        : null,
+    [activeLatestTurn?.terminalReason, latestTurnSettled],
+  );
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
-    if (!completionSummary) return null;
+    if (!completionSummary && !completionTerminalReason) return null;
     return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
-  }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
+  }, [
+    activeLatestTurn,
+    completionSummary,
+    completionTerminalReason,
+    latestTurnSettled,
+    timelineEntries,
+  ]);
   const shouldTickLiveClock = useMemo(
     () =>
       (isOrchestrationThread && activeOrchestrationRun?.status === "running") ||
@@ -5311,6 +5325,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       timelineEntries={timelineEntries}
                       completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                       completionSummary={completionSummary}
+                      completionTerminalReason={completionTerminalReason}
                       turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                       nowIso={nowIso}
                       expandedWorkGroups={expandedWorkGroups}

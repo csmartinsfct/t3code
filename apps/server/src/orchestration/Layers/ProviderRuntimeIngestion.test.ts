@@ -400,6 +400,8 @@ describe("ProviderRuntimeIngestion", () => {
       );
       expect(thread.session?.status).toBe("ready");
       expect(thread.session?.lastError).toBe(testCase.expectedError);
+      expect(thread.latestTurn?.state).toBe("completed");
+      expect(thread.latestTurn?.terminalReason).toBe(testCase.reason);
     }
   });
 
@@ -468,6 +470,8 @@ describe("ProviderRuntimeIngestion", () => {
       );
       expect(thread.session?.status).toBe("error");
       expect(thread.session?.lastError).toBe(testCase.expectedError);
+      expect(thread.latestTurn?.state).toBe("error");
+      expect(thread.latestTurn?.terminalReason).toBe(testCase.reason);
     }
   });
 

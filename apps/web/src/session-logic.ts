@@ -149,6 +149,45 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
   return formatDuration(endedAt - startedAt);
 }
 
+export type TerminalReasonTone = "warning" | "error";
+
+export interface TerminalReasonPresentation {
+  label: string;
+  tone: TerminalReasonTone;
+}
+
+export function terminalReasonPresentation(
+  reason: string | null | undefined,
+): TerminalReasonPresentation | null {
+  switch (reason) {
+    case "blocking_limit":
+      return { label: "Limit reached", tone: "warning" };
+    case "rapid_refill_breaker":
+      return { label: "Temporarily rate limited", tone: "warning" };
+    case "max_turns":
+      return { label: "Max turns reached", tone: "warning" };
+    case "prompt_too_long":
+      return { label: "Context too long", tone: "warning" };
+    case "model_error":
+      return { label: "Model error", tone: "error" };
+    case "image_error":
+      return { label: "Image error", tone: "error" };
+    case "stop_hook_prevented":
+    case "hook_stopped":
+      return { label: "Hook stopped", tone: "warning" };
+    case "tool_deferred":
+      return { label: "Tool deferred", tone: "warning" };
+    case "aborted_streaming":
+    case "aborted_tools":
+    case "completed":
+    case undefined:
+    case null:
+      return null;
+    default:
+      return { label: reason.replace(/_/g, " "), tone: "warning" };
+  }
+}
+
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
 type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
 

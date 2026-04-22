@@ -589,6 +589,21 @@ it.effect("decodes latest turn source proposed plan metadata when present", () =
   }),
 );
 
+it.effect("decodes latest turn terminal reason metadata when present", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationLatestTurn({
+      turnId: "turn-3",
+      state: "completed",
+      requestedAt: "2026-01-01T00:00:00.000Z",
+      startedAt: "2026-01-01T00:00:01.000Z",
+      completedAt: "2026-01-01T00:00:02.000Z",
+      assistantMessageId: "msg-1",
+      terminalReason: "blocking_limit",
+    });
+    assert.strictEqual(parsed.terminalReason, "blocking_limit");
+  }),
+);
+
 it.effect("decodes orchestration session runtime mode defaults", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationSession({

@@ -15,6 +15,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   ThreadId,
+  TrimmedNonEmptyString,
   TurnId,
 } from "@t3tools/contracts";
 import { Option, Schema, ServiceMap } from "effect";
@@ -42,6 +43,7 @@ export const ProjectionTurn = Schema.Struct({
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
+  terminalReason: Schema.NullOr(TrimmedNonEmptyString),
   checkpointTurnCount: Schema.NullOr(NonNegativeInt),
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
@@ -60,6 +62,7 @@ export const ProjectionTurnById = Schema.Struct({
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
+  terminalReason: Schema.NullOr(TrimmedNonEmptyString),
   checkpointTurnCount: Schema.NullOr(NonNegativeInt),
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
