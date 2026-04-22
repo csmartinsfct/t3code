@@ -29,7 +29,6 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   authToken: Schema.optional(Schema.String),
   electronCdpBrokerUrl: Schema.optional(Schema.String),
   electronCdpBrokerToken: Schema.optional(Schema.String),
-  autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
@@ -69,12 +68,6 @@ const authTokenFlag = Flag.string("auth-token").pipe(
 const bootstrapFdFlag = Flag.integer("bootstrap-fd").pipe(
   Flag.withSchema(Schema.Int),
   Flag.withDescription("Read one-time bootstrap secrets from the given file descriptor."),
-  Flag.optional,
-);
-const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
-  Flag.withDescription(
-    "Create a project for the current working directory on startup when missing.",
-  ),
   Flag.optional,
 );
 const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
@@ -136,10 +129,6 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  autoBootstrapProjectFromCwd: Config.boolean("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
-    Config.option,
-    Config.map(Option.getOrUndefined),
-  ),
   logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -155,7 +144,6 @@ interface CliServerFlags {
   readonly noBrowser: Option.Option<boolean>;
   readonly authToken: Option.Option<string>;
   readonly bootstrapFd: Option.Option<number>;
-  readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
 }
 
@@ -280,18 +268,6 @@ export const resolveServerConfig = (
         ),
       ),
     );
-    const autoBootstrapProjectFromCwd = resolveBooleanFlag(
-      flags.autoBootstrapProjectFromCwd,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
-          ),
-        ),
-        () => mode === "web",
-      ),
-    );
     const logWebSocketEvents = resolveBooleanFlag(
       flags.logWebSocketEvents,
       Option.getOrElse(
@@ -353,7 +329,6 @@ export const resolveServerConfig = (
       authToken,
       electronCdpBrokerUrl,
       electronCdpBrokerToken,
-      autoBootstrapProjectFromCwd,
       logWebSocketEvents,
     };
 
@@ -369,7 +344,6 @@ const commandFlags = {
   noBrowser: noBrowserFlag,
   authToken: authTokenFlag,
   bootstrapFd: bootstrapFdFlag,
-  autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
 } as const;
 

@@ -1,25 +1,5 @@
-import {
-  CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
-  MessageId,
-  type ModelSelection,
-  type OrchestrationRunId,
-  ProjectId,
-  ThreadId,
-} from "@t3tools/contracts";
-import {
-  Data,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Ref,
-  Scope,
-  ServiceMap,
-} from "effect";
+import { CommandId, MessageId, type OrchestrationRunId, ThreadId } from "@t3tools/contracts";
+import { Data, Deferred, Effect, Exit, Layer, Option, Queue, Ref, Scope, ServiceMap } from "effect";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
 
 import { ServerConfig } from "./config";
@@ -452,86 +432,17 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
-const autoBootstrapWelcome = (input?: {
+const computeStartupWelcome = (input?: {
   readonly startupWasWorkingThreadIds?: readonly ThreadId[];
 }) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
-    const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
-    const orchestrationEngine = yield* OrchestrationEngineService;
-    const path = yield* Path.Path;
-
-    let bootstrapProjectId: ProjectId | undefined;
-    let bootstrapThreadId: ThreadId | undefined;
-
-    if (serverConfig.autoBootstrapProjectFromCwd) {
-      yield* Effect.gen(function* () {
-        const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
-          serverConfig.cwd,
-        );
-        let nextProjectId: ProjectId;
-        let nextProjectDefaultModelSelection: ModelSelection;
-
-        if (Option.isNone(existingProject)) {
-          const createdAt = new Date().toISOString();
-          nextProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
-          const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-          nextProjectDefaultModelSelection = {
-            provider: "codex",
-            model: "gpt-5-codex",
-          };
-          yield* orchestrationEngine.dispatch({
-            type: "project.create",
-            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-            projectId: nextProjectId,
-            title: bootstrapProjectTitle,
-            workspaceRoot: serverConfig.cwd,
-            defaultModelSelection: nextProjectDefaultModelSelection,
-            createdAt,
-          });
-        } else {
-          nextProjectId = existingProject.value.id;
-          nextProjectDefaultModelSelection = existingProject.value.defaultModelSelection ?? {
-            provider: "codex",
-            model: "gpt-5-codex",
-          };
-        }
-
-        const existingThreadId =
-          yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
-        if (Option.isNone(existingThreadId)) {
-          const createdAt = new Date().toISOString();
-          const createdThreadId = ThreadId.makeUnsafe(crypto.randomUUID());
-          yield* orchestrationEngine.dispatch({
-            type: "thread.create",
-            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-            threadId: createdThreadId,
-            projectId: nextProjectId,
-            title: "New thread",
-            modelSelection: nextProjectDefaultModelSelection,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            runtimeMode: "full-access",
-            branch: null,
-            worktreePath: null,
-            createdAt,
-          });
-          bootstrapProjectId = nextProjectId;
-          bootstrapThreadId = createdThreadId;
-        } else {
-          bootstrapProjectId = nextProjectId;
-          bootstrapThreadId = existingThreadId.value;
-        }
-      });
-    }
-
     const segments = serverConfig.cwd.split(/[/\\]/).filter(Boolean);
     const projectName = segments[segments.length - 1] ?? "project";
 
     return {
       cwd: serverConfig.cwd,
       projectName,
-      ...(bootstrapProjectId ? { bootstrapProjectId } : {}),
-      ...(bootstrapThreadId ? { bootstrapThreadId } : {}),
       ...(input?.startupWasWorkingThreadIds && input.startupWasWorkingThreadIds.length > 0
         ? { startupWasWorkingThreadIds: input.startupWasWorkingThreadIds }
         : {}),
@@ -622,15 +533,13 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
     yield* Effect.logDebug("startup phase: preparing welcome payload");
     const welcome = yield* runStartupPhase(
       "welcome.prepare",
-      autoBootstrapWelcome({
+      computeStartupWelcome({
         startupWasWorkingThreadIds: startupRecovery.wasWorkingThreadIds,
       }),
     );
     yield* Effect.logDebug("startup phase: publishing welcome event", {
       cwd: welcome.cwd,
       projectName: welcome.projectName,
-      bootstrapProjectId: welcome.bootstrapProjectId,
-      bootstrapThreadId: welcome.bootstrapThreadId,
       startupWasWorkingThreadCount: welcome.startupWasWorkingThreadIds?.length ?? 0,
     });
     yield* runStartupPhase(

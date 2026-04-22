@@ -58,7 +58,6 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly authToken: string | undefined;
   readonly electronCdpBrokerUrl?: string | undefined;
   readonly electronCdpBrokerToken?: string | undefined;
-  readonly autoBootstrapProjectFromCwd: boolean;
   readonly logWebSocketEvents: boolean;
 }
 
@@ -144,7 +143,6 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           baseDir,
           ...derivedPaths,
           mode: "web",
-          autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: false,
           port: 0,
           host: undefined,

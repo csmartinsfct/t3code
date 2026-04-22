@@ -447,8 +447,6 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
     welcome: {
       cwd: "/repo/project",
       projectName: "Project",
-      bootstrapProjectId: PROJECT_ID,
-      bootstrapThreadId: THREAD_ID,
     },
   };
 }

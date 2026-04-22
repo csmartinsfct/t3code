@@ -9,9 +9,16 @@ import {
   createDevRunnerEnv,
   findFirstAvailableOffset,
   getConflictPortsForMode,
+  pruneOrphanWorktreeDirs,
   resolveModePortOffsets,
   resolveOffset,
+  resolveWorktreeAwareBaseDir,
 } from "./dev-runner.ts";
+
+import { createHash } from "node:crypto";
+
+const shortHash = (value: string): string =>
+  createHash("sha1").update(value).digest("hex").slice(0, 12);
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("resolveOffset", () => {
@@ -58,7 +65,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
           port: undefined,
@@ -79,7 +85,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: "/tmp/custom-t3",
           authToken: "secret",
           noBrowser: true,
-          autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: true,
           host: "0.0.0.0",
           port: 4222,
@@ -90,7 +95,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_PORT, "4222");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
         assert.equal(env.T3CODE_NO_BROWSER, "1");
-        assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
         assert.equal(env.T3CODE_HOST, "0.0.0.0");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
@@ -109,7 +113,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
           port: undefined,
@@ -131,7 +134,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
           host: undefined,
           port: undefined,
@@ -152,7 +154,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: "/tmp/my-t3",
           authToken: undefined,
           noBrowser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: undefined,
           port: undefined,
@@ -180,7 +181,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           t3Home: "/tmp/my-t3",
           authToken: "fresh-token",
           noBrowser: true,
-          autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
           host: "127.0.0.1",
           port: 4222,
@@ -197,6 +197,32 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_NO_BROWSER, undefined);
         assert.equal(env.T3CODE_HOST, undefined);
         assert.equal(env.VITE_WS_URL, undefined);
+      }),
+    );
+
+    it.effect("redirects T3CODE_HOME into a per-worktree dir when in a worktree", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          mode: "dev:desktop",
+          baseEnv: {},
+          serverOffset: 0,
+          webOffset: 0,
+          t3Home: "/tmp/t3-wt",
+          authToken: undefined,
+          noBrowser: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+          cwd: "/repo/worktree",
+          detectWorktree: async () =>
+            Promise.resolve({ isWorktree: true, topLevel: "/repo/worktree" } as const),
+          seedTemplate: async () => Promise.resolve(false),
+          dirExists: async () => Promise.resolve(true),
+          makeDir: async () => Promise.resolve(),
+        });
+
+        assert.match(env.T3CODE_HOME ?? "", /^\/tmp\/t3-wt\/worktrees\/[0-9a-f]{12}$/);
       }),
     );
   });
@@ -409,6 +435,200 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.deepStrictEqual(cleared, []);
+      }),
+    );
+  });
+
+  describe("resolveWorktreeAwareBaseDir", () => {
+    it.effect("returns rootBase unchanged for the primary clone", () =>
+      Effect.gen(function* () {
+        const result = yield* resolveWorktreeAwareBaseDir({
+          rootBase: "/tmp/base",
+          cwd: "/repo",
+          detectWorktree: async () =>
+            Promise.resolve({ isWorktree: false, topLevel: "/repo" } as const),
+          seedTemplate: async () => Promise.resolve(false),
+          dirExists: async () => Promise.resolve(true),
+          makeDir: async () => Promise.resolve(),
+        });
+
+        assert.deepStrictEqual(result, {
+          baseDir: "/tmp/base",
+          isWorktree: false,
+          topLevel: "/repo",
+          seeded: false,
+        });
+      }),
+    );
+
+    it.effect("returns rootBase when git detection fails", () =>
+      Effect.gen(function* () {
+        const result = yield* resolveWorktreeAwareBaseDir({
+          rootBase: "/tmp/base",
+          cwd: "/no-repo",
+          detectWorktree: async () => Promise.reject(new Error("not a repo")),
+          seedTemplate: async () => Promise.resolve(false),
+          dirExists: async () => Promise.resolve(false),
+          makeDir: async () => Promise.resolve(),
+        });
+
+        assert.equal(result.baseDir, "/tmp/base");
+        assert.equal(result.isWorktree, false);
+      }),
+    );
+
+    it.effect("derives a per-worktree dir and seeds on first run", () =>
+      Effect.gen(function* () {
+        const seedCalls: Array<{ source: string; target: string }> = [];
+        const mkdirCalls: string[] = [];
+        const result = yield* resolveWorktreeAwareBaseDir({
+          rootBase: "/tmp/base",
+          cwd: "/wt-repo",
+          detectWorktree: async () =>
+            Promise.resolve({ isWorktree: true, topLevel: "/wt-repo" } as const),
+          seedTemplate: async (source, target) => {
+            seedCalls.push({ source, target });
+            return true;
+          },
+          dirExists: async () => Promise.resolve(false),
+          makeDir: async (path) => {
+            mkdirCalls.push(path);
+          },
+        });
+
+        assert.equal(result.isWorktree, true);
+        assert.equal(result.topLevel, "/wt-repo");
+        assert.equal(result.seeded, true);
+        // baseDir is <rootBase>/worktrees/<sha1(topLevel).slice(0,12)>
+        assert.match(result.baseDir, /^\/tmp\/base\/worktrees\/[0-9a-f]{12}$/);
+        assert.deepStrictEqual(seedCalls, [
+          {
+            source: "/tmp/base/dev-template",
+            target: `${result.baseDir}/dev`,
+          },
+        ]);
+        assert.deepStrictEqual(mkdirCalls, [result.baseDir]);
+      }),
+    );
+
+    it.effect("skips seeding when the worktree dir is already initialized", () =>
+      Effect.gen(function* () {
+        const seedCalls: Array<{ source: string; target: string }> = [];
+        const result = yield* resolveWorktreeAwareBaseDir({
+          rootBase: "/tmp/base",
+          cwd: "/wt-repo",
+          detectWorktree: async () =>
+            Promise.resolve({ isWorktree: true, topLevel: "/wt-repo" } as const),
+          seedTemplate: async (source, target) => {
+            seedCalls.push({ source, target });
+            return true;
+          },
+          dirExists: async () => Promise.resolve(true),
+          makeDir: async () => Promise.resolve(),
+        });
+
+        assert.equal(result.isWorktree, true);
+        assert.equal(result.seeded, false);
+        assert.deepStrictEqual(seedCalls, []);
+      }),
+    );
+
+    it.effect("is deterministic: same topLevel produces same baseDir", () =>
+      Effect.gen(function* () {
+        const common = {
+          rootBase: "/tmp/base",
+          cwd: "/wt-repo",
+          detectWorktree: async () =>
+            Promise.resolve({ isWorktree: true, topLevel: "/wt-repo" } as const),
+          seedTemplate: async () => Promise.resolve(false),
+          dirExists: async () => Promise.resolve(true),
+          makeDir: async () => Promise.resolve(),
+        } as const;
+        const a = yield* resolveWorktreeAwareBaseDir(common);
+        const b = yield* resolveWorktreeAwareBaseDir(common);
+        assert.equal(a.baseDir, b.baseDir);
+      }),
+    );
+  });
+
+  describe("pruneOrphanWorktreeDirs", () => {
+    it.effect("removes subdirs whose hash is not in the live worktree list", () =>
+      Effect.gen(function* () {
+        const live = new Set(["/repo/primary", "/repo/wt-a"]);
+        const existing = [shortHash("/repo/primary"), shortHash("/repo/wt-a"), shortHash("/gone")];
+        const removed: string[] = [];
+        const result = yield* pruneOrphanWorktreeDirs({
+          rootBase: "/tmp/base",
+          primaryRepoCwd: "/repo/primary",
+          listWorktreePaths: async () => Array.from(live),
+          listDir: async () => existing,
+          removeDir: async (path) => {
+            removed.push(path);
+          },
+        });
+
+        assert.equal(result.skipped, false);
+        assert.deepStrictEqual(result.pruned, [`/tmp/base/worktrees/${shortHash("/gone")}`]);
+        assert.deepStrictEqual(removed, [`/tmp/base/worktrees/${shortHash("/gone")}`]);
+      }),
+    );
+
+    it.effect("skips pruning entirely when git returns no worktrees", () =>
+      Effect.gen(function* () {
+        const removed: string[] = [];
+        const result = yield* pruneOrphanWorktreeDirs({
+          rootBase: "/tmp/base",
+          primaryRepoCwd: "/repo/primary",
+          listWorktreePaths: async () => [],
+          listDir: async () => ["0123456789ab"],
+          removeDir: async (path) => {
+            removed.push(path);
+          },
+        });
+
+        assert.equal(result.skipped, true);
+        assert.deepStrictEqual(result.pruned, []);
+        assert.deepStrictEqual(removed, []);
+      }),
+    );
+
+    it.effect("ignores non-hash directory names for safety", () =>
+      Effect.gen(function* () {
+        const removed: string[] = [];
+        const result = yield* pruneOrphanWorktreeDirs({
+          rootBase: "/tmp/base",
+          primaryRepoCwd: "/repo/primary",
+          listWorktreePaths: async () => ["/repo/primary"],
+          listDir: async () => ["README", "notes.txt", "not-a-hash"],
+          removeDir: async (path) => {
+            removed.push(path);
+          },
+        });
+
+        assert.equal(result.skipped, false);
+        assert.deepStrictEqual(result.pruned, []);
+        assert.deepStrictEqual(removed, []);
+      }),
+    );
+
+    it.effect("swallows removeDir failures and reports only successful prunes", () =>
+      Effect.gen(function* () {
+        const orphanA = shortHash("/gone-a");
+        const orphanB = shortHash("/gone-b");
+        const result = yield* pruneOrphanWorktreeDirs({
+          rootBase: "/tmp/base",
+          primaryRepoCwd: "/repo/primary",
+          listWorktreePaths: async () => ["/repo/primary"],
+          listDir: async () => [orphanA, orphanB],
+          removeDir: async (path) => {
+            if (path.endsWith(orphanA)) {
+              throw new Error("permission denied");
+            }
+          },
+        });
+
+        assert.equal(result.skipped, false);
+        assert.deepStrictEqual(result.pruned, [`/tmp/base/worktrees/${orphanB}`]);
       }),
     );
   });

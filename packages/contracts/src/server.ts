@@ -1,11 +1,5 @@
 import { Schema } from "effect";
-import {
-  IsoDateTime,
-  NonNegativeInt,
-  ProjectId,
-  ThreadId,
-  TrimmedNonEmptyString,
-} from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
@@ -220,8 +214,6 @@ export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Typ
 export const ServerLifecycleWelcomePayload = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   projectName: TrimmedNonEmptyString,
-  bootstrapProjectId: Schema.optional(ProjectId),
-  bootstrapThreadId: Schema.optional(ThreadId),
   startupWasWorkingThreadIds: Schema.optional(Schema.Array(ThreadId)),
 });
 export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;

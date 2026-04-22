@@ -1,6 +1,5 @@
 import {
   DEFAULT_SERVER_SETTINGS,
-  ProjectId,
   ThreadId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -198,8 +197,6 @@ describe("serverState", () => {
       payload: {
         cwd: "/tmp/workspace",
         projectName: "t3-code",
-        bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
-        bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
         startupWasWorkingThreadIds: [ThreadId.makeUnsafe("thread-2")],
       },
     });
@@ -207,8 +204,6 @@ describe("serverState", () => {
     expect(listener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
-      bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
-      bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
       startupWasWorkingThreadIds: [ThreadId.makeUnsafe("thread-2")],
     });
 
@@ -217,8 +212,6 @@ describe("serverState", () => {
     expect(lateListener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
-      bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
-      bootstrapThreadId: ThreadId.makeUnsafe("thread-1"),
       startupWasWorkingThreadIds: [ThreadId.makeUnsafe("thread-2")],
     });
 

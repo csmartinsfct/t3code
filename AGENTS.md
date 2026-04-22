@@ -83,6 +83,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.
 - [Resource Management](docs/resource-management.md) — Lazy loading, shallow startup snapshot, thread content cache (LRU eviction, configurable size), idle session timeout, and memory optimization.
 - [Gemini Provider](docs/gemini-provider.md) — Gemini ACP integration, T3 MCP tool delivery, approvals/user input, usage telemetry, fork/resume limitations, attachments, structured output, and auth detection.
+- [Dev Environment](docs/dev-environment.md) — Dev-runner modes, per-worktree data-dir isolation, seed template + `bun run snapshot-dev`, and the rationale for removing auto-bootstrap.
 
 These docs must be kept up to date as related code changes.
 
@@ -123,9 +124,11 @@ If the tools in this session are connected to the wrong instance (e.g. productio
 The T3 server persists state in `~/.t3/` (overridable via `T3CODE_HOME`).
 
 - **Production** (`apps/desktop` packaged build): `~/.t3/userdata/`
-- **Dev** (`bun run dev` / `bun run dev:desktop`): `~/.t3/dev/`
+- **Dev — primary clone** (`bun run dev` / `bun run dev:desktop` from the main checkout): `~/.t3/dev/`
+- **Dev — git worktree**: `~/.t3/worktrees/<sha1(worktreePath).slice(0,12)>/dev/` — the dev-runner lazily detects worktrees (via `git rev-parse --show-toplevel` vs `--git-common-dir`) and redirects `T3CODE_HOME` so each worktree gets an isolated dev DB. Prevents migration collisions across branches.
+- **Dev seed template**: `~/.t3/dev-template/` — when a worktree's data dir doesn't exist yet, the dev-runner copies this template into it on first launch. Populate it with `bun run snapshot-dev` (see [dev-environment.md](docs/dev-environment.md)).
 
-Each directory contains:
+Each data dir contains:
 
 - `state.sqlite` — main SQLite database (orchestration events, projections, ticketing, managed runs, scheduled tasks)
 - `keybindings.json`, `settings.json` — user config

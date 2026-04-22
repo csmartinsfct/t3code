@@ -51,7 +51,6 @@ const serverConfigTestLayer = Layer.succeed(ServerConfig, {
   terminalLogsDir: "/tmp/t3/dev/logs/terminals",
   anonymousIdPath: "/tmp/t3/dev/anonymous-id",
   mode: "web",
-  autoBootstrapProjectFromCwd: false,
   logWebSocketEvents: false,
   port: 3773,
   host: undefined,

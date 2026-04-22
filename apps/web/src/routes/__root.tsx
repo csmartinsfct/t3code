@@ -8,7 +8,6 @@ import {
   createRootRouteWithContext,
   type ErrorComponentProps,
   useNavigate,
-  useLocation,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
@@ -218,9 +217,6 @@ function EventRouter() {
   );
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
   const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
@@ -237,24 +233,6 @@ function EventRouter() {
       }
 
       setStartupWasWorkingThreads(payload.startupWasWorkingThreadIds ?? []);
-
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-        return;
-      }
-      setProjectExpanded(payload.bootstrapProjectId, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
-      await navigate({
-        to: "/$threadId",
-        params: { threadId: payload.bootstrapThreadId },
-        replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
     })().catch(() => undefined);
   });
 

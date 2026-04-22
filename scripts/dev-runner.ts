@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import * as nodeFs from "node:fs/promises";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 
@@ -119,6 +121,255 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
   });
 }
 
+export interface WorktreeDetection {
+  readonly isWorktree: boolean;
+  readonly topLevel: string | null;
+}
+
+export type DetectWorktree = (cwd: string) => Promise<WorktreeDetection>;
+export type SeedTemplate = (source: string, target: string) => Promise<boolean>;
+export type DirExists = (path: string) => Promise<boolean>;
+export type MakeDir = (path: string) => Promise<void>;
+
+const defaultDetectWorktree: DetectWorktree = async (cwd) => {
+  try {
+    const [topLevelResult, gitCommonDirResult] = await Promise.all([
+      execFile("git", ["rev-parse", "--show-toplevel"], { cwd }),
+      execFile("git", ["rev-parse", "--git-common-dir"], { cwd }),
+    ]);
+    const topLevelStdout = topLevelResult.stdout.trim();
+    const gitCommonDirStdout = gitCommonDirResult.stdout.trim();
+    if (!topLevelStdout || !gitCommonDirStdout) {
+      return { isWorktree: false, topLevel: null };
+    }
+    const path = await import("node:path");
+    const topLevel = path.resolve(topLevelStdout);
+    const gitCommonDir = path.isAbsolute(gitCommonDirStdout)
+      ? gitCommonDirStdout
+      : path.resolve(cwd, gitCommonDirStdout);
+    const primaryRoot = path.resolve(path.dirname(gitCommonDir));
+    return { isWorktree: primaryRoot !== topLevel, topLevel };
+  } catch {
+    return { isWorktree: false, topLevel: null };
+  }
+};
+
+const defaultDirExists: DirExists = async (path) => {
+  try {
+    const stats = await nodeFs.stat(path);
+    return stats.isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const defaultMakeDir: MakeDir = async (path) => {
+  await nodeFs.mkdir(path, { recursive: true });
+};
+
+const defaultSeedTemplate: SeedTemplate = async (source, target) => {
+  try {
+    const stats = await nodeFs.stat(source);
+    if (!stats.isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  await nodeFs.mkdir(target, { recursive: true });
+  // `node:fs/promises.cp` is available on Node ≥16.7.
+  // Copy everything that lives next to the state DB (sqlite files, attachments,
+  // settings, keybindings) and skip logs so fresh logs accumulate per worktree.
+  const entries = await nodeFs.readdir(source, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter((entry) => entry.name !== "logs")
+      .map((entry) =>
+        nodeFs.cp(`${source}/${entry.name}`, `${target}/${entry.name}`, { recursive: true }),
+      ),
+  );
+  return true;
+};
+
+// Best-effort garbage collection for orphaned per-worktree data dirs.
+// When a user runs `git worktree remove <path>` (or deletes the checkout some
+// other way), the corresponding `<rootBase>/worktrees/<hash>/` dir would
+// otherwise linger forever. There is no `post-worktree-remove` git hook, so we
+// reconcile on every dev launch: list the currently-known worktree paths, hash
+// each one, and delete any subdir under `<rootBase>/worktrees/` whose name is
+// not in that allow-list. Any failure (git missing, not a repo, permissions)
+// skips pruning entirely — we never want to nuke data because of a transient
+// problem.
+export type ListWorktreePaths = (cwd: string) => Promise<readonly string[]>;
+export type ListDir = (path: string) => Promise<readonly string[]>;
+export type RemoveDir = (path: string) => Promise<void>;
+
+const defaultListWorktreePaths: ListWorktreePaths = async (cwd) => {
+  try {
+    const { stdout } = await execFile("git", ["worktree", "list", "--porcelain"], { cwd });
+    const paths: string[] = [];
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        paths.push(line.slice("worktree ".length).trim());
+      }
+    }
+    return paths;
+  } catch {
+    return [];
+  }
+};
+
+const defaultListDir: ListDir = async (path) => {
+  try {
+    const entries = await nodeFs.readdir(path, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+};
+
+const defaultRemoveDir: RemoveDir = async (path) => {
+  await nodeFs.rm(path, { recursive: true, force: true });
+};
+
+export interface PruneOrphanWorktreeDirsInput {
+  readonly rootBase: string;
+  readonly primaryRepoCwd: string;
+  readonly listWorktreePaths?: ListWorktreePaths | undefined;
+  readonly listDir?: ListDir | undefined;
+  readonly removeDir?: RemoveDir | undefined;
+}
+
+export interface PruneOrphanWorktreeDirsResult {
+  readonly pruned: readonly string[];
+  readonly skipped: boolean;
+}
+
+export function pruneOrphanWorktreeDirs({
+  rootBase,
+  primaryRepoCwd,
+  listWorktreePaths = defaultListWorktreePaths,
+  listDir = defaultListDir,
+  removeDir = defaultRemoveDir,
+}: PruneOrphanWorktreeDirsInput): Effect.Effect<PruneOrphanWorktreeDirsResult, never, Path.Path> {
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const worktreeRoot = path.join(rootBase, "worktrees");
+
+    const livePaths = yield* Effect.tryPromise({
+      try: () => listWorktreePaths(primaryRepoCwd),
+      catch: () => [] as readonly string[],
+    }).pipe(Effect.catch(() => Effect.succeed([] as readonly string[])));
+
+    // If git gave us nothing, conservatively skip pruning. Prevents wiping data
+    // when git is missing or the cwd isn't a repo.
+    if (livePaths.length === 0) {
+      return { pruned: [], skipped: true };
+    }
+
+    const liveHashes = new Set(
+      livePaths.map((p) => createHash("sha1").update(path.resolve(p)).digest("hex").slice(0, 12)),
+    );
+
+    const existingHashes = yield* Effect.tryPromise({
+      try: () => listDir(worktreeRoot),
+      catch: () => [] as readonly string[],
+    }).pipe(Effect.catch(() => Effect.succeed([] as readonly string[])));
+
+    const orphans = existingHashes.filter(
+      (name) => /^[0-9a-f]{12}$/.test(name) && !liveHashes.has(name),
+    );
+
+    const pruned: string[] = [];
+    for (const name of orphans) {
+      const target = path.join(worktreeRoot, name);
+      const removed = yield* Effect.tryPromise({
+        try: () => removeDir(target).then(() => true),
+        catch: () => false,
+      }).pipe(Effect.catch(() => Effect.succeed(false)));
+      if (removed) pruned.push(target);
+    }
+
+    return { pruned, skipped: false };
+  });
+}
+
+export interface WorktreeAwareBaseDirInput {
+  readonly rootBase: string;
+  readonly cwd: string;
+  readonly detectWorktree?: DetectWorktree | undefined;
+  readonly seedTemplate?: SeedTemplate | undefined;
+  readonly dirExists?: DirExists | undefined;
+  readonly makeDir?: MakeDir | undefined;
+}
+
+export interface WorktreeAwareBaseDirResult {
+  readonly baseDir: string;
+  readonly isWorktree: boolean;
+  readonly topLevel: string | null;
+  readonly seeded: boolean;
+}
+
+export function resolveWorktreeAwareBaseDir({
+  rootBase,
+  cwd,
+  detectWorktree = defaultDetectWorktree,
+  seedTemplate = defaultSeedTemplate,
+  dirExists = defaultDirExists,
+  makeDir = defaultMakeDir,
+}: WorktreeAwareBaseDirInput): Effect.Effect<WorktreeAwareBaseDirResult, never, Path.Path> {
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const detection = yield* Effect.tryPromise({
+      try: () => detectWorktree(cwd),
+      catch: () => ({ isWorktree: false, topLevel: null }) satisfies WorktreeDetection,
+    }).pipe(
+      Effect.catch(
+        () =>
+          Effect.succeed({ isWorktree: false, topLevel: null }) as Effect.Effect<
+            WorktreeDetection,
+            never
+          >,
+      ),
+    );
+
+    if (!detection.isWorktree || !detection.topLevel) {
+      return {
+        baseDir: rootBase,
+        isWorktree: false,
+        topLevel: detection.topLevel,
+        seeded: false,
+      };
+    }
+
+    const hash = createHash("sha1").update(detection.topLevel).digest("hex").slice(0, 12);
+    const worktreeBase = path.join(rootBase, "worktrees", hash);
+    const alreadyInitialized = yield* Effect.tryPromise({
+      try: () => dirExists(worktreeBase),
+      catch: () => false,
+    }).pipe(Effect.catch(() => Effect.succeed(false)));
+
+    let seeded = false;
+    if (!alreadyInitialized) {
+      const template = path.join(rootBase, "dev-template");
+      const seedState = path.join(worktreeBase, "dev");
+      seeded = yield* Effect.tryPromise({
+        try: () => seedTemplate(template, seedState),
+        catch: () => false,
+      }).pipe(Effect.catch(() => Effect.succeed(false)));
+      yield* Effect.tryPromise({
+        try: () => makeDir(worktreeBase),
+        catch: () => undefined,
+      }).pipe(Effect.catch(() => Effect.void));
+    }
+
+    return {
+      baseDir: worktreeBase,
+      isWorktree: true,
+      topLevel: detection.topLevel,
+      seeded,
+    };
+  });
+}
+
 interface CreateDevRunnerEnvInput {
   readonly mode: DevMode;
   readonly baseEnv: NodeJS.ProcessEnv;
@@ -127,11 +378,18 @@ interface CreateDevRunnerEnvInput {
   readonly t3Home: string | undefined;
   readonly authToken: string | undefined;
   readonly noBrowser: boolean | undefined;
-  readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
   readonly host: string | undefined;
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
+  readonly cwd?: string;
+  readonly detectWorktree?: DetectWorktree;
+  readonly seedTemplate?: SeedTemplate;
+  readonly dirExists?: DirExists;
+  readonly makeDir?: MakeDir;
+  readonly listWorktreePaths?: ListWorktreePaths;
+  readonly listDir?: ListDir;
+  readonly removeDir?: RemoveDir;
 }
 
 export function createDevRunnerEnv({
@@ -142,16 +400,52 @@ export function createDevRunnerEnv({
   t3Home,
   authToken,
   noBrowser,
-  autoBootstrapProjectFromCwd,
   logWebSocketEvents,
   host,
   port,
   devUrl,
+  cwd,
+  detectWorktree,
+  seedTemplate,
+  dirExists,
+  makeDir,
+  listWorktreePaths,
+  listDir,
+  removeDir,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    const resolvedBaseDir = yield* resolveBaseDir(t3Home);
+    const resolvedCwd = cwd ?? process.cwd();
+    const rootBaseDir = yield* resolveBaseDir(t3Home);
+    const pruneResult = yield* pruneOrphanWorktreeDirs({
+      rootBase: rootBaseDir,
+      primaryRepoCwd: resolvedCwd,
+      listWorktreePaths,
+      listDir,
+      removeDir,
+    });
+    if (pruneResult.pruned.length > 0) {
+      yield* Effect.logInfo(
+        `[dev-runner] pruned ${pruneResult.pruned.length} orphan worktree dir(s): ${pruneResult.pruned.join(", ")}`,
+      );
+    }
+    const worktreeResult = yield* resolveWorktreeAwareBaseDir({
+      rootBase: rootBaseDir,
+      cwd: resolvedCwd,
+      detectWorktree,
+      seedTemplate,
+      dirExists,
+      makeDir,
+    });
+    if (worktreeResult.isWorktree) {
+      yield* Effect.logInfo(
+        `[dev-runner] worktree isolation active topLevel=${String(
+          worktreeResult.topLevel,
+        )} baseDir=${worktreeResult.baseDir}${worktreeResult.seeded ? " seeded=dev-template" : ""}`,
+      );
+    }
+    const resolvedBaseDir = worktreeResult.baseDir;
     const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {
@@ -188,12 +482,6 @@ export function createDevRunnerEnv({
       output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
     } else if (!isDesktopMode) {
       delete output.T3CODE_NO_BROWSER;
-    }
-
-    if (autoBootstrapProjectFromCwd !== undefined) {
-      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
-    } else {
-      delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
@@ -364,7 +652,6 @@ interface DevRunnerCliInput {
   readonly authToken: string | undefined;
   readonly killPortConflicts: boolean | undefined;
   readonly noBrowser: boolean | undefined;
-  readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
   readonly host: string | undefined;
   readonly port: number | undefined;
@@ -680,7 +967,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     const envOverrides = {
       killPortConflicts: readOptionalBooleanEnv("T3CODE_KILL_PORT_CONFLICTS"),
       noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
     };
 
@@ -704,10 +990,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       t3Home: input.t3Home,
       authToken: input.authToken,
       noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
-      autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
-        input.autoBootstrapProjectFromCwd,
-        envOverrides.autoBootstrapProjectFromCwd,
-      ),
       logWebSocketEvents: resolveOptionalBooleanOverride(
         input.logWebSocketEvents,
         envOverrides.logWebSocketEvents,
@@ -795,12 +1077,6 @@ const devRunnerCli = Command.make("dev-runner", {
   noBrowser: Flag.boolean("no-browser").pipe(
     Flag.withDescription("Browser auto-open toggle (equivalent to T3CODE_NO_BROWSER)."),
     Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_NO_BROWSER")),
-  ),
-  autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
-    Flag.withDescription(
-      "Auto-bootstrap toggle (equivalent to T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
-    ),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
     Flag.withDescription("WebSocket event logging toggle (equivalent to T3CODE_LOG_WS_EVENTS)."),

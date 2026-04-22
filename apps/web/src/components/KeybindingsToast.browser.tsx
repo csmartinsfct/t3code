@@ -156,8 +156,6 @@ function buildFixture(): TestFixture {
     welcome: {
       cwd: "/repo/project",
       projectName: "Project",
-      bootstrapProjectId: PROJECT_ID,
-      bootstrapThreadId: THREAD_ID,
     },
   };
 }
