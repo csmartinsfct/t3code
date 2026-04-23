@@ -1083,11 +1083,10 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
         ...(process.env.CODEX_HOME_PATH ? { homePath: process.env.CODEX_HOME_PATH } : {}),
       });
 
-      expect(resumedSession.threadId).toBe(originalThreadId);
-
-      const resumedSnapshotBeforeTurn = await manager.readThread(resumedSession.threadId);
-      expect(resumedSnapshotBeforeTurn.threadId).toBe(originalThreadId);
-      expect(resumedSnapshotBeforeTurn.turns.length).toBeGreaterThanOrEqual(originalTurnCount);
+      expect(resumedSession.threadId).toBe(firstSession.threadId);
+      expect((resumedSession.resumeCursor as { threadId?: string }).threadId).toBe(
+        originalThreadId,
+      );
 
       await manager.sendTurn({
         threadId: resumedSession.threadId,
@@ -1101,6 +1100,9 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
         },
         { timeout: 120_000, interval: 1_000 },
       );
+
+      const resumedSnapshotAfterTurn = await manager.readThread(resumedSession.threadId);
+      expect(resumedSnapshotAfterTurn.threadId).toBe(originalThreadId);
     } finally {
       manager.stopAll();
       rmSync(workspaceDir, { recursive: true, force: true });

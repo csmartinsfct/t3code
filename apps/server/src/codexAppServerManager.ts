@@ -142,6 +142,7 @@ export interface CodexThreadSnapshot {
 }
 
 const CODEX_VERSION_CHECK_TIMEOUT_MS = 4_000;
+const CODEX_RESUME_READY_BARRIER_TIMEOUT_MS = 5_000;
 
 const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
@@ -629,10 +630,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
       const providerThreadId = threadIdRaw;
 
-      this.updateSession(context, {
-        status: "ready",
-        resumeCursor: { threadId: providerThreadId },
-      });
       this.emitLifecycleEvent(
         context,
         "session/threadOpenResolved",
@@ -645,6 +642,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         resolvedThreadId: providerThreadId,
         requestedRuntimeMode: input.runtimeMode,
       }).pipe(this.runPromise);
+
+      if (threadOpenMethod === "thread/resume") {
+        await this.waitForResumedThreadReady(context, providerThreadId);
+      }
+
+      this.updateSession(context, {
+        status: "ready",
+        resumeCursor: { threadId: providerThreadId },
+      });
       this.emitLifecycleEvent(context, "session/ready", `Connected to thread ${providerThreadId}`);
       return { ...context.session };
     } catch (error) {
@@ -777,6 +783,45 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         ? { resumeCursor: context.session.resumeCursor }
         : {}),
     };
+  }
+
+  private async waitForResumedThreadReady(
+    context: CodexSessionContext,
+    providerThreadId: string,
+  ): Promise<void> {
+    this.emitLifecycleEvent(
+      context,
+      "session/threadResumeReadyBarrier",
+      `Verifying resumed Codex thread ${providerThreadId}.`,
+    );
+
+    const response = await this.sendRequest(
+      context,
+      "thread/read",
+      {
+        threadId: providerThreadId,
+        includeTurns: false,
+      },
+      CODEX_RESUME_READY_BARRIER_TIMEOUT_MS,
+    );
+    const responseRecord = this.readObject(response);
+    const returnedThreadId =
+      this.readString(this.readObject(responseRecord, "thread"), "id") ??
+      this.readString(responseRecord, "threadId");
+
+    if (returnedThreadId !== providerThreadId) {
+      throw new Error(
+        returnedThreadId
+          ? `thread/read returned unexpected thread id ${returnedThreadId} after resuming ${providerThreadId}.`
+          : `thread/read response did not include thread id after resuming ${providerThreadId}.`,
+      );
+    }
+
+    this.emitLifecycleEvent(
+      context,
+      "session/threadResumeReady",
+      `Resumed Codex thread ${providerThreadId} is ready.`,
+    );
   }
 
   async interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void> {
