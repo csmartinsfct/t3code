@@ -1,9 +1,16 @@
 import { Schema } from "effect";
-import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+  type ProjectId as ProjectIdType,
+} from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
-import { ProviderKind } from "./orchestration";
+import { ProviderKind, type ProviderKind as ProviderKindType } from "./orchestration";
 import { ProviderRateLimitInfo } from "./providerRuntime";
 import { ServerSettings } from "./settings";
 
@@ -160,52 +167,6 @@ export const ServerConfigStreamMcpConfigChangedEvent = Schema.Struct({
 export type ServerConfigStreamMcpConfigChangedEvent =
   typeof ServerConfigStreamMcpConfigChangedEvent.Type;
 
-// ---------------------------------------------------------------------------
-// Provider rate-limits – account-level, not thread-level.
-// ---------------------------------------------------------------------------
-
-/** A single account-usage tier returned by provider OAuth/quota APIs. */
-export const OAuthUsageTier = Schema.Struct({
-  /** Tier key, e.g. "five_hour", "seven_day_sonnet", or a model id. */
-  tier: TrimmedNonEmptyString,
-  /** Utilization as 0–1 fraction. */
-  utilization: Schema.Number,
-  /** ISO 8601 UTC reset timestamp. `null` when unknown. */
-  resetsAt: Schema.NullOr(IsoDateTime),
-});
-export type OAuthUsageTier = typeof OAuthUsageTier.Type;
-
-export const ProviderRateLimitsSnapshot = Schema.Struct({
-  provider: ProviderKind,
-  rateLimitInfo: ProviderRateLimitInfo,
-  updatedAt: IsoDateTime,
-  /** Multi-tier OAuth/quota usage data (5h, 7d, model-specific). Absent when unavailable. */
-  oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
-  /** Warning message when the usage-data fetch is degraded (e.g. API 429 backoff). */
-  fetchWarning: Schema.optional(Schema.String),
-});
-export type ProviderRateLimitsSnapshot = typeof ProviderRateLimitsSnapshot.Type;
-
-export const ServerConfigStreamRateLimitsUpdatedEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("rateLimitsUpdated"),
-  payload: Schema.Struct({
-    rateLimits: Schema.Array(ProviderRateLimitsSnapshot),
-  }),
-});
-export type ServerConfigStreamRateLimitsUpdatedEvent =
-  typeof ServerConfigStreamRateLimitsUpdatedEvent.Type;
-
-export const ServerConfigStreamEvent = Schema.Union([
-  ServerConfigStreamSnapshotEvent,
-  ServerConfigStreamKeybindingsUpdatedEvent,
-  ServerConfigStreamProviderStatusesEvent,
-  ServerConfigStreamSettingsUpdatedEvent,
-  ServerConfigStreamMcpConfigChangedEvent,
-  ServerConfigStreamRateLimitsUpdatedEvent,
-]);
-export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
-
 export const ServerLifecycleReadyPayload = Schema.Struct({
   at: IsoDateTime,
 });
@@ -251,14 +212,142 @@ export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.T
 
 export const ResolveMcpServersInput = Schema.Struct({
   provider: ProviderKind,
+  projectId: Schema.optional(ProjectId),
   cwd: Schema.optional(TrimmedNonEmptyString),
+  forceRefresh: Schema.optional(Schema.Boolean),
 });
-export type ResolveMcpServersInput = typeof ResolveMcpServersInput.Type;
+export interface ResolveMcpServersInput {
+  readonly provider: ProviderKindType;
+  readonly projectId?: ProjectIdType;
+  readonly cwd?: string;
+  readonly forceRefresh?: boolean;
+}
+
+export const ResolvedMcpServerTool = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.String),
+  annotations: Schema.optional(Schema.Unknown),
+});
+export type ResolvedMcpServerTool = typeof ResolvedMcpServerTool.Type;
+
+export const ResolvedMcpServer = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  status: Schema.optional(TrimmedNonEmptyString),
+  scope: Schema.optional(TrimmedNonEmptyString),
+  error: Schema.optional(Schema.String),
+  toolCount: Schema.optional(NonNegativeInt),
+  serverInfo: Schema.optional(Schema.Unknown),
+  config: Schema.optional(Schema.Unknown),
+  tools: Schema.optional(Schema.Array(ResolvedMcpServerTool)),
+});
+export type ResolvedMcpServer = typeof ResolvedMcpServer.Type;
+
+export const ResolvedMcpServersStatus = Schema.Literals(["loading", "ready", "error"]);
+export type ResolvedMcpServersStatus = typeof ResolvedMcpServersStatus.Type;
+
+export const ResolvedMcpProviderSnapshot = Schema.Struct({
+  provider: ProviderKind,
+  projectId: Schema.optional(ProjectId),
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  status: ResolvedMcpServersStatus,
+  refreshing: Schema.optional(Schema.Boolean),
+  serverNames: Schema.Array(TrimmedNonEmptyString),
+  servers: Schema.optional(Schema.Array(ResolvedMcpServer)),
+  updatedAt: Schema.optional(IsoDateTime),
+  error: Schema.optional(Schema.String),
+});
+export interface ResolvedMcpProviderSnapshot {
+  readonly provider: ProviderKindType;
+  readonly projectId?: ProjectIdType;
+  readonly cwd?: string;
+  readonly status: ResolvedMcpServersStatus;
+  readonly refreshing?: boolean;
+  readonly serverNames: readonly string[];
+  readonly servers?: readonly ResolvedMcpServer[];
+  readonly updatedAt?: string;
+  readonly error?: string;
+}
 
 export const ResolveMcpServersResult = Schema.Struct({
+  status: ResolvedMcpServersStatus,
+  refreshing: Schema.optional(Schema.Boolean),
   serverNames: Schema.Array(TrimmedNonEmptyString),
+  servers: Schema.optional(Schema.Array(ResolvedMcpServer)),
+  updatedAt: Schema.optional(IsoDateTime),
+  error: Schema.optional(Schema.String),
+  profiles: Schema.optional(Schema.Array(ResolvedMcpProviderSnapshot)),
 });
-export type ResolveMcpServersResult = typeof ResolveMcpServersResult.Type;
+export interface ResolveMcpServersResult {
+  readonly status: ResolvedMcpServersStatus;
+  readonly refreshing?: boolean;
+  readonly serverNames: readonly string[];
+  readonly servers?: readonly ResolvedMcpServer[];
+  readonly updatedAt?: string;
+  readonly error?: string;
+  readonly profiles?: readonly ResolvedMcpProviderSnapshot[];
+}
+
+export const ServerConfigStreamMcpStatusUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("mcpStatusUpdated"),
+  payload: Schema.Struct({
+    snapshots: Schema.Array(ResolvedMcpProviderSnapshot),
+  }),
+});
+export type ServerConfigStreamMcpStatusUpdatedEvent = {
+  readonly version: 1;
+  readonly type: "mcpStatusUpdated";
+  readonly payload: {
+    readonly snapshots: readonly ResolvedMcpProviderSnapshot[];
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Provider rate-limits – account-level, not thread-level.
+// ---------------------------------------------------------------------------
+
+/** A single account-usage tier returned by provider OAuth/quota APIs. */
+export const OAuthUsageTier = Schema.Struct({
+  /** Tier key, e.g. "five_hour", "seven_day_sonnet", or a model id. */
+  tier: TrimmedNonEmptyString,
+  /** Utilization as 0–1 fraction. */
+  utilization: Schema.Number,
+  /** ISO 8601 UTC reset timestamp. `null` when unknown. */
+  resetsAt: Schema.NullOr(IsoDateTime),
+});
+export type OAuthUsageTier = typeof OAuthUsageTier.Type;
+
+export const ProviderRateLimitsSnapshot = Schema.Struct({
+  provider: ProviderKind,
+  rateLimitInfo: ProviderRateLimitInfo,
+  updatedAt: IsoDateTime,
+  /** Multi-tier OAuth/quota usage data (5h, 7d, model-specific). Absent when unavailable. */
+  oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
+  /** Warning message when the usage-data fetch is degraded (e.g. API 429 backoff). */
+  fetchWarning: Schema.optional(Schema.String),
+});
+export type ProviderRateLimitsSnapshot = typeof ProviderRateLimitsSnapshot.Type;
+
+export const ServerConfigStreamRateLimitsUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("rateLimitsUpdated"),
+  payload: Schema.Struct({
+    rateLimits: Schema.Array(ProviderRateLimitsSnapshot),
+  }),
+});
+export type ServerConfigStreamRateLimitsUpdatedEvent =
+  typeof ServerConfigStreamRateLimitsUpdatedEvent.Type;
+
+export const ServerConfigStreamEvent = Schema.Union([
+  ServerConfigStreamSnapshotEvent,
+  ServerConfigStreamKeybindingsUpdatedEvent,
+  ServerConfigStreamProviderStatusesEvent,
+  ServerConfigStreamSettingsUpdatedEvent,
+  ServerConfigStreamMcpConfigChangedEvent,
+  ServerConfigStreamMcpStatusUpdatedEvent,
+  ServerConfigStreamRateLimitsUpdatedEvent,
+]);
+export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 
 export class ResolveMcpServersError extends Schema.TaggedErrorClass<ResolveMcpServersError>()(
   "ResolveMcpServersError",

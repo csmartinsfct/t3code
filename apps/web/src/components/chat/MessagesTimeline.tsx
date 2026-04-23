@@ -27,12 +27,15 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  BellIcon,
+  BrainIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
   Loader2Icon,
+  PackageIcon,
   type LucideIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -925,6 +928,17 @@ function workEntryPreview(
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
+  switch (workEntry.diagnosticCategory) {
+    case "memory_recall":
+      return BrainIcon;
+    case "notification":
+      return BellIcon;
+    case "plugin_install":
+      return PackageIcon;
+    case "mirror_error":
+      return CircleAlertIcon;
+  }
+
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;
@@ -959,10 +973,30 @@ function capitalizePhrase(value: string): string {
 }
 
 function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
+  const diagnosticHeading = diagnosticWorkEntryHeading(workEntry);
+  if (diagnosticHeading) {
+    return diagnosticHeading;
+  }
+
   if (!workEntry.toolTitle) {
     return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
   }
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
+}
+
+function diagnosticWorkEntryHeading(workEntry: TimelineWorkEntry): string | null {
+  switch (workEntry.diagnosticCategory) {
+    case "memory_recall":
+      return "Memory recall";
+    case "notification":
+      return "Claude notification";
+    case "plugin_install":
+      return workEntry.label.trim() || "Plugin install";
+    case "mirror_error":
+      return "Mirror error";
+    default:
+      return null;
+  }
 }
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {

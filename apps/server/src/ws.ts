@@ -32,14 +32,15 @@ import {
   OrchestrationReplayEventsError,
   ResolveCodexProjectTrustError,
   ResolveMcpServersError,
+  ResolveMcpServersResult,
   ResolveSkillsError,
+  ServerConfigStreamMcpStatusUpdatedEvent,
   TextGenerationError,
   type TerminalEvent,
   TrustCodexProjectError,
   WS_METHODS,
   WsRpcGroup,
   baseProviderKind,
-  providerProfileId,
   type ProviderKind,
 } from "@t3tools/contracts";
 import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -63,6 +64,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation";
 import { ProviderRateLimitsCache } from "./provider/Services/ProviderRateLimitsCache";
+import { ProviderMcpStatusCache } from "./provider/Services/ProviderMcpStatusCache";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
@@ -83,7 +85,6 @@ import { ProjectionThreadRepository } from "./persistence/Services/ProjectionThr
 import { makeOrchestrationRunServiceFromDeps } from "./orchestrationRuns/Layers/OrchestrationRuns";
 import { makeOrchestrationRunRunnerFromDeps } from "./orchestrationRuns/Layers/OrchestrationRunRunner";
 import {
-  resolveClaudeMcpServerNames,
   resolveCodexMcpServerNames,
   resolveCodexProjectTrusted,
   resolveCodexProjectConfigPaths,
@@ -112,6 +113,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const providerRegistry = yield* ProviderRegistry;
     const providerService = yield* ProviderService;
     const rateLimitsCache = yield* ProviderRateLimitsCache;
+    const mcpStatusCache = yield* ProviderMcpStatusCache;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
@@ -190,7 +192,11 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               nodePath.basename(event.path) === targetFile,
           ),
           Stream.debounce(Duration.millis(150)),
-          Stream.runForEach(() => PubSub.publish(mcpConfigChangedPubSub, undefined)),
+          Stream.runForEach(() =>
+            mcpStatusCache
+              .invalidateAll("mcp-config")
+              .pipe(Effect.andThen(PubSub.publish(mcpConfigChangedPubSub, undefined))),
+          ),
           Effect.ignoreCause({ log: true }),
           Effect.forkScoped,
           Effect.as(true),
@@ -665,7 +671,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 }
               }
               const serverNames = yield* resolveCodexMcpServerNames(codexHome, input.cwd);
-              return { serverNames };
+              return { status: "ready" as const, serverNames };
             }
             if (base === "gemini") {
               const settings = yield* serverSettings.getSettings;
@@ -677,31 +683,35 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 yield* ensureWatchDirForFile(nodePath.dirname(configPath), "settings.json");
               }
               const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, input.cwd);
-              return { serverNames };
+              return { status: "ready" as const, serverNames };
             }
             // Claude (default or profile)
-            const profileId = providerProfileId(input.provider);
-            const settings = yield* serverSettings.getSettings;
-            let configDir: string | undefined;
-            if (profileId) {
-              const configured = settings.providers.claudeProfiles.find(
-                (p) => p.profileId === profileId,
-              );
-              configDir = configured?.configDir;
-              if (!configDir) {
-                configDir = nodePath.join(os.homedir(), `.claude-${profileId}`);
-              }
-            } else {
-              configDir = settings.providers.claudeAgent.configDir || undefined;
+            if (!input.projectId || !input.cwd) {
+              return {
+                status: "error" as const,
+                serverNames: [],
+                servers: [],
+                error: "Claude MCP status requires a project and workspace.",
+              };
             }
-            if (!configDir) {
-              configDir = nodePath.join(os.homedir(), ".claude");
-            }
-            if (input.cwd) {
-              yield* ensureWatchDirForFile(input.cwd, ".mcp.json");
-            }
-            const serverNames = yield* resolveClaudeMcpServerNames(configDir, input.cwd);
-            return { serverNames };
+            yield* ensureWatchDirForFile(input.cwd, ".mcp.json");
+            const result = yield* mcpStatusCache.ensureClaudeProject({
+              projectId: input.projectId,
+              cwd: input.cwd,
+              selectedProvider: input.provider,
+              ...(input.forceRefresh === true ? { forceRefresh: true } : {}),
+            });
+            return {
+              status: result.selected.status,
+              ...(result.selected.refreshing !== undefined
+                ? { refreshing: result.selected.refreshing }
+                : {}),
+              serverNames: result.selected.serverNames,
+              ...(result.selected.servers ? { servers: result.selected.servers } : {}),
+              ...(result.selected.updatedAt ? { updatedAt: result.selected.updatedAt } : {}),
+              ...(result.selected.error ? { error: result.selected.error } : {}),
+              profiles: result.snapshots,
+            } as unknown as typeof ResolveMcpServersResult.Type;
           }).pipe(
             Effect.mapError(
               (cause) =>
@@ -1377,6 +1387,16 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 payload: { rateLimits },
               })),
             );
+            const mcpStatusUpdates = mcpStatusCache.streamChanges.pipe(
+              Stream.map(
+                (snapshots) =>
+                  ({
+                    version: 1 as const,
+                    type: "mcpStatusUpdated" as const,
+                    payload: { snapshots },
+                  }) as unknown as typeof ServerConfigStreamMcpStatusUpdatedEvent.Type,
+              ),
+            );
 
             // Emit the cached rate-limits snapshot right after the config
             // snapshot so that new connections see the latest data immediately.
@@ -1395,6 +1415,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 ),
               ),
             ).pipe(Stream.flatMap(Stream.fromIterable));
+            const initialMcpStatus = Stream.fromEffect(
+              mcpStatusCache.getAll.pipe(
+                Effect.map((snapshots) =>
+                  snapshots.length > 0
+                    ? [
+                        {
+                          version: 1 as const,
+                          type: "mcpStatusUpdated" as const,
+                          payload: { snapshots },
+                        } as unknown as typeof ServerConfigStreamMcpStatusUpdatedEvent.Type,
+                      ]
+                    : [],
+                ),
+              ),
+            ).pipe(Stream.flatMap(Stream.fromIterable));
 
             return Stream.concat(
               Stream.make({
@@ -1403,11 +1438,11 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 config: yield* loadServerConfig,
               }),
               Stream.concat(
-                initialRateLimits,
+                Stream.merge(initialRateLimits, initialMcpStatus),
                 Stream.merge(
                   mcpConfigChangedStream,
                   Stream.merge(
-                    rateLimitsUpdates,
+                    Stream.merge(rateLimitsUpdates, mcpStatusUpdates),
                     Stream.merge(
                       keybindingsUpdates,
                       Stream.merge(providerStatuses, settingsUpdates),

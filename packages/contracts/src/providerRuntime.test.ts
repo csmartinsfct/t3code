@@ -214,4 +214,36 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.stderr).toBe("lint failed");
     expect(parsed.payload.exitCode).toBe(1);
   });
+
+  it("decodes runtime diagnostic events with optional detail and data", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "runtime.diagnostic",
+      eventId: "event-diagnostic-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:06.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        category: "plugin_install",
+        summary: "Plugin github-personal connected",
+        detail: "41 tools available",
+        tone: "info",
+        data: {
+          status: "connected",
+          name: "github-personal",
+        },
+      },
+    });
+
+    expect(parsed.type).toBe("runtime.diagnostic");
+    if (parsed.type !== "runtime.diagnostic") {
+      throw new Error("expected runtime.diagnostic");
+    }
+    expect(parsed.payload.category).toBe("plugin_install");
+    expect(parsed.payload.detail).toBe("41 tools available");
+    expect(parsed.payload.data).toEqual({
+      status: "connected",
+      name: "github-personal",
+    });
+  });
 });

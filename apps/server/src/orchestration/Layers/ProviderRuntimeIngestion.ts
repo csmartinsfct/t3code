@@ -589,6 +589,25 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "runtime.diagnostic": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: event.payload.tone === "error" ? "error" : "info",
+          kind: `runtime.diagnostic.${event.payload.category}`,
+          summary: event.payload.summary,
+          payload: {
+            category: event.payload.category,
+            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "turn.plan.updated": {
       return [
         {

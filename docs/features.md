@@ -138,6 +138,11 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - MCP discovery: the chat MCP menu mirrors Gemini CLI user settings
   (`<GEMINI_CLI_HOME>/settings.json`) and project settings
   (`.gemini/settings.json`), including `mcp.allowed` / `mcp.excluded` filters.
+- Claude MCP status: for Claude, the composer uses project-scoped SDK
+  `mcpServerStatus()` snapshots shared across threads. T3 probes every enabled
+  Claude profile in the background without yielding a user prompt or triggering
+  model inference, then renders live statuses such as connected, needs-auth, and
+  failed with manual retry.
 - Project title, T3 REST service guidance, and project system prompts are
   delivered through ACP embedded context on the first Gemini turn because Gemini
   ACP session creation does not accept a system-prompt parameter.
@@ -176,7 +181,8 @@ Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and
 
 - `provider.startSession` / `provider.sendTurn` / `provider.interruptTurn` — Session lifecycle.
 - `server.refreshProviders` — Re-scan provider statuses.
-- `server.resolveMcpServers` — Get available MCP servers for the provider.
+- `server.resolveMcpServers` — Get project-scoped MCP status for Claude or
+  name-only MCP discovery for Codex/Gemini.
 
 ---
 

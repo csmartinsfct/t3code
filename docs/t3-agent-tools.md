@@ -20,10 +20,13 @@ Each endpoint uses plain REST with a `{data, error}` response envelope. Authenti
 
 Ticketing REST API sessions can also be scoped to a live thread. When a provider session has thread context, T3 injects `threadId` alongside `projectId` into the ticketing endpoint URL / auth context so server-side ticket creation can persist an origin-thread relationship without exposing any extra public tool arguments.
 
-The chat composer's MCP picker mirrors provider-side config on disk so the UI reflects what a session can use:
+The chat composer's MCP picker reflects provider-side MCP availability:
 
 - Codex: global `~/.codex/config.toml` plus project-scoped `.codex/config.toml`
-- Claude: profile/global `.claude.json` plus project-local `.mcp.json`
+- Claude: project-scoped live SDK status from `mcpServerStatus()`, loaded in the
+  background for every enabled Claude profile in the project. The hidden status
+  probe initializes Claude Code MCP state without yielding a user prompt or
+  triggering model inference.
 - Gemini: user-level `<GEMINI_CLI_HOME>/settings.json` (default
   `~/.gemini/settings.json`) plus project-local `.gemini/settings.json`
 

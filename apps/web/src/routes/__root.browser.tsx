@@ -208,7 +208,7 @@ function resolveWsRpc(tag: string): unknown {
     return { entries: [], truncated: false };
   }
   if (tag === WS_METHODS.serverResolveMcpServers) {
-    return { serverNames: [] };
+    return { status: "ready", serverNames: [] };
   }
   if (tag === WS_METHODS.serverResolveSkills) {
     return { skills: [] };

@@ -22,6 +22,7 @@ import type {
   ProviderSession,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  ResolvedMcpServer,
   ThreadId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
@@ -91,6 +92,15 @@ export interface ProviderServiceShape {
   readonly getCapabilities: (
     provider: ProviderKind,
   ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>;
+
+  /**
+   * Probe live MCP server status for a provider/workspace without creating a
+   * user-visible provider session.
+   */
+  readonly probeMcpServers?: (input: {
+    readonly provider: ProviderKind;
+    readonly cwd: string;
+  }) => Effect.Effect<ReadonlyArray<ResolvedMcpServer>, ProviderServiceError>;
 
   /**
    * Roll back provider conversation state by a number of turns.

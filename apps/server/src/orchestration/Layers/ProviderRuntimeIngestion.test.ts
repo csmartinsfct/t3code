@@ -2000,6 +2000,66 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBeNull();
   });
 
+  it("records runtime.diagnostic activities without changing active turn state", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-diagnostic-turn-started"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-diagnostic"),
+      payload: {},
+    });
+
+    harness.emit({
+      type: "runtime.diagnostic",
+      eventId: asEventId("evt-runtime-diagnostic"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-diagnostic"),
+      payload: {
+        category: "plugin_install",
+        summary: "Plugin github-personal connected",
+        detail: "41 tools available",
+        data: {
+          status: "connected",
+          name: "github-personal",
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-diagnostic" &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) =>
+            activity.id === "evt-runtime-diagnostic" &&
+            activity.kind === "runtime.diagnostic.plugin_install",
+        ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-runtime-diagnostic",
+    );
+    const activityPayload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.activeTurnId).toBe("turn-diagnostic");
+    expect(thread.session?.lastError).toBeNull();
+    expect(activity?.tone).toBe("info");
+    expect(activity?.summary).toBe("Plugin github-personal connected");
+    expect(activityPayload?.category).toBe("plugin_install");
+    expect(activityPayload?.detail).toBe("41 tools available");
+  });
+
   it("maps session/thread lifecycle and item.started into session/activity projections", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

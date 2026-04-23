@@ -67,6 +67,10 @@ import {
   ProviderRateLimitsCache,
   type ProviderRateLimitsCacheShape,
 } from "./provider/Services/ProviderRateLimitsCache.ts";
+import {
+  ProviderMcpStatusCache,
+  type ProviderMcpStatusCacheShape,
+} from "./provider/Services/ProviderMcpStatusCache.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -149,6 +153,7 @@ const buildAppUnderTest = (options?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
     providerRateLimitsCache?: Partial<ProviderRateLimitsCacheShape>;
+    providerMcpStatusCache?: Partial<ProviderMcpStatusCacheShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
@@ -233,6 +238,23 @@ const buildAppUnderTest = (options?: {
           getAll: Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRateLimitsCache,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderMcpStatusCache)({
+          ensureClaudeProject: () =>
+            Effect.succeed({
+              selected: {
+                provider: "claudeAgent",
+                status: "ready",
+                serverNames: [],
+              },
+              snapshots: [],
+            }),
+          invalidateAll: () => Effect.void,
+          getAll: Effect.succeed([]),
+          streamChanges: Stream.empty,
+          ...options?.layers?.providerMcpStatusCache,
         }),
       ),
       Layer.provide(

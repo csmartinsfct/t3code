@@ -2,8 +2,10 @@ import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
+  type ProjectId,
   type ProviderKind,
   type ProviderRateLimitsSnapshot,
+  type ResolvedMcpProviderSnapshot,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerConfigUpdatedPayload,
@@ -140,6 +142,10 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
       }
       return;
     }
+    case "mcpStatusUpdated": {
+      replaceMcpStatusSnapshots(event.payload.snapshots);
+      return;
+    }
     case "rateLimitsUpdated": {
       const prev = (appAtomRegistry.get(providerRateLimitsAtom) ??
         []) as ReadonlyArray<ProviderRateLimitsSnapshot>;
@@ -248,6 +254,14 @@ export function resetServerStateForTests() {
   resetAppAtomRegistryForTests();
   activeRateLimitWarningToastId = null;
   nextServerConfigUpdatedNotificationId = 1;
+  mcpStatusSnapshotsByKey.clear();
+  mcpStatusInvalidationRevision = 0;
+  for (const listener of mcpStatusSnapshotListeners) {
+    listener();
+  }
+  for (const listener of mcpStatusInvalidationListeners) {
+    listener();
+  }
 }
 
 let nextServerConfigUpdatedNotificationId = 1;
@@ -273,6 +287,124 @@ function getMcpConfigRevisionSnapshot(): number {
 
 export function useMcpConfigRevision(): number {
   return useSyncExternalStore(subscribeMcpConfigRevision, getMcpConfigRevisionSnapshot);
+}
+
+// ---------------------------------------------------------------------------
+// Project-scoped MCP status snapshots.
+// ---------------------------------------------------------------------------
+
+const mcpStatusSnapshotsByKey = new Map<string, ResolvedMcpProviderSnapshot>();
+const mcpStatusSnapshotListeners = new Set<() => void>();
+let mcpStatusInvalidationRevision = 0;
+const mcpStatusInvalidationListeners = new Set<() => void>();
+
+type IncomingMcpStatusSnapshot = Omit<
+  ResolvedMcpProviderSnapshot,
+  "projectId" | "cwd" | "refreshing" | "servers" | "updatedAt" | "error"
+> & {
+  readonly projectId?: ProjectId | undefined;
+  readonly cwd?: string | undefined;
+  readonly refreshing?: boolean | undefined;
+  readonly servers?: ResolvedMcpProviderSnapshot["servers"] | undefined;
+  readonly updatedAt?: string | undefined;
+  readonly error?: string | undefined;
+};
+
+function mcpStatusSnapshotKey(
+  projectId: ProjectId | undefined,
+  cwd: string | undefined,
+  provider: ProviderKind | undefined,
+): string | null {
+  if (!projectId || !cwd || !provider) return null;
+  return `${projectId}\0${cwd}\0${provider}`;
+}
+
+export function applyMcpStatusSnapshots(snapshots: ReadonlyArray<IncomingMcpStatusSnapshot>): void {
+  for (const snapshot of snapshots) {
+    const { projectId, cwd } = snapshot;
+    if (!projectId || !cwd) continue;
+    const key = mcpStatusSnapshotKey(projectId, cwd, snapshot.provider);
+    if (!key) continue;
+    mcpStatusSnapshotsByKey.set(key, {
+      provider: snapshot.provider,
+      projectId,
+      cwd,
+      status: snapshot.status,
+      serverNames: snapshot.serverNames,
+      ...(snapshot.refreshing !== undefined ? { refreshing: snapshot.refreshing } : {}),
+      ...(snapshot.servers !== undefined ? { servers: snapshot.servers } : {}),
+      ...(snapshot.updatedAt !== undefined ? { updatedAt: snapshot.updatedAt } : {}),
+      ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
+    });
+  }
+  for (const listener of mcpStatusSnapshotListeners) {
+    listener();
+  }
+}
+
+export function replaceMcpStatusSnapshots(
+  snapshots: ReadonlyArray<IncomingMcpStatusSnapshot>,
+): void {
+  mcpStatusSnapshotsByKey.clear();
+  applyMcpStatusSnapshots(snapshots);
+  if (snapshots.length === 0) {
+    mcpStatusInvalidationRevision++;
+    for (const listener of mcpStatusInvalidationListeners) {
+      listener();
+    }
+  }
+}
+
+export function setMcpStatusSnapshotsForTests(
+  snapshots: ReadonlyArray<ResolvedMcpProviderSnapshot>,
+): void {
+  replaceMcpStatusSnapshots(snapshots);
+}
+
+function subscribeMcpStatusSnapshots(listener: () => void): () => void {
+  mcpStatusSnapshotListeners.add(listener);
+  return () => {
+    mcpStatusSnapshotListeners.delete(listener);
+  };
+}
+
+export function getMcpStatusSnapshot(
+  projectId: ProjectId | undefined,
+  cwd: string | undefined,
+  provider: ProviderKind | undefined,
+): ResolvedMcpProviderSnapshot | null {
+  const key = mcpStatusSnapshotKey(projectId, cwd, provider);
+  return key ? (mcpStatusSnapshotsByKey.get(key) ?? null) : null;
+}
+
+export function useMcpStatusSnapshot(
+  projectId: ProjectId | undefined,
+  cwd: string | undefined,
+  provider: ProviderKind | undefined,
+): ResolvedMcpProviderSnapshot | null {
+  return useSyncExternalStore(
+    subscribeMcpStatusSnapshots,
+    () => getMcpStatusSnapshot(projectId, cwd, provider),
+    () => null,
+  );
+}
+
+function subscribeMcpStatusInvalidationRevision(listener: () => void): () => void {
+  mcpStatusInvalidationListeners.add(listener);
+  return () => {
+    mcpStatusInvalidationListeners.delete(listener);
+  };
+}
+
+function getMcpStatusInvalidationRevisionSnapshot(): number {
+  return mcpStatusInvalidationRevision;
+}
+
+export function useMcpStatusInvalidationRevision(): number {
+  return useSyncExternalStore(
+    subscribeMcpStatusInvalidationRevision,
+    getMcpStatusInvalidationRevisionSnapshot,
+  );
 }
 
 function resolveServerConfig(config: ServerConfig): void {

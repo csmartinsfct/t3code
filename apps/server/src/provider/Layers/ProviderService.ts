@@ -872,6 +872,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
     registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
+  const probeMcpServers: ProviderServiceShape["probeMcpServers"] = Effect.fn("probeMcpServers")(
+    function* (input) {
+      const adapter = yield* registry.getByProvider(input.provider);
+      if (!adapter.probeMcpServers) {
+        return [];
+      }
+      return yield* adapter.probeMcpServers(input);
+    },
+  );
+
   const rollbackConversation: ProviderServiceShape["rollbackConversation"] = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1006,6 +1016,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     stopSession,
     listSessions,
     getCapabilities,
+    probeMcpServers,
     rollbackConversation,
     probeAllRateLimits,
     // Each access creates a fresh PubSub subscription so that multiple

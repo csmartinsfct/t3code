@@ -158,7 +158,7 @@ import {
   resolveSelectableProvider,
 } from "../providerModels";
 import { useManagedRunCompletionToasts } from "../hooks/useManagedRunCompletionToasts";
-import { useMcpServerNames } from "../hooks/useMcpServerNames";
+import { useMcpServers } from "../hooks/useMcpServerNames";
 import { useSkills } from "../hooks/useSkills";
 import { useRehydrateSkillContent } from "../hooks/useRehydrateSkillContent";
 import { useSettings } from "../hooks/useSettings";
@@ -1414,7 +1414,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => (rateLimitEntry ? deriveRateLimitSnapshot(rateLimitEntry) : null),
     [rateLimitEntry],
   );
-  const mcpServerNames = useMcpServerNames(selectedProvider, activeProject?.cwd);
+  const mcpStatusRefreshKey = `${activeThread?.session?.orchestrationStatus ?? "none"}:${
+    activeThread?.session?.updatedAt ?? "never"
+  }`;
+  const mcpServers = useMcpServers({
+    provider: selectedProvider,
+    projectId: activeThread?.projectId,
+    cwd: activeProject?.cwd,
+    refreshKey: mcpStatusRefreshKey,
+  });
   const availableSkills = useSkills(activeProject?.cwd);
   useRehydrateSkillContent(threadId, activeProject?.cwd);
   const attachedSkillIds = useMemo(
@@ -5635,7 +5643,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
                             {isComposerFooterCompact ? (
                               <>
-                                <McpServersPicker serverNames={mcpServerNames} compact />
+                                <McpServersPicker
+                                  status={mcpServers.status}
+                                  refreshing={mcpServers.refreshing}
+                                  serverNames={mcpServers.serverNames}
+                                  servers={mcpServers.servers}
+                                  error={mcpServers.error}
+                                  compact
+                                  onRetry={mcpServers.retry}
+                                />
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}
@@ -5717,7 +5733,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   orientation="vertical"
                                   className="mx-0.5 hidden h-4 sm:block"
                                 />
-                                <McpServersPicker serverNames={mcpServerNames} />
+                                <McpServersPicker
+                                  status={mcpServers.status}
+                                  refreshing={mcpServers.refreshing}
+                                  serverNames={mcpServers.serverNames}
+                                  servers={mcpServers.servers}
+                                  error={mcpServers.error}
+                                  onRetry={mcpServers.retry}
+                                />
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}

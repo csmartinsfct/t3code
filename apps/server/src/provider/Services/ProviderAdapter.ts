@@ -17,6 +17,7 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ResolvedMcpServer,
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
@@ -108,6 +109,15 @@ export interface ProviderAdapterShape<TError> {
    * Check whether this adapter owns an active session id.
    */
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>;
+
+  /**
+   * Probe live MCP server status for a provider/workspace without requiring a
+   * user-visible session, when supported.
+   */
+  readonly probeMcpServers?: (input: {
+    readonly provider: ProviderKind;
+    readonly cwd: string;
+  }) => Effect.Effect<ReadonlyArray<ResolvedMcpServer>, TError>;
 
   /**
    * Read a provider thread snapshot.

@@ -141,6 +141,70 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work log");
   });
 
+  it("renders runtime diagnostics with category-specific labels and icons", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-memory",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-memory",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Memory recall - project",
+              detail: "3 memories - /Users/example/.claude/memory.md (personal)",
+              tone: "info",
+              diagnosticCategory: "memory_recall",
+            },
+          },
+          {
+            id: "entry-mirror",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-mirror",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Session mirror error",
+              detail: "Mirror write failed",
+              tone: "error",
+              diagnosticCategory: "mirror_error",
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Memory recall");
+    expect(markup).toContain("3 memories");
+    expect(markup).toContain("/Users/example/.claude/memory.md");
+    expect(markup).toContain("Mirror error");
+    expect(markup).toContain("Mirror write failed");
+    expect(markup).toContain("lucide-brain");
+    expect(markup).toContain("lucide-circle-alert");
+  });
+
   it("renders terminal reason labels in the completion divider", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

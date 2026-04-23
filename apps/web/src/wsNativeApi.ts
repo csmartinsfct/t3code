@@ -162,7 +162,10 @@ export function createWsNativeApi(): NativeApi {
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
-      resolveMcpServers: rpcClient.server.resolveMcpServers,
+      resolveMcpServers: async (input) =>
+        (await rpcClient.server.resolveMcpServers(
+          input as Parameters<typeof rpcClient.server.resolveMcpServers>[0],
+        )) as Awaited<ReturnType<NativeApi["server"]["resolveMcpServers"]>>,
       resolveCodexProjectTrust: rpcClient.server.resolveCodexProjectTrust,
       trustCodexProject: rpcClient.server.trustCodexProject,
       resolveSkills: rpcClient.server.resolveSkills,

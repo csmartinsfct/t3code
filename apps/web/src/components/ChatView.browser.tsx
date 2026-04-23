@@ -14,6 +14,7 @@ import {
   type OrchestrationStartupSnapshot,
   type OrchestrationThreadContent,
   type ProjectId,
+  type ResolvedMcpServer,
   type ScheduledTaskId,
   type ServerConfig,
   type ServerProvider,
@@ -618,7 +619,7 @@ function materializeThreadInStore(threadId: ThreadId): void {
 }
 
 function installTestNativeApi(input?: {
-  resolveMcpServers?: () => Promise<{ serverNames: readonly string[] }>;
+  resolveMcpServers?: NativeApi["server"]["resolveMcpServers"];
   resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
   confirm?: (message: string) => boolean | Promise<boolean>;
   managedRunsOnEvent?: NativeApi["managedRuns"]["onEvent"];
@@ -663,7 +664,8 @@ function installTestNativeApi(input?: {
     server: {
       ...base.server,
       resolveMcpServers:
-        input?.resolveMcpServers ?? (async () => ({ serverNames: resolvedMcpServerNames })),
+        input?.resolveMcpServers ??
+        (async () => ({ status: "ready", serverNames: resolvedMcpServerNames })),
       resolveSkills: input?.resolveSkills ?? (async () => ({ skills: [] })),
     },
   };
@@ -1110,7 +1112,7 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return fixture.serverConfig;
   }
   if (tag === WS_METHODS.serverResolveMcpServers) {
-    return { serverNames: resolvedMcpServerNames };
+    return { status: "ready", serverNames: resolvedMcpServerNames };
   }
   if (tag === WS_METHODS.serverResolveSkills) {
     return { skills: [] };
@@ -3518,7 +3520,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("renders resolved MCP server names and refreshes them after config changes", async () => {
     // Audit traceability: 623a434, 3dd6391, 03999e7.
     resolvedMcpServerNames = ["Filesystem", "Project Tickets"];
-    const resolveMcpServers = vi.fn(async () => ({ serverNames: resolvedMcpServerNames }));
+    const resolveMcpServers = vi.fn(async (_input: unknown) => ({
+      status: "ready" as const,
+      serverNames: resolvedMcpServerNames,
+    }));
     installTestNativeApi({
       resolveMcpServers,
     });
@@ -3536,6 +3541,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(resolveMcpServers).toHaveBeenCalledTimes(1);
+          expect(resolveMcpServers).toHaveBeenCalledWith(
+            expect.objectContaining({
+              provider: "codex",
+              projectId: PROJECT_ID,
+              cwd: "/repo/project",
+            }),
+          );
+          expect(resolveMcpServers.mock.calls[0]?.[0]).not.toHaveProperty("threadId");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -3572,6 +3585,64 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(text).toContain("Prompt Registry");
         expect(text).not.toContain("Project Tickets");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders live MCP server status grouped by scope when available", async () => {
+    const liveServers: readonly ResolvedMcpServer[] = [
+      {
+        name: "github-personal",
+        status: "connected",
+        scope: "user",
+        toolCount: 41,
+      },
+      {
+        name: "monday",
+        status: "needs-auth",
+        scope: "claudeai",
+      },
+    ];
+    const resolveMcpServers = vi.fn(async (_input: unknown) => ({
+      status: "ready" as const,
+      serverNames: liveServers.map((server) => server.name),
+      servers: liveServers,
+    }));
+    installTestNativeApi({
+      resolveMcpServers,
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mcp-live-status-target" as MessageId,
+        targetText: "mcp live status target",
+      }),
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const mcpButton = await waitForMcpServersButton();
+
+      await vi.waitFor(
+        () => {
+          expect(resolveMcpServers).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      mcpButton.click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("MCP Servers");
+        expect(text).toContain("github-personal");
+        expect(text).toContain("monday");
+        expect(text).toContain("needs-auth");
+        expect(text).toContain("user");
+        expect(text).toContain("claudeai");
+      });
+      expect(document.querySelector('[title*="41 tools"]')).not.toBeNull();
     } finally {
       await mounted.cleanup();
     }

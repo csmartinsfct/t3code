@@ -67,6 +67,7 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  diagnosticCategory?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -559,6 +560,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const command = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
+  const diagnosticCategory = extractDiagnosticCategory(activity, payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
@@ -572,6 +574,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     const detail = stripTrailingExitCode(payload.detail).output;
     if (detail) {
       entry.detail = detail;
+    }
+  }
+  if (diagnosticCategory) {
+    const diagnosticDetail = extractDiagnosticDetail(diagnosticCategory, payload, entry.detail);
+    if (diagnosticDetail) {
+      entry.detail = diagnosticDetail;
     }
   }
   if (command) {
@@ -588,6 +596,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (requestKind) {
     entry.requestKind = requestKind;
+  }
+  if (diagnosticCategory) {
+    entry.diagnosticCategory = diagnosticCategory;
   }
   const collapseKey = deriveWorkLogCollapseKey(entry, payload);
   if (collapseKey) {
@@ -647,6 +658,7 @@ function mergeDerivedWorkLogEntries(
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
+  const diagnosticCategory = next.diagnosticCategory ?? previous.diagnosticCategory;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   return {
     ...previous,
@@ -657,6 +669,7 @@ function mergeDerivedWorkLogEntries(
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
+    ...(diagnosticCategory ? { diagnosticCategory } : {}),
     ...(collapseKey ? { collapseKey } : {}),
   };
 }
@@ -795,6 +808,113 @@ function extractWorkLogRequestKind(
     return payload.requestKind;
   }
   return requestKindFromRequestType(payload?.requestType) ?? undefined;
+}
+
+function extractDiagnosticCategory(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+): string | undefined {
+  if (!activity.kind.startsWith("runtime.diagnostic.")) {
+    return undefined;
+  }
+  const category =
+    typeof payload?.category === "string"
+      ? payload.category.trim()
+      : activity.kind.slice("runtime.diagnostic.".length);
+  return category.length > 0 ? category : undefined;
+}
+
+function extractDiagnosticDetail(
+  category: string,
+  payload: Record<string, unknown> | null,
+  fallback: string | undefined,
+): string | undefined {
+  switch (category) {
+    case "memory_recall":
+      return formatMemoryRecallDetail(payload, fallback);
+    case "plugin_install":
+      return formatPluginInstallDetail(payload, fallback);
+    case "notification":
+      return formatNotificationDetail(payload, fallback);
+    default:
+      return fallback;
+  }
+}
+
+function formatMemoryRecallDetail(
+  payload: Record<string, unknown> | null,
+  fallback: string | undefined,
+): string | undefined {
+  const data = asRecord(payload?.data);
+  const mode = asTrimmedString(data?.mode);
+  const memories = Array.isArray(data?.memories) ? data.memories : [];
+  const memorySummaries = memories
+    .map((entry) => formatMemoryRecallEntry(asRecord(entry)))
+    .filter((entry): entry is string => Boolean(entry));
+  const uniqueSummaries = [...new Set(memorySummaries)];
+  const visibleSummaries = uniqueSummaries.slice(0, 3);
+  const extraCount = uniqueSummaries.length - visibleSummaries.length;
+  const metadataParts = [
+    mode ? `mode:${mode}` : null,
+    visibleSummaries.length > 0
+      ? `${visibleSummaries.join(", ")}${extraCount > 0 ? ` +${extraCount} more` : ""}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  if (metadataParts.length === 0) {
+    return fallback;
+  }
+  return fallback ? `${fallback} - ${metadataParts.join(" - ")}` : metadataParts.join(" - ");
+}
+
+function formatMemoryRecallEntry(memory: Record<string, unknown> | null): string | null {
+  if (!memory) {
+    return null;
+  }
+  const path = asTrimmedString(memory.path);
+  const scope = asTrimmedString(memory.scope);
+  const content = asTrimmedString(memory.content);
+  const label = path ?? (scope ? `scope:${scope}` : null);
+  const scopedLabel = label && scope && path ? `${label} (${scope})` : label;
+  if (content && scopedLabel) {
+    return `${scopedLabel}: ${compactSingleLine(content, 140)}`;
+  }
+  return scopedLabel ?? (content ? compactSingleLine(content, 140) : null);
+}
+
+function formatPluginInstallDetail(
+  payload: Record<string, unknown> | null,
+  fallback: string | undefined,
+): string | undefined {
+  if (fallback) {
+    return fallback;
+  }
+  const data = asRecord(payload?.data);
+  const name = asTrimmedString(data?.name);
+  const status = asTrimmedString(data?.status);
+  const parts = [name, status].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" - ") : undefined;
+}
+
+function formatNotificationDetail(
+  payload: Record<string, unknown> | null,
+  fallback: string | undefined,
+): string | undefined {
+  const data = asRecord(payload?.data);
+  const priority = asTrimmedString(data?.priority);
+  if (!priority || !fallback) {
+    return fallback;
+  }
+  return fallback.toLocaleLowerCase().includes(priority.toLocaleLowerCase())
+    ? fallback
+    : `${fallback} - ${priority}`;
+}
+
+function compactSingleLine(value: string, limit: number): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= limit) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(0, limit - 1)).trimEnd()}...`;
 }
 
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {

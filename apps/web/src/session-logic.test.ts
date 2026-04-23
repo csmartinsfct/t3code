@@ -670,6 +670,99 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.detail).toBe("quality-gate\nlint failed\nExit code 1");
   });
 
+  it("keeps runtime diagnostics visible in the work log with useful metadata", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plugin-install",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.diagnostic.plugin_install",
+        summary: "Plugin github-personal completed",
+        tone: "info",
+        payload: {
+          category: "plugin_install",
+          data: { name: "github-personal", status: "completed" },
+        },
+      }),
+      makeActivity({
+        id: "mirror-error",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "runtime.diagnostic.mirror_error",
+        summary: "Session mirror error",
+        tone: "error",
+        payload: {
+          category: "mirror_error",
+          detail: "Mirror write failed",
+        },
+      }),
+      makeActivity({
+        id: "notification",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "runtime.diagnostic.notification",
+        summary: "Claude notification",
+        tone: "info",
+        payload: {
+          category: "notification",
+          detail: "Login required",
+          data: { priority: "high" },
+        },
+      }),
+      makeActivity({
+        id: "memory-recall",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "runtime.diagnostic.memory_recall",
+        summary: "Memory recall - project",
+        tone: "info",
+        payload: {
+          category: "memory_recall",
+          detail: "3 memories",
+          data: {
+            mode: "synthesize",
+            memories: [
+              {
+                content: "Use the local dev server from the worktree.",
+                path: "/Users/example/.claude/memory.md",
+                scope: "personal",
+              },
+              {
+                path: "/repo/.claude/memory.md",
+                scope: "team",
+              },
+              {
+                content: "Prefer concise ticket comments.",
+                path: "<synthesis:/repo>",
+                scope: "team",
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "plugin-install",
+      "mirror-error",
+      "notification",
+      "memory-recall",
+    ]);
+    expect(entries.map((entry) => entry.diagnosticCategory)).toEqual([
+      "plugin_install",
+      "mirror_error",
+      "notification",
+      "memory_recall",
+    ]);
+    expect(entries.find((entry) => entry.id === "mirror-error")?.tone).toBe("error");
+    expect(entries.find((entry) => entry.id === "plugin-install")?.detail).toBe(
+      "github-personal - completed",
+    );
+    expect(entries.find((entry) => entry.id === "notification")?.detail).toBe(
+      "Login required - high",
+    );
+    expect(entries.find((entry) => entry.id === "memory-recall")?.detail).toBe(
+      "3 memories - mode:synthesize - /Users/example/.claude/memory.md (personal): Use the local dev server from the worktree., /repo/.claude/memory.md (team), <synthesis:/repo> (team): Prefer concise ticket comments.",
+    );
+  });
+
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),

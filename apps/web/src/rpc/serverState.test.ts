@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyServerConfigEvent,
+  getMcpStatusSnapshot,
   getServerConfig,
   onProvidersUpdated,
   onServerConfigUpdated,
@@ -401,5 +402,75 @@ describe("serverState", () => {
     expect(selectProviderRateLimitSnapshot(snapshots, "codex:metric" as never)).toBe(snapshots[1]);
     expect(selectProviderRateLimitSnapshot([snapshots[0]!], "codex:metric" as never)).toBeNull();
     expect(selectProviderRateLimitSnapshot([snapshots[1]!], "codex")).toBeNull();
+  });
+
+  it("stores project-scoped MCP status snapshots from config stream events", () => {
+    const projectId = "project-1" as never;
+    applyServerConfigEvent({
+      version: 1,
+      type: "mcpStatusUpdated",
+      payload: {
+        snapshots: [
+          {
+            provider: "claudeAgent:design" as never,
+            projectId,
+            cwd: "/tmp/project",
+            status: "ready",
+            refreshing: false,
+            serverNames: ["github-personal"],
+            servers: [
+              {
+                name: "github-personal",
+                status: "connected",
+                scope: "user",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(
+      getMcpStatusSnapshot(projectId, "/tmp/project", "claudeAgent:design" as never),
+    ).toMatchObject({
+      provider: "claudeAgent:design",
+      status: "ready",
+      serverNames: ["github-personal"],
+    });
+  });
+
+  it("clears stale MCP status snapshots when the server publishes an empty full snapshot", () => {
+    const projectId = "project-1" as never;
+    applyServerConfigEvent({
+      version: 1,
+      type: "mcpStatusUpdated",
+      payload: {
+        snapshots: [
+          {
+            provider: "claudeAgent:design" as never,
+            projectId,
+            cwd: "/tmp/project",
+            status: "ready",
+            serverNames: ["github-personal"],
+          },
+        ],
+      },
+    });
+
+    expect(
+      getMcpStatusSnapshot(projectId, "/tmp/project", "claudeAgent:design" as never),
+    ).not.toBeNull();
+
+    applyServerConfigEvent({
+      version: 1,
+      type: "mcpStatusUpdated",
+      payload: {
+        snapshots: [],
+      },
+    });
+
+    expect(
+      getMcpStatusSnapshot(projectId, "/tmp/project", "claudeAgent:design" as never),
+    ).toBeNull();
   });
 });

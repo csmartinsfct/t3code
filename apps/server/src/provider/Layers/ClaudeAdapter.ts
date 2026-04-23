@@ -8,7 +8,9 @@
  */
 import {
   type CanUseTool,
+  type McpServerStatus,
   query,
+  startup,
   type SDKControlGetContextUsageResponse,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -18,12 +20,14 @@ import {
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
+  type WarmQuery,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
   asProviderInput,
   baseProviderKind,
   type ProviderRateLimitInfo,
+  type ProviderKind,
   makeProviderKind,
   type CanonicalItemType,
   type ClaudeModelSelection,
@@ -43,6 +47,7 @@ import {
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
+  type ResolvedMcpServer,
   ThreadId,
   TurnId,
   type UserInputQuestion,
@@ -195,11 +200,46 @@ interface ClaudeSessionContext {
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly interrupt: () => Promise<void>;
+  readonly initializationResult?: () => Promise<unknown>;
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
+  readonly mcpServerStatus?: () => Promise<McpServerStatus[]>;
   readonly close: () => void;
+}
+
+function normalizeClaudeMcpServerStatus(server: McpServerStatus): ResolvedMcpServer {
+  const tools = Array.isArray(server.tools)
+    ? server.tools
+        .filter((tool) => typeof tool.name === "string" && tool.name.trim().length > 0)
+        .map((tool) => {
+          const normalized: {
+            name: string;
+            description?: string;
+            annotations?: unknown;
+          } = {
+            name: tool.name.trim(),
+          };
+          if (typeof tool.description === "string") {
+            normalized.description = tool.description;
+          }
+          if (tool.annotations !== undefined) {
+            normalized.annotations = tool.annotations;
+          }
+          return normalized;
+        })
+    : undefined;
+
+  return {
+    name: server.name,
+    status: server.status,
+    ...(server.scope ? { scope: server.scope } : {}),
+    ...(server.error ? { error: server.error } : {}),
+    ...(tools ? { toolCount: tools.length, tools } : {}),
+    ...(server.serverInfo !== undefined ? { serverInfo: server.serverInfo } : {}),
+    ...(server.config !== undefined ? { config: server.config } : {}),
+  };
 }
 
 export interface ClaudeAdapterLiveOptions {
@@ -836,6 +876,22 @@ const resolveClaudeCodeExecutableOption = (binaryPath: string): string | undefin
   const normalized = binaryPath.trim();
   return normalized && normalized !== DEFAULT_CLAUDE_BINARY_PATH ? normalized : undefined;
 };
+
+function resolveClaudeConfigDir(input: {
+  readonly provider?: ProviderKind;
+  readonly configuredBaseDir?: string;
+  readonly profiles: ReadonlyArray<{ readonly profileId: string; readonly configDir: string }>;
+}): string | undefined {
+  const profileId = input.provider?.includes(":")
+    ? input.provider.slice(input.provider.indexOf(":") + 1)
+    : undefined;
+  if (!profileId) {
+    return input.configuredBaseDir || undefined;
+  }
+
+  const configuredProfile = input.profiles.find((p) => p.profileId === profileId);
+  return configuredProfile?.configDir || path.join(os.homedir(), `.claude-${profileId}`);
+}
 
 function buildPromptText(input: ProviderSendTurnInput): string {
   const claudeSel =
@@ -1645,6 +1701,36 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       payload: {
         message,
         ...(detail !== undefined ? { detail } : {}),
+      },
+      providerRefs: nativeProviderRefs(context),
+    });
+  });
+
+  const emitRuntimeDiagnostic = Effect.fn("emitRuntimeDiagnostic")(function* (
+    context: ClaudeSessionContext,
+    input: {
+      category: string;
+      summary: string;
+      detail?: string | undefined;
+      tone?: "info" | "error" | undefined;
+      data?: unknown;
+    },
+  ) {
+    const turnState = context.turnState;
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "runtime.diagnostic",
+      eventId: stamp.eventId,
+      provider: context.session.provider,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(turnState ? { turnId: asCanonicalTurnId(turnState.turnId) } : {}),
+      payload: {
+        category: input.category,
+        summary: input.summary,
+        ...(input.detail ? { detail: input.detail } : {}),
+        ...(input.tone ? { tone: input.tone } : {}),
+        ...(input.data !== undefined ? { data: input.data } : {}),
       },
       providerRefs: nativeProviderRefs(context),
     });
@@ -2548,6 +2634,87 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         });
         return;
+      case "memory_recall": {
+        const raw = message as Record<string, unknown>;
+        const mode = safeString(raw.mode) ?? "memory";
+        const memories = Array.isArray(raw.memories)
+          ? raw.memories
+              .filter((memory): memory is Record<string, unknown> =>
+                Boolean(memory && typeof memory === "object"),
+              )
+              .map((memory) => {
+                const path = safeString(memory.path);
+                const scope = safeString(memory.scope);
+                const content = safeString(memory.content);
+                const normalized: { path?: string; scope?: string; content?: string } = {};
+                if (path) normalized.path = path;
+                if (scope) normalized.scope = scope;
+                if (content) normalized.content = content;
+                return normalized;
+              })
+          : [];
+        yield* emitRuntimeDiagnostic(context, {
+          category: "memory_recall",
+          summary: `Memory recall - ${mode}`,
+          detail:
+            memories.length === 1
+              ? "1 memory"
+              : memories.length > 1
+                ? `${memories.length} memories`
+                : undefined,
+          data: { mode, memories },
+        });
+        return;
+      }
+      case "notification": {
+        const raw = message as Record<string, unknown>;
+        const priority = safeString(raw.priority);
+        if (priority !== "high" && priority !== "immediate") {
+          return;
+        }
+        const text = safeString(raw.text) ?? "Claude notification";
+        yield* emitRuntimeDiagnostic(context, {
+          category: "notification",
+          summary: "Claude notification",
+          detail: text,
+          data: {
+            ...(safeString(raw.key) ? { key: safeString(raw.key) } : {}),
+            priority,
+            ...(safeString(raw.color) ? { color: safeString(raw.color) } : {}),
+          },
+        });
+        return;
+      }
+      case "plugin_install": {
+        const raw = message as Record<string, unknown>;
+        const status = safeString(raw.status) ?? "updated";
+        const name = safeString(raw.name);
+        const error = safeString(raw.error);
+        yield* emitRuntimeDiagnostic(context, {
+          category: "plugin_install",
+          summary: name ? `Plugin ${name} ${status}` : `Plugin install ${status}`,
+          ...(error ? { detail: error } : {}),
+          tone: status === "failed" ? "error" : "info",
+          data: {
+            status,
+            ...(name ? { name } : {}),
+            ...(error ? { error } : {}),
+          },
+        });
+        return;
+      }
+      case "mirror_error": {
+        const raw = message as Record<string, unknown>;
+        const error = safeString(raw.error) ?? "Claude session mirror error";
+        yield* emitRuntimeDiagnostic(context, {
+          category: "mirror_error",
+          summary: "Session mirror error",
+          detail: error,
+          tone: "error",
+          data: raw,
+        });
+        return;
+      }
       default:
         yield* emitRuntimeWarning(
           context,
@@ -3369,20 +3536,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? (input.modelSelection as { profileId?: string }).profileId
           : undefined;
       const effectiveProfileId = inputProviderProfileId ?? modelSelectionProfileId;
-      let configDir: string | undefined;
-      if (effectiveProfileId) {
-        // Check explicitly configured profiles first
-        const configuredProfile = allSettings.providers.claudeProfiles.find(
-          (p) => p.profileId === effectiveProfileId,
-        );
-        configDir = configuredProfile?.configDir;
-        // Fall back to convention: ~/.claude-{profileId}
-        if (!configDir) {
-          configDir = path.join(os.homedir(), `.claude-${effectiveProfileId}`);
-        }
-      } else {
-        configDir = claudeSettings.configDir || undefined;
-      }
+      const configDir = resolveClaudeConfigDir({
+        ...(effectiveProfileId ? { provider: makeProviderKind(PROVIDER, effectiveProfileId) } : {}),
+        configuredBaseDir: claudeSettings.configDir,
+        profiles: allSettings.providers.claudeProfiles,
+      });
 
       const claudeBinaryPath = resolveClaudeCodeExecutableOption(claudeSettings.binaryPath);
       const modelSelection =
@@ -3861,6 +4019,108 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return context !== undefined && !context.stopped;
     });
 
+  const probeMcpServers: NonNullable<ClaudeAdapterShape["probeMcpServers"]> = Effect.fn(
+    "probeMcpServers",
+  )(function* (input) {
+    const activeContext = Array.from(sessions.values()).find(
+      (context) =>
+        !context.stopped &&
+        context.session.status !== "closed" &&
+        context.session.provider === input.provider &&
+        context.session.cwd === input.cwd &&
+        context.query.mcpServerStatus,
+    );
+    if (activeContext?.query.mcpServerStatus) {
+      const servers = yield* Effect.tryPromise({
+        try: () => activeContext.query.mcpServerStatus!(),
+        catch: (cause) => toRequestError(activeContext.session.threadId, "mcp/status", cause),
+      });
+      return servers.map(normalizeClaudeMcpServerStatus);
+    }
+
+    const probeThreadId = ThreadId.makeUnsafe("__mcp_status_probe__");
+    const allSettings = yield* serverSettingsService.getSettings.pipe(
+      Effect.mapError(
+        (error) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: probeThreadId,
+            detail: error.message,
+            cause: error,
+          }),
+      ),
+    );
+    const claudeSettings = allSettings.providers.claudeAgent;
+    const configDir = resolveClaudeConfigDir({
+      provider: input.provider,
+      configuredBaseDir: claudeSettings.configDir,
+      profiles: allSettings.providers.claudeProfiles,
+    });
+    const claudeBinaryPath = resolveClaudeCodeExecutableOption(claudeSettings.binaryPath);
+    const abortController = new AbortController();
+
+    const idlePrompt: AsyncIterable<SDKUserMessage> = {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => {
+          await new Promise<void>((resolve) => {
+            if (abortController.signal.aborted) {
+              resolve();
+              return;
+            }
+            abortController.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+
+    const queryOptions: ClaudeQueryOptions = {
+      cwd: input.cwd,
+      ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
+      settingSources: [...CLAUDE_SETTING_SOURCES],
+      env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : process.env,
+      additionalDirectories: [input.cwd],
+      persistSession: false,
+      abortController,
+    };
+
+    let warmQuery: WarmQuery | undefined;
+    let runtime: ClaudeQueryRuntime | undefined;
+    return yield* Effect.tryPromise({
+      try: async () => {
+        warmQuery = await startup({
+          options: queryOptions,
+        });
+        runtime = warmQuery.query(idlePrompt);
+        if (runtime.initializationResult) {
+          await runtime.initializationResult();
+        }
+        if (!runtime.mcpServerStatus) {
+          return [];
+        }
+        const servers = await runtime.mcpServerStatus();
+        return servers.map(normalizeClaudeMcpServerStatus);
+      },
+      catch: (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "mcp/status",
+          detail: toMessage(cause, "mcp/status failed"),
+          cause,
+        }),
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          abortController.abort();
+          runtime?.close();
+          warmQuery?.close();
+        }),
+      ),
+    );
+  });
+
   const stopAll: ClaudeAdapterShape["stopAll"] = () =>
     Effect.forEach(
       sessions,
@@ -4026,6 +4286,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    probeMcpServers,
     stopAll,
     probeRateLimits,
     streamEvents: Stream.fromQueue(runtimeEventQueue),

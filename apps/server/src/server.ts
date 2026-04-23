@@ -44,6 +44,7 @@ import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderComma
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { ProviderRateLimitsCacheLive } from "./provider/Layers/ProviderRateLimitsCache";
+import { ProviderMcpStatusCacheLive } from "./provider/Layers/ProviderMcpStatusCache";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
 import { RepoDiscoveryLive } from "./workspace/Layers/RepoDiscovery";
@@ -295,6 +296,7 @@ const RuntimeCoreServicesLive = Layer.empty.pipe(
 
 const RuntimeServicesLive = Layer.mergeAll(
   RuntimeCoreServicesLive,
+  ProviderMcpStatusCacheLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
   PromptManagementLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
   SessionRestartServiceLive.pipe(Layer.provide(RuntimeCoreServicesLive)),
 );

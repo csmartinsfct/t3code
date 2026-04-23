@@ -190,6 +190,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "config.warning",
   "deprecation.notice",
   "files.persisted",
+  "runtime.diagnostic",
   "runtime.warning",
   "runtime.error",
 ]);
@@ -240,6 +241,7 @@ const ModelReroutedType = Schema.Literal("model.rerouted");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
+const RuntimeDiagnosticType = Schema.Literal("runtime.diagnostic");
 const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
 
@@ -735,6 +737,15 @@ const RuntimeWarningPayload = Schema.Struct({
 });
 export type RuntimeWarningPayload = typeof RuntimeWarningPayload.Type;
 
+const RuntimeDiagnosticPayload = Schema.Struct({
+  category: TrimmedNonEmptyStringSchema,
+  summary: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(Schema.String),
+  tone: Schema.optional(Schema.Literals(["info", "error"])),
+  data: Schema.optional(Schema.Unknown),
+});
+export type RuntimeDiagnosticPayload = typeof RuntimeDiagnosticPayload.Type;
+
 const RuntimeErrorPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
   class: Schema.optional(RuntimeErrorClass),
@@ -1081,6 +1092,13 @@ const ProviderRuntimeWarningEvent = Schema.Struct({
 });
 export type ProviderRuntimeWarningEvent = typeof ProviderRuntimeWarningEvent.Type;
 
+const ProviderRuntimeDiagnosticEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: RuntimeDiagnosticType,
+  payload: RuntimeDiagnosticPayload,
+});
+export type ProviderRuntimeDiagnosticEvent = typeof ProviderRuntimeDiagnosticEvent.Type;
+
 const ProviderRuntimeErrorEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: RuntimeErrorType,
@@ -1134,6 +1152,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,
+  ProviderRuntimeDiagnosticEvent,
   ProviderRuntimeWarningEvent,
   ProviderRuntimeErrorEvent,
 ]);
