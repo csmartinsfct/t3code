@@ -814,6 +814,7 @@ export function KanbanTicketDetail({
     try {
       const api = ensureNativeApi();
       await api.ticketing.delete({ id: ticketId });
+      setDeleteDialogOpen(false);
       onBack();
     } catch (error) {
       console.error("Failed to delete ticket:", error);
@@ -824,6 +825,7 @@ export function KanbanTicketDetail({
     try {
       const api = ensureNativeApi();
       await api.ticketing.archive({ id: ticketId });
+      setArchiveDialogOpen(false);
       onBack();
     } catch (error) {
       console.error("Failed to archive ticket:", error);

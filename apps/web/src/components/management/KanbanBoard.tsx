@@ -963,6 +963,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         />
       ) : selectedTicketId ? (
         <KanbanTicketDetail
+          key={selectedTicketId}
           ticketId={selectedTicketId}
           projectId={projectId}
           onBack={handleBack}

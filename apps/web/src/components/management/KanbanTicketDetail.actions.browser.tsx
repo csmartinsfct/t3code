@@ -406,3 +406,47 @@ describe("KanbanTicketDetail move-to-board actions", () => {
     });
   });
 });
+
+describe("KanbanTicketDetail delete dialog", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    selectionStoreState.selectedTicketIds = new Set();
+    selectionStoreState.selectedTickets = new Map();
+    document.body.innerHTML = "";
+  });
+
+  // Regression: deleting a sub-ticket previously left `deleteDialogOpen=true` after
+  // `onBack()`, so when the parent detail re-rendered the confirmation dialog
+  // immediately reopened on the parent and a second click would delete it.
+  it("closes the confirmation dialog after a successful delete", async () => {
+    await using mounted = await mountDetail({
+      tickets: [
+        makeTicket({
+          id: "child-ticket" as Ticket["id"],
+          parentId: "parent-ticket" as Ticket["id"],
+          identifier: "T3CO-301",
+          title: "Child ticket to delete",
+        }),
+      ],
+    });
+
+    await page.getByRole("button", { name: "Ticket actions" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Delete ticket?");
+    });
+
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+
+    await vi.waitFor(() => {
+      expect(mockDelete).toHaveBeenCalledWith({ id: "child-ticket" });
+    });
+    await vi.waitFor(() => {
+      expect(mounted.onBack).toHaveBeenCalledTimes(1);
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").not.toContain("Delete ticket?");
+    });
+  });
+});
