@@ -135,28 +135,36 @@ describe("PromptsPanel browser coverage", () => {
         })),
         updateDocument: vi.fn(async () => globalStates.implement),
       },
+      orchestration: {
+        listRuns: vi.fn(async () => []),
+      },
     } as unknown as NativeApi;
 
     const screen = await render(<PromptsPanel />);
 
     try {
       await expect.element(page.getByRole("heading", { name: "Implement" })).toBeInTheDocument();
-      await expect.element(page.getByText("Default")).toBeInTheDocument();
+      await expect.element(page.getByText("Default").first()).toBeInTheDocument();
       await expect.element(page.getByText("Customized")).toBeInTheDocument();
 
       await page.getByLabelText("Prompt scope").click();
       await page.getByRole("option", { name: "Project Alpha", exact: true }).click();
 
       await vi.waitFor(() => {
-        expect(listDefinitionsSpy).toHaveBeenCalledWith({
+        expect(getDocumentSpy).toHaveBeenCalledWith({
           scope: "project",
           projectId: PROMPTS_PROJECT_ID,
+          promptId: "review",
         });
       });
       await expect.element(page.getByText("Inherited")).toBeInTheDocument();
       await expect.element(page.getByText("Overridden")).toBeInTheDocument();
+      await expect.element(page.getByRole("heading", { name: "Dynamic UI" })).toBeInTheDocument();
+      await expect
+        .element(page.getByRole("heading", { name: "Builder Prompt" }))
+        .toBeInTheDocument();
 
-      await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+      await page.getByRole("button", { name: "Edit", exact: true }).nth(2).click();
 
       await expect.element(page.getByRole("heading", { name: "Implement" })).toBeInTheDocument();
       await expect.element(page.getByRole("button", { name: "Cancel" })).toBeInTheDocument();

@@ -865,12 +865,102 @@ Also applies to switches: `data-disabled:cursor-not-allowed data-disabled:opacit
 
 ---
 
-## 12. Anti-Patterns
+## 12. Dynamic Chat UI Artifacts
+
+Dynamic chat UI artifacts are experimental, highly interactive responses rendered inline in the chat timeline. They are generated as durable assistant message metadata, referenced by a small `t3:dynamic-chat-ui` marker block, and displayed in a sandboxed iframe.
+
+This file is the shipped Dynamic UI design guide. Settings -> Prompts -> Dynamic UI can store `settings.dynamicChatUi.designGuideOverride`; when present, the hidden builder uses that override instead of this file. The same section also exposes the builder prompt wrapper via `settings.dynamicChatUi.builderPromptOverride`. Resetting either setting returns generation to the shipped original.
+
+### Chat Constraints
+
+- The artifact container must be `width: 100%`, `min-width: 0`, and `max-width: 800px`.
+- The chat column can resize; generated UI must remain usable at roughly 320px, 520px, and 800px widths.
+- Use compact, card-like layouts. Avoid full-page app shells, heroes, and large whitespace.
+- Prefer one primary interactive region per artifact: a table, simulator, chart panel, or tabbed explorer.
+- Dense tables may scroll horizontally inside the artifact, but the chat timeline itself must not gain horizontal overflow.
+- The default height should be useful without being huge. Artifacts may request height via the iframe bridge, but the host caps inline height.
+- Artifact source lives in assistant message metadata (`dynamicChatUiArtifacts`) so marker blocks stay compact and generated HTML cannot break markdown fences. Legacy full-HTML marker blocks are still supported as a fallback.
+
+### Allowed Artifact Shapes
+
+Good candidates:
+
+- Responsive data tables with sticky or compact headers.
+- Simulation cards with sliders, numeric inputs, and computed values.
+- Tabbed chart cards with line, bar, or area charts.
+- Weighted decision matrices.
+- Pricing or model-cost calculators.
+- Benchmark explorers.
+- Incident or migration timelines.
+- API response explorers.
+- Risk/scenario simulators.
+
+### Runtime Expectations
+
+- Generated HTML/JS runs inside an iframe with script execution enabled.
+- Do not assume same-origin access to the parent app.
+- The iframe host injects T3 color variables for generated HTML:
+  - Neutral surfaces: `--t3-background`, `--t3-card`, `--t3-muted`, `--t3-border`
+  - Text: `--t3-foreground`, `--t3-muted-foreground`
+  - Accents/status: `--t3-primary`, `--t3-info`, `--t3-success`, `--t3-warning`, `--t3-destructive`
+- Use neutral surfaces for panels and cards: transparent, `var(--t3-card)`, or `var(--t3-muted)`. Do not create blue, slate, navy, indigo, or tinted "ops dashboard" backgrounds.
+- Reserve status colors for narrow accents, badges, dots, chart lines, and critical markers. Never wash full cards or sections with status color.
+- Use `window.t3ChatUi.postHeight(height)` when custom sizing is needed.
+- Use `window.t3ChatUi.emit(name, payload)` for future host-visible events.
+- Height changes must be announced through the bridge so the virtualized chat timeline can remeasure the row without scroll jumps.
+- Keep external network access out of generated artifacts unless a later explicit setting allows it.
+- Bundle or inline all styles required for the artifact. The iframe does not inherit Tailwind classes from the parent document.
+- Match T3 Code visually by using compact spacing, subtle borders, restrained shadows, semantic-looking status colors, and the typography guidance in this document.
+
+### Experimental Limits
+
+- Network access: generated artifacts must not fetch remote scripts, fonts, images, stylesheets, or data. Inline all CSS, JS, SVG, and sample data.
+- Imports: do not use React, JSX, module imports, CDNs, Tailwind runtime classes, or external UI libraries. Use native DOM, SVG, and canvas.
+- Bundle size: keep `html` under 400,000 characters. Prefer small focused artifacts; avoid embedding large datasets or generated libraries.
+- Height: choose `initialHeight` close to the expected first render. The chat wrapper measures the iframe content and lets it grow or shrink to fit; do not rely on a fixed cap.
+- Size artifacts to their actual content. Do not use `height: 100vh`, `min-height: 100vh`, `100dvh`, or full-screen spacer roots inside chat artifacts; those make the iframe reserve blank space below the UI.
+- Do not inflate `initialHeight` or add hidden spacer elements to create visual breathing room.
+- Timeouts: generated code must initialize quickly and should avoid long synchronous loops, large animation workloads, polling, or timers that run continuously.
+- Safety posture: this path is intentionally unsafe and experimental, but artifacts still run in a sandboxed iframe and should communicate only through the `window.t3ChatUi` bridge.
+
+### Fenced Block Format
+
+````
+```t3:dynamic-chat-ui
+{
+  "version": 1,
+  "id": "pricing-simulator",
+  "title": "Pricing simulator",
+  "description": "Adjust usage and margin assumptions.",
+  "initialHeight": 360,
+  "maxHeight": 700,
+  "html": "<!doctype html><html>...</html>"
+}
+```
+````
+
+### Builder API
+
+Agents can call `/api/dynamic-chat-ui`:
+
+- `create_dynamic_chat_ui_from_prompt` accepts a natural-language UI request plus required `title` and `description`, optional `data`/`context`, loads this design guide, calls the configured secondary model, and inserts the generated artifact directly into the chat timeline.
+- `description` must briefly describe what is being built because it appears in the generating timeline card before the hidden builder finishes.
+- While generation runs, T3 inserts a compact pending message and replaces that same timeline item with the final iframe artifact on success or a short failure note on error.
+- The calling agent receives a compact success payload. It should not echo HTML, JSON, or `t3:dynamic-chat-ui` blocks back to the user.
+
+The low-level HTML validation and block serialization path is intentionally internal. The chat agent should describe the desired interface and data to the builder instead of hand-authoring artifact HTML.
+
+For revisions, the same tool accepts `sourceArtifactId` and optional `sourceMessageId`. T3 resolves the prior artifact from the current thread, resumes the hidden builder session keyed to that artifact when possible, and asks the builder for a complete replacement artifact. The parent chat agent should describe the requested change in `prompt`; it should not paste the old HTML back into the request.
+
+---
+
+## 13. Anti-Patterns
 
 **Do NOT**:
 
 - Use `rounded-full` on cards or containers (only for avatars, switch thumbs, and pill indicators).
 - Use gradient backgrounds on panels, cards, or sections.
+- Use blue/slate/navy/indigo tinted backgrounds for panels or dashboard cards; T3 surfaces are neutral, with color reserved for accents.
 - Add noise/grain textures — the global `body::after` overlay handles it.
 - Use `framer-motion`, `motion`, or any JavaScript animation library.
 - Use solid opaque borders like `border-gray-200` — always use `border-border` (semi-transparent).

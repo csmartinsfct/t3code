@@ -1486,6 +1486,12 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           (appendDeveloperInstructions ? "\n\n" : "") +
           checkpointContext.value.systemPrompt;
       }
+      if (input.systemPrompt) {
+        appendDeveloperInstructions =
+          (appendDeveloperInstructions ?? "") +
+          (appendDeveloperInstructions ? "\n\n" : "") +
+          input.systemPrompt;
+      }
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: requestedProvider,

@@ -20,9 +20,11 @@ describe("ProviderSessionStartInput", () => {
           fastMode: true,
         },
       },
+      systemPrompt: "Build only the requested inline UI artifact.",
       runtimeMode: "full-access",
     });
     expect(parsed.runtimeMode).toBe("full-access");
+    expect(parsed.systemPrompt).toBe("Build only the requested inline UI artifact.");
     expect(parsed.modelSelection?.provider).toBe("codex");
     expect(parsed.modelSelection?.model).toBe("gpt-5.3-codex");
     if (parsed.modelSelection?.provider !== "codex") {

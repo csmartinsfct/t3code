@@ -1,6 +1,6 @@
 # T3 Agent Tools
 
-How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, browser automation, prompt management, and session restart) to AI provider sessions.
+How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, browser automation, Dynamic Chat UI, prompt management, and session restart) to AI provider sessions.
 
 ## Overview
 
@@ -13,6 +13,7 @@ T3 Code exposes several internal REST API services that AI models can use during
 | Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                                                                                                                          |
 | Browser         | `/api/browser`         | 58    | Per-project browser automation with plaintext output and stable @ref element IDs. Defaults to Playwright headless Chromium; desktop projects that mount the embedded browser route to Electron `WebContentsView` through the CDP broker — see [browser-tools.md](browser-tools.md). |
 | Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                                                                                                                         |
+| Dynamic Chat UI | `/api/dynamic-chat-ui` | 1     | Generate experimental self-contained chat UI artifacts and insert them directly into the timeline through sandboxed iframes. See [dynamic-chat-ui.md](dynamic-chat-ui.md).                                                                                                          |
 | Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                                                                                                                |
 
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
@@ -39,7 +40,7 @@ sessions, so repo-local MCP config works without any manual terminal setup.
 
 ## Delivery Path: REST via Shell
 
-Every supported provider (Codex, Claude, Gemini) reaches the four T3 services through the same prompt-injected REST path. The shared builder `buildT3ServiceInjectionPrompt` (in `apps/server/src/provider/sessionContextPrompt.ts`) assembles the environment header, the REST endpoint table, the per-session Bearer token, and the admin prompt documents. Each adapter hands this identical string to its CLI:
+Every supported provider (Codex, Claude, Gemini) reaches T3 services through the same prompt-injected REST path. The shared builder `buildT3ServiceInjectionPrompt` (in `apps/server/src/provider/sessionContextPrompt.ts`) assembles the environment header, the REST endpoint table, the per-session Bearer token, and the admin prompt documents. Each adapter hands this identical string to its CLI:
 
 - **Codex**: appended through `appendDeveloperInstructions` at session start.
 - **Claude**: appended through `systemPrompt.append` at session start.
@@ -116,6 +117,8 @@ packages/contracts/src/settings.ts                     # Server settings schema
 apps/server/src/provider/sessionContextPrompt.ts        # buildT3ServiceInjectionPrompt (shared helper)
 apps/server/src/provider/restEndpointSystemPrompt.ts    # REST endpoint table + env header
 apps/server/src/prompts/http.ts                         # Prompt-management REST route
+apps/server/src/dynamicChatUi/http.ts                   # Dynamic chat UI artifact REST route
+apps/web/src/components/settings/DynamicChatUiPromptSection.tsx # Dynamic UI design-guide settings
 apps/server/src/ticketing/http.ts                       # Ticketing REST route + thread-aware request context
 apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (REST via curl)
 apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (REST via curl)

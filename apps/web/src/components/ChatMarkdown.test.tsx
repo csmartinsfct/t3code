@@ -5,6 +5,7 @@ import { render } from "vitest-browser-react";
 
 import type { ProposeActionEvent } from "./ChatMarkdown";
 import ChatMarkdown from "./ChatMarkdown";
+import { __clearDynamicChatUiFrameCacheForTests } from "./chat/DynamicChatUiArtifact";
 
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
@@ -29,9 +30,77 @@ const PROPOSE_ACTION_BLOCK = [
   "```",
 ].join("\n");
 
-async function mountMarkdown(
-  props: Partial<ComponentProps<typeof ChatMarkdown>> = {},
-): Promise<{ cleanup: () => Promise<void> }> {
+const DYNAMIC_CHAT_UI_BLOCK = [
+  "```t3:dynamic-chat-ui",
+  JSON.stringify(
+    {
+      version: 1,
+      id: "scenario-card",
+      title: "Scenario card",
+      description: "Interactive response artifact.",
+      initialHeight: 240,
+      html: "<!doctype html><html><body><main style='height:360px'><h1>Scenario</h1><input type='range' /></main></body></html>",
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
+const DYNAMIC_CHAT_UI_STATUS_BLOCK = [
+  "```t3:dynamic-chat-ui-status",
+  JSON.stringify(
+    {
+      version: 1,
+      title: "Scenario card",
+      description: "Building the interactive view.",
+      state: "generating",
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
+const DYNAMIC_CHAT_UI_MARKER_BLOCK = [
+  "```t3:dynamic-chat-ui",
+  JSON.stringify(
+    {
+      version: 1,
+      id: "metadata-card",
+      title: "Metadata card",
+      description: "Marker stored without HTML.",
+      initialHeight: 240,
+      maxHeight: 420,
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
+const DYNAMIC_CHAT_UI_TALL_INITIAL_BLOCK = [
+  "```t3:dynamic-chat-ui",
+  JSON.stringify(
+    {
+      version: 1,
+      id: "tight-height-card",
+      title: "Tight height card",
+      description: "Should shrink to content.",
+      initialHeight: 700,
+      maxHeight: 900,
+      html: "<!doctype html><html><body><main style='height:180px;margin:0;padding:0'>Compact artifact</main></body></html>",
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
+async function mountMarkdown(props: Partial<ComponentProps<typeof ChatMarkdown>> = {}): Promise<{
+  cleanup: () => Promise<void>;
+  rerender: (props: Partial<ComponentProps<typeof ChatMarkdown>>) => Promise<void>;
+}> {
   const host = document.createElement("div");
   document.body.append(host);
 
@@ -44,11 +113,14 @@ async function mountMarkdown(
       await screen.unmount();
       host.remove();
     },
+    rerender: (nextProps) =>
+      screen.rerender(<ChatMarkdown text="" cwd={undefined} {...nextProps} />),
   };
 }
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
+    __clearDynamicChatUiFrameCacheForTests();
     document.body.innerHTML = "";
     vi.clearAllMocks();
   });
@@ -184,6 +256,332 @@ describe("ChatMarkdown", () => {
       expect(page.getByText("Rejected")).toBeTruthy();
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("renders dynamic chat UI blocks as sandboxed timeline artifacts", async () => {
+    const onDynamicChatUiResize = vi.fn();
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_BLOCK,
+      onDynamicChatUiResize,
+    });
+
+    try {
+      expect(document.body.textContent ?? "").not.toContain("Dynamic UI");
+      expect(document.body.textContent ?? "").not.toContain("Artifact height capped");
+
+      const iframe = document.querySelector<HTMLIFrameElement>("iframe");
+      expect(iframe).toBeTruthy();
+      expect(iframe?.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(iframe?.getAttribute("referrerpolicy")).toBe("no-referrer");
+      expect(iframe?.srcdoc).toContain("Scenario");
+      expect(iframe?.srcdoc).toContain("t3ChatUi");
+      expect(iframe?.style.height).toBe("240px");
+
+      await vi.waitFor(() => expect(onDynamicChatUiResize).toHaveBeenCalled());
+      onDynamicChatUiResize.mockClear();
+      expect(iframe?.contentWindow).toBeTruthy();
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe?.contentWindow ?? null,
+          data: {
+            source: "t3-dynamic-chat-ui",
+            artifactId: "scenario-card",
+            type: "resize",
+            height: 360,
+          },
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const height = Number.parseInt(iframe?.style.height ?? "0", 10);
+        expect(height).toBeGreaterThanOrEqual(360);
+        expect(height).toBeLessThan(420);
+        expect(onDynamicChatUiResize).toHaveBeenCalled();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("ignores tiny dynamic chat UI iframe height jitter", async () => {
+    const onDynamicChatUiResize = vi.fn();
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_BLOCK,
+      onDynamicChatUiResize,
+    });
+
+    try {
+      const iframe = document.querySelector<HTMLIFrameElement>("iframe");
+      expect(iframe).toBeTruthy();
+      expect(iframe?.style.height).toBe("240px");
+      await vi.waitFor(() => {
+        expect(Number.parseInt(iframe?.style.height ?? "0", 10)).toBeGreaterThan(240);
+      });
+      const measuredHeight = Number.parseInt(iframe?.style.height ?? "0", 10);
+      onDynamicChatUiResize.mockClear();
+
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe?.contentWindow ?? null,
+          data: {
+            source: "t3-dynamic-chat-ui",
+            artifactId: "scenario-card",
+            type: "resize",
+            height: measuredHeight + 2,
+          },
+        }),
+      );
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      expect(iframe?.style.height).toBe(`${measuredHeight}px`);
+      expect(onDynamicChatUiResize).not.toHaveBeenCalled();
+
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe?.contentWindow ?? null,
+          data: {
+            source: "t3-dynamic-chat-ui",
+            artifactId: "scenario-card",
+            type: "resize",
+            height: measuredHeight + 4,
+          },
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(iframe?.style.height).toBe(`${measuredHeight + 4}px`);
+        expect(onDynamicChatUiResize).toHaveBeenCalled();
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("allows dynamic chat UI iframes to grow beyond legacy maxHeight", async () => {
+    const mounted = await mountMarkdown({
+      text: [
+        "```t3:dynamic-chat-ui",
+        JSON.stringify(
+          {
+            version: 1,
+            id: "unbounded-card",
+            title: "Unbounded card",
+            description: "Can grow to fit content.",
+            initialHeight: 240,
+            maxHeight: 420,
+            html: "<!doctype html><html><body><main style='height:1200px'>Tall artifact</main></body></html>",
+          },
+          null,
+          2,
+        ),
+        "```",
+      ].join("\n"),
+      onDynamicChatUiResize: vi.fn(),
+    });
+
+    try {
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="unbounded-card"]',
+      );
+      expect(iframe).toBeTruthy();
+      expect(iframe?.style.height).toBe("240px");
+
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: iframe?.contentWindow ?? null,
+          data: {
+            source: "t3-dynamic-chat-ui",
+            artifactId: "unbounded-card",
+            type: "resize",
+            height: 1200,
+          },
+        }),
+      );
+
+      await vi.waitFor(() => expect(iframe?.style.height).toBe("1200px"));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders dynamic chat UI artifacts from message metadata", async () => {
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_MARKER_BLOCK,
+      dynamicChatUiArtifacts: [
+        {
+          version: 1,
+          id: "metadata-card",
+          title: "Metadata card",
+          description: "Marker stored without HTML.",
+          initialHeight: 240,
+          maxHeight: 420,
+          html: "<!doctype html><html><body><main><h1>Metadata artifact</h1><script>const fence = '```';</script></main></body></html>",
+        },
+      ],
+      onDynamicChatUiResize: vi.fn(),
+    });
+
+    try {
+      expect(page.getByText("Metadata card")).toBeTruthy();
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="metadata-card"]',
+      );
+      expect(iframe).toBeTruthy();
+      expect(iframe?.srcdoc).toContain("Metadata artifact");
+      expect(iframe?.srcdoc).toContain("const fence = '```'");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders dynamic chat UI status blocks as compact loading cards", async () => {
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_STATUS_BLOCK,
+    });
+
+    try {
+      expect(page.getByText("Scenario card")).toBeTruthy();
+      expect(page.getByText("Building")).toBeTruthy();
+      expect(page.getByText("Building the interactive view.")).toBeTruthy();
+      expect(document.querySelector("iframe")).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shrinks dynamic chat UI iframes from an oversized initial height", async () => {
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_TALL_INITIAL_BLOCK,
+      onDynamicChatUiResize: vi.fn(),
+    });
+
+    try {
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="tight-height-card"]',
+      );
+      expect(iframe).toBeTruthy();
+      expect(iframe?.style.height).toBe("700px");
+
+      await vi.waitFor(() => {
+        const height = Number.parseInt(iframe?.style.height ?? "0", 10);
+        expect(height).toBeGreaterThanOrEqual(180);
+        expect(height).toBeLessThan(300);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps dynamic chat UI iframes loaded across parent markdown rerenders", async () => {
+    const srcdocDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+    let srcdocSetCalls = 0;
+
+    Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return srcdocDescriptor?.get?.call(this) ?? this.getAttribute("srcdoc") ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        srcdocSetCalls += 1;
+        if (srcdocDescriptor?.set) {
+          srcdocDescriptor.set.call(this, value);
+        } else {
+          this.setAttribute("srcdoc", value);
+        }
+      },
+    });
+
+    const mounted = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_BLOCK,
+      onDynamicChatUiResize: vi.fn(),
+    });
+
+    try {
+      await vi.waitFor(() => expect(srcdocSetCalls).toBe(1));
+      const iframe = document.querySelector<HTMLIFrameElement>("iframe");
+      expect(iframe).toBeTruthy();
+      expect(iframe?.srcdoc).toContain("Scenario");
+
+      await mounted.rerender({
+        text: DYNAMIC_CHAT_UI_BLOCK,
+        onDynamicChatUiResize: vi.fn(),
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      expect(document.querySelector("iframe")).toBe(iframe);
+      expect(srcdocSetCalls).toBe(1);
+    } finally {
+      await mounted.cleanup();
+      if (srcdocDescriptor) {
+        Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", srcdocDescriptor);
+      }
+    }
+  });
+
+  it("preserves dynamic chat UI iframes across markdown unmounts", async () => {
+    const srcdocDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+    let srcdocSetCalls = 0;
+
+    Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        return srcdocDescriptor?.get?.call(this) ?? this.getAttribute("srcdoc") ?? "";
+      },
+      set(this: HTMLIFrameElement, value: string) {
+        srcdocSetCalls += 1;
+        if (srcdocDescriptor?.set) {
+          srcdocDescriptor.set.call(this, value);
+        } else {
+          this.setAttribute("srcdoc", value);
+        }
+      },
+    });
+
+    const firstMount = await mountMarkdown({
+      text: DYNAMIC_CHAT_UI_BLOCK,
+      onDynamicChatUiResize: vi.fn(),
+    });
+    let firstMountCleanedUp = false;
+
+    try {
+      await vi.waitFor(() => expect(srcdocSetCalls).toBe(1));
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="scenario-card"]',
+      );
+      expect(iframe).toBeTruthy();
+
+      await firstMount.cleanup();
+      firstMountCleanedUp = true;
+      expect(
+        document.querySelector<HTMLIFrameElement>(
+          '[data-dynamic-chat-ui-frame-parking-lot="true"] iframe',
+        ),
+      ).toBe(iframe);
+
+      const secondMount = await mountMarkdown({
+        text: DYNAMIC_CHAT_UI_BLOCK,
+        onDynamicChatUiResize: vi.fn(),
+      });
+
+      try {
+        await vi.waitFor(() => {
+          expect(
+            document.querySelector<HTMLIFrameElement>(
+              'iframe[data-dynamic-chat-ui-artifact-id="scenario-card"]',
+            ),
+          ).toBe(iframe);
+        });
+        expect(srcdocSetCalls).toBe(1);
+      } finally {
+        await secondMount.cleanup();
+      }
+    } finally {
+      if (!firstMountCleanedUp) {
+        await firstMount.cleanup();
+      }
+      if (srcdocDescriptor) {
+        Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", srcdocDescriptor);
+      }
     }
   });
 });

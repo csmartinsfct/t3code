@@ -4,6 +4,7 @@ import {
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
+import { extractDynamicChatUiArtifactsFromMarkdown } from "@t3tools/shared/dynamicChatUi";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -240,6 +241,26 @@ function collectThreadAttachmentRelativePaths(
     }
   }
   return relativePaths;
+}
+
+function mergeMessageMetadataWithDynamicChatUiArtifacts(
+  metadata: ProjectionThreadMessage["metadata"],
+  text: string,
+): ProjectionThreadMessage["metadata"] {
+  if (metadata?.dynamicChatUiArtifacts?.some((artifact) => artifact.html.trim().length > 0)) {
+    return metadata;
+  }
+
+  const dynamicChatUiArtifacts = extractDynamicChatUiArtifactsFromMarkdown(text);
+  if (dynamicChatUiArtifacts.length === 0) {
+    if (!metadata?.dynamicChatUiArtifacts || metadata.dynamicChatUiArtifacts.length === 0) {
+      return metadata;
+    }
+    const { dynamicChatUiArtifacts: _dynamicChatUiArtifacts, ...rest } = metadata;
+    return Object.keys(rest).length > 0 ? rest : undefined;
+  }
+  if (!metadata) return { dynamicChatUiArtifacts };
+  return { ...metadata, dynamicChatUiArtifacts };
 }
 
 const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function* (
@@ -691,6 +712,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                   attachments: event.payload.attachments,
                 })
               : previousMessage?.attachments;
+          const nextMetadata = mergeMessageMetadataWithDynamicChatUiArtifacts(
+            event.payload.metadata ?? previousMessage?.metadata,
+            nextText,
+          );
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
@@ -698,7 +723,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             role: event.payload.role,
             text: nextText,
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
-            ...(event.payload.metadata !== undefined ? { metadata: event.payload.metadata } : {}),
+            ...(nextMetadata !== undefined ? { metadata: nextMetadata } : {}),
             isStreaming: event.payload.streaming,
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,

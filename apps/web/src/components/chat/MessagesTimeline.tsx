@@ -1,4 +1,5 @@
 import { type MessageId, type TurnId } from "@t3tools/contracts";
+import { stripDynamicChatUiFencesFromMarkdown } from "@t3tools/shared/dynamicChatUi";
 import {
   memo,
   useCallback,
@@ -50,7 +51,9 @@ import {
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   estimateMessagesTimelineRowHeight,
+  getDynamicChatUiArtifactsForRow,
   normalizeCompactToolLabel,
+  rowContainsDynamicChatUiArtifact,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -200,7 +203,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
-    if (!activeTurnInProgress) return firstTailRowIndex;
+    const firstDynamicChatUiRowIndex = rows.findIndex(rowContainsDynamicChatUiArtifact);
+    const firstStatefulRowIndex =
+      firstDynamicChatUiRowIndex >= 0
+        ? Math.min(firstTailRowIndex, firstDynamicChatUiRowIndex)
+        : firstTailRowIndex;
+    if (!activeTurnInProgress) return firstStatefulRowIndex;
 
     const turnStartedAtMs =
       typeof activeTurnStartedAt === "string" ? Date.parse(activeTurnStartedAt) : Number.NaN;
@@ -220,20 +228,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       );
     }
 
-    if (firstCurrentTurnRowIndex < 0) return firstTailRowIndex;
+    if (firstCurrentTurnRowIndex < 0) return firstStatefulRowIndex;
 
     for (let index = firstCurrentTurnRowIndex - 1; index >= 0; index -= 1) {
       const previousRow = rows[index];
       if (!previousRow || previousRow.kind !== "message") continue;
       if (previousRow.message.role === "user") {
-        return Math.min(index, firstTailRowIndex);
+        return Math.min(index, firstStatefulRowIndex);
       }
       if (previousRow.message.role === "assistant" && !previousRow.message.streaming) {
         break;
       }
     }
 
-    return Math.min(firstCurrentTurnRowIndex, firstTailRowIndex);
+    return Math.min(firstCurrentTurnRowIndex, firstStatefulRowIndex);
   }, [activeTurnInProgress, activeTurnStartedAt, rows]);
 
   const virtualizedRowCount = clamp(firstUnvirtualizedRowIndex, {
@@ -265,6 +273,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     useAnimationFrameWithResizeObserver: true,
     overscan: 8,
   });
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
   useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
@@ -286,13 +296,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [rowVirtualizer]);
   const pendingMeasureFrameRef = useRef<number | null>(null);
-  const onTimelineImageLoad = useCallback(() => {
+  const scheduleTimelineMeasure = useCallback(() => {
     if (pendingMeasureFrameRef.current !== null) return;
     pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = null;
-      rowVirtualizer.measure();
+      rowVirtualizerRef.current.measure();
     });
-  }, [rowVirtualizer]);
+  }, []);
+  const onTimelineImageLoad = scheduleTimelineMeasure;
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
@@ -519,7 +530,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const dynamicChatUiArtifacts = getDynamicChatUiArtifactsForRow(row);
+          const textWithoutDynamicChatUi =
+            dynamicChatUiArtifacts.length > 0
+              ? stripDynamicChatUiFencesFromMarkdown(row.message.text)
+              : row.message.text;
+          const messageText =
+            textWithoutDynamicChatUi ||
+            (dynamicChatUiArtifacts.length > 0 || row.message.streaming ? "" : "(empty response)");
           const reviewOutput = isReviewThread ? parseReviewOutputText(messageText) : null;
           return (
             <div
@@ -570,11 +588,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       text={messageText}
                       cwd={markdownCwd}
                       isStreaming={Boolean(row.message.streaming)}
+                      dynamicChatUiArtifacts={dynamicChatUiArtifacts}
                       {...(onProposeAction ? { onProposeAction } : {})}
                       {...(onProposeScheduledTask ? { onProposeScheduledTask } : {})}
                       {...(resolveProjectName ? { resolveProjectName } : {})}
                       {...(onOpenFileLink ? { onOpenFileLink } : {})}
                       {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
+                      onDynamicChatUiResize={scheduleTimelineMeasure}
                     />
                   )}
                   {(() => {

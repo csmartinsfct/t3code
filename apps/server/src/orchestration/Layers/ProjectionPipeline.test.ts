@@ -225,6 +225,78 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-missing-thread-
   },
 );
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-dynamic-chat-ui-message-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("persists dynamic chat UI artifact metadata extracted from assistant messages", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = new Date().toISOString();
+        const artifactPayload = {
+          version: 1,
+          id: "pricing-simulator",
+          title: "Pricing simulator",
+          description: "Adjust seats and usage.",
+          initialHeight: 280,
+          maxHeight: 640,
+          html: '<section><input type="range" /></section>',
+        };
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.makeUnsafe("evt-dynamic-chat-ui"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-dynamic-chat-ui"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-dynamic-chat-ui"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-dynamic-chat-ui"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-dynamic-chat-ui"),
+            messageId: MessageId.makeUnsafe("message-dynamic-chat-ui"),
+            role: "assistant",
+            text: [
+              "Here is the simulator.",
+              "```t3:dynamic-chat-ui",
+              JSON.stringify(artifactPayload),
+              "```",
+            ].join("\n"),
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const messageRows = yield* sql<{
+          readonly metadataJson: string | null;
+        }>`
+          SELECT metadata_json AS "metadataJson"
+          FROM projection_thread_messages
+          WHERE message_id = 'message-dynamic-chat-ui'
+        `;
+        const metadata = JSON.parse(messageRows[0]?.metadataJson ?? "{}");
+
+        assert.deepEqual(metadata.dynamicChatUiArtifacts, [
+          {
+            id: "pricing-simulator",
+            title: "Pricing simulator",
+            description: "Adjust seats and usage.",
+            initialHeight: 280,
+            maxHeight: 640,
+          },
+        ]);
+        assert.isFalse(JSON.stringify(metadata).includes("range"));
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

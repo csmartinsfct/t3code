@@ -14,6 +14,7 @@ export interface AdminPromptDocuments {
   readonly scheduledTasks: PromptDocumentV1;
   readonly ticketing: PromptDocumentV1;
   readonly browser: PromptDocumentV1;
+  readonly dynamicChatUi: PromptDocumentV1;
 }
 
 /**
@@ -40,6 +41,7 @@ export function buildT3ServiceInjectionPrompt(input: {
     renderAdminPromptDocument(adminPrompts.scheduledTasks, runtime),
     renderAdminPromptDocument(adminPrompts.ticketing, runtime),
     renderAdminPromptDocument(adminPrompts.browser, runtime),
+    renderAdminPromptDocument(adminPrompts.dynamicChatUi, runtime),
   ];
   return sections.join("\n\n");
 }

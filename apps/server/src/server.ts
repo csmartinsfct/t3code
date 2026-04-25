@@ -53,6 +53,7 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ManagedRunRepositoryLive } from "./persistence/Layers/ManagedRuns";
 import { browserRouteLayer } from "./browser/http";
+import { dynamicChatUiRouteLayer } from "./dynamicChatUi/http";
 import { BrowserManagerServiceLive } from "./browser/Layers/BrowserManager";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
 import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
@@ -305,6 +306,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   scheduledTasksRouteLayer,
   ticketingRouteLayer,
   browserRouteLayer,
+  dynamicChatUiRouteLayer,
   promptsRouteLayer,
   sessionRestartRouteLayer,
   staticAndDevRouteLayer,

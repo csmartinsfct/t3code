@@ -1,6 +1,6 @@
 # Prompts
 
-T3 Code exposes orchestration prompt management through one backend-owned service that powers both the UI and an explicit REST management endpoint.
+T3 Code exposes orchestration and admin prompt management through one backend-owned service that powers both the UI and an explicit REST management endpoint.
 
 ## Overview
 
@@ -13,7 +13,7 @@ The prompt-management surface covers the six orchestration prompt ids:
 - `reReview`
 - `reviewFeedback`
 
-Every prompt id belongs to the `orchestration` prompt group and is stored as a prompt-template document with:
+These prompt ids belong to the `orchestration` prompt group and are stored as prompt-template documents with:
 
 - shipped defaults from `DEFAULT_SERVER_SETTINGS.promptDefaults.orchestration`
 - resolved global documents from `settings.prompts.orchestration`
@@ -26,6 +26,17 @@ Effective prompt resolution order is:
 3. shipped default
 
 Validation and preview rendering are always backend-owned. The server never trusts raw UI or REST API input without validating it first.
+
+The same service also exposes global-only admin prompts:
+
+- `general`
+- `managedRuns`
+- `scheduledTasks`
+- `ticketing`
+- `browser`
+- `dynamicChatUi`
+
+Admin prompts are injected into provider chat sessions through `buildT3ServiceInjectionPrompt`. They describe T3 service access for visible chat agents. `dynamicChatUi` is the parent-agent instruction that explains when and how to call `create_dynamic_chat_ui_from_prompt`; visual generation constraints stay in the Dynamic UI design guide instead.
 
 Review-specific behavior:
 
@@ -96,6 +107,15 @@ The `runtime` condition carries a `match` field with one of:
 
 At injection time, admin prompt blocks are filtered against the current server runtime (derived from `ServerConfig.devUrl` and `ServerConfig.mode`). Preview rendering in Settings uses the same current runtime so what you see matches what the agent receives.
 
+## Dynamic UI Design Guide
+
+Settings -> Prompts includes a separate Dynamic UI section for the hidden Dynamic UI builder. It exposes:
+
+- `Builder Prompt` — the provider-level instruction prompt for the hidden builder session. It contains the output contract, iframe constraints, and `{{...}}` placeholders for request-specific context. Edits are stored in `settings.dynamicChatUi.builderPromptOverride`; the actual UI request is also sent as the builder turn message.
+- `Design Language` — the effective `docs/design-language.md` content. Edits are stored in `settings.dynamicChatUi.designGuideOverride`.
+
+These are not prompt-template documents and are not injected into the parent chat agent. They are loaded only by `/api/dynamic-chat-ui` when the hidden builder session generates or revises a chat UI artifact. See [Dynamic Chat UI](dynamic-chat-ui.md).
+
 ## Validation And Preview
 
 Validation uses the shared prompt-template validator from `packages/shared/src/promptTemplates.ts`.
@@ -117,4 +137,5 @@ apps/server/src/prompts/http.ts                       # REST route at /api/promp
 apps/server/src/ws.ts                                 # WebSocket RPC handlers
 apps/web/src/wsRpcClient.ts                           # Web client prompt RPC adapter
 apps/web/src/wsNativeApi.ts                           # Native API prompt facade
+apps/web/src/components/settings/DynamicChatUiPromptSection.tsx # Dynamic UI design guide editor
 ```

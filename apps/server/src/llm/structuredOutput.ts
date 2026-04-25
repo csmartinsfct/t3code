@@ -152,6 +152,7 @@ export function runCodexStructuredOutput<S extends Schema.Top>(input: {
   imagePaths?: ReadonlyArray<string>;
   reasoningEffort: string;
   fastMode?: boolean;
+  timeoutMs?: number;
 }): Effect.Effect<S["Type"], StructuredOutputRunnerError, S["DecodingServices"]> {
   return Effect.tryPromise({
     try: async () => {
@@ -185,7 +186,7 @@ export function runCodexStructuredOutput<S extends Schema.Top>(input: {
           ],
           {
             cwd: input.cwd,
-            timeoutMs: CODEX_TIMEOUT_MS,
+            timeoutMs: input.timeoutMs ?? CODEX_TIMEOUT_MS,
             stdin: input.prompt,
             env: {
               ...process.env,
@@ -248,9 +249,11 @@ export function runClaudeStructuredOutput<S extends Schema.Top>(input: {
   outputSchema: S;
   modelSelection: ClaudeModelSelection;
   binaryPath?: string;
+  configDir?: string;
   effort?: string;
   thinking?: boolean;
   fastMode?: boolean;
+  timeoutMs?: number;
 }): Effect.Effect<S["Type"], StructuredOutputRunnerError, S["DecodingServices"]> {
   return Effect.tryPromise({
     try: async () => {
@@ -275,8 +278,9 @@ export function runClaudeStructuredOutput<S extends Schema.Top>(input: {
         ],
         {
           cwd: input.cwd,
-          timeoutMs: CLAUDE_TIMEOUT_MS,
+          timeoutMs: input.timeoutMs ?? CLAUDE_TIMEOUT_MS,
           stdin: input.prompt,
+          env: input.configDir ? { ...process.env, CLAUDE_CONFIG_DIR: input.configDir } : undefined,
           allowNonZeroExit: true,
           outputMode: "truncate",
         },
@@ -336,6 +340,7 @@ export function runGeminiStructuredOutput<S extends Schema.Top>(input: {
   modelSelection: GeminiModelSelection;
   binaryPath?: string;
   homePath?: string;
+  timeoutMs?: number;
 }): Effect.Effect<S["Type"], StructuredOutputRunnerError, S["DecodingServices"]> {
   return Effect.tryPromise({
     try: async () => {
@@ -361,7 +366,7 @@ ${schemaJson}`;
         ],
         {
           cwd: input.cwd,
-          timeoutMs: GEMINI_TIMEOUT_MS,
+          timeoutMs: input.timeoutMs ?? GEMINI_TIMEOUT_MS,
           env: {
             ...process.env,
             ...(input.homePath ? { GEMINI_CLI_HOME: input.homePath } : {}),

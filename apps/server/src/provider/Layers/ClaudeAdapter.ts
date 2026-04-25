@@ -3432,6 +3432,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           (serviceSystemPrompt ? "\n\n" : "") +
           checkpointContext.value.systemPrompt;
       }
+      if (input.systemPrompt) {
+        serviceSystemPrompt =
+          (serviceSystemPrompt ?? "") + (serviceSystemPrompt ? "\n\n" : "") + input.systemPrompt;
+      }
 
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),

@@ -26,6 +26,7 @@ export const ADMIN_PROMPT_IDS = [
   "scheduledTasks",
   "ticketing",
   "browser",
+  "dynamicChatUi",
 ] as const;
 export type AdminPromptId = (typeof ADMIN_PROMPT_IDS)[number];
 export const AdminPromptId = Schema.Literals(ADMIN_PROMPT_IDS);
@@ -431,6 +432,36 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 
 Each project has its own Chromium profile at \`<dataDir>/browser/<projectId>/chromium-profile/\`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed between projects.`;
 
+const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
+
+T3 can generate interactive, durable UI artifacts directly inside the chat timeline through the \`/api/dynamic-chat-ui\` REST endpoint.
+
+Use this when the user asks for an inline interface, simulator, dashboard, table, chart, calculator, picker, visual comparison, or any other UI that would be more useful than prose.
+
+### Available tool
+
+Only call \`create_dynamic_chat_ui_from_prompt\`.
+
+Do not call lower-level artifact creation tools, do not generate raw HTML yourself in the parent chat agent, and do not ask for example templates first. The Dynamic UI builder receives the design guide and constraints internally.
+
+### How to call it
+
+1. Call \`GET /api/dynamic-chat-ui\` to inspect the current input schema.
+2. Call \`POST /api/dynamic-chat-ui\` with \`{"tool":"create_dynamic_chat_ui_from_prompt","input":{...}}\`.
+3. Put the user's UI request in \`prompt\`.
+4. Pass any structured values the UI should render or simulate in \`data\`.
+5. Pass short product/domain notes in \`context\` when useful.
+6. You must pass a short \`title\` and \`description\`. The \`description\` must be a brief description of what is being built; both fields are shown immediately by the generating timeline card before the hidden builder finishes. Requests without these fields are rejected.
+7. For revisions, pass \`sourceArtifactId\` and, when available, \`sourceMessageId\` for the existing UI artifact.
+
+The tool uses the current chat thread's selected model for the hidden builder session, clamped to a practical reasoning level where needed. It inserts a generating card into the chat timeline, replaces it with the finished sandboxed UI, and returns metadata.
+
+### Response behavior
+
+After a successful call, the UI has already been inserted into the chat timeline as a message. Do not print returned HTML, JSON, markdown fences, or artifact blocks. Briefly acknowledge the UI only if the user expects prose around it.
+
+If the user asks to change a generated UI, call the same tool again with the revision request and the source artifact identifiers. The builder will resume the hidden artifact session when possible and receives the previous HTML as context.`;
+
 export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   general: {
     version: PROMPT_TEMPLATE_VERSION,
@@ -451,5 +482,9 @@ export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   browser: {
     version: PROMPT_TEMPLATE_VERSION,
     blocks: [{ when: null, text: BROWSER_DEFAULT_TEXT }],
+  },
+  dynamicChatUi: {
+    version: PROMPT_TEMPLATE_VERSION,
+    blocks: [{ when: null, text: DYNAMIC_CHAT_UI_DEFAULT_TEXT }],
   },
 } as const satisfies Record<AdminPromptId, PromptDocumentV1>;

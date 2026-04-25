@@ -22,6 +22,14 @@ import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { isProposeActionBlock, parseProposeActionPayload } from "../lib/proposeActionParser";
+import { stripDynamicChatUiFencesFromMarkdown } from "@t3tools/shared/dynamicChatUi";
+import {
+  isDynamicChatUiBlock,
+  isDynamicChatUiStatusBlock,
+  parseDynamicChatUiPayload,
+  parseDynamicChatUiStatusPayload,
+  type DynamicChatUiPayload,
+} from "../lib/dynamicChatUiParser";
 import {
   isProposeScheduledTaskBlock,
   parseProposeScheduledTaskPayload,
@@ -32,6 +40,8 @@ import { readNativeApi } from "../nativeApi";
 import { splitPathAndPosition } from "../terminal-links";
 import ProposeActionCard from "./chat/ProposeActionCard";
 import ProposeScheduledTaskCard from "./chat/ProposeScheduledTaskCard";
+import { DynamicChatUiArtifact } from "./chat/DynamicChatUiArtifact";
+import { DynamicChatUiStatusCard } from "./chat/DynamicChatUiStatusCard";
 import { TicketIdentifierBadge } from "./TicketIdentifierBadge";
 
 class CodeHighlightErrorBoundary extends React.Component<
@@ -85,6 +95,8 @@ interface ChatMarkdownProps {
   resolveProjectName?: (projectId: string) => string;
   onOpenFileLink?: (absolutePath: string, line?: number, column?: number) => void;
   onOpenTicketLink?: (identifier: string) => void | Promise<void>;
+  onDynamicChatUiResize?: () => void;
+  dynamicChatUiArtifacts?: ReadonlyArray<DynamicChatUiPayload>;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -280,9 +292,20 @@ function ChatMarkdown({
   resolveProjectName,
   onOpenFileLink,
   onOpenTicketLink,
+  onDynamicChatUiResize,
+  dynamicChatUiArtifacts = [],
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const onDynamicChatUiResizeRef = useRef(onDynamicChatUiResize);
+  useEffect(() => {
+    onDynamicChatUiResizeRef.current = onDynamicChatUiResize;
+  }, [onDynamicChatUiResize]);
+  const handleDynamicChatUiResize = useCallback(() => {
+    onDynamicChatUiResizeRef.current?.();
+  }, []);
+  const markdownText =
+    dynamicChatUiArtifacts.length > 0 ? stripDynamicChatUiFencesFromMarkdown(text) : text;
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
@@ -386,6 +409,30 @@ function ChatMarkdown({
           return <pre {...props}>{children}</pre>;
         }
 
+        if (isDynamicChatUiBlock(codeBlock.className)) {
+          const payload = parseDynamicChatUiPayload(codeBlock.code);
+          if (payload) {
+            return (
+              <DynamicChatUiArtifact
+                artifact={payload}
+                isStreaming={isStreaming}
+                onResize={handleDynamicChatUiResize}
+              />
+            );
+          }
+          return <pre {...props}>{children}</pre>;
+        }
+
+        if (isDynamicChatUiStatusBlock(codeBlock.className)) {
+          const payload = parseDynamicChatUiStatusPayload(codeBlock.code);
+          if (payload) {
+            return (
+              <DynamicChatUiStatusCard title={payload.title} description={payload.description} />
+            );
+          }
+          return <pre {...props}>{children}</pre>;
+        }
+
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
@@ -405,6 +452,7 @@ function ChatMarkdown({
     [
       cwd,
       diffThemeName,
+      handleDynamicChatUiResize,
       isStreaming,
       onOpenFileLink,
       onOpenTicketLink,
@@ -425,10 +473,33 @@ function ChatMarkdown({
             : defaultUrlTransform(value)
         }
       >
-        {unwrapBacktickedTicketLinks(text)}
+        {unwrapBacktickedTicketLinks(markdownText)}
       </ReactMarkdown>
+      {dynamicChatUiArtifacts.map((artifact) => (
+        <DynamicChatUiArtifact
+          key={`${artifact.id}:${artifact.html.length}`}
+          artifact={artifact}
+          isStreaming={isStreaming}
+          onResize={handleDynamicChatUiResize}
+        />
+      ))}
     </div>
   );
 }
 
-export default memo(ChatMarkdown);
+function areChatMarkdownPropsEqual(previous: ChatMarkdownProps, next: ChatMarkdownProps): boolean {
+  return (
+    previous.text === next.text &&
+    previous.cwd === next.cwd &&
+    previous.isStreaming === next.isStreaming &&
+    Boolean(previous.onProposeAction) === Boolean(next.onProposeAction) &&
+    Boolean(previous.onProposeScheduledTask) === Boolean(next.onProposeScheduledTask) &&
+    Boolean(previous.resolveProjectName) === Boolean(next.resolveProjectName) &&
+    Boolean(previous.onOpenFileLink) === Boolean(next.onOpenFileLink) &&
+    Boolean(previous.onOpenTicketLink) === Boolean(next.onOpenTicketLink) &&
+    Boolean(previous.onDynamicChatUiResize) === Boolean(next.onDynamicChatUiResize) &&
+    previous.dynamicChatUiArtifacts === next.dynamicChatUiArtifacts
+  );
+}
+
+export default memo(ChatMarkdown, areChatMarkdownPropsEqual);

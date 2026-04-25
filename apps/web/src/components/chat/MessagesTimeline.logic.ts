@@ -1,4 +1,8 @@
 import { type MessageId } from "@t3tools/contracts";
+import {
+  extractDynamicChatUiArtifactsFromMarkdown,
+  stripDynamicChatUiFencesFromMarkdown,
+} from "@t3tools/shared/dynamicChatUi";
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
@@ -129,6 +133,25 @@ export function deriveMessagesTimelineRows(input: {
   return nextRows;
 }
 
+type DynamicChatUiRowArtifact = ReturnType<
+  typeof extractDynamicChatUiArtifactsFromMarkdown
+>[number];
+
+export function getDynamicChatUiArtifactsForRow(
+  row: MessagesTimelineRow,
+): ReadonlyArray<DynamicChatUiRowArtifact> {
+  if (row.kind !== "message") return [];
+  const metadataArtifacts = row.message.metadata?.dynamicChatUiArtifacts;
+  if (metadataArtifacts?.some((artifact) => artifact.html.trim().length > 0)) {
+    return metadataArtifacts.filter((artifact) => artifact.html.trim().length > 0);
+  }
+  return extractDynamicChatUiArtifactsFromMarkdown(row.message.text);
+}
+
+export function rowContainsDynamicChatUiArtifact(row: MessagesTimelineRow): boolean {
+  return getDynamicChatUiArtifactsForRow(row).length > 0;
+}
+
 export function estimateMessagesTimelineRowHeight(
   row: MessagesTimelineRow,
   input: {
@@ -145,9 +168,20 @@ export function estimateMessagesTimelineRowHeight(
     case "working":
       return 40;
     case "message": {
-      let estimate = estimateTimelineMessageHeight(row.message, {
-        timelineWidthPx: input.timelineWidthPx,
-      });
+      const dynamicChatUiArtifacts = getDynamicChatUiArtifactsForRow(row);
+      const estimateText =
+        dynamicChatUiArtifacts.length > 0
+          ? stripDynamicChatUiFencesFromMarkdown(row.message.text)
+          : row.message.text;
+      let estimate = estimateTimelineMessageHeight(
+        { ...row.message, text: estimateText },
+        {
+          timelineWidthPx: input.timelineWidthPx,
+        },
+      );
+      for (const artifact of dynamicChatUiArtifacts) {
+        estimate += artifact.initialHeight + 76;
+      }
       const turnDiffSummary = input.turnDiffSummaryByAssistantMessageId?.get(row.message.id);
       if (turnDiffSummary && turnDiffSummary.files.length > 0) {
         estimate += estimateChangedFilesCardHeight(turnDiffSummary);

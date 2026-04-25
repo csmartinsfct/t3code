@@ -139,6 +139,11 @@ const ADMIN_PROMPT_METADATA = {
     description:
       "Instructions for driving the per-project headless Chromium via the T3 /api/browser REST service (navigate, snapshot with @refs, click/fill, screenshots, evaluate JS, batch).",
   },
+  dynamicChatUi: {
+    label: "Dynamic Chat UI",
+    description:
+      "Instructions for asking the hidden Dynamic UI builder to create or revise interactive chat timeline artifacts.",
+  },
 } as const satisfies Record<AdminPromptId, Pick<PromptDefinition, "label" | "description">>;
 
 // ---------------------------------------------------------------------------

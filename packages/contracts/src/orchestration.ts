@@ -311,9 +311,26 @@ export const OrchestrationPromptMessageOrigin = Schema.Struct({
 });
 export type OrchestrationPromptMessageOrigin = typeof OrchestrationPromptMessageOrigin.Type;
 
+export const DynamicChatUiArtifactMetadata = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  description: Schema.NullOr(Schema.String),
+  initialHeight: NonNegativeInt,
+  maxHeight: NonNegativeInt,
+});
+export type DynamicChatUiArtifactMetadata = typeof DynamicChatUiArtifactMetadata.Type;
+
+export const DynamicChatUiArtifactDocument = Schema.Struct({
+  version: Schema.Literal(1).pipe(Schema.withDecodingDefault(() => 1 as const)),
+  ...DynamicChatUiArtifactMetadata.fields,
+  html: Schema.String.pipe(Schema.withDecodingDefault(() => "")),
+});
+export type DynamicChatUiArtifactDocument = typeof DynamicChatUiArtifactDocument.Type;
+
 export const OrchestrationMessageMetadata = Schema.Struct({
   origin: Schema.optionalKey(OrchestrationPromptMessageOrigin),
   internal: Schema.optionalKey(Schema.Boolean),
+  dynamicChatUiArtifacts: Schema.optionalKey(Schema.Array(DynamicChatUiArtifactDocument)),
 });
 export type OrchestrationMessageMetadata = typeof OrchestrationMessageMetadata.Type;
 
@@ -814,6 +831,8 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  text: Schema.optional(Schema.String),
+  metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });

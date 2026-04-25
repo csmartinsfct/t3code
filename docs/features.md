@@ -59,6 +59,25 @@ The core of T3 Code is an event-sourced orchestration engine that manages all ag
 - `subscribeOrchestrationDomainEvents` — Stream all domain events in real time.
 - `subscribeOrchestrationRunEvents` — Stream events for a specific orchestration run.
 
+### Dynamic Chat UI Artifacts
+
+Assistant messages can include experimental `t3:dynamic-chat-ui` fenced blocks. The web timeline parses these durable message blocks and renders them as inline sandboxed iframe artifacts with compact T3 Code chrome, theme delivery, and a `window.t3ChatUi` postMessage bridge for height and future host-visible events.
+
+The server projection extracts lightweight artifact metadata (`id`, `title`, `description`, `initialHeight`, `maxHeight`) into message metadata so thread hydration and virtualized row measurement can understand the artifact without duplicating large HTML blobs. The HTML source remains in the assistant message text, so reloads/reconnects preserve the artifact as normal timeline content.
+
+Agents can use `/api/dynamic-chat-ui` to:
+
+- Generate and insert an artifact from a prompt using the current thread's selected model and the Dynamic UI design guide.
+- Revise an existing artifact by passing `sourceArtifactId` and describing the requested change.
+- See a pending timeline message while generation runs; the service replaces that same message with the durable artifact on success or an inline failure note on error.
+- Receive a compact success payload after insertion, without carrying artifact HTML through the parent agent response.
+
+The chat agent-facing API intentionally exposes only prompt-driven generation. The server keeps HTML validation and fenced-block serialization as internal implementation details so the chat agent does not hand-author UI HTML or anchor generation on canned examples.
+
+Dynamic UI generation uses hidden provider sessions keyed to the source thread and artifact id. Those sessions reuse the normal provider runtime binding/resume cursor path, but they are not represented as visible chat threads. If provider resume is unavailable, the server still resolves prior artifact context from the current thread and sends it in the revision prompt as a fallback.
+
+See [Dynamic Chat UI](dynamic-chat-ui.md) for the full agent flow, builder session lifecycle, iframe rendering model, Settings integration, and testing notes.
+
 ---
 
 ## 2. Provider System

@@ -27,6 +27,13 @@ describe("settings defaults", () => {
     expect(DEFAULT_UNIFIED_SETTINGS.resumeAgentsOnStartup).toBe(false);
   });
 
+  it("defaults Dynamic Chat UI design guide override to null", () => {
+    expect(DEFAULT_SERVER_SETTINGS.dynamicChatUi.designGuideOverride).toBeNull();
+    expect(DEFAULT_SERVER_SETTINGS.dynamicChatUi.builderPromptOverride).toBeNull();
+    expect(DEFAULT_UNIFIED_SETTINGS.dynamicChatUi.designGuideOverride).toBeNull();
+    expect(DEFAULT_UNIFIED_SETTINGS.dynamicChatUi.builderPromptOverride).toBeNull();
+  });
+
   it("includes Gemini provider defaults", () => {
     expect(DEFAULT_SERVER_SETTINGS.providers.gemini).toEqual({
       enabled: true,
@@ -127,6 +134,38 @@ describe("settings defaults", () => {
       }),
     ).toEqual({
       resumeAgentsOnStartup: true,
+    });
+  });
+
+  it("accepts Dynamic Chat UI design guide patches", () => {
+    const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        dynamicChatUi: {
+          designGuideOverride: "# Design override",
+          builderPromptOverride: "Builder prompt override",
+        },
+      }),
+    ).toEqual({
+      dynamicChatUi: {
+        designGuideOverride: "# Design override",
+        builderPromptOverride: "Builder prompt override",
+      },
+    });
+
+    expect(
+      decodePatch({
+        dynamicChatUi: {
+          designGuideOverride: null,
+          builderPromptOverride: null,
+        },
+      }),
+    ).toEqual({
+      dynamicChatUi: {
+        designGuideOverride: null,
+        builderPromptOverride: null,
+      },
     });
   });
 });

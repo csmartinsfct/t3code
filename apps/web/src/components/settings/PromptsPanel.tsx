@@ -15,6 +15,7 @@ import { ensureNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsPageContainer } from "./SettingsPanels";
+import { DynamicChatUiPromptSection } from "./DynamicChatUiPromptSection";
 import { PromptEditorDialog } from "./PromptEditorDialog";
 import { PromptList } from "./PromptList";
 
@@ -204,6 +205,8 @@ export function PromptsPanel() {
             documentStates={adminDocStates}
             onEditPrompt={handleEditAdmin}
           />
+
+          <DynamicChatUiPromptSection />
 
           {/* Scope dropdown — only affects orchestration prompts */}
           <div className="flex items-center justify-between">

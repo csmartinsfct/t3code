@@ -1322,7 +1322,7 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                   adminPrompts: settings.prompts.admin,
                 }
               : undefined;
-          const sessionContextPrompt = Option.isSome(checkpointContext)
+          const baseSessionContextPrompt = Option.isSome(checkpointContext)
             ? buildProviderSessionContextPrompt({
                 threadId: input.threadId,
                 projectTitle: checkpointContext.value.projectTitle,
@@ -1333,6 +1333,12 @@ export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
                 ...(serviceContext ? { serviceContext } : {}),
               })
             : undefined;
+          const sessionContextPrompt = input.systemPrompt
+            ? [
+                ...(baseSessionContextPrompt ? [baseSessionContextPrompt] : []),
+                input.systemPrompt,
+              ].join("\n\n")
+            : baseSessionContextPrompt;
           const sessionContextPromptHash = sessionContextPrompt
             ? hashProviderSessionContextPrompt(sessionContextPrompt)
             : undefined;

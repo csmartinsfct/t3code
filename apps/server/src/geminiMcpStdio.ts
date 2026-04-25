@@ -23,6 +23,7 @@ const SERVICE_ENDPOINTS = {
   "scheduled-tasks": "/api/scheduled-tasks",
   ticketing: "/api/ticketing",
   prompts: "/api/prompts",
+  "dynamic-chat-ui": "/api/dynamic-chat-ui",
 } as const;
 
 type ServiceName = keyof typeof SERVICE_ENDPOINTS;

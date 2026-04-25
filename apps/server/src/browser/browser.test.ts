@@ -22,9 +22,10 @@ const TEST_THREAD = ThreadId.makeUnsafe("t3co-325-test");
 it.effect("ADMIN_PROMPT_IDS includes browser alongside the other admin prompts", () =>
   Effect.sync(() => {
     assert.include(ADMIN_PROMPT_IDS, "browser");
-    // All five expected ids are present, in a deterministic order.
-    assert.deepEqual([...ADMIN_PROMPT_IDS].sort(), [
+    // All expected ids are present, in a deterministic order.
+    assert.deepEqual([...ADMIN_PROMPT_IDS].toSorted(), [
       "browser",
+      "dynamicChatUi",
       "general",
       "managedRuns",
       "scheduledTasks",
@@ -48,6 +49,19 @@ it.effect("ADMIN_PROMPT_SHIPPED_DEFAULTS.browser has non-empty content", () =>
   }),
 );
 
+it.effect("ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi has non-empty content", () =>
+  Effect.sync(() => {
+    const doc = ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi;
+    assert.equal(doc.version, 1);
+    assert.isAtLeast(doc.blocks.length, 1);
+    const text = doc.blocks.map((b) => b.text).join("");
+    assert.isAtLeast(text.length, 500, "dynamic UI prompt should be substantial");
+    assert.include(text, "/api/dynamic-chat-ui");
+    assert.include(text, "create_dynamic_chat_ui_from_prompt");
+    assert.include(text, "sourceArtifactId");
+  }),
+);
+
 it.effect(
   "buildT3ServiceInjectionPrompt renders the browser prompt in the system-prompt output",
   () =>
@@ -64,6 +78,7 @@ it.effect(
           scheduledTasks: ADMIN_PROMPT_SHIPPED_DEFAULTS.scheduledTasks,
           ticketing: ADMIN_PROMPT_SHIPPED_DEFAULTS.ticketing,
           browser: ADMIN_PROMPT_SHIPPED_DEFAULTS.browser,
+          dynamicChatUi: ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi,
         },
       });
       // Header for the new admin prompt block
@@ -71,6 +86,8 @@ it.effect(
       // Available-services table row
       assert.include(output, "| Browser |");
       assert.include(output, "http://127.0.0.1:3773/api/browser");
+      assert.include(output, "## Dynamic Chat UI");
+      assert.include(output, "create_dynamic_chat_ui_from_prompt");
     }),
 );
 

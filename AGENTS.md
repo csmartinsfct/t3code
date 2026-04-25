@@ -78,6 +78,7 @@ Use these as implementation references when designing protocol handling, UX flow
 - [Agent Tools](docs/t3-agent-tools.md) — How internal services are exposed to AI sessions, delivery modes (native tools vs HTTP endpoints), injection flow, and adding new services.
 - [Multi-Layout](docs/multi-layout.md) — Board view with Kanban ticket management, drag-and-drop reordering/status changes, nested sidebar layout, and ticket composer attachments.
 - [Design Language](docs/design-language.md) — Prescriptive design system reference: color tokens, typography, spacing, component patterns, animations, layout recipes, and anti-patterns. Used as context for LLM-generated UIs.
+- [Dynamic Chat UI](docs/dynamic-chat-ui.md) — Experimental generated chat timeline UI artifacts, parent-agent tool flow, hidden builder sessions, iframe rendering, Settings integration, and revision behavior.
 - [Features](docs/features.md) — Exhaustive product feature catalog: what each feature is, how users interact with it, and how agents interact via REST API.
 - [Visibility](docs/visibility.md) — Practical debugging guide: lifecycle logs, timeline logs, provider event logs, log file locations, context-loss investigation workflow, and logging best practices.
 - [Observability](docs/observability.md) — Tracing infrastructure, OTLP export, metrics, span/trace debugging, Grafana setup, and instrumentation patterns.

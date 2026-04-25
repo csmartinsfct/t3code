@@ -115,6 +115,12 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const DynamicChatUiSettings = Schema.Struct({
+  designGuideOverride: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+  builderPromptOverride: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(() => null)),
+});
+export type DynamicChatUiSettings = typeof DynamicChatUiSettings.Type;
+
 export const OrchestrationPromptSettings = Schema.Struct({
   implement: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS.implement),
@@ -152,6 +158,9 @@ export const AdminPromptSettings = Schema.Struct({
   ),
   browser: PromptDocumentV1.pipe(
     Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.browser),
+  ),
+  dynamicChatUi: PromptDocumentV1.pipe(
+    Schema.withDecodingDefault(() => ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi),
   ),
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type AdminPromptSettings = typeof AdminPromptSettings.Type;
@@ -209,6 +218,7 @@ export const ServerSettings = Schema.Struct({
     claudeProfiles: Schema.Array(ClaudeProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  dynamicChatUi: DynamicChatUiSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   prompts: ServerPromptSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   promptDefaults: ServerPromptSettings.pipe(
     Schema.withDecodingDefault(() => ({
@@ -347,8 +357,15 @@ export const ServerSettingsPatch = Schema.Struct({
           scheduledTasks: Schema.optionalKey(PromptDocumentPatch),
           ticketing: Schema.optionalKey(PromptDocumentPatch),
           browser: Schema.optionalKey(PromptDocumentPatch),
+          dynamicChatUi: Schema.optionalKey(PromptDocumentPatch),
         }),
       ),
+    }),
+  ),
+  dynamicChatUi: Schema.optionalKey(
+    Schema.Struct({
+      designGuideOverride: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      builderPromptOverride: Schema.optionalKey(Schema.NullOr(Schema.String)),
     }),
   ),
 });
