@@ -378,3 +378,17 @@ apps/web/src/components/settings/ticketUtils.ts          # Status/priority maps
 apps/web/src/hooks/useTicketing.ts                       # Data hook
 apps/web/src/routes/settings.tickets.*.tsx               # Route files
 ```
+
+---
+
+## Patchable Bodies And Stable Criteria
+
+Ticket long-form markdown now lives in `ticket_bodies`, keyed by ticket ID with `revision`, SHA-256 `content_hash`, `size_bytes`, and `format = markdown`. The legacy `tickets.description` column is still dual-written as a compatibility/cache field for one release window, but list/tree/summary responses stay body-free.
+
+`get_ticket` returns body metadata plus a small preview by default. Agents and UI code opt into full content with `includeBody: true`, or prefer `get_ticket_body` for file-like reads using `startLine` and `limit`. The canonical empty-body hash is SHA-256 of the empty string: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Body writes go through `edit_ticket_body` / `ticketing.editBody` and require `expectedRevision`. Section-scoped writes also require `expectedSectionHash`. Supported operations are `str_replace`, `insert`, `replace_section`, `append_section`, and `replace_body`; unified diffs are intentionally not supported in v1. The service rejects bodies over 1 MiB with `body_too_large` before mutating. Body history is compact: operation, revision range, hashes, changed line/char counts, summary, and a bounded excerpt only.
+
+Acceptance criteria now live in `ticket_acceptance_criteria` with stable IDs and integer `position`. Tickets carry `criteria_revision`; all granular criteria writes require `expectedCriteriaRevision`. Reorder renormalizes positions to `100, 200, 300, ...` in the same transaction. Legacy whole-array updates remain as compatibility paths, but UI status/text/add/remove flows use `edit_ticket_criteria` / `ticketing.editCriteria`.
+
+Migration `039_TicketingPatchableBodies` creates `ticket_bodies`, `ticket_body_changes`, `ticket_acceptance_criteria`, adds `tickets.criteria_revision`, backfills existing descriptions and criteria JSON, and deletes oversized legacy body-history rows rather than preserving full old/new body payloads.

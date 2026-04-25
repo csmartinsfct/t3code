@@ -91,7 +91,18 @@ import type {
   SetDependenciesInput,
   Ticket,
   TicketArchiveInput,
+  TicketBodyEditInput,
+  TicketBodyEditResult,
+  TicketBodyGetInput,
+  TicketBodyReadResult,
+  TicketBodySearchInput,
+  TicketBodySearchResult,
+  TicketBodySectionsInput,
+  TicketBodySectionsResult,
   TicketCreateInput,
+  TicketCriteriaEditInput,
+  TicketCriteriaListInput,
+  TicketCriteriaListResult,
   TicketUpdateInput,
   TicketDeleteInput,
   TicketUnarchiveInput,
@@ -377,6 +388,12 @@ export interface NativeApi {
     getById: (input: TicketGetByIdInput) => Promise<Ticket>;
     getByIdentifier: (input: TicketGetByIdentifierInput) => Promise<Ticket>;
     getThreadLinks: (input: TicketThreadLinksInput) => Promise<TicketThreadLinks>;
+    getBody: (input: TicketBodyGetInput) => Promise<TicketBodyReadResult>;
+    searchBody: (input: TicketBodySearchInput) => Promise<TicketBodySearchResult>;
+    getBodySections: (input: TicketBodySectionsInput) => Promise<TicketBodySectionsResult>;
+    editBody: (input: TicketBodyEditInput) => Promise<TicketBodyEditResult>;
+    listCriteria: (input: TicketCriteriaListInput) => Promise<TicketCriteriaListResult>;
+    editCriteria: (input: TicketCriteriaEditInput) => Promise<TicketCriteriaListResult>;
     create: (input: TicketCreateInput) => Promise<Ticket>;
     update: (input: TicketUpdateInput) => Promise<Ticket>;
     delete: (input: TicketDeleteInput) => Promise<void>;

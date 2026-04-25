@@ -55,6 +55,8 @@ export const TicketHistoryAction = Schema.Literals([
   "created",
   "updated",
   "status_changed",
+  "body_updated",
+  "criteria_updated",
   "dependency_added",
   "dependency_removed",
   "label_added",
@@ -67,6 +69,18 @@ export const TicketHistoryAction = Schema.Literals([
   "artifact_deleted",
 ]);
 export type TicketHistoryAction = typeof TicketHistoryAction.Type;
+
+export const TicketBodyOperation = Schema.Literals([
+  "str_replace",
+  "insert",
+  "replace_section",
+  "append_section",
+  "replace_body",
+]);
+export type TicketBodyOperation = typeof TicketBodyOperation.Type;
+
+export const TicketCriteriaOperation = Schema.Literals(["add", "update", "remove", "reorder"]);
+export type TicketCriteriaOperation = typeof TicketCriteriaOperation.Type;
 
 // ---------------------------------------------------------------------------
 // Artifact payload schemas (per type)
@@ -96,13 +110,102 @@ export type ImagePayload = typeof ImagePayload.Type;
 // ---------------------------------------------------------------------------
 
 export const AcceptanceCriterion = Schema.Struct({
+  id: Schema.optional(TrimmedNonEmptyString),
+  position: Schema.optional(Schema.Int),
   text: Schema.String,
   status: AcceptanceCriterionStatus,
   reason: Schema.optional(Schema.NullOr(Schema.String)),
   verifiedBy: Schema.optional(Schema.NullOr(Schema.String)),
   verifiedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  createdAt: Schema.optional(IsoDateTime),
+  updatedAt: Schema.optional(IsoDateTime),
 });
 export type AcceptanceCriterion = typeof AcceptanceCriterion.Type;
+
+export const TicketBodyMetadata = Schema.Struct({
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  sizeBytes: Schema.Int,
+  lineCount: Schema.Int,
+});
+export type TicketBodyMetadata = typeof TicketBodyMetadata.Type;
+
+export const TicketBodyLine = Schema.Struct({
+  line: Schema.Int,
+  text: Schema.String,
+});
+export type TicketBodyLine = typeof TicketBodyLine.Type;
+
+export const TicketBodyReadResult = Schema.Struct({
+  ticketId: TicketId,
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  format: Schema.Literal("markdown"),
+  sizeBytes: Schema.Int,
+  lineCount: Schema.Int,
+  startLine: Schema.Int,
+  limit: Schema.Int,
+  lines: Schema.Array(TicketBodyLine),
+  truncated: Schema.Boolean,
+  sectionHash: Schema.optional(TrimmedNonEmptyString),
+});
+export type TicketBodyReadResult = typeof TicketBodyReadResult.Type;
+
+export const TicketBodySearchMatch = Schema.Struct({
+  line: Schema.Int,
+  text: Schema.String,
+  before: Schema.Array(TicketBodyLine),
+  after: Schema.Array(TicketBodyLine),
+});
+export type TicketBodySearchMatch = typeof TicketBodySearchMatch.Type;
+
+export const TicketBodySearchResult = Schema.Struct({
+  ticketId: TicketId,
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  matches: Schema.Array(TicketBodySearchMatch),
+  truncated: Schema.Boolean,
+});
+export type TicketBodySearchResult = typeof TicketBodySearchResult.Type;
+
+export const TicketBodySection = Schema.Struct({
+  path: Schema.Array(Schema.String),
+  heading: Schema.String,
+  level: Schema.Int,
+  startLine: Schema.Int,
+  endLine: Schema.Int,
+  startChar: Schema.Int,
+  endChar: Schema.Int,
+  sectionHash: TrimmedNonEmptyString,
+});
+export type TicketBodySection = typeof TicketBodySection.Type;
+
+export const TicketBodySectionsResult = Schema.Struct({
+  ticketId: TicketId,
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  sections: Schema.Array(TicketBodySection),
+});
+export type TicketBodySectionsResult = typeof TicketBodySectionsResult.Type;
+
+export const TicketBodyEditResult = Schema.Struct({
+  ticketId: TicketId,
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  sizeBytes: Schema.Int,
+  lineCount: Schema.Int,
+  changedLines: Schema.Int,
+  changedChars: Schema.Int,
+  summary: Schema.String,
+});
+export type TicketBodyEditResult = typeof TicketBodyEditResult.Type;
+
+export const TicketCriteriaListResult = Schema.Struct({
+  ticketId: TicketId,
+  criteriaRevision: Schema.Int,
+  criteria: Schema.Array(AcceptanceCriterion),
+});
+export type TicketCriteriaListResult = typeof TicketCriteriaListResult.Type;
 
 export const Label = Schema.Struct({
   id: LabelId,
@@ -197,12 +300,15 @@ export const Ticket = Schema.Struct({
   identifier: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   description: Schema.NullOr(Schema.String),
+  body: Schema.optional(TicketBodyMetadata),
+  bodyPreview: Schema.optional(Schema.Array(TicketBodyLine)),
   status: TicketStatus,
   priority: TicketPriority,
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
   worktree: Schema.NullOr(Schema.String),
   acceptanceCriteria: Schema.NullOr(Schema.Array(AcceptanceCriterion)),
+  criteriaRevision: Schema.optional(Schema.Int),
   labels: Schema.Array(Label),
   dependencies: Schema.Array(TicketDependency),
   subTickets: Schema.Array(TicketSummary),
@@ -285,7 +391,9 @@ export const TicketUpdateInput = Schema.Struct({
   id: TicketId,
   title: Schema.optional(TrimmedNonEmptyString),
   description: Schema.optional(Schema.NullOr(Schema.String)),
+  expectedRevision: Schema.optional(Schema.Int),
   acceptanceCriteria: Schema.optional(Schema.NullOr(Schema.Array(AcceptanceCriterion))),
+  expectedCriteriaRevision: Schema.optional(Schema.Int),
   status: Schema.optional(TicketStatus),
   priority: Schema.optional(TicketPriority),
   parentId: Schema.optional(Schema.NullOr(TicketId)),
@@ -310,12 +418,14 @@ export type TicketListInput = typeof TicketListInput.Type;
 export const TicketGetByIdInput = Schema.Struct({
   id: TicketId,
   projectId: Schema.optional(ProjectId),
+  includeBody: Schema.optional(Schema.Boolean),
 });
 export type TicketGetByIdInput = typeof TicketGetByIdInput.Type;
 
 export const TicketGetByIdentifierInput = Schema.Struct({
   identifier: TrimmedNonEmptyString,
   projectId: Schema.optional(ProjectId),
+  includeBody: Schema.optional(Schema.Boolean),
 });
 export type TicketGetByIdentifierInput = typeof TicketGetByIdentifierInput.Type;
 
@@ -366,6 +476,68 @@ export const UpdateCriterionStatusInput = Schema.Struct({
   reason: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UpdateCriterionStatusInput = typeof UpdateCriterionStatusInput.Type;
+
+export const TicketBodyGetInput = Schema.Struct({
+  ticketId: TicketId,
+  startLine: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  sectionPath: Schema.optional(Schema.Array(Schema.String)),
+});
+export type TicketBodyGetInput = typeof TicketBodyGetInput.Type;
+
+export const TicketBodySearchInput = Schema.Struct({
+  ticketId: TicketId,
+  query: Schema.String,
+  contextLines: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+export type TicketBodySearchInput = typeof TicketBodySearchInput.Type;
+
+export const TicketBodySectionsInput = Schema.Struct({
+  ticketId: TicketId,
+  maxDepth: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+export type TicketBodySectionsInput = typeof TicketBodySectionsInput.Type;
+
+export const TicketBodyEditInput = Schema.Struct({
+  ticketId: TicketId,
+  expectedRevision: Schema.Int,
+  expectedSectionHash: Schema.optional(Schema.String),
+  operation: TicketBodyOperation,
+  oldStr: Schema.optional(Schema.String),
+  newStr: Schema.optional(Schema.String),
+  occurrence: Schema.optional(Schema.Literals(["first", "last", "all"])),
+  requireUnique: Schema.optional(Schema.Boolean),
+  insertLine: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  insertText: Schema.optional(Schema.String),
+  sectionPath: Schema.optional(Schema.Array(Schema.String)),
+  heading: Schema.optional(Schema.String),
+  markdown: Schema.optional(Schema.String),
+  parentSectionPath: Schema.optional(Schema.Array(Schema.String)),
+  body: Schema.optional(Schema.String),
+});
+export type TicketBodyEditInput = typeof TicketBodyEditInput.Type;
+
+export const TicketCriteriaListInput = Schema.Struct({
+  ticketId: TicketId,
+});
+export type TicketCriteriaListInput = typeof TicketCriteriaListInput.Type;
+
+export const TicketCriteriaEditInput = Schema.Struct({
+  ticketId: TicketId,
+  expectedCriteriaRevision: Schema.Int,
+  operation: TicketCriteriaOperation,
+  criterionId: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  status: Schema.optional(AcceptanceCriterionStatus),
+  reason: Schema.optional(Schema.NullOr(Schema.String)),
+  verifiedBy: Schema.optional(Schema.NullOr(Schema.String)),
+  verifiedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  afterCriterionId: Schema.optional(Schema.String),
+  beforeCriterionId: Schema.optional(Schema.String),
+  criterionIds: Schema.optional(Schema.Array(Schema.String)),
+});
+export type TicketCriteriaEditInput = typeof TicketCriteriaEditInput.Type;
 
 export const LabelCreateInput = Schema.Struct({
   projectId: Schema.optional(Schema.NullOr(ProjectId)),

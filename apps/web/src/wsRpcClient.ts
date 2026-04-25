@@ -165,6 +165,12 @@ export interface WsRpcClient {
     readonly getById: RpcUnaryMethod<typeof WS_METHODS.ticketingGetById>;
     readonly getByIdentifier: RpcUnaryMethod<typeof WS_METHODS.ticketingGetByIdentifier>;
     readonly getThreadLinks: RpcUnaryMethod<typeof WS_METHODS.ticketingGetThreadLinks>;
+    readonly getBody: RpcUnaryMethod<typeof WS_METHODS.ticketingGetBody>;
+    readonly searchBody: RpcUnaryMethod<typeof WS_METHODS.ticketingSearchBody>;
+    readonly getBodySections: RpcUnaryMethod<typeof WS_METHODS.ticketingGetBodySections>;
+    readonly editBody: RpcUnaryMethod<typeof WS_METHODS.ticketingEditBody>;
+    readonly listCriteria: RpcUnaryMethod<typeof WS_METHODS.ticketingListCriteria>;
+    readonly editCriteria: RpcUnaryMethod<typeof WS_METHODS.ticketingEditCriteria>;
     readonly create: RpcUnaryMethod<typeof WS_METHODS.ticketingCreate>;
     readonly update: RpcUnaryMethod<typeof WS_METHODS.ticketingUpdate>;
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.ticketingDelete>;
@@ -372,6 +378,17 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.ticketingGetByIdentifier](input)),
       getThreadLinks: (input) =>
         transport.request((client) => client[WS_METHODS.ticketingGetThreadLinks](input)),
+      getBody: (input) => transport.request((client) => client[WS_METHODS.ticketingGetBody](input)),
+      searchBody: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingSearchBody](input)),
+      getBodySections: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingGetBodySections](input)),
+      editBody: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingEditBody](input)),
+      listCriteria: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingListCriteria](input)),
+      editCriteria: (input) =>
+        transport.request((client) => client[WS_METHODS.ticketingEditCriteria](input)),
       create: (input) => transport.request((client) => client[WS_METHODS.ticketingCreate](input)),
       update: (input) => transport.request((client) => client[WS_METHODS.ticketingUpdate](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.ticketingDelete](input)),

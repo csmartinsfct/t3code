@@ -212,6 +212,93 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     ),
     inputSchema: {
       ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      includeBody: {
+        type: "boolean",
+        optional: true,
+        description:
+          "Opt into returning the full body. By default get_ticket returns body metadata and preview only.",
+      },
+    },
+  },
+  {
+    name: "get_ticket_body",
+    title: "Get Ticket Body",
+    description:
+      "Read a ticket body with file-like 1-based line windows. Use sectionPath to scope to a markdown section; response includes revision, contentHash, sizeBytes, lineCount, and sectionHash when scoped.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      startLine: { type: "number", optional: true, description: "1-based start line." },
+      limit: { type: "number", optional: true, description: "Maximum lines to return." },
+      sectionPath: {
+        type: "array",
+        optional: true,
+        items: { type: "string" },
+        description: "Markdown heading path, e.g. ['Goal', 'API'].",
+      },
+    },
+  },
+  {
+    name: "search_ticket_body",
+    title: "Search Ticket Body",
+    description: "Search within one ticket body without loading the whole body.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      query: { type: "string", description: "Text to search for." },
+      contextLines: { type: "number", optional: true, description: "Lines around each match." },
+      limit: { type: "number", optional: true, description: "Maximum matches." },
+    },
+  },
+  {
+    name: "get_ticket_body_sections",
+    title: "Get Ticket Body Sections",
+    description:
+      "Return markdown heading outline only: section paths, levels, ranges, character ranges, and hashes. Use get_ticket_body for section content.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      maxDepth: { type: "number", optional: true, description: "Maximum heading depth." },
+    },
+  },
+  {
+    name: "edit_ticket_body",
+    title: "Edit Ticket Body",
+    description:
+      "Patch a ticket body with mandatory expectedRevision conflict detection. Pick str_replace for known unique strings, insert for line-based additive content, replace_section for known headings with expectedSectionHash, append_section for new sections, and replace_body only as a last resort. No unified diff/apply_patch operation is supported.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      expectedRevision: {
+        type: "number",
+        description: "Current body revision from get_ticket_body.",
+      },
+      expectedSectionHash: {
+        type: "string",
+        optional: true,
+        description: "Required for section-scoped writes.",
+      },
+      operation: {
+        type: "string",
+        enum: ["str_replace", "insert", "replace_section", "append_section", "replace_body"],
+        description: "Edit operation.",
+      },
+      oldStr: { type: "string", optional: true, description: "str_replace target." },
+      newStr: { type: "string", optional: true, description: "str_replace replacement." },
+      occurrence: {
+        type: "string",
+        optional: true,
+        enum: ["first", "last", "all"],
+        description: "Which occurrence to replace when requireUnique is false.",
+      },
+      requireUnique: { type: "boolean", optional: true, description: "Defaults to true." },
+      insertLine: {
+        type: "number",
+        optional: true,
+        description: "1-based line number; 0 inserts at top.",
+      },
+      insertText: { type: "string", optional: true, description: "Text to insert." },
+      sectionPath: { type: "array", optional: true, items: { type: "string" } },
+      heading: { type: "string", optional: true, description: "New section heading." },
+      markdown: { type: "string", optional: true, description: "Section/body markdown content." },
+      parentSectionPath: { type: "array", optional: true, items: { type: "string" } },
+      body: { type: "string", optional: true, description: "Full replacement body." },
     },
   },
   {
@@ -293,7 +380,13 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: "string",
         optional: true,
         nullable: true,
-        description: "New description.",
+        description:
+          "Legacy full-body replacement. Prefer edit_ticket_body; pass expectedRevision for conflict detection.",
+      },
+      expectedRevision: {
+        type: "number",
+        optional: true,
+        description: "Required for safe legacy description writes.",
       },
       status: {
         type: "string",
@@ -336,8 +429,43 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
           },
         },
-        description: "Replace acceptance criteria. Pass null to clear.",
+        description:
+          "Legacy whole-array replacement. Prefer edit_ticket_criteria; pass expectedCriteriaRevision for conflict detection.",
       },
+      expectedCriteriaRevision: {
+        type: "number",
+        optional: true,
+        description: "Required for safe legacy acceptance criteria writes.",
+      },
+    },
+  },
+  {
+    name: "list_ticket_criteria",
+    title: "List Ticket Criteria",
+    description:
+      "Return acceptance criteria with stable IDs, positions, status metadata, and criteriaRevision.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+    },
+  },
+  {
+    name: "edit_ticket_criteria",
+    title: "Edit Ticket Criteria",
+    description:
+      "Granular acceptance-criteria edits with mandatory expectedCriteriaRevision. Operations add, update, remove, and reorder keep stable criterion IDs and renormalize integer positions.",
+    inputSchema: {
+      ticketId: { type: "string", description: "The ticket identifier (e.g. 'ZBD-7')." },
+      expectedCriteriaRevision: { type: "number", description: "Current criteria revision." },
+      operation: { type: "string", enum: ["add", "update", "remove", "reorder"] },
+      criterionId: { type: "string", optional: true },
+      text: { type: "string", optional: true },
+      status: { type: "string", optional: true, enum: ["pending", "met", "not_met"] },
+      reason: { type: "string", optional: true, nullable: true },
+      verifiedBy: { type: "string", optional: true, nullable: true },
+      verifiedAt: { type: "string", optional: true, nullable: true },
+      afterCriterionId: { type: "string", optional: true },
+      beforeCriterionId: { type: "string", optional: true },
+      criterionIds: { type: "array", optional: true, items: { type: "string" } },
     },
   },
   {
@@ -766,9 +894,105 @@ function toolHandlers(ctx: ToolContext) {
     get_ticket: (input: Record<string, unknown>) =>
       Effect.gen(function* () {
         const id = input.ticketId as string;
+        const includeBody = input.includeBody as boolean | undefined;
         const resolved = yield* resolveId(id);
-        const ticket = yield* ticketing.getById({ id: resolved, projectId });
+        const ticket = yield* ticketing.getById({
+          id: resolved,
+          projectId,
+          includeBody: includeBody ?? false,
+        });
         return respondOk(yield* resolveJson(ticket));
+      }),
+
+    get_ticket_body: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolved = yield* resolveId(input.ticketId as string);
+        return respondOk(
+          yield* ticketing.getBody({
+            ticketId: resolved,
+            ...((input.startLine as number | undefined)
+              ? { startLine: input.startLine as number }
+              : {}),
+            ...((input.limit as number | undefined) ? { limit: input.limit as number } : {}),
+            ...((input.sectionPath as string[] | undefined)
+              ? { sectionPath: input.sectionPath as string[] }
+              : {}),
+          }),
+        );
+      }),
+
+    search_ticket_body: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolved = yield* resolveId(input.ticketId as string);
+        return respondOk(
+          yield* ticketing.searchBody({
+            ticketId: resolved,
+            query: input.query as string,
+            ...((input.contextLines as number | undefined) !== undefined
+              ? { contextLines: input.contextLines as number }
+              : {}),
+            ...((input.limit as number | undefined) ? { limit: input.limit as number } : {}),
+          }),
+        );
+      }),
+
+    get_ticket_body_sections: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolved = yield* resolveId(input.ticketId as string);
+        return respondOk(
+          yield* ticketing.getBodySections({
+            ticketId: resolved,
+            ...((input.maxDepth as number | undefined)
+              ? { maxDepth: input.maxDepth as number }
+              : {}),
+          }),
+        );
+      }),
+
+    edit_ticket_body: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolved = yield* resolveId(input.ticketId as string);
+        return respondOk(
+          yield* ticketing.editBody({
+            ticketId: resolved,
+            expectedRevision: input.expectedRevision as number,
+            operation: input.operation as never,
+            ...((input.expectedSectionHash as string | undefined)
+              ? { expectedSectionHash: input.expectedSectionHash as string }
+              : {}),
+            ...((input.oldStr as string | undefined) !== undefined
+              ? { oldStr: input.oldStr as string }
+              : {}),
+            ...((input.newStr as string | undefined) !== undefined
+              ? { newStr: input.newStr as string }
+              : {}),
+            ...((input.occurrence as string | undefined)
+              ? { occurrence: input.occurrence as never }
+              : {}),
+            ...((input.requireUnique as boolean | undefined) !== undefined
+              ? { requireUnique: input.requireUnique as boolean }
+              : {}),
+            ...((input.insertLine as number | undefined) !== undefined
+              ? { insertLine: input.insertLine as number }
+              : {}),
+            ...((input.insertText as string | undefined) !== undefined
+              ? { insertText: input.insertText as string }
+              : {}),
+            ...((input.sectionPath as string[] | undefined)
+              ? { sectionPath: input.sectionPath as string[] }
+              : {}),
+            ...((input.heading as string | undefined) ? { heading: input.heading as string } : {}),
+            ...((input.markdown as string | undefined) !== undefined
+              ? { markdown: input.markdown as string }
+              : {}),
+            ...((input.parentSectionPath as string[] | undefined)
+              ? { parentSectionPath: input.parentSectionPath as string[] }
+              : {}),
+            ...((input.body as string | undefined) !== undefined
+              ? { body: input.body as string }
+              : {}),
+          }),
+        );
       }),
 
     create_ticket: (input: Record<string, unknown>) =>
@@ -822,6 +1046,7 @@ function toolHandlers(ctx: ToolContext) {
         const id = input.ticketId as string;
         const title = input.title as string | undefined;
         const description = input.description as string | null | undefined;
+        const expectedRevision = input.expectedRevision as number | undefined;
         const status = input.status as string | undefined;
         const priority = input.priority as string | undefined;
         const parentId = input.parentId as string | null | undefined;
@@ -831,6 +1056,7 @@ function toolHandlers(ctx: ToolContext) {
           | Array<{ text: string; status?: string }>
           | null
           | undefined;
+        const expectedCriteriaRevision = input.expectedCriteriaRevision as number | undefined;
 
         const resolvedId = yield* resolveId(id);
         const resolvedParentId =
@@ -855,12 +1081,14 @@ function toolHandlers(ctx: ToolContext) {
           id: resolvedId,
           ...(title ? { title } : {}),
           ...(description !== undefined ? { description } : {}),
+          ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           ...(status ? { status: status as never } : {}),
           ...(priority ? { priority: priority as never } : {}),
           ...(resolvedParentId !== undefined ? { parentId: resolvedParentId } : {}),
           ...(sortOrder !== undefined ? { sortOrder } : {}),
           ...(worktree !== undefined ? { worktree } : {}),
           ...(mappedCriteria !== undefined ? { acceptanceCriteria: mappedCriteria } : {}),
+          ...(expectedCriteriaRevision !== undefined ? { expectedCriteriaRevision } : {}),
         });
         return respondOk(yield* resolveJson(ticket));
       }),
@@ -968,6 +1196,49 @@ function toolHandlers(ctx: ToolContext) {
       }),
 
     // ---- Criteria ----
+
+    list_ticket_criteria: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolvedTicketId = yield* resolveId(input.ticketId as string);
+        return respondOk(yield* ticketing.listCriteria({ ticketId: resolvedTicketId }));
+      }),
+
+    edit_ticket_criteria: (input: Record<string, unknown>) =>
+      Effect.gen(function* () {
+        const resolvedTicketId = yield* resolveId(input.ticketId as string);
+        return respondOk(
+          yield* ticketing.editCriteria({
+            ticketId: resolvedTicketId,
+            expectedCriteriaRevision: input.expectedCriteriaRevision as number,
+            operation: input.operation as never,
+            ...((input.criterionId as string | undefined)
+              ? { criterionId: input.criterionId as string }
+              : {}),
+            ...((input.text as string | undefined) !== undefined
+              ? { text: input.text as string }
+              : {}),
+            ...((input.status as string | undefined) ? { status: input.status as never } : {}),
+            ...((input.reason as string | null | undefined) !== undefined
+              ? { reason: input.reason as string | null }
+              : {}),
+            ...((input.verifiedBy as string | null | undefined) !== undefined
+              ? { verifiedBy: input.verifiedBy as string | null }
+              : {}),
+            ...((input.verifiedAt as string | null | undefined) !== undefined
+              ? { verifiedAt: input.verifiedAt as never }
+              : {}),
+            ...((input.afterCriterionId as string | undefined)
+              ? { afterCriterionId: input.afterCriterionId as string }
+              : {}),
+            ...((input.beforeCriterionId as string | undefined)
+              ? { beforeCriterionId: input.beforeCriterionId as string }
+              : {}),
+            ...((input.criterionIds as string[] | undefined)
+              ? { criterionIds: input.criterionIds as string[] }
+              : {}),
+          }),
+        );
+      }),
 
     update_criterion_status: (input: Record<string, unknown>) =>
       Effect.gen(function* () {

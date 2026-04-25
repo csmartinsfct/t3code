@@ -1089,6 +1089,30 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.ticketingGetThreadLinks, ticketing.getThreadLinks(input), {
           "rpc.aggregate": "ticketing",
         }),
+      [WS_METHODS.ticketingGetBody]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetBody, ticketing.getBody(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingSearchBody]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingSearchBody, ticketing.searchBody(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingGetBodySections]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingGetBodySections, ticketing.getBodySections(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingEditBody]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingEditBody, ticketing.editBody(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingListCriteria]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingListCriteria, ticketing.listCriteria(input), {
+          "rpc.aggregate": "ticketing",
+        }),
+      [WS_METHODS.ticketingEditCriteria]: (input) =>
+        observeRpcEffect(WS_METHODS.ticketingEditCriteria, ticketing.editCriteria(input), {
+          "rpc.aggregate": "ticketing",
+        }),
       [WS_METHODS.ticketingCreate]: (input) =>
         observeRpcEffect(WS_METHODS.ticketingCreate, ticketing.create(input), {
           "rpc.aggregate": "ticketing",

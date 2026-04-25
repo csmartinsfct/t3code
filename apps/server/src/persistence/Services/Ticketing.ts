@@ -1,5 +1,6 @@
 import {
   AcceptanceCriterion,
+  AcceptanceCriterionStatus,
   ArtifactType,
   CommentAuthorType,
   CommentId,
@@ -9,6 +10,7 @@ import {
   TicketHistoryAction,
   TicketHistoryId,
   TicketId,
+  TicketBodyOperation,
   TicketPriority,
   TicketStatus,
   ArtifactId,
@@ -36,6 +38,7 @@ export const PersistedTicket = Schema.Struct({
   sortOrder: Schema.Number,
   isArchived: Schema.Boolean,
   worktree: Schema.NullOr(Schema.String),
+  criteriaRevision: Schema.optional(Schema.Int),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -123,6 +126,49 @@ export const PersistedTicketHistoryEntry = Schema.Struct({
 });
 export type PersistedTicketHistoryEntry = typeof PersistedTicketHistoryEntry.Type;
 
+export const PersistedTicketBody = Schema.Struct({
+  ticketId: TicketId,
+  format: Schema.Literal("markdown"),
+  body: Schema.String,
+  revision: Schema.Int,
+  contentHash: Schema.String,
+  sizeBytes: Schema.Int,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type PersistedTicketBody = typeof PersistedTicketBody.Type;
+
+export const PersistedTicketBodyChange = Schema.Struct({
+  id: Schema.String,
+  ticketId: TicketId,
+  baseRevision: Schema.Int,
+  newRevision: Schema.Int,
+  operation: TicketBodyOperation,
+  patchExcerpt: Schema.NullOr(Schema.String),
+  summary: Schema.NullOr(Schema.String),
+  beforeHash: Schema.String,
+  afterHash: Schema.String,
+  changedLines: Schema.Int,
+  changedChars: Schema.Int,
+  performedBy: Schema.String,
+  performedAt: Schema.String,
+});
+export type PersistedTicketBodyChange = typeof PersistedTicketBodyChange.Type;
+
+export const PersistedAcceptanceCriterion = Schema.Struct({
+  id: Schema.String,
+  ticketId: TicketId,
+  position: Schema.Int,
+  text: Schema.String,
+  status: AcceptanceCriterionStatus,
+  reason: Schema.NullOr(Schema.String),
+  verifiedBy: Schema.NullOr(Schema.String),
+  verifiedAt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type PersistedAcceptanceCriterion = typeof PersistedAcceptanceCriterion.Type;
+
 // ---------------------------------------------------------------------------
 // Row schemas for reading from SQLite (JSON columns decoded from strings)
 // ---------------------------------------------------------------------------
@@ -132,6 +178,7 @@ export const TicketRow = Schema.Struct({
   isArchived: Schema.Number,
   /** Kept as raw string | null — parsed in toPersistedTicket */
   acceptanceCriteria: Schema.NullOr(Schema.String),
+  criteriaRevision: Schema.Number,
 });
 
 export const LabelRow = Schema.Struct({
@@ -150,6 +197,14 @@ export const ArtifactRow = Schema.Struct({
 export const TicketHistoryRow = Schema.Struct({
   ...PersistedTicketHistoryEntry.fields,
   changes: Schema.Unknown.pipe(Schema.fromJsonString),
+});
+
+export const TicketBodyRow = Schema.Struct({
+  ...PersistedTicketBody.fields,
+});
+
+export const AcceptanceCriterionRow = Schema.Struct({
+  ...PersistedAcceptanceCriterion.fields,
 });
 
 // ---------------------------------------------------------------------------
@@ -218,6 +273,12 @@ export const HistoryByTicketInput = Schema.Struct({
   offset: Schema.optional(Schema.Int),
 });
 export type HistoryByTicketInput = typeof HistoryByTicketInput.Type;
+
+export const TicketBodyLookupInput = Schema.Struct({ ticketId: TicketId });
+export type TicketBodyLookupInput = typeof TicketBodyLookupInput.Type;
+
+export const CriteriaByTicketInput = Schema.Struct({ ticketId: TicketId });
+export type CriteriaByTicketInput = typeof CriteriaByTicketInput.Type;
 
 export const TicketLabelAssocInput = Schema.Struct({
   ticketId: TicketId,
@@ -315,6 +376,33 @@ export interface TicketingRepositoryShape {
   readonly countByParent: (
     input: CountByParentInput,
   ) => Effect.Effect<number, ProjectionRepositoryError>;
+
+  // Ticket bodies
+  readonly getBody: (
+    input: TicketBodyLookupInput,
+  ) => Effect.Effect<Option.Option<PersistedTicketBody>, ProjectionRepositoryError>;
+  readonly upsertBody: (
+    input: PersistedTicketBody,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly recordBodyChange: (
+    input: PersistedTicketBodyChange,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  // Acceptance criteria
+  readonly listCriteria: (
+    input: CriteriaByTicketInput,
+  ) => Effect.Effect<ReadonlyArray<PersistedAcceptanceCriterion>, ProjectionRepositoryError>;
+  readonly replaceCriteria: (input: {
+    readonly ticketId: TicketId;
+    readonly criteria: ReadonlyArray<PersistedAcceptanceCriterion>;
+    readonly criteriaRevision: number;
+    readonly updatedAt: string;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly updateCriteriaRevision: (input: {
+    readonly ticketId: TicketId;
+    readonly criteriaRevision: number;
+    readonly updatedAt: string;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
 
   // Batch queries (for eliminating N+1 in list/getTree)
   readonly batchListLabelsForTickets: (input: {

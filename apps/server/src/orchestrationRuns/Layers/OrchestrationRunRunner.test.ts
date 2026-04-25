@@ -275,6 +275,12 @@ const makeTicketingService = (
   getById: ({ id }) => Effect.succeed(resolveTestTicket(id)),
   getByIdentifier: () => Effect.die(new Error("not mocked")),
   getThreadLinks: ({ ticketId }) => Effect.succeed({ ticketId, originThread: null }),
+  getBody: () => Effect.die(new Error("not mocked")),
+  searchBody: () => Effect.die(new Error("not mocked")),
+  getBodySections: () => Effect.die(new Error("not mocked")),
+  editBody: () => Effect.die(new Error("not mocked")),
+  listCriteria: () => Effect.die(new Error("not mocked")),
+  editCriteria: () => Effect.die(new Error("not mocked")),
   create: () => Effect.die(new Error("not mocked")),
   update: ({ id, ...changes }) =>
     Effect.succeed({
