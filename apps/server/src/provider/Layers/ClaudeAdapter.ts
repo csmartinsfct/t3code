@@ -20,7 +20,6 @@ import {
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
-  type WarmQuery,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
@@ -206,6 +205,12 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   readonly mcpServerStatus?: () => Promise<McpServerStatus[]>;
+  readonly reloadPlugins?: () => Promise<unknown>;
+  readonly close: () => void;
+}
+
+interface WarmClaudeQuery {
+  readonly query: (prompt: AsyncIterable<SDKUserMessage>) => ClaudeQueryRuntime;
   readonly close: () => void;
 }
 
@@ -247,6 +252,10 @@ export interface ClaudeAdapterLiveOptions {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
   }) => ClaudeQueryRuntime;
+  readonly startupQuery?: (input?: {
+    readonly options?: ClaudeQueryOptions;
+    readonly initializeTimeoutMs?: number;
+  }) => Promise<WarmClaudeQuery>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly lifecycleLogger?: ProviderLifecycleLoggerShape;
@@ -1315,6 +1324,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       readonly prompt: AsyncIterable<SDKUserMessage>;
       readonly options: ClaudeQueryOptions;
     }) => query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime);
+  const startupQuery = options?.startupQuery ?? startup;
 
   const lifecycle = options?.lifecycleLogger;
   const lfcyl = (
@@ -4032,7 +4042,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     );
     if (activeContext?.query.mcpServerStatus) {
       const servers = yield* Effect.tryPromise({
-        try: () => activeContext.query.mcpServerStatus!(),
+        try: async () => {
+          if (input.reloadPlugins === true && activeContext.query.reloadPlugins) {
+            await activeContext.query.reloadPlugins();
+          }
+          return activeContext.query.mcpServerStatus!();
+        },
         catch: (cause) => toRequestError(activeContext.session.threadId, "mcp/status", cause),
       });
       return servers.map(normalizeClaudeMcpServerStatus);
@@ -4086,16 +4101,19 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       abortController,
     };
 
-    let warmQuery: WarmQuery | undefined;
+    let warmQuery: WarmClaudeQuery | undefined;
     let runtime: ClaudeQueryRuntime | undefined;
     return yield* Effect.tryPromise({
       try: async () => {
-        warmQuery = await startup({
+        warmQuery = await startupQuery({
           options: queryOptions,
         });
         runtime = warmQuery.query(idlePrompt);
         if (runtime.initializationResult) {
           await runtime.initializationResult();
+        }
+        if (input.reloadPlugins === true && runtime.reloadPlugins) {
+          await runtime.reloadPlugins();
         }
         if (!runtime.mcpServerStatus) {
           return [];

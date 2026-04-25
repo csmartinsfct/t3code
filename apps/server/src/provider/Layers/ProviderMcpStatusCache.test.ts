@@ -18,13 +18,17 @@ const PROJECT_ID = ProjectId.makeUnsafe("project-cache-test");
 const CWD = "/tmp/project-cache-test";
 
 function makeLayer(input?: {
-  readonly probe?: (provider: ProviderKind) => Effect.Effect<readonly [{ readonly name: string }]>;
+  readonly probe?: (request: {
+    readonly provider: ProviderKind;
+    readonly reloadPlugins?: boolean;
+  }) => Effect.Effect<readonly [{ readonly name: string }]>;
   readonly settings?: Record<string, unknown>;
 }) {
-  const probe = vi.fn((request: { readonly provider: ProviderKind }) =>
-    input?.probe
-      ? input.probe(request.provider)
-      : Effect.succeed([{ name: `${request.provider}-mcp` }] as const),
+  const probe = vi.fn(
+    (request: { readonly provider: ProviderKind; readonly reloadPlugins?: boolean }) =>
+      input?.probe
+        ? input.probe(request)
+        : Effect.succeed([{ name: `${request.provider}-mcp` }] as const),
   );
   const settings = input?.settings ?? {
     providers: {
@@ -205,5 +209,31 @@ describe("ProviderMcpStatusCacheLive", () => {
     );
 
     expect(probe).toHaveBeenCalledTimes(4);
+  });
+
+  it("passes reloadPlugins to provider probes on forceRefresh", async () => {
+    const { layer, probe } = makeLayer();
+
+    await runWithCache(
+      layer,
+      Effect.gen(function* () {
+        const cache = yield* ProviderMcpStatusCache;
+        yield* cache.ensureClaudeProject({
+          projectId: PROJECT_ID,
+          cwd: CWD,
+          selectedProvider: "claudeAgent",
+        });
+        yield* Effect.sleep(20);
+        yield* cache.ensureClaudeProject({
+          projectId: PROJECT_ID,
+          cwd: CWD,
+          selectedProvider: "claudeAgent",
+          forceRefresh: true,
+        });
+        yield* Effect.sleep(20);
+      }),
+    );
+
+    expect(probe.mock.calls.some(([request]) => request.reloadPlugins === true)).toBe(true);
   });
 });

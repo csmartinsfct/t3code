@@ -285,7 +285,24 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
+  providerName?: "codex" | "claudeAgent" | "gemini";
 }): OrchestrationReadModel {
+  const providerName = options.providerName ?? "codex";
+  const modelSelection =
+    providerName === "claudeAgent"
+      ? ({
+          provider: "claudeAgent",
+          model: "claude-opus-4-1",
+        } as const)
+      : providerName === "gemini"
+        ? ({
+            provider: "gemini",
+            model: "gemini-2.5-pro",
+          } as const)
+        : ({
+            provider: "codex",
+            model: "gpt-5",
+          } as const);
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
   for (let index = 0; index < 22; index += 1) {
@@ -327,10 +344,7 @@ function createSnapshotForTargetUser(options: {
         id: PROJECT_ID,
         title: "Project",
         workspaceRoot: "/repo/project",
-        defaultModelSelection: {
-          provider: "codex",
-          model: "gpt-5",
-        },
+        defaultModelSelection: modelSelection,
         scripts: [],
         systemPrompt: null,
         promptOverrides: { orchestration: {} },
@@ -344,10 +358,7 @@ function createSnapshotForTargetUser(options: {
         id: THREAD_ID,
         projectId: PROJECT_ID,
         title: "Browser test thread",
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5",
-        },
+        modelSelection,
         interactionMode: "default",
         runtimeMode: "full-access",
         branch: "main",
@@ -367,7 +378,7 @@ function createSnapshotForTargetUser(options: {
         session: {
           threadId: THREAD_ID,
           status: options.sessionStatus ?? "ready",
-          providerName: "codex",
+          providerName,
           runtimeMode: "full-access",
           activeTurnId: null,
           lastError: null,
@@ -3643,6 +3654,72 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(text).toContain("claudeai");
       });
       expect(document.querySelector('[title*="41 tools"]')).not.toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("forces a Claude MCP refresh when retry is clicked from the MCP menu", async () => {
+    const liveServers: readonly ResolvedMcpServer[] = [
+      {
+        name: "github-personal",
+        status: "connected",
+        scope: "user",
+      },
+    ];
+    const resolveMcpServers = vi.fn(async (_input: unknown) => ({
+      status: "ready" as const,
+      serverNames: liveServers.map((server) => server.name),
+      servers: liveServers,
+    }));
+    installTestNativeApi({
+      resolveMcpServers,
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mcp-claude-retry-target" as MessageId,
+        targetText: "mcp claude retry target",
+        providerName: "claudeAgent",
+      }),
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const mcpButton = await waitForMcpServersButton();
+
+      await vi.waitFor(
+        () => {
+          expect(resolveMcpServers).toHaveBeenCalledTimes(1);
+          expect(resolveMcpServers.mock.calls[0]?.[0]).toMatchObject({
+            provider: "claudeAgent",
+            projectId: PROJECT_ID,
+            cwd: "/repo/project",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      mcpButton.click();
+
+      const retryButton = await vi.waitFor(() => {
+        const button = document.querySelector(
+          'button[aria-label="Retry MCP status"]',
+        ) as HTMLButtonElement | null;
+        expect(button).not.toBeNull();
+        return button!;
+      });
+      retryButton.click();
+
+      await vi.waitFor(() => {
+        expect(resolveMcpServers.mock.calls.length).toBeGreaterThan(1);
+        expect(resolveMcpServers.mock.calls.at(-1)?.[0]).toMatchObject({
+          provider: "claudeAgent",
+          projectId: PROJECT_ID,
+          cwd: "/repo/project",
+          forceRefresh: true,
+        });
+      });
     } finally {
       await mounted.cleanup();
     }

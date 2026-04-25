@@ -178,6 +178,7 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
       readonly projectId: ProjectId;
       readonly cwd: string;
       readonly providers: ReadonlyArray<ProviderKind>;
+      readonly reloadPlugins?: boolean;
     }) =>
       Effect.gen(function* () {
         yield* Effect.forEach(
@@ -186,7 +187,11 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
             Effect.gen(function* () {
               const result = yield* (
                 providerService.probeMcpServers
-                  ? providerService.probeMcpServers({ provider, cwd: input.cwd })
+                  ? providerService.probeMcpServers({
+                      provider,
+                      cwd: input.cwd,
+                      ...(input.reloadPlugins === true ? { reloadPlugins: true } : {}),
+                    })
                   : Effect.succeed([])
               ).pipe(Effect.timeoutOption(PROFILE_PROBE_TIMEOUT_MS));
               const updatedAt = new Date().toISOString();
@@ -318,6 +323,7 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
                 projectId: input.projectId,
                 cwd: input.cwd,
                 providers,
+                ...(input.forceRefresh === true ? { reloadPlugins: true } : {}),
               }),
             );
           }

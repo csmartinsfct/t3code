@@ -4,6 +4,7 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
+  McpServerStatus,
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
@@ -19,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option, Random, Stream } from "effect";
+import { vi } from "vitest";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -42,8 +44,11 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public readonly reloadPluginsCalls: Array<void> = [];
   public closeCalls = 0;
+  public initializationResult?: () => Promise<unknown>;
   public getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
+  public mcpServerStatus?: () => Promise<McpServerStatus[]>;
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -98,6 +103,10 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   readonly close = (): void => {
     this.closeCalls += 1;
     this.finish();
+  };
+
+  readonly reloadPlugins = async (): Promise<void> => {
+    this.reloadPluginsCalls.push(undefined);
   };
 
   [Symbol.asyncIterator](): AsyncIterator<SDKMessage> {
@@ -168,6 +177,7 @@ function makeHarness(config?: {
   readonly cwd?: string;
   readonly baseDir?: string;
   readonly settingsOverride?: Parameters<typeof ServerSettingsService.layerTest>[0];
+  readonly startupQuery?: ClaudeAdapterLiveOptions["startupQuery"];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -182,6 +192,11 @@ function makeHarness(config?: {
       createInput = input;
       return query;
     },
+    ...(config?.startupQuery
+      ? {
+          startupQuery: config.startupQuery,
+        }
+      : {}),
     ...(config?.nativeEventLogger
       ? {
           nativeEventLogger: config.nativeEventLogger,
@@ -3308,6 +3323,79 @@ describe("ClaudeAdapterLive", () => {
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
+  });
+
+  describe("probeMcpServers", () => {
+    it.effect("reloads plugins before reading MCP status from an active matching session", () => {
+      const harness = makeHarness();
+      const mcpStatus = vi.fn(
+        async (): Promise<McpServerStatus[]> => [{ name: "github-personal", status: "connected" }],
+      );
+      harness.query.mcpServerStatus = mcpStatus;
+
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+          cwd: "/tmp/claude-adapter-test",
+        });
+
+        const result = yield* adapter.probeMcpServers!({
+          provider: "claudeAgent",
+          cwd: "/tmp/claude-adapter-test",
+          reloadPlugins: true,
+        });
+
+        assert.equal(harness.query.reloadPluginsCalls.length, 1);
+        assert.equal(mcpStatus.mock.calls.length, 1);
+        assert.equal(result[0]?.name, "github-personal");
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+
+    it.effect("reloads plugins during hidden startup probes before reading MCP status", () => {
+      const probeQuery = new FakeClaudeQuery();
+      const initializationResult = vi.fn(async () => undefined);
+      const mcpStatus = vi.fn(
+        async (): Promise<McpServerStatus[]> => [{ name: "project-tickets", status: "connected" }],
+      );
+      probeQuery.initializationResult = initializationResult;
+      probeQuery.mcpServerStatus = mcpStatus;
+
+      let closeCalls = 0;
+      const startupQuery = vi.fn(async () => ({
+        query: () => probeQuery,
+        close: () => {
+          closeCalls += 1;
+        },
+        [Symbol.asyncDispose]: async () => undefined,
+      }));
+
+      const harness = makeHarness({
+        startupQuery,
+      });
+
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const result = yield* adapter.probeMcpServers!({
+          provider: "claudeAgent",
+          cwd: "/tmp/claude-adapter-test",
+          reloadPlugins: true,
+        });
+
+        assert.equal(startupQuery.mock.calls.length, 1);
+        assert.equal(initializationResult.mock.calls.length, 1);
+        assert.equal(probeQuery.reloadPluginsCalls.length, 1);
+        assert.equal(mcpStatus.mock.calls.length, 1);
+        assert.equal(closeCalls, 1);
+        assert.equal(probeQuery.closeCalls, 1);
+        assert.equal(result[0]?.name, "project-tickets");
+      }).pipe(Effect.provide(harness.layer));
+    });
   });
 
   describe("probeRateLimits", () => {

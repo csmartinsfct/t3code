@@ -117,6 +117,7 @@ export interface ProviderAdapterShape<TError> {
   readonly probeMcpServers?: (input: {
     readonly provider: ProviderKind;
     readonly cwd: string;
+    readonly reloadPlugins?: boolean;
   }) => Effect.Effect<ReadonlyArray<ResolvedMcpServer>, TError>;
 
   /**
