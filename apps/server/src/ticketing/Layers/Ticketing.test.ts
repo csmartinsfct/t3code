@@ -329,6 +329,395 @@ TicketingTestLayer("TicketingService", (it) => {
     }),
   );
 
+  it.effect("keeps getById/getByIdentifier body-light unless includeBody is explicit", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-default");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BD01 default project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Large body ticket",
+        description: "line one\nline two",
+      });
+
+      const byId = yield* ticketing.getById({ id: created.id });
+      const byIdentifier = yield* ticketing.getByIdentifier({
+        identifier: created.identifier,
+        projectId,
+      });
+      const withBody = yield* ticketing.getById({ id: created.id, includeBody: true });
+
+      assert.strictEqual(byId.description, null);
+      assert.strictEqual(byIdentifier.description, null);
+      assert.strictEqual(byId.body?.sizeBytes, "line one\nline two".length);
+      assert.strictEqual(withBody.description, "line one\nline two");
+    }),
+  );
+
+  it.effect("reads ticket bodies with 1-based line windows", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-window");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BW02 window project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Windowed body",
+        description: "alpha\nbeta\ngamma\ndelta",
+      });
+
+      const body = yield* ticketing.getBody({ ticketId: created.id, startLine: 2, limit: 2 });
+
+      assert.strictEqual(body.startLine, 2);
+      assert.strictEqual(body.limit, 2);
+      assert.strictEqual(body.lineCount, 4);
+      assert.strictEqual(body.truncated, true);
+      assert.deepStrictEqual(body.lines, [
+        { line: 2, text: "beta" },
+        { line: 3, text: "gamma" },
+      ]);
+    }),
+  );
+
+  it.effect("rejects expectedRevision conflicts without mutating the body", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-conflict");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BC03 conflict project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Conflict body",
+        description: "original",
+      });
+
+      const exit = yield* Effect.exit(
+        ticketing.editBody({
+          ticketId: created.id,
+          expectedRevision: 99,
+          operation: "replace_body",
+          body: "mutated",
+        }),
+      );
+      const body = yield* ticketing.getBody({ ticketId: created.id });
+
+      assert.strictEqual(exit._tag, "Failure");
+      assert.strictEqual(body.revision, 1);
+      assert.deepStrictEqual(body.lines, [{ line: 1, text: "original" }]);
+    }),
+  );
+
+  it.effect(
+    "rejects ambiguous str_replace by default and supports explicit all-match replacement",
+    () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.makeUnsafe("project-body-str-replace");
+        const ticketing = yield* TicketingService;
+        yield* seedProject(projectId, "BS04 str_replace project");
+
+        const created = yield* ticketing.create({
+          projectId,
+          title: "Ambiguous body",
+          description: "same\nsame\nunique",
+        });
+
+        const ambiguous = yield* Effect.exit(
+          ticketing.editBody({
+            ticketId: created.id,
+            expectedRevision: 1,
+            operation: "str_replace",
+            oldStr: "same",
+            newStr: "changed",
+          }),
+        );
+        assert.strictEqual(ambiguous._tag, "Failure");
+
+        const updated = yield* ticketing.editBody({
+          ticketId: created.id,
+          expectedRevision: 1,
+          operation: "str_replace",
+          oldStr: "same",
+          newStr: "changed",
+          requireUnique: false,
+          occurrence: "all",
+        });
+        const body = yield* ticketing.getBody({ ticketId: created.id });
+
+        assert.strictEqual(updated.revision, 2);
+        assert.deepStrictEqual(
+          body.lines.map((line) => line.text),
+          ["changed", "changed", "unique"],
+        );
+      }),
+  );
+
+  it.effect("inserts body text at a 1-based line number", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-insert");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BI05 insert project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Insert body",
+        description: "first\nthird",
+      });
+
+      const result = yield* ticketing.editBody({
+        ticketId: created.id,
+        expectedRevision: 1,
+        operation: "insert",
+        insertLine: 2,
+        insertText: "second",
+      });
+      const body = yield* ticketing.getBody({ ticketId: created.id });
+
+      assert.strictEqual(result.revision, 2);
+      assert.deepStrictEqual(
+        body.lines.map((line) => line.text),
+        ["first", "second", "third"],
+      );
+    }),
+  );
+
+  it.effect("reads and replaces markdown sections using expectedSectionHash", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-sections");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BX06 sections project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Section body",
+        description: "# Goal\n\nOld goal\n\n## Notes\n\nKeep me",
+      });
+
+      const sections = yield* ticketing.getBodySections({ ticketId: created.id });
+      const goal = sections.sections.find((section) => section.path.join("/") === "Goal");
+      const notes = sections.sections.find((section) => section.path.join("/") === "Goal/Notes");
+      assert.ok(goal);
+      assert.ok(notes);
+
+      const scoped = yield* ticketing.getBody({
+        ticketId: created.id,
+        sectionPath: ["Goal"],
+        limit: 3,
+      });
+      assert.strictEqual(scoped.sectionHash, goal.sectionHash);
+      assert.deepStrictEqual(
+        scoped.lines.map((line) => line.text),
+        ["# Goal", "", "Old goal"],
+      );
+
+      const conflict = yield* Effect.exit(
+        ticketing.editBody({
+          ticketId: created.id,
+          expectedRevision: 1,
+          expectedSectionHash: "not-the-hash",
+          operation: "replace_section",
+          sectionPath: ["Goal", "Notes"],
+          markdown: "New notes",
+        }),
+      );
+      assert.strictEqual(conflict._tag, "Failure");
+
+      const updated = yield* ticketing.editBody({
+        ticketId: created.id,
+        expectedRevision: 1,
+        expectedSectionHash: notes.sectionHash,
+        operation: "replace_section",
+        sectionPath: ["Goal", "Notes"],
+        markdown: "New notes",
+      });
+      const body = yield* ticketing.getBody({ ticketId: created.id });
+
+      assert.strictEqual(updated.revision, 2);
+      assert.deepStrictEqual(
+        body.lines.map((line) => line.text),
+        ["# Goal", "", "Old goal", "", "## Notes", "New notes"],
+      );
+    }),
+  );
+
+  it.effect("rejects body writes over the size cap without mutating", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-body-size-cap");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "BZ07 size cap project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Size capped body",
+        description: "small",
+      });
+
+      const exit = yield* Effect.exit(
+        ticketing.editBody({
+          ticketId: created.id,
+          expectedRevision: 1,
+          operation: "replace_body",
+          body: "x".repeat(1024 * 1024 + 1),
+        }),
+      );
+      const body = yield* ticketing.getBody({ ticketId: created.id });
+
+      assert.strictEqual(exit._tag, "Failure");
+      assert.strictEqual(body.revision, 1);
+      assert.deepStrictEqual(body.lines, [{ line: 1, text: "small" }]);
+    }),
+  );
+
+  it.effect(
+    "records compact body history and publishes compact body metadata in update events",
+    () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.makeUnsafe("project-body-events");
+        const ticketing = yield* TicketingService;
+        yield* seedProject(projectId, "BE08 events project");
+
+        const created = yield* ticketing.create({
+          projectId,
+          title: "Event body",
+          description: "before full body text",
+        });
+
+        const eventsFiber = yield* ticketing.streamEvents.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+
+        const result = yield* ticketing.editBody({
+          ticketId: created.id,
+          expectedRevision: 1,
+          operation: "replace_body",
+          body: "after full body text",
+        });
+
+        const collected = yield* Fiber.join(eventsFiber);
+        const event = Array.from(collected)[0]!;
+        assert.strictEqual(event.type, "ticket_upserted");
+        if (event.type === "ticket_upserted") {
+          assert.strictEqual(event.body?.ticketId, created.id);
+          assert.strictEqual(event.body?.revision, result.revision);
+          assert.strictEqual(event.body?.contentHash, result.contentHash);
+          assert.strictEqual(event.body?.sizeBytes, result.sizeBytes);
+          assert.ok(!JSON.stringify(event).includes("after full body text"));
+        }
+
+        const history = yield* ticketing.getHistory({ ticketId: created.id });
+        const bodyHistory = history.find((entry) => entry.action === "body_updated");
+        assert.ok(bodyHistory);
+        const changes = bodyHistory.changes as Record<string, unknown>;
+        assert.strictEqual(changes.operation, "replace_body");
+        assert.ok(!("old" in changes));
+        assert.ok(!("new" in changes));
+        assert.ok(!JSON.stringify(changes).includes("after full body text"));
+        assert.ok(!JSON.stringify(changes).includes("before full body text"));
+      }),
+  );
+
+  it.effect(
+    "keeps criteria IDs stable, rejects stale criteria revisions, and renormalizes reorder positions",
+    () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.makeUnsafe("project-criteria-edits");
+        const ticketing = yield* TicketingService;
+        yield* seedProject(projectId, "CE09 criteria edits project");
+
+        const created = yield* ticketing.create({
+          projectId,
+          title: "Criteria body",
+          acceptanceCriteria: [
+            { text: "first", status: "pending" },
+            { text: "second", status: "pending" },
+            { text: "third", status: "pending" },
+          ],
+        });
+
+        const initial = yield* ticketing.listCriteria({ ticketId: created.id });
+        const firstId = initial.criteria[0]!.id;
+        const secondId = initial.criteria[1]!.id;
+        const thirdId = initial.criteria[2]!.id;
+        if (!firstId || !secondId || !thirdId) {
+          throw new Error("Expected stable criterion IDs");
+        }
+
+        const stale = yield* Effect.exit(
+          ticketing.editCriteria({
+            ticketId: created.id,
+            expectedCriteriaRevision: 99,
+            operation: "update",
+            criterionId: firstId,
+            text: "stale update",
+          }),
+        );
+        assert.strictEqual(stale._tag, "Failure");
+
+        const edited = yield* ticketing.editCriteria({
+          ticketId: created.id,
+          expectedCriteriaRevision: initial.criteriaRevision,
+          operation: "update",
+          criterionId: firstId,
+          text: "first edited",
+        });
+        assert.strictEqual(edited.criteria[0]!.id, firstId);
+        assert.strictEqual(edited.criteria[0]!.text, "first edited");
+
+        const reordered = yield* ticketing.editCriteria({
+          ticketId: created.id,
+          expectedCriteriaRevision: edited.criteriaRevision,
+          operation: "reorder",
+          criterionIds: [thirdId, firstId, secondId],
+        });
+
+        assert.deepStrictEqual(
+          reordered.criteria.map((criterion) => criterion.id),
+          [thirdId, firstId, secondId],
+        );
+        assert.deepStrictEqual(
+          reordered.criteria.map((criterion) => criterion.position),
+          [100, 200, 300],
+        );
+      }),
+  );
+
+  it.effect("keeps legacy update compatibility while honoring explicit revision checks", () =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.makeUnsafe("project-compat-updates");
+      const ticketing = yield* TicketingService;
+      yield* seedProject(projectId, "CU10 compatibility project");
+
+      const created = yield* ticketing.create({
+        projectId,
+        title: "Compatibility body",
+        description: "legacy one",
+      });
+
+      const conflict = yield* Effect.exit(
+        ticketing.update({
+          id: created.id,
+          description: "should not save",
+          expectedRevision: 42,
+        }),
+      );
+      assert.strictEqual(conflict._tag, "Failure");
+
+      const updated = yield* ticketing.update({
+        id: created.id,
+        description: "legacy two",
+        expectedRevision: 1,
+      });
+      const body = yield* ticketing.getBody({ ticketId: created.id });
+
+      assert.strictEqual(updated.description, null);
+      assert.strictEqual(body.revision, 2);
+      assert.deepStrictEqual(body.lines, [{ line: 1, text: "legacy two" }]);
+    }),
+  );
+
   it.effect("archives a ticket (hidden from default list, visible with includeArchived)", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.makeUnsafe("project-archive-basic");

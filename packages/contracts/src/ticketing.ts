@@ -130,6 +130,15 @@ export const TicketBodyMetadata = Schema.Struct({
 });
 export type TicketBodyMetadata = typeof TicketBodyMetadata.Type;
 
+export const TicketBodyEventMetadata = Schema.Struct({
+  ticketId: TicketId,
+  revision: Schema.Int,
+  contentHash: TrimmedNonEmptyString,
+  sizeBytes: Schema.Int,
+  summary: Schema.optional(Schema.String),
+});
+export type TicketBodyEventMetadata = typeof TicketBodyEventMetadata.Type;
+
 export const TicketBodyLine = Schema.Struct({
   line: Schema.Int,
   text: Schema.String,
@@ -665,6 +674,7 @@ export const TicketingStreamEvent = Schema.Union([
     type: Schema.Literal("ticket_upserted"),
     projectId: ProjectId,
     ticket: TicketSummary,
+    body: Schema.optional(TicketBodyEventMetadata),
   }),
   Schema.Struct({
     type: Schema.Literal("ticket_deleted"),

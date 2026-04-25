@@ -272,7 +272,8 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       expectedSectionHash: {
         type: "string",
         optional: true,
-        description: "Required for section-scoped writes.",
+        description:
+          "Required when operation is replace_section, and required for append_section when parentSectionPath is provided.",
       },
       operation: {
         type: "string",

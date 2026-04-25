@@ -316,7 +316,7 @@ const makeTicketingService = Effect.gen(function* () {
 
       const subSummaries = yield* batchBuildSummaries(subTickets);
       const bodyLines = splitLines(body.body);
-      const includeBody = options?.includeBody ?? true;
+      const includeBody = options?.includeBody ?? false;
 
       return {
         id: ticket.id,
@@ -357,6 +357,12 @@ const makeTicketingService = Effect.gen(function* () {
   const publishTicketSummary = (
     ticketId: TicketId,
     operation: string,
+    body?: {
+      readonly revision: number;
+      readonly contentHash: string;
+      readonly sizeBytes: number;
+      readonly summary?: string;
+    },
   ): Effect.Effect<void, TicketingError> =>
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(ticketId);
@@ -374,6 +380,17 @@ const makeTicketingService = Effect.gen(function* () {
         type: "ticket_upserted",
         projectId: ticket.projectId,
         ticket: buildTicketSummary(ticket, labels as Label[], subTicketCount, dependencyCount),
+        ...(body
+          ? {
+              body: {
+                ticketId: ticket.id,
+                revision: body.revision,
+                contentHash: body.contentHash as never,
+                sizeBytes: body.sizeBytes,
+                ...(body.summary ? { summary: body.summary } : {}),
+              },
+            }
+          : {}),
       });
     });
 
@@ -493,7 +510,7 @@ const makeTicketingService = Effect.gen(function* () {
       if (input.projectId && ticket.projectId !== input.projectId) {
         return yield* new TicketNotFoundError({ ticketId: input.id });
       }
-      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? true });
+      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? false });
     });
 
   const getByIdentifier: TicketingServiceShape["getByIdentifier"] = (input) =>
@@ -511,7 +528,7 @@ const makeTicketingService = Effect.gen(function* () {
           ),
         onSome: Effect.succeed,
       });
-      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? true });
+      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? false });
     });
 
   const getThreadLinks: TicketingServiceShape["getThreadLinks"] = (input) =>
@@ -799,7 +816,12 @@ const makeTicketingService = Effect.gen(function* () {
         },
         "user",
       ).pipe(Effect.mapError(toOperationError("editBody")));
-      yield* publishTicketSummary(ticket.id, "editBody");
+      yield* publishTicketSummary(ticket.id, "editBody", {
+        revision,
+        contentHash: afterHash,
+        sizeBytes: bodySizeBytes(nextBody),
+        summary,
+      });
       return {
         ticketId: ticket.id,
         revision,
@@ -904,7 +926,7 @@ const makeTicketingService = Effect.gen(function* () {
       next = next.map((criterion, index) => ({
         ...criterion,
         position: (index + 1) * 100,
-        updatedAt: criterion.updatedAt === now ? now : criterion.updatedAt,
+        updatedAt: criterion.updatedAt,
       }));
       const nextRevision = (ticket.criteriaRevision ?? 1) + 1;
       yield* repo
@@ -1077,6 +1099,14 @@ const makeTicketingService = Effect.gen(function* () {
 
       const changes: Record<string, { old: unknown; new: unknown }> = {};
       const patch: Record<string, unknown> = { updatedAt: now };
+      let bodyEvent:
+        | {
+            readonly revision: number;
+            readonly contentHash: string;
+            readonly sizeBytes: number;
+            readonly summary?: string;
+          }
+        | undefined;
 
       if (input.title !== undefined) {
         changes.title = { old: existing.title, new: input.title };
@@ -1148,18 +1178,26 @@ const makeTicketingService = Effect.gen(function* () {
       if (input.description !== undefined) {
         const before = yield* hydrateBody(existing);
         const afterBody = input.description ?? "";
+        const afterHash = createContentHash(afterBody);
+        const afterSizeBytes = bodySizeBytes(afterBody);
         yield* repo
           .upsertBody({
             ticketId: input.id,
             format: "markdown",
             body: afterBody,
             revision: before.revision + 1,
-            contentHash: createContentHash(afterBody),
-            sizeBytes: bodySizeBytes(afterBody),
+            contentHash: afterHash,
+            sizeBytes: afterSizeBytes,
             createdAt: before.createdAt,
             updatedAt: now,
           })
           .pipe(Effect.mapError(toOperationError("update")));
+        bodyEvent = {
+          revision: before.revision + 1,
+          contentHash: afterHash,
+          sizeBytes: afterSizeBytes,
+          summary: "Replaced full ticket body",
+        };
       }
       if (input.acceptanceCriteria !== undefined) {
         yield* repo
@@ -1184,7 +1222,7 @@ const makeTicketingService = Effect.gen(function* () {
 
       const full = yield* buildFullTicket(updated);
 
-      yield* publishTicketSummary(input.id, "update");
+      yield* publishTicketSummary(input.id, "update", bodyEvent);
 
       // When parentId changes, notify both old and new parents so counts stay fresh
       if (changes.parentId) {

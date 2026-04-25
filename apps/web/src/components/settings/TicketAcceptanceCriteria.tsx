@@ -79,7 +79,7 @@ export function TicketAcceptanceCriteria({
         console.error("Failed to update criterion status:", error);
       }
     },
-    [ticketId, onUpdated],
+    [criteriaRevision, ticketId, onUpdated],
   );
 
   // --- Edit text (always-input pattern, like title field) -----------------
