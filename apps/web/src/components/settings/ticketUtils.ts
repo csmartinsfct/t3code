@@ -93,6 +93,8 @@ const HISTORY_ACTION_LABELS: Record<TicketHistoryAction, string> = {
   created: "Created ticket",
   updated: "Updated ticket",
   status_changed: "Changed status",
+  body_updated: "Updated body",
+  criteria_updated: "Updated criteria",
   dependency_added: "Added dependency",
   dependency_removed: "Removed dependency",
   label_added: "Added label",

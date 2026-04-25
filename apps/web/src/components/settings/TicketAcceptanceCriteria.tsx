@@ -9,6 +9,7 @@ import { formatRelativeDate } from "./ticketUtils";
 interface TicketAcceptanceCriteriaProps {
   ticketId: TicketId;
   criteria: ReadonlyArray<AcceptanceCriterion>;
+  criteriaRevision?: number;
   onUpdated: () => void;
   onCriteriaChange: (next: AcceptanceCriterion[]) => Promise<void>;
 }
@@ -46,6 +47,7 @@ export function buildCriteriaAfterAdd(
 export function TicketAcceptanceCriteria({
   ticketId,
   criteria,
+  criteriaRevision = 1,
   onUpdated,
   onCriteriaChange,
 }: TicketAcceptanceCriteriaProps) {
@@ -65,9 +67,11 @@ export function TicketAcceptanceCriteria({
       try {
         const api = ensureNativeApi();
         const nextStatus = current.status === "met" ? "pending" : "met";
-        await api.ticketing.updateCriterionStatus({
+        await api.ticketing.editCriteria({
           ticketId,
-          index,
+          expectedCriteriaRevision: criteriaRevision,
+          operation: "update",
+          criterionId: current.id,
           status: nextStatus,
         });
         onUpdated();
@@ -75,7 +79,7 @@ export function TicketAcceptanceCriteria({
         console.error("Failed to update criterion status:", error);
       }
     },
-    [ticketId, onUpdated],
+    [criteriaRevision, ticketId, onUpdated],
   );
 
   // --- Edit text (always-input pattern, like title field) -----------------

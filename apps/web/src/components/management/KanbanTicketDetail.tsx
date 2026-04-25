@@ -118,10 +118,12 @@ export function buildTicketDetailLookupInput(
 ): {
   id: TicketId;
   projectId: ProjectId;
+  includeBody: true;
 } {
   return {
     id: ticketId,
     projectId: projectId as ProjectId,
+    includeBody: true,
   };
 }
 
@@ -694,10 +696,13 @@ export function KanbanTicketDetail({
       }
       try {
         const api = ensureNativeApi();
-        const updated = await api.ticketing.update({
-          id: ticketId,
-          description: nextMarkdown,
+        await api.ticketing.editBody({
+          ticketId,
+          expectedRevision: previous?.body?.revision ?? 1,
+          operation: "replace_body",
+          body: nextMarkdown ?? "",
         });
+        const updated = await api.ticketing.getById({ id: ticketId, includeBody: true });
         ticketRef.current = updated;
         setTicket(updated);
       } catch (error) {
@@ -721,9 +726,43 @@ export function KanbanTicketDetail({
       }
       try {
         const api = ensureNativeApi();
-        const updated = await api.ticketing.update({
+        if (nextCriteria.length === (previous?.acceptanceCriteria?.length ?? 0) + 1) {
+          const added = nextCriteria[nextCriteria.length - 1];
+          await api.ticketing.editCriteria({
+            ticketId,
+            expectedCriteriaRevision: previous?.criteriaRevision ?? 1,
+            operation: "add",
+            text: added?.text ?? "",
+            status: added?.status ?? "pending",
+          });
+        } else if (nextCriteria.length === (previous?.acceptanceCriteria?.length ?? 0) - 1) {
+          const removed = (previous?.acceptanceCriteria ?? []).find(
+            (criterion) => !nextCriteria.some((next) => next.id === criterion.id),
+          );
+          await api.ticketing.editCriteria({
+            ticketId,
+            expectedCriteriaRevision: previous?.criteriaRevision ?? 1,
+            operation: "remove",
+            criterionId: removed?.id,
+          });
+        } else {
+          const changedIndex = nextCriteria.findIndex((criterion, index) => {
+            const before = previous?.acceptanceCriteria?.[index];
+            return before?.text !== criterion.text || before?.status !== criterion.status;
+          });
+          const changed = nextCriteria[changedIndex];
+          await api.ticketing.editCriteria({
+            ticketId,
+            expectedCriteriaRevision: previous?.criteriaRevision ?? 1,
+            operation: "update",
+            criterionId: changed?.id,
+            text: changed?.text,
+            status: changed?.status,
+          });
+        }
+        const updated = await api.ticketing.getById({
           id: ticketId,
-          acceptanceCriteria: nextCriteria,
+          includeBody: true,
         });
         ticketRef.current = updated;
         setTicket(updated);
@@ -1085,6 +1124,7 @@ export function KanbanTicketDetail({
         <TicketAcceptanceCriteria
           ticketId={ticketId}
           criteria={ticket.acceptanceCriteria ?? []}
+          criteriaRevision={ticket.criteriaRevision ?? 1}
           onUpdated={() => void fetchTicket()}
           onCriteriaChange={handleCriteriaChange}
         />

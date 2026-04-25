@@ -25,6 +25,7 @@ import {
   type TicketingError,
   type TicketingStreamEvent,
   type TicketStatus,
+  type AcceptanceCriterion,
 } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Option, Path, PubSub, Stream } from "effect";
 
@@ -40,12 +41,28 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { TicketingRepository } from "../../persistence/Services/Ticketing.ts";
 import type {
+  PersistedAcceptanceCriterion,
+  PersistedTicketBody,
   PersistedTicket,
   PersistedTicketingAttachment,
 } from "../../persistence/Services/Ticketing.ts";
 import { TicketThreadLinkRepository } from "../../persistence/Services/TicketThreadLinks.ts";
 import type { TicketThreadLinkLookupRow } from "../../persistence/Services/TicketThreadLinks.ts";
 import { TicketingService, type TicketingServiceShape } from "../Services/Ticketing.ts";
+import {
+  bodySizeBytes,
+  countChangedLines,
+  createContentHash,
+  DEFAULT_TICKET_BODY_READ_LIMIT,
+  findSection,
+  makeBodyMetadata,
+  makePatchExcerpt,
+  markdownSections,
+  splitLines,
+  summarizeBodyOperation,
+  TICKET_BODY_PREVIEW_LINE_LIMIT,
+  TICKET_BODY_SIZE_CAP_BYTES,
+} from "../bodyModel.ts";
 
 const nowIso = () => new Date().toISOString();
 
@@ -143,6 +160,91 @@ const makeTicketingService = Effect.gen(function* () {
       performedAt: nowIso(),
     });
 
+  const toContractCriterion = (criterion: PersistedAcceptanceCriterion): AcceptanceCriterion => ({
+    id: criterion.id as never,
+    position: criterion.position,
+    text: criterion.text,
+    status: criterion.status,
+    reason: criterion.reason,
+    verifiedBy: criterion.verifiedBy,
+    verifiedAt: criterion.verifiedAt as never,
+    createdAt: criterion.createdAt,
+    updatedAt: criterion.updatedAt,
+  });
+
+  const makePersistedCriteria = (
+    ticketId: TicketId,
+    criteria: ReadonlyArray<AcceptanceCriterion>,
+    now: string,
+  ): PersistedAcceptanceCriterion[] =>
+    criteria.map((criterion, index) => ({
+      id: criterion.id ?? crypto.randomUUID(),
+      ticketId,
+      position: (index + 1) * 100,
+      text: criterion.text,
+      status: criterion.status ?? "pending",
+      reason: criterion.reason ?? null,
+      verifiedBy: criterion.verifiedBy ?? null,
+      verifiedAt: criterion.verifiedAt ?? null,
+      createdAt: criterion.createdAt ?? now,
+      updatedAt: now,
+    }));
+
+  const hydrateBody = (
+    ticket: PersistedTicket,
+  ): Effect.Effect<PersistedTicketBody, TicketingError> =>
+    Effect.gen(function* () {
+      const existing = yield* repo
+        .getBody({ ticketId: ticket.id })
+        .pipe(Effect.mapError(toOperationError("hydrateBody")));
+      return yield* Option.match(existing, {
+        onSome: Effect.succeed,
+        onNone: () => {
+          const body = ticket.description ?? "";
+          const now = ticket.updatedAt;
+          const persisted: PersistedTicketBody = {
+            ticketId: ticket.id,
+            format: "markdown",
+            body,
+            revision: 1,
+            contentHash: createContentHash(body),
+            sizeBytes: bodySizeBytes(body),
+            createdAt: ticket.createdAt,
+            updatedAt: now,
+          };
+          return repo
+            .upsertBody(persisted)
+            .pipe(Effect.as(persisted), Effect.mapError(toOperationError("hydrateBody")));
+        },
+      });
+    });
+
+  const hydrateCriteria = (
+    ticket: PersistedTicket,
+  ): Effect.Effect<ReadonlyArray<PersistedAcceptanceCriterion>, TicketingError> =>
+    Effect.gen(function* () {
+      const existing = yield* repo
+        .listCriteria({ ticketId: ticket.id })
+        .pipe(Effect.mapError(toOperationError("hydrateCriteria")));
+      if (existing.length > 0) return existing;
+      const criteria = makePersistedCriteria(
+        ticket.id,
+        ticket.acceptanceCriteria ?? [],
+        ticket.updatedAt,
+      );
+      if (criteria.length > 0) {
+        yield* repo
+          .replaceCriteria({
+            ticketId: ticket.id,
+            criteria,
+            criteriaRevision: ticket.criteriaRevision ?? 1,
+            updatedAt: ticket.updatedAt,
+          })
+          .pipe(Effect.mapError(toOperationError("hydrateCriteria")));
+      }
+      return criteria;
+    });
+
   const resolveTicketOrFail = (id: TicketId) =>
     repo.getById({ id }).pipe(
       Effect.flatMap(
@@ -199,15 +301,22 @@ const makeTicketingService = Effect.gen(function* () {
       );
     });
 
-  const buildFullTicket = (ticket: PersistedTicket): Effect.Effect<Ticket, TicketingError> =>
+  const buildFullTicket = (
+    ticket: PersistedTicket,
+    options?: { readonly includeBody?: boolean },
+  ): Effect.Effect<Ticket, TicketingError> =>
     Effect.gen(function* () {
       const labels = yield* repo.listLabelsForTicket({ ticketId: ticket.id });
       const deps = yield* repo.listDependencies({ ticketId: ticket.id });
       const subTickets = yield* repo.listByParent({ parentId: ticket.id });
       const comments = yield* repo.listCommentsByTicket({ ticketId: ticket.id });
       const artifacts = yield* repo.listArtifactsByTicket({ ticketId: ticket.id });
+      const body = yield* hydrateBody(ticket);
+      const criteria = yield* hydrateCriteria(ticket);
 
       const subSummaries = yield* batchBuildSummaries(subTickets);
+      const bodyLines = splitLines(body.body);
+      const includeBody = options?.includeBody ?? false;
 
       return {
         id: ticket.id,
@@ -216,13 +325,19 @@ const makeTicketingService = Effect.gen(function* () {
         ticketNumber: ticket.ticketNumber,
         identifier: ticket.identifier as never,
         title: ticket.title as never,
-        description: ticket.description,
+        description: includeBody ? body.body : null,
+        body: makeBodyMetadata(body.body, body.revision),
+        bodyPreview: bodyLines.slice(0, TICKET_BODY_PREVIEW_LINE_LIMIT).map((text, index) => ({
+          line: index + 1,
+          text,
+        })),
         status: ticket.status,
         priority: ticket.priority,
         sortOrder: ticket.sortOrder,
         isArchived: ticket.isArchived,
         worktree: ticket.worktree,
-        acceptanceCriteria: ticket.acceptanceCriteria,
+        acceptanceCriteria: criteria.map(toContractCriterion),
+        criteriaRevision: ticket.criteriaRevision ?? 1,
         labels: labels as Label[],
         dependencies: deps as TicketDependency[],
         subTickets: subSummaries,
@@ -242,6 +357,12 @@ const makeTicketingService = Effect.gen(function* () {
   const publishTicketSummary = (
     ticketId: TicketId,
     operation: string,
+    body?: {
+      readonly revision: number;
+      readonly contentHash: string;
+      readonly sizeBytes: number;
+      readonly summary?: string;
+    },
   ): Effect.Effect<void, TicketingError> =>
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(ticketId);
@@ -259,6 +380,17 @@ const makeTicketingService = Effect.gen(function* () {
         type: "ticket_upserted",
         projectId: ticket.projectId,
         ticket: buildTicketSummary(ticket, labels as Label[], subTicketCount, dependencyCount),
+        ...(body
+          ? {
+              body: {
+                ticketId: ticket.id,
+                revision: body.revision,
+                contentHash: body.contentHash as never,
+                sizeBytes: body.sizeBytes,
+                ...(body.summary ? { summary: body.summary } : {}),
+              },
+            }
+          : {}),
       });
     });
 
@@ -378,7 +510,7 @@ const makeTicketingService = Effect.gen(function* () {
       if (input.projectId && ticket.projectId !== input.projectId) {
         return yield* new TicketNotFoundError({ ticketId: input.id });
       }
-      return yield* buildFullTicket(ticket);
+      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? false });
     });
 
   const getByIdentifier: TicketingServiceShape["getByIdentifier"] = (input) =>
@@ -396,7 +528,7 @@ const makeTicketingService = Effect.gen(function* () {
           ),
         onSome: Effect.succeed,
       });
-      return yield* buildFullTicket(ticket);
+      return yield* buildFullTicket(ticket, { includeBody: input.includeBody ?? false });
     });
 
   const getThreadLinks: TicketingServiceShape["getThreadLinks"] = (input) =>
@@ -445,6 +577,381 @@ const makeTicketingService = Effect.gen(function* () {
         ticketId: input.ticketId,
         originThread,
       } satisfies TicketThreadLinks;
+    });
+
+  const getBody: TicketingServiceShape["getBody"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      const body = yield* hydrateBody(ticket);
+      const allLines = splitLines(body.body);
+      let startLine = input.startLine ?? 1;
+      let endLine = allLines.length;
+      let sectionHash: string | undefined;
+      if (input.sectionPath && input.sectionPath.length > 0) {
+        const section = findSection(body.body, input.sectionPath);
+        if (!section) {
+          return yield* new TicketingValidationError({
+            field: "sectionPath",
+            message: `Unknown section: ${input.sectionPath.join(" > ")}`,
+          });
+        }
+        sectionHash = section.sectionHash;
+        startLine = input.startLine ?? section.startLine;
+        endLine = section.endLine;
+      }
+      const limit = input.limit ?? DEFAULT_TICKET_BODY_READ_LIMIT;
+      const zeroBased = Math.max(0, startLine - 1);
+      const lines = allLines
+        .slice(zeroBased, Math.min(endLine, zeroBased + limit))
+        .map((text, index) => ({
+          line: startLine + index,
+          text,
+        }));
+      return {
+        ticketId: ticket.id,
+        revision: body.revision,
+        contentHash: body.contentHash as never,
+        format: "markdown" as const,
+        sizeBytes: body.sizeBytes,
+        lineCount: allLines.length,
+        startLine,
+        limit,
+        lines,
+        truncated: zeroBased + limit < endLine,
+        ...(sectionHash ? { sectionHash: sectionHash as never } : {}),
+      };
+    });
+
+  const searchBody: TicketingServiceShape["searchBody"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      const body = yield* hydrateBody(ticket);
+      const query = input.query.toLowerCase();
+      const contextLines = input.contextLines ?? 2;
+      const limit = input.limit ?? 20;
+      const lines = splitLines(body.body);
+      const matches = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index]!.toLowerCase().includes(query)) continue;
+        matches.push({
+          line: index + 1,
+          text: lines[index]!,
+          before: lines
+            .slice(Math.max(0, index - contextLines), index)
+            .map((text, beforeIndex) => ({
+              line: Math.max(1, index - contextLines + 1) + beforeIndex,
+              text,
+            })),
+          after: lines.slice(index + 1, index + 1 + contextLines).map((text, afterIndex) => ({
+            line: index + 2 + afterIndex,
+            text,
+          })),
+        });
+        if (matches.length >= limit) break;
+      }
+      return {
+        ticketId: ticket.id,
+        revision: body.revision,
+        contentHash: body.contentHash as never,
+        matches,
+        truncated: matches.length >= limit,
+      };
+    });
+
+  const getBodySections: TicketingServiceShape["getBodySections"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      const body = yield* hydrateBody(ticket);
+      return {
+        ticketId: ticket.id,
+        revision: body.revision,
+        contentHash: body.contentHash as never,
+        sections: markdownSections(body.body, input.maxDepth),
+      };
+    });
+
+  const editBody: TicketingServiceShape["editBody"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      const current = yield* hydrateBody(ticket);
+      if (input.expectedRevision !== current.revision) {
+        return yield* new TicketingValidationError({
+          field: "expectedRevision",
+          message: `Body revision mismatch: expected ${input.expectedRevision}, current ${current.revision}`,
+        });
+      }
+
+      let nextBody = current.body;
+      if (input.operation === "replace_body") {
+        nextBody = input.body ?? "";
+      } else if (input.operation === "insert") {
+        if (input.insertLine === undefined || input.insertText === undefined) {
+          return yield* new TicketingValidationError({
+            field: "insertText",
+            message: "insert requires insertLine and insertText",
+          });
+        }
+        const lines = splitLines(current.body);
+        const requestedLine = input.insertLine === 0 ? 0 : input.insertLine - 1;
+        const index = Math.min(Math.max(requestedLine, 0), lines.length);
+        lines.splice(index, 0, ...splitLines(input.insertText));
+        nextBody = lines.join("\n");
+      } else if (input.operation === "str_replace") {
+        if (input.oldStr === undefined || input.newStr === undefined) {
+          return yield* new TicketingValidationError({
+            field: "oldStr",
+            message: "str_replace requires oldStr and newStr",
+          });
+        }
+        const first = current.body.indexOf(input.oldStr);
+        const last = current.body.lastIndexOf(input.oldStr);
+        if (first < 0) {
+          return yield* new TicketingValidationError({ field: "oldStr", message: "No match" });
+        }
+        if ((input.requireUnique ?? true) && first !== last) {
+          return yield* new TicketingValidationError({
+            field: "oldStr",
+            message: "Ambiguous match; set requireUnique false with occurrence",
+          });
+        }
+        if (input.occurrence === "all") {
+          nextBody = current.body.split(input.oldStr).join(input.newStr);
+        } else {
+          const position = input.occurrence === "last" ? last : first;
+          nextBody =
+            current.body.slice(0, position) +
+            input.newStr +
+            current.body.slice(position + input.oldStr.length);
+        }
+      } else if (input.operation === "replace_section") {
+        const sectionPath = input.sectionPath ?? [];
+        const section = findSection(current.body, sectionPath);
+        if (!section) {
+          return yield* new TicketingValidationError({
+            field: "sectionPath",
+            message: `Unknown section: ${sectionPath.join(" > ")}`,
+          });
+        }
+        if (input.expectedSectionHash !== section.sectionHash) {
+          return yield* new TicketingValidationError({
+            field: "expectedSectionHash",
+            message: "Section hash mismatch",
+          });
+        }
+        const lines = splitLines(current.body);
+        const headingLine = lines[section.startLine - 1] ?? `# ${section.heading}`;
+        const replacement = [headingLine, ...(input.markdown ? splitLines(input.markdown) : [])];
+        lines.splice(
+          section.startLine - 1,
+          section.endLine - section.startLine + 1,
+          ...replacement,
+        );
+        nextBody = lines.join("\n");
+      } else if (input.operation === "append_section") {
+        if (input.expectedSectionHash !== undefined && input.parentSectionPath) {
+          const parent = findSection(current.body, input.parentSectionPath);
+          if (!parent || parent.sectionHash !== input.expectedSectionHash) {
+            return yield* new TicketingValidationError({
+              field: "expectedSectionHash",
+              message: "Section hash mismatch",
+            });
+          }
+        }
+        const heading = input.heading ?? "Notes";
+        const markdown = input.markdown ?? "";
+        const prefix = current.body.trimEnd() ? "\n\n" : "";
+        nextBody = `${current.body.trimEnd()}${prefix}## ${heading}\n\n${markdown}`.trimEnd();
+      }
+
+      if (bodySizeBytes(nextBody) > TICKET_BODY_SIZE_CAP_BYTES) {
+        return yield* new TicketingValidationError({ field: "body", message: "body_too_large" });
+      }
+      const now = nowIso();
+      const beforeHash = current.contentHash;
+      const afterHash = createContentHash(nextBody);
+      const revision = current.revision + 1;
+      yield* repo
+        .upsertBody({
+          ticketId: ticket.id,
+          format: "markdown",
+          body: nextBody,
+          revision,
+          contentHash: afterHash,
+          sizeBytes: bodySizeBytes(nextBody),
+          createdAt: current.createdAt,
+          updatedAt: now,
+        })
+        .pipe(Effect.mapError(toOperationError("editBody")));
+      const changedLines = countChangedLines(current.body, nextBody);
+      const changedChars = Math.abs(nextBody.length - current.body.length);
+      const summary = summarizeBodyOperation(input.operation);
+      yield* repo
+        .recordBodyChange({
+          id: crypto.randomUUID(),
+          ticketId: ticket.id,
+          baseRevision: current.revision,
+          newRevision: revision,
+          operation: input.operation,
+          patchExcerpt: makePatchExcerpt(current.body, nextBody),
+          summary,
+          beforeHash,
+          afterHash,
+          changedLines,
+          changedChars,
+          performedBy: "user",
+          performedAt: now,
+        })
+        .pipe(Effect.mapError(toOperationError("editBody")));
+      yield* recordHistory(
+        ticket.id,
+        "body_updated",
+        {
+          operation: input.operation,
+          baseRevision: current.revision,
+          newRevision: revision,
+          beforeHash,
+          afterHash,
+          changedLines,
+          changedChars,
+        },
+        "user",
+      ).pipe(Effect.mapError(toOperationError("editBody")));
+      yield* publishTicketSummary(ticket.id, "editBody", {
+        revision,
+        contentHash: afterHash,
+        sizeBytes: bodySizeBytes(nextBody),
+        summary,
+      });
+      return {
+        ticketId: ticket.id,
+        revision,
+        contentHash: afterHash as never,
+        sizeBytes: bodySizeBytes(nextBody),
+        lineCount: splitLines(nextBody).length,
+        changedLines,
+        changedChars,
+        summary,
+      };
+    });
+
+  const listCriteria: TicketingServiceShape["listCriteria"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      const criteria = yield* hydrateCriteria(ticket);
+      return {
+        ticketId: ticket.id,
+        criteriaRevision: ticket.criteriaRevision ?? 1,
+        criteria: criteria.map(toContractCriterion),
+      };
+    });
+
+  const editCriteria: TicketingServiceShape["editCriteria"] = (input) =>
+    Effect.gen(function* () {
+      const ticket = yield* resolveTicketOrFail(input.ticketId);
+      if (input.expectedCriteriaRevision !== (ticket.criteriaRevision ?? 1)) {
+        return yield* new TicketingValidationError({
+          field: "expectedCriteriaRevision",
+          message: `Criteria revision mismatch: expected ${input.expectedCriteriaRevision}, current ${ticket.criteriaRevision ?? 1}`,
+        });
+      }
+      const now = nowIso();
+      const current = [...(yield* hydrateCriteria(ticket))];
+      let next = current.map((criterion) => ({ ...criterion }));
+      if (input.operation === "add") {
+        if (!input.text?.trim()) {
+          return yield* new TicketingValidationError({
+            field: "text",
+            message: "Text is required",
+          });
+        }
+        const created: PersistedAcceptanceCriterion = {
+          id: crypto.randomUUID(),
+          ticketId: ticket.id,
+          position: 0,
+          text: input.text.trim(),
+          status: input.status ?? "pending",
+          reason: input.reason ?? null,
+          verifiedBy: input.verifiedBy ?? null,
+          verifiedAt: input.verifiedAt ?? null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const anchorIndex = input.afterCriterionId
+          ? next.findIndex((criterion) => criterion.id === input.afterCriterionId)
+          : input.beforeCriterionId
+            ? next.findIndex((criterion) => criterion.id === input.beforeCriterionId)
+            : -1;
+        if (input.beforeCriterionId && anchorIndex >= 0) next.splice(anchorIndex, 0, created);
+        else if (anchorIndex >= 0) next.splice(anchorIndex + 1, 0, created);
+        else next.push(created);
+      } else if (input.operation === "update") {
+        if (!input.criterionId || !next.some((criterion) => criterion.id === input.criterionId)) {
+          return yield* new TicketingValidationError({
+            field: "criterionId",
+            message: "Unknown criterion ID",
+          });
+        }
+        next = next.map((criterion) =>
+          criterion.id === input.criterionId
+            ? {
+                ...criterion,
+                ...(input.text !== undefined ? { text: input.text } : {}),
+                ...(input.status !== undefined ? { status: input.status } : {}),
+                ...(input.reason !== undefined ? { reason: input.reason } : {}),
+                ...(input.verifiedBy !== undefined ? { verifiedBy: input.verifiedBy } : {}),
+                ...(input.verifiedAt !== undefined ? { verifiedAt: input.verifiedAt } : {}),
+                updatedAt: now,
+              }
+            : criterion,
+        );
+      } else if (input.operation === "remove") {
+        if (!input.criterionId || !next.some((criterion) => criterion.id === input.criterionId)) {
+          return yield* new TicketingValidationError({
+            field: "criterionId",
+            message: "Unknown criterion ID",
+          });
+        }
+        next = next.filter((criterion) => criterion.id !== input.criterionId);
+      } else if (input.operation === "reorder") {
+        const ids = input.criterionIds ?? [];
+        const byId = new Map(next.map((criterion) => [criterion.id, criterion]));
+        if (ids.length !== next.length || ids.some((id) => !byId.has(id))) {
+          return yield* new TicketingValidationError({
+            field: "criterionIds",
+            message: "Reorder must include every current criterion ID exactly once",
+          });
+        }
+        next = ids.map((id) => byId.get(id)!);
+      }
+      next = next.map((criterion, index) => ({
+        ...criterion,
+        position: (index + 1) * 100,
+        updatedAt: criterion.updatedAt,
+      }));
+      const nextRevision = (ticket.criteriaRevision ?? 1) + 1;
+      yield* repo
+        .replaceCriteria({
+          ticketId: ticket.id,
+          criteria: next,
+          criteriaRevision: nextRevision,
+          updatedAt: now,
+        })
+        .pipe(Effect.mapError(toOperationError("editCriteria")));
+      yield* recordHistory(
+        ticket.id,
+        "criteria_updated",
+        {
+          operation: input.operation,
+          criteriaRevision: { old: ticket.criteriaRevision ?? 1, new: nextRevision },
+        },
+        "user",
+      ).pipe(Effect.mapError(toOperationError("editCriteria")));
+      yield* publishTicketSummary(ticket.id, "editCriteria");
+      return {
+        ticketId: ticket.id,
+        criteriaRevision: nextRevision,
+        criteria: next.map(toContractCriterion),
+      };
     });
 
   const create: TicketingServiceShape["create"] = (input) =>
@@ -512,11 +1019,35 @@ const makeTicketingService = Effect.gen(function* () {
         sortOrder: input.sortOrder ?? 0,
         isArchived: false,
         worktree: input.worktree ?? null,
+        criteriaRevision: 1,
         createdAt: now,
         updatedAt: now,
       };
 
       yield* repo.createTicket(ticket).pipe(Effect.mapError(toOperationError("create")));
+      yield* repo
+        .upsertBody({
+          ticketId: id,
+          format: "markdown",
+          body: description ?? "",
+          revision: 1,
+          contentHash: createContentHash(description ?? ""),
+          sizeBytes: bodySizeBytes(description ?? ""),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .pipe(Effect.mapError(toOperationError("create")));
+      const criteriaRows = makePersistedCriteria(id, input.acceptanceCriteria ?? [], now);
+      if (criteriaRows.length > 0) {
+        yield* repo
+          .replaceCriteria({
+            ticketId: id,
+            criteria: criteriaRows,
+            criteriaRevision: 1,
+            updatedAt: now,
+          })
+          .pipe(Effect.mapError(toOperationError("create")));
+      }
       yield* recordHistory(id, "created", ticket, "user").pipe(
         Effect.mapError(toOperationError("create")),
       );
@@ -568,21 +1099,56 @@ const makeTicketingService = Effect.gen(function* () {
 
       const changes: Record<string, { old: unknown; new: unknown }> = {};
       const patch: Record<string, unknown> = { updatedAt: now };
+      let bodyEvent:
+        | {
+            readonly revision: number;
+            readonly contentHash: string;
+            readonly sizeBytes: number;
+            readonly summary?: string;
+          }
+        | undefined;
 
       if (input.title !== undefined) {
         changes.title = { old: existing.title, new: input.title };
         patch.title = input.title;
       }
       if (input.description !== undefined) {
-        changes.description = { old: existing.description, new: input.description };
+        const body = yield* hydrateBody(existing);
+        if (input.expectedRevision !== undefined && input.expectedRevision !== body.revision) {
+          return yield* new TicketingValidationError({
+            field: "expectedRevision",
+            message: `Body revision mismatch: expected ${input.expectedRevision}, current ${body.revision}`,
+          });
+        }
+        const nextBody = input.description ?? "";
+        if (bodySizeBytes(nextBody) > TICKET_BODY_SIZE_CAP_BYTES) {
+          return yield* new TicketingValidationError({
+            field: "description",
+            message: "body_too_large",
+          });
+        }
+        changes.description = {
+          old: { revision: body.revision, contentHash: body.contentHash },
+          new: { revision: body.revision + 1, contentHash: createContentHash(nextBody) },
+        };
         patch.description = input.description ?? null;
       }
       if (input.acceptanceCriteria !== undefined) {
+        if (
+          input.expectedCriteriaRevision !== undefined &&
+          input.expectedCriteriaRevision !== (existing.criteriaRevision ?? 1)
+        ) {
+          return yield* new TicketingValidationError({
+            field: "expectedCriteriaRevision",
+            message: `Criteria revision mismatch: expected ${input.expectedCriteriaRevision}, current ${existing.criteriaRevision ?? 1}`,
+          });
+        }
         changes.acceptanceCriteria = {
           old: existing.acceptanceCriteria,
           new: input.acceptanceCriteria,
         };
         patch.acceptanceCriteria = input.acceptanceCriteria ?? null;
+        patch.criteriaRevision = (existing.criteriaRevision ?? 1) + 1;
       }
       if (input.status !== undefined) {
         changes.status = { old: existing.status, new: input.status };
@@ -609,6 +1175,41 @@ const makeTicketingService = Effect.gen(function* () {
 
       yield* repo.updateTicket(updated).pipe(Effect.mapError(toOperationError("update")));
 
+      if (input.description !== undefined) {
+        const before = yield* hydrateBody(existing);
+        const afterBody = input.description ?? "";
+        const afterHash = createContentHash(afterBody);
+        const afterSizeBytes = bodySizeBytes(afterBody);
+        yield* repo
+          .upsertBody({
+            ticketId: input.id,
+            format: "markdown",
+            body: afterBody,
+            revision: before.revision + 1,
+            contentHash: afterHash,
+            sizeBytes: afterSizeBytes,
+            createdAt: before.createdAt,
+            updatedAt: now,
+          })
+          .pipe(Effect.mapError(toOperationError("update")));
+        bodyEvent = {
+          revision: before.revision + 1,
+          contentHash: afterHash,
+          sizeBytes: afterSizeBytes,
+          summary: "Replaced full ticket body",
+        };
+      }
+      if (input.acceptanceCriteria !== undefined) {
+        yield* repo
+          .replaceCriteria({
+            ticketId: input.id,
+            criteria: makePersistedCriteria(input.id, input.acceptanceCriteria ?? [], now),
+            criteriaRevision: updated.criteriaRevision ?? 1,
+            updatedAt: now,
+          })
+          .pipe(Effect.mapError(toOperationError("update")));
+      }
+
       const historyAction = changes.status ? "status_changed" : "updated";
       yield* recordHistory(input.id, historyAction, changes, "user").pipe(
         Effect.mapError(toOperationError("update")),
@@ -621,7 +1222,7 @@ const makeTicketingService = Effect.gen(function* () {
 
       const full = yield* buildFullTicket(updated);
 
-      yield* publishTicketSummary(input.id, "update");
+      yield* publishTicketSummary(input.id, "update", bodyEvent);
 
       // When parentId changes, notify both old and new parents so counts stay fresh
       if (changes.parentId) {
@@ -945,51 +1546,31 @@ const makeTicketingService = Effect.gen(function* () {
   const updateCriterionStatus: TicketingServiceShape["updateCriterionStatus"] = (input) =>
     Effect.gen(function* () {
       const ticket = yield* resolveTicketOrFail(input.ticketId);
-      if (!ticket.acceptanceCriteria || ticket.acceptanceCriteria.length === 0) {
+      const criteria = yield* hydrateCriteria(ticket);
+      if (criteria.length === 0) {
         return yield* new TicketingValidationError({
           field: "acceptanceCriteria",
           message: "Ticket has no acceptance criteria",
         });
       }
-      if (input.index < 0 || input.index >= ticket.acceptanceCriteria.length) {
+      if (input.index < 0 || input.index >= criteria.length) {
         return yield* new TicketingValidationError({
           field: "index",
-          message: `Index ${input.index} out of range (0-${ticket.acceptanceCriteria.length - 1})`,
+          message: `Index ${input.index} out of range (0-${criteria.length - 1})`,
         });
       }
-
-      const now = nowIso();
-      const updated = [...ticket.acceptanceCriteria];
-      updated[input.index] = {
-        ...updated[input.index]!,
+      yield* editCriteria({
+        ticketId: input.ticketId,
+        expectedCriteriaRevision: ticket.criteriaRevision ?? 1,
+        operation: "update",
+        criterionId: criteria[input.index]!.id,
         status: input.status,
         reason: input.reason ?? null,
         verifiedBy: "user",
-        verifiedAt: now,
-      };
-
-      const updatedTicket: PersistedTicket = {
-        ...ticket,
-        acceptanceCriteria: updated,
-        updatedAt: now,
-      };
-      yield* repo
-        .updateTicket(updatedTicket)
-        .pipe(Effect.mapError(toOperationError("updateCriterionStatus")));
-      yield* recordHistory(
-        input.ticketId,
-        "updated",
-        {
-          acceptanceCriteria: {
-            index: input.index,
-            old: ticket.acceptanceCriteria[input.index],
-            new: updated[input.index],
-          },
-        },
-        "user",
-      ).pipe(Effect.mapError(toOperationError("updateCriterionStatus")));
-
-      return yield* buildFullTicket(updatedTicket);
+        verifiedAt: nowIso() as never,
+      });
+      const updated = yield* resolveTicketOrFail(input.ticketId);
+      return yield* buildFullTicket(updated);
     });
 
   // History
@@ -1585,6 +2166,12 @@ const makeTicketingService = Effect.gen(function* () {
     getById,
     getByIdentifier,
     getThreadLinks,
+    getBody,
+    searchBody,
+    getBodySections,
+    editBody,
+    listCriteria,
+    editCriteria,
     create,
     update,
     delete: del,

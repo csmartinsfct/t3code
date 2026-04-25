@@ -24,7 +24,18 @@ import type {
   TemplateUpdateInput,
   Ticket,
   TicketArchiveInput,
+  TicketBodyEditInput,
+  TicketBodyEditResult,
+  TicketBodyGetInput,
+  TicketBodyReadResult,
+  TicketBodySearchInput,
+  TicketBodySearchResult,
+  TicketBodySectionsInput,
+  TicketBodySectionsResult,
   TicketCreateInput,
+  TicketCriteriaEditInput,
+  TicketCriteriaListInput,
+  TicketCriteriaListResult,
   TicketUpdateInput,
   TicketDeleteInput,
   TicketUnarchiveInput,
@@ -69,6 +80,24 @@ export interface TicketingServiceShape {
   readonly getThreadLinks: (
     input: TicketThreadLinksInput,
   ) => Effect.Effect<TicketThreadLinks, TicketingError>;
+  readonly getBody: (
+    input: TicketBodyGetInput,
+  ) => Effect.Effect<TicketBodyReadResult, TicketingError>;
+  readonly searchBody: (
+    input: TicketBodySearchInput,
+  ) => Effect.Effect<TicketBodySearchResult, TicketingError>;
+  readonly getBodySections: (
+    input: TicketBodySectionsInput,
+  ) => Effect.Effect<TicketBodySectionsResult, TicketingError>;
+  readonly editBody: (
+    input: TicketBodyEditInput,
+  ) => Effect.Effect<TicketBodyEditResult, TicketingError>;
+  readonly listCriteria: (
+    input: TicketCriteriaListInput,
+  ) => Effect.Effect<TicketCriteriaListResult, TicketingError>;
+  readonly editCriteria: (
+    input: TicketCriteriaEditInput,
+  ) => Effect.Effect<TicketCriteriaListResult, TicketingError>;
   readonly create: (input: TicketCreateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly update: (input: TicketUpdateInput) => Effect.Effect<Ticket, TicketingError>;
   readonly delete: (input: TicketDeleteInput) => Effect.Effect<void, TicketingError>;

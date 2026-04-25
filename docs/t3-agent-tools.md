@@ -137,3 +137,21 @@ To add a new REST API service:
 4. No adapter changes required — the shared helper handles all three providers
 
 If a service should stay HTTP-only and not be advertised to models, simply do not add it to the table.
+
+---
+
+## Ticket Body Tools
+
+Ticket bodies are patchable documents. Use `get_ticket` for metadata and preview; pass `includeBody: true` only when the full body is truly needed. Prefer these tools for large tickets:
+
+- `get_ticket_body`: line-window read with `startLine`, `limit`, and optional `sectionPath`. Returns revision, content hash, size, total line count, and section hash when scoped.
+- `search_ticket_body`: direct text search within one ticket body with small line snippets.
+- `get_ticket_body_sections`: markdown outline only, including section paths, ranges, and hashes.
+- `edit_ticket_body`: the single write tool. Always pass `expectedRevision`; for `replace_section` and section-scoped `append_section`, also pass `expectedSectionHash`. Use `str_replace` for known unique strings, `insert` for line additions, `replace_section` for known headings, `append_section` for new sections, and `replace_body` as a last resort. Bodies over 1 MiB reject with `body_too_large` without mutating.
+
+Acceptance criteria use stable IDs:
+
+- `list_ticket_criteria` returns criteria plus `criteriaRevision`.
+- `edit_ticket_criteria` supports `add`, `update`, `remove`, and `reorder`, all requiring `expectedCriteriaRevision`. Reorders must include every current criterion ID once; positions are renormalized server-side.
+
+Legacy `update_ticket.description` and `update_ticket.acceptanceCriteria` remain for compatibility but should be avoided by agents because they replace whole fields and are more conflict-prone.

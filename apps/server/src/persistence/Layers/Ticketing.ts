@@ -5,6 +5,7 @@ import { Effect, Layer, Option, Schema } from "effect";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   AllocateTicketNumberInput,
+  AcceptanceCriterionRow,
   ArtifactLookupInput,
   ArtifactRow,
   ArtifactsByCommentInput,
@@ -13,6 +14,7 @@ import {
   CommentRow,
   CommentsByTicketInput,
   CountByParentInput,
+  CriteriaByTicketInput,
   DependencyAssocInput,
   DependencyLookupInput,
   HistoryByTicketInput,
@@ -22,6 +24,9 @@ import {
   LabelsByProjectInput,
   LabelsByTicketInput,
   PersistedArtifact,
+  PersistedAcceptanceCriterion,
+  PersistedTicketBody,
+  PersistedTicketBodyChange,
   PersistedComment,
   PersistedLabel,
   PersistedTemplate,
@@ -33,6 +38,8 @@ import {
   TemplateRow,
   TemplatesByProjectInput,
   TicketHistoryRow,
+  TicketBodyLookupInput,
+  TicketBodyRow,
   TicketIdentifierLookupInput,
   TicketingAttachmentLookupInput,
   TicketingAttachmentRow,
@@ -68,6 +75,7 @@ const TICKET_SELECT = `
   description,
   worktree,
   acceptance_criteria_json AS "acceptanceCriteria",
+  criteria_revision AS "criteriaRevision",
   status,
   priority,
   sort_order AS "sortOrder",
@@ -131,6 +139,30 @@ const HISTORY_SELECT = `
   performed_at AS "performedAt"
 `;
 
+const BODY_SELECT = `
+  ticket_id AS "ticketId",
+  format,
+  body,
+  revision,
+  content_hash AS "contentHash",
+  size_bytes AS "sizeBytes",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
+const CRITERION_SELECT = `
+  id,
+  ticket_id AS "ticketId",
+  position,
+  text,
+  status,
+  reason,
+  verified_by AS "verifiedBy",
+  verified_at AS "verifiedAt",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
 const DEP_SELECT = `
   d.ticket_id AS "ticketId",
   d.depends_on_ticket_id AS "dependsOnTicketId",
@@ -158,14 +190,14 @@ const makeTicketingRepository = Effect.gen(function* () {
           id, project_id, parent_id, ticket_number, identifier,
           title, description, worktree,
           acceptance_criteria_json,
-          status, priority, sort_order, is_archived,
+          status, priority, sort_order, is_archived, criteria_revision,
           created_at, updated_at
         )
         VALUES (
           ${row.id}, ${row.projectId}, ${row.parentId}, ${row.ticketNumber}, ${row.identifier},
           ${row.title}, ${row.description}, ${row.worktree},
           ${row.acceptanceCriteria ? JSON.stringify(row.acceptanceCriteria) : null},
-          ${row.status}, ${row.priority}, ${row.sortOrder}, ${row.isArchived ? 1 : 0},
+          ${row.status}, ${row.priority}, ${row.sortOrder}, ${row.isArchived ? 1 : 0}, ${row.criteriaRevision ?? 1},
           ${row.createdAt}, ${row.updatedAt}
         )
         ON CONFLICT (id) DO UPDATE SET
@@ -178,6 +210,7 @@ const makeTicketingRepository = Effect.gen(function* () {
           priority = excluded.priority,
           sort_order = excluded.sort_order,
           is_archived = excluded.is_archived,
+          criteria_revision = excluded.criteria_revision,
           updated_at = excluded.updated_at
       `,
   });
@@ -447,6 +480,61 @@ const makeTicketingRepository = Effect.gen(function* () {
       sql`SELECT ${sql.literal(HISTORY_SELECT)} FROM ticket_history WHERE ticket_id = ${ticketId} ORDER BY performed_at DESC LIMIT ${limit ?? 50} OFFSET ${offset ?? 0}`,
   });
 
+  // ---- Ticket bodies ----
+
+  const getBody_ = SqlSchema.findOneOption({
+    Request: TicketBodyLookupInput,
+    Result: TicketBodyRow,
+    execute: ({ ticketId }) =>
+      sql`SELECT ${sql.literal(BODY_SELECT)} FROM ticket_bodies WHERE ticket_id = ${ticketId}`,
+  });
+
+  const writeBody = SqlSchema.void({
+    Request: PersistedTicketBody,
+    execute: (row) =>
+      sql`
+        INSERT INTO ticket_bodies (
+          ticket_id, format, body, revision, content_hash, size_bytes, created_at, updated_at
+        )
+        VALUES (
+          ${row.ticketId}, ${row.format}, ${row.body}, ${row.revision}, ${row.contentHash},
+          ${row.sizeBytes}, ${row.createdAt}, ${row.updatedAt}
+        )
+        ON CONFLICT (ticket_id) DO UPDATE SET
+          format = excluded.format,
+          body = excluded.body,
+          revision = excluded.revision,
+          content_hash = excluded.content_hash,
+          size_bytes = excluded.size_bytes,
+          updated_at = excluded.updated_at
+      `,
+  });
+
+  const writeBodyChange = SqlSchema.void({
+    Request: PersistedTicketBodyChange,
+    execute: (row) =>
+      sql`
+        INSERT INTO ticket_body_changes (
+          id, ticket_id, base_revision, new_revision, operation, patch_excerpt, summary,
+          before_hash, after_hash, changed_lines, changed_chars, performed_by, performed_at
+        )
+        VALUES (
+          ${row.id}, ${row.ticketId}, ${row.baseRevision}, ${row.newRevision}, ${row.operation},
+          ${row.patchExcerpt}, ${row.summary}, ${row.beforeHash}, ${row.afterHash},
+          ${row.changedLines}, ${row.changedChars}, ${row.performedBy}, ${row.performedAt}
+        )
+      `,
+  });
+
+  // ---- Acceptance criteria ----
+
+  const listCriteria_ = SqlSchema.findAll({
+    Request: CriteriaByTicketInput,
+    Result: AcceptanceCriterionRow,
+    execute: ({ ticketId }) =>
+      sql`SELECT ${sql.literal(CRITERION_SELECT)} FROM ticket_acceptance_criteria WHERE ticket_id = ${ticketId} ORDER BY position ASC, created_at ASC`,
+  });
+
   // ---- Allocate ticket number (atomic) ----
 
   const ProjectNumberRow = Schema.Struct({
@@ -588,6 +676,82 @@ const makeTicketingRepository = Effect.gen(function* () {
       countChildren(input).pipe(
         Effect.map((rows) => (rows.length > 0 ? rows[0]!.cnt : 0)),
         Effect.mapError(toPersistenceSqlError("TicketingRepository.countByParent:query")),
+      ),
+
+    getBody: (input) =>
+      getBody_(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.getBody:query")),
+      ),
+    upsertBody: (input) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* writeBody(input);
+            yield* sql`UPDATE tickets SET description = ${input.body}, updated_at = ${input.updatedAt} WHERE id = ${input.ticketId}`;
+          }),
+        )
+        .pipe(
+          Effect.asVoid,
+          Effect.mapError(toPersistenceSqlError("TicketingRepository.upsertBody:query")),
+        ),
+    recordBodyChange: (input) =>
+      writeBodyChange(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.recordBodyChange:query")),
+      ),
+    listCriteria: (input) =>
+      listCriteria_(input).pipe(
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.listCriteria:query")),
+      ),
+    replaceCriteria: ({ ticketId, criteria, criteriaRevision, updatedAt }) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`DELETE FROM ticket_acceptance_criteria WHERE ticket_id = ${ticketId}`;
+            for (const criterion of criteria) {
+              yield* sql`
+                INSERT INTO ticket_acceptance_criteria (
+                  id, ticket_id, position, text, status, reason, verified_by, verified_at, created_at, updated_at
+                )
+                VALUES (
+                  ${criterion.id}, ${criterion.ticketId}, ${criterion.position}, ${criterion.text},
+                  ${criterion.status}, ${criterion.reason}, ${criterion.verifiedBy}, ${criterion.verifiedAt},
+                  ${criterion.createdAt}, ${criterion.updatedAt}
+                )
+              `;
+            }
+            yield* sql`
+              UPDATE tickets
+              SET acceptance_criteria_json = ${JSON.stringify(
+                criteria.map((criterion) => ({
+                  id: criterion.id,
+                  position: criterion.position,
+                  text: criterion.text,
+                  status: criterion.status,
+                  reason: criterion.reason,
+                  verifiedBy: criterion.verifiedBy,
+                  verifiedAt: criterion.verifiedAt,
+                  createdAt: criterion.createdAt,
+                  updatedAt: criterion.updatedAt,
+                })),
+              )},
+              criteria_revision = ${criteriaRevision},
+              updated_at = ${updatedAt}
+              WHERE id = ${ticketId}
+            `;
+          }),
+        )
+        .pipe(
+          Effect.asVoid,
+          Effect.mapError(toPersistenceSqlError("TicketingRepository.replaceCriteria:query")),
+        ),
+    updateCriteriaRevision: ({ ticketId, criteriaRevision, updatedAt }) =>
+      sql`
+        UPDATE tickets
+        SET criteria_revision = ${criteriaRevision}, updated_at = ${updatedAt}
+        WHERE id = ${ticketId}
+      `.pipe(
+        Effect.asVoid,
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.updateCriteriaRevision:query")),
       ),
 
     // Batch queries

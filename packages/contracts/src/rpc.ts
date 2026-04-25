@@ -100,7 +100,18 @@ import {
   SetDependenciesInput,
   Ticket,
   TicketArchiveInput,
+  TicketBodyEditInput,
+  TicketBodyEditResult,
+  TicketBodyGetInput,
+  TicketBodyReadResult,
+  TicketBodySearchInput,
+  TicketBodySearchResult,
+  TicketBodySectionsInput,
+  TicketBodySectionsResult,
   TicketCreateInput,
+  TicketCriteriaEditInput,
+  TicketCriteriaListInput,
+  TicketCriteriaListResult,
   TicketUpdateInput,
   TicketDeleteInput,
   TicketUnarchiveInput,
@@ -267,6 +278,12 @@ export const WS_METHODS = {
   ticketingGetById: "ticketing.getById",
   ticketingGetByIdentifier: "ticketing.getByIdentifier",
   ticketingGetThreadLinks: "ticketing.getThreadLinks",
+  ticketingGetBody: "ticketing.getBody",
+  ticketingSearchBody: "ticketing.searchBody",
+  ticketingGetBodySections: "ticketing.getBodySections",
+  ticketingEditBody: "ticketing.editBody",
+  ticketingListCriteria: "ticketing.listCriteria",
+  ticketingEditCriteria: "ticketing.editCriteria",
   ticketingCreate: "ticketing.create",
   ticketingUpdate: "ticketing.update",
   ticketingDelete: "ticketing.delete",
@@ -842,6 +859,42 @@ export const WsTicketingGetThreadLinksRpc = Rpc.make(WS_METHODS.ticketingGetThre
   error: TicketingError,
 });
 
+export const WsTicketingGetBodyRpc = Rpc.make(WS_METHODS.ticketingGetBody, {
+  payload: TicketBodyGetInput,
+  success: TicketBodyReadResult,
+  error: TicketingError,
+});
+
+export const WsTicketingSearchBodyRpc = Rpc.make(WS_METHODS.ticketingSearchBody, {
+  payload: TicketBodySearchInput,
+  success: TicketBodySearchResult,
+  error: TicketingError,
+});
+
+export const WsTicketingGetBodySectionsRpc = Rpc.make(WS_METHODS.ticketingGetBodySections, {
+  payload: TicketBodySectionsInput,
+  success: TicketBodySectionsResult,
+  error: TicketingError,
+});
+
+export const WsTicketingEditBodyRpc = Rpc.make(WS_METHODS.ticketingEditBody, {
+  payload: TicketBodyEditInput,
+  success: TicketBodyEditResult,
+  error: TicketingError,
+});
+
+export const WsTicketingListCriteriaRpc = Rpc.make(WS_METHODS.ticketingListCriteria, {
+  payload: TicketCriteriaListInput,
+  success: TicketCriteriaListResult,
+  error: TicketingError,
+});
+
+export const WsTicketingEditCriteriaRpc = Rpc.make(WS_METHODS.ticketingEditCriteria, {
+  payload: TicketCriteriaEditInput,
+  success: TicketCriteriaListResult,
+  error: TicketingError,
+});
+
 export const WsTicketingCreateRpc = Rpc.make(WS_METHODS.ticketingCreate, {
   payload: TicketCreateInput,
   success: Ticket,
@@ -1096,6 +1149,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsTicketingGetByIdRpc,
   WsTicketingGetByIdentifierRpc,
   WsTicketingGetThreadLinksRpc,
+  WsTicketingGetBodyRpc,
+  WsTicketingSearchBodyRpc,
+  WsTicketingGetBodySectionsRpc,
+  WsTicketingEditBodyRpc,
+  WsTicketingListCriteriaRpc,
+  WsTicketingEditCriteriaRpc,
   WsTicketingCreateRpc,
   WsTicketingUpdateRpc,
   WsTicketingDeleteRpc,
