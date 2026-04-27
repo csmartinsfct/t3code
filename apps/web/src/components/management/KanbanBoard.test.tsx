@@ -103,7 +103,7 @@ const uiStateStoreState = {
     updatedAt: string;
   } | null,
   boardViewMode: "cards" as "cards" | "list",
-  browserVisible: false,
+  browserVisibleByProjectId: {} as Record<string, boolean>,
   boardFiltersByProjectId: {},
   setManagementBoardRoot: vi.fn(),
   pushManagementBoardTicket: vi.fn(),
@@ -320,7 +320,7 @@ async function renderBoard({
   selectionStoreState.selectedTickets = new Map();
   uiStateStoreState.managementBoardContext = managementBoardContext;
   uiStateStoreState.boardViewMode = boardViewMode;
-  uiStateStoreState.browserVisible = browserVisible;
+  uiStateStoreState.browserVisibleByProjectId = browserVisible ? { "project-1": true } : {};
   detailMockState.lastProps = null;
   selectionBarMockState.lastProps = null;
   columnMockState.lastProps = null;

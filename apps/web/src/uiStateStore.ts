@@ -49,7 +49,7 @@ interface PersistedUiState {
   projectOrderCwds?: string[];
   viewMode?: ViewMode;
   boardViewMode?: BoardViewMode | "browser";
-  browserVisible?: boolean;
+  browserVisibleByProjectId?: Record<string, boolean>;
   boardFiltersByProjectId?: Record<
     string,
     {
@@ -81,7 +81,7 @@ export interface UiThreadState {
 export interface UiBoardState {
   managementBoardContext: BoardContext | null;
   boardViewMode: BoardViewMode;
-  browserVisible: boolean;
+  browserVisibleByProjectId: Record<string, boolean>;
   boardFiltersByProjectId: Record<string, BoardFilters>;
 }
 
@@ -106,7 +106,7 @@ const initialState: UiState = {
   startupRecoveryStateByThreadId: {},
   managementBoardContext: null,
   boardViewMode: "cards",
-  browserVisible: false,
+  browserVisibleByProjectId: {},
   boardFiltersByProjectId: {},
   viewMode: "chat",
 };
@@ -115,7 +115,7 @@ const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 let persistedViewMode: ViewMode = "chat";
 let persistedBoardViewMode: BoardViewMode = "cards";
-let persistedBrowserVisible = false;
+let persistedBrowserVisibleByProjectId: Record<string, boolean> = {};
 let persistedBoardFiltersByProjectId: Record<string, BoardFilters> = {};
 let persistedManagementBoardContext: BoardContext | null = null;
 const currentProjectCwdById = new Map<ProjectId, string>();
@@ -140,7 +140,7 @@ function readPersistedState(): UiState {
           ...initialState,
           viewMode: persistedViewMode,
           boardViewMode: persistedBoardViewMode,
-          browserVisible: persistedBrowserVisible,
+          browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
           boardFiltersByProjectId: persistedBoardFiltersByProjectId,
           managementBoardContext: persistedManagementBoardContext,
         };
@@ -152,7 +152,7 @@ function readPersistedState(): UiState {
       ...initialState,
       viewMode: persistedViewMode,
       boardViewMode: persistedBoardViewMode,
-      browserVisible: persistedBrowserVisible,
+      browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
       boardFiltersByProjectId: persistedBoardFiltersByProjectId,
       managementBoardContext: persistedManagementBoardContext,
     };
@@ -177,15 +177,21 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
   }
   persistedViewMode =
     parsed.viewMode === "chat" || parsed.viewMode === "management" ? parsed.viewMode : "chat";
-  if (parsed.boardViewMode === "browser") {
-    persistedBoardViewMode = "cards";
-    persistedBrowserVisible = true;
-  } else {
-    persistedBoardViewMode =
-      parsed.boardViewMode === "cards" || parsed.boardViewMode === "list"
-        ? parsed.boardViewMode
-        : "cards";
-    persistedBrowserVisible = parsed.browserVisible === true;
+  // Legacy `boardViewMode: "browser"` and the previous global `browserVisible`
+  // boolean were app-wide flags. Visibility is now per-project, so neither
+  // legacy shape can be safely migrated without knowing which project they
+  // applied to — drop them and let the user re-toggle per project.
+  persistedBoardViewMode =
+    parsed.boardViewMode === "cards" || parsed.boardViewMode === "list"
+      ? parsed.boardViewMode
+      : "cards";
+  persistedBrowserVisibleByProjectId = {};
+  if (parsed.browserVisibleByProjectId && typeof parsed.browserVisibleByProjectId === "object") {
+    for (const [projectId, value] of Object.entries(parsed.browserVisibleByProjectId)) {
+      if (typeof projectId === "string" && projectId.length > 0 && value === true) {
+        persistedBrowserVisibleByProjectId[projectId] = true;
+      }
+    }
   }
   persistedBoardFiltersByProjectId = {};
   if (parsed.boardFiltersByProjectId && typeof parsed.boardFiltersByProjectId === "object") {
@@ -251,7 +257,7 @@ function persistState(state: UiState): void {
         projectOrderCwds,
         viewMode: state.viewMode,
         boardViewMode: state.boardViewMode,
-        browserVisible: state.browserVisible,
+        browserVisibleByProjectId: state.browserVisibleByProjectId,
         boardFiltersByProjectId: state.boardFiltersByProjectId,
         managementBoardContext: state.managementBoardContext,
       } satisfies PersistedUiState),
@@ -688,9 +694,16 @@ export function setBoardViewMode(state: UiState, mode: BoardViewMode): UiState {
   return { ...state, boardViewMode: mode };
 }
 
-export function setBrowserVisible(state: UiState, visible: boolean): UiState {
-  if (state.browserVisible === visible) return state;
-  return { ...state, browserVisible: visible };
+export function setBrowserVisible(state: UiState, projectId: ProjectId, visible: boolean): UiState {
+  const current = state.browserVisibleByProjectId[projectId] ?? false;
+  if (current === visible) return state;
+  const next = { ...state.browserVisibleByProjectId };
+  if (visible) {
+    next[projectId] = true;
+  } else {
+    delete next[projectId];
+  }
+  return { ...state, browserVisibleByProjectId: next };
 }
 
 export function setBoardFilters(
@@ -801,7 +814,7 @@ interface UiStateStore extends UiState {
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
   setViewMode: (mode: ViewMode) => void;
   setBoardViewMode: (mode: BoardViewMode) => void;
-  setBrowserVisible: (visible: boolean) => void;
+  setBrowserVisible: (projectId: ProjectId, visible: boolean) => void;
   setBoardFilters: (projectId: ProjectId, updates: Partial<BoardFilters>) => void;
   toggleBoardCollapsedStatus: (projectId: ProjectId, status: string) => void;
 }
@@ -839,7 +852,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
   setViewMode: (mode) => set({ viewMode: mode }),
   setBoardViewMode: (mode) => set((state) => setBoardViewMode(state, mode)),
-  setBrowserVisible: (visible) => set((state) => setBrowserVisible(state, visible)),
+  setBrowserVisible: (projectId, visible) =>
+    set((state) => setBrowserVisible(state, projectId, visible)),
   setBoardFilters: (projectId, updates) =>
     set((state) => setBoardFilters(state, projectId, updates)),
   toggleBoardCollapsedStatus: (projectId, status) =>

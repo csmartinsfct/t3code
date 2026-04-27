@@ -1,11 +1,158 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-21T20:21:56.983Z",
-  "lastProcessedCommit": "e30aefb2582621eaadf5b3744dbafab9bf2bca0b",
+  "generatedAt": "2026-04-25T22:51:10.497Z",
+  "lastProcessedCommit": "ea6911b8fb879796006a3d7f9309b947ad4378cd",
   "groups": [
+    {
+      "date": "2026-04-26",
+      "entries": [
+        {
+          "id": "2c5b49795898b4d0",
+          "title": "Fixed ticket delete and archive dialogs reopening on the wrong ticket",
+          "summary": "Resolved an issue where deleting or archiving a sub-ticket could leave the confirmation dialog open after navigating back, creating a risk of accidentally acting on the parent ticket.",
+          "category": "fix",
+          "commitShas": ["ea6911b8fb879796006a3d7f9309b947ad4378cd"]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-25",
+      "entries": [
+        {
+          "id": "80af44a23911d9f4",
+          "title": "Claude MCP refresh is more reliable",
+          "summary": "Refreshing Claude MCP integrations now uses an improved reload flow, helping status updates appear more consistently when plugins change.",
+          "category": "improvement",
+          "commitShas": ["b9981a9fd90270e60c976fddecb0aa8c3322a45f"]
+        },
+        {
+          "id": "d615ccda70f541cf",
+          "title": "Ticket descriptions can now be updated incrementally",
+          "summary": "Improved ticket editing so descriptions and acceptance criteria can be patched without replacing the entire content, making ticket updates smoother and more reliable.",
+          "category": "improvement",
+          "commitShas": [
+            "659a0d356d66aabf968941e36e68243f9c568a76",
+            "dfdcc202df229e53f32e7e3f36117308776b9563"
+          ]
+        },
+        {
+          "id": "9bf018da9d20cf03",
+          "title": "Dynamic chat UI artifacts",
+          "summary": "Added support for dynamic chat UI artifacts, letting conversations surface richer generated UI content directly in the chat experience.",
+          "category": "feature",
+          "commitShas": ["daf7884747a23fd3abbda114f3070cdce4b076d0"]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-23",
+      "entries": [
+        {
+          "id": "03df0d404154033c",
+          "title": "Claude MCP server status is now reflected in chat",
+          "summary": "The chat experience now surfaces Claude MCP server availability so you can better understand which integrations are connected and ready to use while working in a session.",
+          "category": "feature",
+          "commitShas": ["dc4bada4d22c825c46b394616306ec2ccf32bb0e"]
+        },
+        {
+          "id": "07885c9cad2119b3",
+          "title": "Codex now defaults to GPT-5.5",
+          "summary": "Added GPT-5.5 as a built-in Codex model and made it the default selection for new Codex sessions, while keeping GPT-5.4 and older variants available to choose manually.",
+          "category": "feature",
+          "commitShas": ["b44ab30bf479ed6538ab2e14799f5e8e15bca685"]
+        },
+        {
+          "id": "5509ccb6da52ed50",
+          "title": "Improved Codex Session Resume Reliability",
+          "summary": "Codex sessions now resume more reliably by avoiding a readiness race that could interrupt or mis-handle restored sessions.",
+          "category": "fix",
+          "commitShas": ["867d90e627bc0bf157d729fc773753e183a6abb5"]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-22",
+      "entries": [
+        {
+          "id": "057d2862e7d95d96",
+          "title": "Fixed Embedded Browser Project Scoping",
+          "summary": "The embedded browser now stays correctly scoped to the active project, preventing browser activity from leaking into or using the wrong project context.",
+          "category": "fix",
+          "commitShas": ["9239003ca5cb5fdd6ec5b79d1390afbac255c1a4"]
+        },
+        {
+          "id": "87a34e5d97d35a93",
+          "title": "Embedded browser DevTools now dock to the side",
+          "summary": "Opening DevTools from the embedded browser now places the inspector beside the T3 Code window by default, reducing window clutter while still allowing users to switch dock positions or undock it manually.",
+          "category": "improvement",
+          "commitShas": ["d9ecfc7781dd20701994731d93d024715dc4bf70"]
+        },
+        {
+          "id": "fffa8aa0039f0a47",
+          "title": "Embedded Browser Reload, Zoom, and DevTools Shortcuts",
+          "summary": "Embedded browser tabs now support reload shortcuts, keyboard zoom controls, native trackpad pinch zoom, and DevTools shortcuts for inspecting the active tab.",
+          "category": "feature",
+          "commitShas": [
+            "537e4f187ddd793be0058780d3e0029e88076461",
+            "a95b0101ba3b535f68f0d125c612dc9469db303d",
+            "e100168d8b350fb8e49744ab7dff39febfa24ddc"
+          ]
+        },
+        {
+          "id": "19f75f935658be61",
+          "title": "More Reliable Worktree Development State",
+          "summary": "Development worktrees now keep separate local data directories, reducing cross-branch state conflicts and making branch-specific development sessions more predictable.",
+          "category": "improvement",
+          "commitShas": ["72e5f283663c0363b93eb24bdab1bcb97bfd1771"]
+        },
+        {
+          "id": "9b82b3286f32dc9b",
+          "title": "More Transparent Claude Run Status",
+          "summary": "Claude runs now surface terminal reasons and hook lifecycle output more clearly in the conversation timeline, while hiding successful hook exit codes to reduce noise.",
+          "category": "improvement",
+          "commitShas": [
+            "1637d6bfb297ea80a1af9426e551e4abb0f55eee",
+            "16c6434309d808795a2951f502602fb756d8b3b7",
+            "6c1f788e4e461a733b4581316263170f67001ffe",
+            "7d141770b0655605111995b980303aabe6123920"
+          ]
+        },
+        {
+          "id": "7e4060c6c87ad789",
+          "title": "Claude Usage Tier Labeling",
+          "summary": "Claude rate limit and usage displays now label the design usage tier more clearly.",
+          "category": "improvement",
+          "commitShas": ["ec6b7c55dc5522782a47ab31111415822228d58e"]
+        },
+        {
+          "id": "148c14a102f0605b",
+          "title": "Clearer Claude Context Usage",
+          "summary": "Claude conversations now show a more useful context usage breakdown, with a simplified popover that makes it easier to understand how the context window is being used.",
+          "category": "improvement",
+          "commitShas": [
+            "8bc1edef8afaed775c19a4ff9e4e8e63119acb50",
+            "d0d07e085da383f76726689437b0c3f92899e639"
+          ]
+        },
+        {
+          "id": "530286499f0a8da8",
+          "title": "Claude Opus With Extra-High Reasoning",
+          "summary": "Claude support now includes Opus with the extra-high reasoning option, expanding the model choices available when starting or configuring agent work.",
+          "category": "feature",
+          "commitShas": ["ebce0da13a61441942f613644e9ee8acd384abeb"]
+        }
+      ]
+    },
     {
       "date": "2026-04-21",
       "entries": [
+        {
+          "id": "a39661b9bbce1ad8",
+          "title": "Faster Scheduled Task Settings",
+          "summary": "Scheduled task settings now load more quickly, making it easier to browse and manage task details without waiting on heavier project data.",
+          "category": "performance",
+          "commitShas": ["91138ff3f0ecf29d3b8a008e744f19971c3fba4e"]
+        },
         {
           "id": "6f6a2b555eb906dc",
           "title": "Image attachments for tickets",
@@ -2334,6 +2481,111 @@
         "fromExclusiveCommit": "7a91bcb0975c42572043397cb042d2c513fbb675",
         "toInclusiveCommit": "e30aefb2582621eaadf5b3744dbafab9bf2bca0b",
         "commitShas": ["e30aefb2582621eaadf5b3744dbafab9bf2bca0b"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-22T13:12:30.343Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e30aefb2582621eaadf5b3744dbafab9bf2bca0b",
+        "toInclusiveCommit": "e100168d8b350fb8e49744ab7dff39febfa24ddc",
+        "commitShas": [
+          "91138ff3f0ecf29d3b8a008e744f19971c3fba4e",
+          "ebce0da13a61441942f613644e9ee8acd384abeb",
+          "d0d07e085da383f76726689437b0c3f92899e639",
+          "8bc1edef8afaed775c19a4ff9e4e8e63119acb50",
+          "7d141770b0655605111995b980303aabe6123920",
+          "ec6b7c55dc5522782a47ab31111415822228d58e",
+          "16c6434309d808795a2951f502602fb756d8b3b7",
+          "1637d6bfb297ea80a1af9426e551e4abb0f55eee",
+          "6c1f788e4e461a733b4581316263170f67001ffe",
+          "f7989ac8c15c485319b4eed298a4e34d32e31f8f",
+          "537e4f187ddd793be0058780d3e0029e88076461",
+          "72e5f283663c0363b93eb24bdab1bcb97bfd1771",
+          "a95b0101ba3b535f68f0d125c612dc9469db303d",
+          "e100168d8b350fb8e49744ab7dff39febfa24ddc"
+        ],
+        "commitCount": 14,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-22T13:44:10.333Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e100168d8b350fb8e49744ab7dff39febfa24ddc",
+        "toInclusiveCommit": "d9ecfc7781dd20701994731d93d024715dc4bf70",
+        "commitShas": ["d9ecfc7781dd20701994731d93d024715dc4bf70"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-23T14:46:07.594Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d9ecfc7781dd20701994731d93d024715dc4bf70",
+        "toInclusiveCommit": "867d90e627bc0bf157d729fc773753e183a6abb5",
+        "commitShas": [
+          "9239003ca5cb5fdd6ec5b79d1390afbac255c1a4",
+          "867d90e627bc0bf157d729fc773753e183a6abb5"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-23T20:22:07.753Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "867d90e627bc0bf157d729fc773753e183a6abb5",
+        "toInclusiveCommit": "b44ab30bf479ed6538ab2e14799f5e8e15bca685",
+        "commitShas": ["b44ab30bf479ed6538ab2e14799f5e8e15bca685"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-25T01:56:24.737Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "b44ab30bf479ed6538ab2e14799f5e8e15bca685",
+        "toInclusiveCommit": "daf7884747a23fd3abbda114f3070cdce4b076d0",
+        "commitShas": ["daf7884747a23fd3abbda114f3070cdce4b076d0"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-25T15:16:11.407Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "daf7884747a23fd3abbda114f3070cdce4b076d0",
+        "toInclusiveCommit": "a2fa1ece9aceab901265fcda93cb0c40aa34b559",
+        "commitShas": [
+          "659a0d356d66aabf968941e36e68243f9c568a76",
+          "dfdcc202df229e53f32e7e3f36117308776b9563",
+          "a2fa1ece9aceab901265fcda93cb0c40aa34b559"
+        ],
+        "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-25T18:05:58.955Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "a2fa1ece9aceab901265fcda93cb0c40aa34b559",
+        "toInclusiveCommit": "b9981a9fd90270e60c976fddecb0aa8c3322a45f",
+        "commitShas": [
+          "dc4bada4d22c825c46b394616306ec2ccf32bb0e",
+          "b9981a9fd90270e60c976fddecb0aa8c3322a45f"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-25T22:51:10.298Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "b9981a9fd90270e60c976fddecb0aa8c3322a45f",
+        "toInclusiveCommit": "ea6911b8fb879796006a3d7f9309b947ad4378cd",
+        "commitShas": ["ea6911b8fb879796006a3d7f9309b947ad4378cd"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true

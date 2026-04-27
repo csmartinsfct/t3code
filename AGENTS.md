@@ -147,5 +147,6 @@ Electron also stores Chromium profile data (localStorage, cookies) under `~/Libr
 - `production-build` — Build a production macOS DMG via `scripts/build-desktop-artifact.ts`.
 - `test-managed-runs-mcp` — Test the managed runs REST endpoint end-to-end using the dev bypass token.
 - `test-orchestration` — End-to-end orchestration test: reset test repo, create tickets, run orchestration with real models, verify via chrome-devtools MCP.
+- `airbnb-balcony-scanner` — Inspect Airbnb search results for spacious balconies, terraces, patios, gardens, yards, rooftops, pools, or exterior sections using T3 browser automation, deterministic photo-tour image loading, screenshot contact sheets, and markdown candidate tracking.
 
 Skills must be kept up to date as related code changes. When modifying behavior covered by a skill or doc, review and update the corresponding file.

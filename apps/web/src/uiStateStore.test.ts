@@ -27,7 +27,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     startupRecoveryStateByThreadId: {},
     managementBoardContext: null,
     boardViewMode: "cards",
-    browserVisible: false,
+    browserVisibleByProjectId: {},
     boardFiltersByProjectId: {},
     viewMode: "chat",
     ...overrides,

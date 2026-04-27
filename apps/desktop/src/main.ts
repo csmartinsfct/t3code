@@ -1762,7 +1762,7 @@ function scheduleEmbeddedBrowserDebuggerRetry(embedded: EmbeddedBrowserTabState)
 }
 
 async function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserTabState): Promise<void> {
-  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 20 });
+  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
   await sendBrowserCdp(embedded, "Runtime.evaluate", {
     expression:
       "Promise.resolve().then(() => { for (const media of document.querySelectorAll('video,audio')) { try { media.pause(); } catch {} } })",

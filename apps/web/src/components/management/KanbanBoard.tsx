@@ -235,7 +235,9 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const viewMode = useUiStateStore((s) => s.boardViewMode);
   const setViewMode = useUiStateStore((s) => s.setBoardViewMode);
-  const browserVisible = useUiStateStore((s) => s.browserVisible);
+  const browserVisible = useUiStateStore(
+    (s) => s.browserVisibleByProjectId[typedProjectId] ?? false,
+  );
   const setBrowserVisible = useUiStateStore((s) => s.setBrowserVisible);
   const boardFilters =
     useUiStateStore((s) => s.boardFiltersByProjectId[typedProjectId]) ?? DEFAULT_BOARD_FILTERS;
@@ -931,7 +933,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           ) : null}
           <button
             type="button"
-            onClick={() => setBrowserVisible(!browserVisible)}
+            onClick={() => setBrowserVisible(typedProjectId, !browserVisible)}
             className={cn(
               "flex size-7 items-center justify-center rounded-md border transition-colors",
               browserVisible
