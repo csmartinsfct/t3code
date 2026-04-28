@@ -51,6 +51,7 @@ import {
   TicketListByProjectInput,
   TicketLookupInput,
   TicketRow,
+  TicketSubtreeInput,
   TicketsByProjectInput,
 } from "../Services/Ticketing.ts";
 import type { PersistedTicket as PersistedTicketType } from "../Services/Ticketing.ts";
@@ -630,6 +631,54 @@ const makeTicketingRepository = Effect.gen(function* () {
         Effect.map((rows) => rows.map(toPersistedTicket)),
         Effect.mapError(toPersistenceSqlError("TicketingRepository.listByParent:query")),
       ),
+    listSubtree: (input: TicketSubtreeInput) =>
+      Effect.gen(function* () {
+        const limit = input.limit ?? 500;
+        // Fetch limit + 1 so the service layer can detect truncation.
+        const fetchCap = limit + 1;
+        const archivedClause = input.includeArchived ? "" : "AND t.is_archived = 0";
+        const rawRows = yield* sql`
+          WITH RECURSIVE descendants AS (
+            SELECT t.id, t.project_id, t.parent_id, t.ticket_number, t.identifier,
+                   t.title, t.description, t.worktree, t.acceptance_criteria_json,
+                   t.criteria_revision, t.status, t.priority, t.sort_order,
+                   t.is_archived, t.created_at, t.updated_at
+            FROM tickets t
+            WHERE t.parent_id = ${input.rootTicketId}
+              AND t.project_id = ${input.projectId}
+              ${sql.literal(archivedClause)}
+            UNION ALL
+            SELECT t.id, t.project_id, t.parent_id, t.ticket_number, t.identifier,
+                   t.title, t.description, t.worktree, t.acceptance_criteria_json,
+                   t.criteria_revision, t.status, t.priority, t.sort_order,
+                   t.is_archived, t.created_at, t.updated_at
+            FROM tickets t
+            INNER JOIN descendants d ON t.parent_id = d.id
+            WHERE 1=1 ${sql.literal(archivedClause)}
+          )
+          SELECT id,
+                 project_id AS "projectId",
+                 parent_id AS "parentId",
+                 ticket_number AS "ticketNumber",
+                 identifier,
+                 title,
+                 description,
+                 worktree,
+                 acceptance_criteria_json AS "acceptanceCriteria",
+                 criteria_revision AS "criteriaRevision",
+                 status,
+                 priority,
+                 sort_order AS "sortOrder",
+                 CASE WHEN is_archived = 1 THEN 1 ELSE 0 END AS "isArchived",
+                 created_at AS "createdAt",
+                 updated_at AS "updatedAt"
+          FROM descendants
+          ORDER BY parent_id ASC, sort_order ASC, created_at ASC
+          LIMIT ${fetchCap}
+        `;
+        const rows = rawRows as unknown as ReadonlyArray<typeof TicketRow.Type>;
+        return rows.map(toPersistedTicket);
+      }).pipe(Effect.mapError(toPersistenceSqlError("TicketingRepository.listSubtree:query"))),
     archiveTicket: ({ id }) =>
       sql`UPDATE tickets SET is_archived = 1, updated_at = ${new Date().toISOString()} WHERE id = ${id}`.pipe(
         Effect.asVoid,

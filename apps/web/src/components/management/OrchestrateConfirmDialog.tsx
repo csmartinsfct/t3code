@@ -3,7 +3,6 @@ import {
   type OrchestrationPromptOverrides,
   type TicketId,
   type TicketSummary,
-  type TicketTreeNode,
 } from "@t3tools/contracts";
 import {
   AlertTriangleIcon,
@@ -88,11 +87,11 @@ export function OrchestrateConfirmDialog({
     const api = ensureNativeApi();
     api.ticketing
       .getTree({ projectId: projectId as ProjectId })
-      .then((tree: readonly TicketTreeNode[]) => {
+      .then((result) => {
         if (cancelled) return;
         const selectedIds = new Set(selectedTickets.keys());
-        const result = buildOrchestrationPlan(selectedIds, tree, allTickets);
-        setPlan(result);
+        const plan = buildOrchestrationPlan(selectedIds, result.roots, allTickets);
+        setPlan(plan);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

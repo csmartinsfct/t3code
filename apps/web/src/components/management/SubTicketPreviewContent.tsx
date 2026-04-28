@@ -44,7 +44,7 @@ export function SubTicketPreviewContent({
   const metCount = criteria.filter((c) => c.status === "met").length;
 
   return (
-    <div className="-mr-4 flex max-h-[568px] flex-col gap-3 overflow-y-auto pr-4">
+    <div className="-mr-4 flex max-h-[300px] flex-col gap-3 overflow-y-auto pr-4">
       {/* Title */}
       <h4 className="text-sm font-medium leading-snug text-foreground">{ticket.title}</h4>
 

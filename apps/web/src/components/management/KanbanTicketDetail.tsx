@@ -46,6 +46,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/men
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import { SubTicketsTree } from "./SubTicketsTree";
 import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
@@ -393,6 +394,7 @@ export function SubTicketRowButton({
   subTicket,
   isSelected,
   isDragging,
+  isPreviewOpen = false,
   onClick,
   buttonRef,
   buttonProps,
@@ -400,6 +402,7 @@ export function SubTicketRowButton({
   subTicket: TicketSummary;
   isSelected: boolean;
   isDragging: boolean;
+  isPreviewOpen?: boolean;
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   buttonRef?: React.Ref<HTMLButtonElement> | undefined;
   buttonProps?: TicketRowButtonProps;
@@ -410,8 +413,12 @@ export function SubTicketRowButton({
     title: subTicket.title,
     status: subTicket.status,
     buttonRef,
-    className: `flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-      isSelected ? "bg-primary/5 ring-1.5 ring-primary/40" : "hover:bg-accent/30"
+    className: `flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+      isSelected
+        ? "bg-primary/5 ring-1.5 ring-primary/40"
+        : isPreviewOpen
+          ? "bg-accent/30"
+          : "hover:bg-accent/30"
     } ${isDragging ? "opacity-40" : ""}`,
     onClick,
   });
@@ -1151,11 +1158,11 @@ export function KanbanTicketDetail({
           </div>
         )}
 
-        {/* Sub-tickets */}
+        {/* Sub-tickets — recursive tree, default open, per-node collapse persisted. */}
         {ticket.subTickets.length > 0 && (
-          <SubTicketsList
+          <SubTicketsTree
+            ticketId={ticketId}
             projectId={projectId}
-            subTickets={ticket.subTickets}
             onNavigateToTicket={onNavigateToTicket}
             onMoveToBoardRequest={handleMoveToBoardRequest}
             onArchiveRequest={handleArchiveSubTicketsRequest}
@@ -1228,7 +1235,7 @@ export function KanbanTicketDetail({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {/* Archive sub-tickets confirmation */}
+      {/* Archive sub-tickets confirmation (multi-select / context-menu archive). */}
       <AlertDialog
         open={archiveSubTicketsDialog !== null}
         onOpenChange={(open) => {

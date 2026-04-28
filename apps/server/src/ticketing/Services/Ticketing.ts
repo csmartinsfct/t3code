@@ -54,7 +54,7 @@ import type {
   TicketSearchInput,
   TicketSummary,
   TicketTreeInput,
-  TicketTreeNode,
+  TicketTreeResult,
   UpdateCriterionStatusInput,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
@@ -107,9 +107,7 @@ export interface TicketingServiceShape {
   readonly search: (
     input: TicketSearchInput,
   ) => Effect.Effect<ReadonlyArray<TicketSummary>, TicketingError>;
-  readonly getTree: (
-    input: TicketTreeInput,
-  ) => Effect.Effect<ReadonlyArray<TicketTreeNode>, TicketingError>;
+  readonly getTree: (input: TicketTreeInput) => Effect.Effect<TicketTreeResult, TicketingError>;
 
   // Dependencies
   readonly setDependencies: (input: SetDependenciesInput) => Effect.Effect<void, TicketingError>;

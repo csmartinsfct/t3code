@@ -119,7 +119,7 @@ import type {
   TicketThreadLinksInput,
   TicketSummary,
   TicketTreeInput,
-  TicketTreeNode,
+  TicketTreeResult,
   UpdateCriterionStatusInput,
 } from "./ticketing";
 import type {
@@ -401,7 +401,7 @@ export interface NativeApi {
     unarchive: (input: TicketUnarchiveInput) => Promise<Ticket>;
     reorder: (input: TicketReorderInput) => Promise<void>;
     search: (input: TicketSearchInput) => Promise<ReadonlyArray<TicketSummary>>;
-    getTree: (input: TicketTreeInput) => Promise<ReadonlyArray<TicketTreeNode>>;
+    getTree: (input: TicketTreeInput) => Promise<TicketTreeResult>;
     setDependencies: (input: SetDependenciesInput) => Promise<void>;
     addDependency: (input: DependencyInput) => Promise<void>;
     removeDependency: (input: DependencyInput) => Promise<void>;

@@ -216,15 +216,18 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           selectedTickets.push(yield* resolveTicketForProject(input.projectId, identifier));
         }
 
-        const ticketTree = yield* ticketing.getTree({ projectId: input.projectId as never }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new OrchestrationRunError({
-                message: "Failed to load project ticket tree for orchestration run creation",
-                cause,
-              }),
-          ),
-        );
+        const ticketTreeResult = yield* ticketing
+          .getTree({ projectId: input.projectId as never })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationRunError({
+                  message: "Failed to load project ticket tree for orchestration run creation",
+                  cause,
+                }),
+            ),
+          );
+        const ticketTree = ticketTreeResult.roots;
         const plan = buildOrchestrationPlan(
           new Set(selectedTickets.map((ticket) => ticket.id)),
           ticketTree,

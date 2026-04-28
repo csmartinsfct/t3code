@@ -66,7 +66,20 @@ interface PersistedUiState {
     boardScrollLeft?: number;
     updatedAt?: string;
   } | null;
+  /**
+   * Ticket IDs the user has collapsed in the recursive sub-tickets tree on the
+   * ticket detail view. Open is the default — only collapsed entries are stored
+   * so the set stays bounded as users navigate. FIFO-trimmed to {@link COLLAPSED_TICKET_LIMIT}.
+   */
+  collapsedTicketIds?: string[];
 }
+
+/**
+ * Maximum number of collapsed ticket IDs persisted to localStorage. Prevents
+ * unbounded growth as users navigate many tickets over time. Older entries are
+ * dropped first when the limit is exceeded.
+ */
+const COLLAPSED_TICKET_LIMIT = 5000;
 
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
@@ -85,7 +98,17 @@ export interface UiBoardState {
   boardFiltersByProjectId: Record<string, BoardFilters>;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiBoardState {
+export interface UiTicketState {
+  /**
+   * Set-shaped record where present keys mark a sub-ticket node as collapsed.
+   * Default for any ticket is "open" — absence means open.
+   */
+  collapsedTicketIds: Record<string, true>;
+  /** Insertion-ordered list of collapsed ticket IDs, used for FIFO eviction. */
+  collapsedTicketOrder: TicketId[];
+}
+
+export interface UiState extends UiProjectState, UiThreadState, UiBoardState, UiTicketState {
   viewMode: ViewMode;
 }
 
@@ -109,6 +132,8 @@ const initialState: UiState = {
   browserVisibleByProjectId: {},
   boardFiltersByProjectId: {},
   viewMode: "chat",
+  collapsedTicketIds: {},
+  collapsedTicketOrder: [],
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
@@ -118,6 +143,7 @@ let persistedBoardViewMode: BoardViewMode = "cards";
 let persistedBrowserVisibleByProjectId: Record<string, boolean> = {};
 let persistedBoardFiltersByProjectId: Record<string, BoardFilters> = {};
 let persistedManagementBoardContext: BoardContext | null = null;
+let persistedCollapsedTicketOrder: TicketId[] = [];
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -143,6 +169,10 @@ function readPersistedState(): UiState {
           browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
           boardFiltersByProjectId: persistedBoardFiltersByProjectId,
           managementBoardContext: persistedManagementBoardContext,
+          collapsedTicketIds: Object.fromEntries(
+            persistedCollapsedTicketOrder.map((id) => [id, true] as const),
+          ),
+          collapsedTicketOrder: [...persistedCollapsedTicketOrder],
         };
       }
       return initialState;
@@ -155,6 +185,10 @@ function readPersistedState(): UiState {
       browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
       boardFiltersByProjectId: persistedBoardFiltersByProjectId,
       managementBoardContext: persistedManagementBoardContext,
+      collapsedTicketIds: Object.fromEntries(
+        persistedCollapsedTicketOrder.map((id) => [id, true] as const),
+      ),
+      collapsedTicketOrder: [...persistedCollapsedTicketOrder],
     };
   } catch {
     return initialState;
@@ -215,6 +249,17 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
     }
   }
 
+  persistedCollapsedTicketOrder = [];
+  if (Array.isArray(parsed.collapsedTicketIds)) {
+    const seen = new Set<string>();
+    for (const value of parsed.collapsedTicketIds) {
+      if (typeof value !== "string" || value.length === 0 || seen.has(value)) continue;
+      seen.add(value);
+      persistedCollapsedTicketOrder.push(value as TicketId);
+      if (persistedCollapsedTicketOrder.length >= COLLAPSED_TICKET_LIMIT) break;
+    }
+  }
+
   const context = parsed.managementBoardContext;
   if (typeof context?.projectId === "string" && context.projectId.length > 0) {
     const ticketStack = (context.ticketStack ?? []).filter(
@@ -260,6 +305,7 @@ function persistState(state: UiState): void {
         browserVisibleByProjectId: state.browserVisibleByProjectId,
         boardFiltersByProjectId: state.boardFiltersByProjectId,
         managementBoardContext: state.managementBoardContext,
+        collapsedTicketIds: state.collapsedTicketOrder.slice(-COLLAPSED_TICKET_LIMIT),
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -737,6 +783,33 @@ export function toggleBoardCollapsedStatus(
   };
 }
 
+export function toggleTicketCollapsed(state: UiState, ticketId: TicketId): UiState {
+  const wasCollapsed = state.collapsedTicketIds[ticketId] === true;
+  if (wasCollapsed) {
+    const nextCollapsedIds = { ...state.collapsedTicketIds };
+    delete nextCollapsedIds[ticketId];
+    return {
+      ...state,
+      collapsedTicketIds: nextCollapsedIds,
+      collapsedTicketOrder: state.collapsedTicketOrder.filter((id) => id !== ticketId),
+    };
+  }
+  // Mark as collapsed. Append to the order list (FIFO), trimming the oldest entries
+  // when we exceed the persistence cap so localStorage stays bounded.
+  const order = [...state.collapsedTicketOrder, ticketId];
+  const trimmed =
+    order.length > COLLAPSED_TICKET_LIMIT ? order.slice(-COLLAPSED_TICKET_LIMIT) : order;
+  const nextCollapsedIds: Record<string, true> =
+    trimmed.length === order.length
+      ? { ...state.collapsedTicketIds, [ticketId]: true }
+      : Object.fromEntries(trimmed.map((id) => [id, true] as const));
+  return {
+    ...state,
+    collapsedTicketIds: nextCollapsedIds,
+    collapsedTicketOrder: trimmed,
+  };
+}
+
 export function toggleProject(state: UiState, projectId: ProjectId): UiState {
   const expanded = state.projectExpandedById[projectId] ?? true;
   return {
@@ -810,6 +883,7 @@ interface UiStateStore extends UiState {
     validTicketIds: ReadonlySet<TicketId>,
   ) => void;
   toggleProject: (projectId: ProjectId) => void;
+  toggleTicketCollapsed: (ticketId: TicketId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -846,6 +920,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   sanitizeManagementBoardContext: (projectId, validTicketIds) =>
     set((state) => sanitizeManagementBoardContext(state, projectId, validTicketIds)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
+  toggleTicketCollapsed: (ticketId) => set((state) => toggleTicketCollapsed(state, ticketId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>

@@ -370,6 +370,31 @@ export const TicketTreeNodeWire = Schema.Struct({
 
 export const TicketTreeNode = TicketTreeNodeWire as unknown as Schema.Schema<TicketTreeNode>;
 
+export interface TicketTreeResult {
+  readonly roots: ReadonlyArray<TicketTreeNode>;
+  readonly truncated: boolean;
+  readonly totalCount: number;
+}
+
+/**
+ * Pass-through schema for TicketTreeResult — uses TicketTreeNodeWire (the actual
+ * runtime schema) for `roots`, then casts to the recursive type. Same pattern as
+ * TicketTreeNode above.
+ */
+export const TicketTreeResultWire = Schema.Struct({
+  /** Top-level subtree nodes (children of the requested root, or top-level project tickets). */
+  roots: Schema.Array(TicketTreeNodeWire),
+  /** True when the result was capped by the server's subtree limit. */
+  truncated: Schema.Boolean,
+  /**
+   * Number of ticket nodes in the returned subtree (excluding the root). When `truncated`
+   * is true this equals the cap; the actual subtree may be larger.
+   */
+  totalCount: Schema.Int,
+});
+
+export const TicketTreeResult = TicketTreeResultWire as unknown as Schema.Schema<TicketTreeResult>;
+
 // ---------------------------------------------------------------------------
 // RPC input schemas
 // ---------------------------------------------------------------------------

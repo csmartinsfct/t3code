@@ -160,4 +160,216 @@ layer("TicketingRepository", (it) => {
       );
     }),
   );
+
+  it.effect("listSubtree returns multi-level descendants of the root, excluding the root", () =>
+    Effect.gen(function* () {
+      const repository = yield* TicketingRepository;
+      const projectId = ProjectId.makeUnsafe("project-subtree");
+      const rootId = TicketId.makeUnsafe("ticket-subtree-root");
+      const childA = TicketId.makeUnsafe("ticket-subtree-childA");
+      const childB = TicketId.makeUnsafe("ticket-subtree-childB");
+      const grandA1 = TicketId.makeUnsafe("ticket-subtree-grandA1");
+      const grandA2 = TicketId.makeUnsafe("ticket-subtree-grandA2");
+      const greatGrandA1A = TicketId.makeUnsafe("ticket-subtree-greatA1A");
+      const otherRoot = TicketId.makeUnsafe("ticket-subtree-other");
+
+      yield* seedProject(projectId, "Subtree project");
+      yield* seedTicket({
+        id: rootId,
+        projectId,
+        parentId: null,
+        ticketNumber: 1,
+        identifier: "SUB-1",
+        title: "Root",
+        sortOrder: 0,
+        createdAt: "2026-04-09T10:00:00.000Z",
+      });
+      yield* seedTicket({
+        id: childA,
+        projectId,
+        parentId: rootId,
+        ticketNumber: 2,
+        identifier: "SUB-2",
+        title: "Child A",
+        sortOrder: 0,
+        createdAt: "2026-04-09T10:01:00.000Z",
+      });
+      yield* seedTicket({
+        id: childB,
+        projectId,
+        parentId: rootId,
+        ticketNumber: 3,
+        identifier: "SUB-3",
+        title: "Child B",
+        sortOrder: 1,
+        createdAt: "2026-04-09T10:02:00.000Z",
+      });
+      yield* seedTicket({
+        id: grandA1,
+        projectId,
+        parentId: childA,
+        ticketNumber: 4,
+        identifier: "SUB-4",
+        title: "Grand A1",
+        sortOrder: 0,
+        createdAt: "2026-04-09T10:03:00.000Z",
+      });
+      yield* seedTicket({
+        id: grandA2,
+        projectId,
+        parentId: childA,
+        ticketNumber: 5,
+        identifier: "SUB-5",
+        title: "Grand A2",
+        sortOrder: 1,
+        createdAt: "2026-04-09T10:04:00.000Z",
+      });
+      yield* seedTicket({
+        id: greatGrandA1A,
+        projectId,
+        parentId: grandA1,
+        ticketNumber: 6,
+        identifier: "SUB-6",
+        title: "Great Grand A1A",
+        sortOrder: 0,
+        createdAt: "2026-04-09T10:05:00.000Z",
+      });
+      // Sibling top-level ticket — should not appear in the subtree of root.
+      yield* seedTicket({
+        id: otherRoot,
+        projectId,
+        parentId: null,
+        ticketNumber: 7,
+        identifier: "SUB-7",
+        title: "Other root",
+        sortOrder: 1,
+        createdAt: "2026-04-09T10:06:00.000Z",
+      });
+
+      const descendants = yield* repository.listSubtree({
+        projectId,
+        rootTicketId: rootId,
+      });
+      const ids = new Set(descendants.map((t) => t.id));
+
+      assert.strictEqual(ids.size, 5);
+      assert.isTrue(ids.has(childA));
+      assert.isTrue(ids.has(childB));
+      assert.isTrue(ids.has(grandA1));
+      assert.isTrue(ids.has(grandA2));
+      assert.isTrue(ids.has(greatGrandA1A));
+      assert.isFalse(ids.has(rootId));
+      assert.isFalse(ids.has(otherRoot));
+    }),
+  );
+
+  it.effect(
+    "listSubtree respects the limit (returns up to limit + 1 for truncation detection)",
+    () =>
+      Effect.gen(function* () {
+        const repository = yield* TicketingRepository;
+        const projectId = ProjectId.makeUnsafe("project-subtree-limit");
+        const rootId = TicketId.makeUnsafe("ticket-limit-root");
+
+        yield* seedProject(projectId, "Subtree limit project");
+        yield* seedTicket({
+          id: rootId,
+          projectId,
+          parentId: null,
+          ticketNumber: 1,
+          identifier: "LIM-1",
+          title: "Root",
+          sortOrder: 0,
+          createdAt: "2026-04-09T10:00:00.000Z",
+        });
+        // Seed 5 children of root.
+        for (let i = 0; i < 5; i++) {
+          yield* seedTicket({
+            id: TicketId.makeUnsafe(`ticket-limit-child-${i}`),
+            projectId,
+            parentId: rootId,
+            ticketNumber: i + 2,
+            identifier: `LIM-${i + 2}`,
+            title: `Child ${i}`,
+            sortOrder: i,
+            createdAt: `2026-04-09T10:0${i + 1}:00.000Z`,
+          });
+        }
+
+        // limit = 3 → returns 4 rows (limit + 1) so the service can detect truncation.
+        const limited = yield* repository.listSubtree({
+          projectId,
+          rootTicketId: rootId,
+          limit: 3,
+        });
+        assert.strictEqual(limited.length, 4);
+
+        // limit = 10 → returns all 5 children, no overflow row.
+        const all = yield* repository.listSubtree({
+          projectId,
+          rootTicketId: rootId,
+          limit: 10,
+        });
+        assert.strictEqual(all.length, 5);
+      }),
+  );
+
+  it.effect(
+    "listSubtree excludes archived descendants by default and includes them when requested",
+    () =>
+      Effect.gen(function* () {
+        const repository = yield* TicketingRepository;
+        const projectId = ProjectId.makeUnsafe("project-subtree-archived");
+        const rootId = TicketId.makeUnsafe("ticket-arch-root");
+        const archivedChildId = TicketId.makeUnsafe("ticket-arch-child");
+        const liveChildId = TicketId.makeUnsafe("ticket-live-child");
+
+        yield* seedProject(projectId, "Subtree archive project");
+        yield* seedTicket({
+          id: rootId,
+          projectId,
+          parentId: null,
+          ticketNumber: 1,
+          identifier: "ARC-1",
+          title: "Root",
+          sortOrder: 0,
+          createdAt: "2026-04-09T10:00:00.000Z",
+        });
+        yield* seedTicket({
+          id: archivedChildId,
+          projectId,
+          parentId: rootId,
+          ticketNumber: 2,
+          identifier: "ARC-2",
+          title: "Archived child",
+          sortOrder: 0,
+          createdAt: "2026-04-09T10:01:00.000Z",
+        });
+        yield* seedTicket({
+          id: liveChildId,
+          projectId,
+          parentId: rootId,
+          ticketNumber: 3,
+          identifier: "ARC-3",
+          title: "Live child",
+          sortOrder: 1,
+          createdAt: "2026-04-09T10:02:00.000Z",
+        });
+        yield* repository.archiveTicket({ id: archivedChildId });
+
+        const live = yield* repository.listSubtree({
+          projectId,
+          rootTicketId: rootId,
+        });
+        assert.strictEqual(live.length, 1);
+        assert.strictEqual(live[0]?.id, liveChildId);
+
+        const includingArchived = yield* repository.listSubtree({
+          projectId,
+          rootTicketId: rootId,
+          includeArchived: true,
+        });
+        assert.strictEqual(includingArchived.length, 2);
+      }),
+  );
 });

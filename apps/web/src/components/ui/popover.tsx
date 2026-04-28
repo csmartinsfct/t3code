@@ -43,6 +43,9 @@ function PopoverPopup({
   alignOffset = 0,
   tooltipStyle = false,
   anchor,
+  collisionAvoidance,
+  collisionPadding,
+  positionMethod,
   ...props
 }: PopoverPrimitive.Popup.Props & {
   side?: PopoverPrimitive.Positioner.Props["side"];
@@ -51,6 +54,9 @@ function PopoverPopup({
   alignOffset?: PopoverPrimitive.Positioner.Props["alignOffset"];
   tooltipStyle?: boolean;
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
+  collisionAvoidance?: PopoverPrimitive.Positioner.Props["collisionAvoidance"];
+  collisionPadding?: PopoverPrimitive.Positioner.Props["collisionPadding"];
+  positionMethod?: PopoverPrimitive.Positioner.Props["positionMethod"];
 }) {
   return (
     <PopoverPrimitive.Portal>
@@ -62,6 +68,9 @@ function PopoverPopup({
         data-slot="popover-positioner"
         side={side}
         sideOffset={sideOffset}
+        {...(collisionAvoidance !== undefined ? { collisionAvoidance } : {})}
+        {...(collisionPadding !== undefined ? { collisionPadding } : {})}
+        {...(positionMethod !== undefined ? { positionMethod } : {})}
       >
         <PopoverPrimitive.Popup
           className={cn(

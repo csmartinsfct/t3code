@@ -16,6 +16,7 @@ import {
   setStartupWasWorkingThreads,
   syncProjects,
   syncThreads,
+  toggleTicketCollapsed,
   type UiState,
 } from "./uiStateStore";
 
@@ -30,6 +31,8 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     browserVisibleByProjectId: {},
     boardFiltersByProjectId: {},
     viewMode: "chat",
+    collapsedTicketIds: {},
+    collapsedTicketOrder: [],
     ...overrides,
   };
 }
@@ -339,5 +342,34 @@ describe("uiStateStore pure functions", () => {
     const next = setManagementBoardScrollLeft(initialState, 240);
 
     expect(next.managementBoardContext?.boardScrollLeft).toBe(240);
+  });
+
+  it("toggleTicketCollapsed marks a ticket collapsed and toggles back to open", () => {
+    const ticketId = TicketId.makeUnsafe("ticket-collapse");
+    const initial = makeUiState();
+
+    const collapsed = toggleTicketCollapsed(initial, ticketId);
+    expect(collapsed.collapsedTicketIds[ticketId]).toBe(true);
+    expect(collapsed.collapsedTicketOrder).toEqual([ticketId]);
+
+    const reopened = toggleTicketCollapsed(collapsed, ticketId);
+    expect(reopened.collapsedTicketIds[ticketId]).toBeUndefined();
+    expect(reopened.collapsedTicketOrder).toEqual([]);
+  });
+
+  it("toggleTicketCollapsed appends in FIFO order so old entries can be evicted", () => {
+    const ticketA = TicketId.makeUnsafe("ticket-a");
+    const ticketB = TicketId.makeUnsafe("ticket-b");
+    const ticketC = TicketId.makeUnsafe("ticket-c");
+
+    let state = makeUiState();
+    state = toggleTicketCollapsed(state, ticketA);
+    state = toggleTicketCollapsed(state, ticketB);
+    state = toggleTicketCollapsed(state, ticketC);
+
+    expect(state.collapsedTicketOrder).toEqual([ticketA, ticketB, ticketC]);
+    expect(Object.keys(state.collapsedTicketIds).toSorted()).toEqual(
+      [ticketA, ticketB, ticketC].toSorted(),
+    );
   });
 });
