@@ -66,6 +66,13 @@ import {
 
 const nowIso = () => new Date().toISOString();
 
+/**
+ * Maximum number of descendant nodes returned by `getTree({ rootTicketId })`.
+ * Beyond this, the result is truncated and the client surfaces a "subtree is large"
+ * affordance. Prevents pathological epics from blocking the ticket detail page.
+ */
+const SUBTREE_NODE_LIMIT = 500;
+
 const toOperationError =
   (operation: string) =>
   (cause: unknown): TicketingError =>
@@ -1413,15 +1420,31 @@ const makeTicketingService = Effect.gen(function* () {
 
   const getTree: TicketingServiceShape["getTree"] = (input) =>
     Effect.gen(function* () {
-      const allTickets = yield* repo
-        .listByProject({
-          projectId: input.projectId,
-          includeArchived: false,
-          ...(input.rootTicketId ? { parentId: input.rootTicketId } : {}),
-        })
-        .pipe(Effect.mapError(toOperationError("getTree")));
+      // When rootTicketId is set, use a recursive CTE bounded to the subtree of that
+      // ticket — avoids loading the entire project. Without rootTicketId, fall back
+      // to listing the whole project (used by orchestration views).
+      const rawTickets = input.rootTicketId
+        ? yield* repo
+            .listSubtree({
+              projectId: input.projectId,
+              rootTicketId: input.rootTicketId,
+              limit: SUBTREE_NODE_LIMIT,
+            })
+            .pipe(Effect.mapError(toOperationError("getTree")))
+        : yield* repo
+            .listByProject({
+              projectId: input.projectId,
+              includeArchived: false,
+            })
+            .pipe(Effect.mapError(toOperationError("getTree")));
 
-      if (allTickets.length === 0) return [];
+      // Detect truncation: listSubtree fetches limit + 1 to signal overflow.
+      const truncated = input.rootTicketId ? rawTickets.length > SUBTREE_NODE_LIMIT : false;
+      const allTickets = truncated ? rawTickets.slice(0, SUBTREE_NODE_LIMIT) : rawTickets;
+
+      if (allTickets.length === 0) {
+        return { roots: [], truncated, totalCount: 0 };
+      }
 
       const ids = allTickets.map((t) => t.id);
       const [labelsMap, countsMap, depsMap] = yield* Effect.all([
@@ -1460,7 +1483,7 @@ const makeTicketingService = Effect.gen(function* () {
         dependencies: ticketDepsMap.get(summary.id) ?? [],
       });
 
-      // Root nodes are those with no parent or with rootTicketId as parent
+      // Root nodes are those with no parent or with rootTicketId as parent.
       const rootParentId = input.rootTicketId ?? null;
       const roots = allTickets
         .filter((t) => t.parentId === rootParentId)
@@ -1468,7 +1491,7 @@ const makeTicketingService = Effect.gen(function* () {
         .filter(Boolean)
         .map(buildNode);
 
-      return roots;
+      return { roots, truncated, totalCount: allTickets.length };
     });
 
   // Dependencies

@@ -133,9 +133,9 @@ export function OrchestrationSubpage({
     const api = ensureNativeApi();
     api.ticketing
       .getTree({ projectId: projectId as ProjectId })
-      .then((next: readonly TicketTreeNode[]) => {
+      .then((next) => {
         if (cancelled) return;
-        setTree(next);
+        setTree(next.roots);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

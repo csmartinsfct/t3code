@@ -245,6 +245,14 @@ export type TicketListByProjectInput = typeof TicketListByProjectInput.Type;
 export const TicketListByParentInput = Schema.Struct({ parentId: TicketId });
 export type TicketListByParentInput = typeof TicketListByParentInput.Type;
 
+export const TicketSubtreeInput = Schema.Struct({
+  projectId: ProjectId,
+  rootTicketId: TicketId,
+  includeArchived: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Int),
+});
+export type TicketSubtreeInput = typeof TicketSubtreeInput.Type;
+
 export const AllocateTicketNumberInput = Schema.Struct({ projectId: ProjectId });
 export type AllocateTicketNumberInput = typeof AllocateTicketNumberInput.Type;
 
@@ -360,6 +368,14 @@ export interface TicketingRepositoryShape {
   ) => Effect.Effect<ReadonlyArray<PersistedTicket>, ProjectionRepositoryError>;
   readonly listByParent: (
     input: TicketListByParentInput,
+  ) => Effect.Effect<ReadonlyArray<PersistedTicket>, ProjectionRepositoryError>;
+  /**
+   * Recursive descendants of `rootTicketId`, scoped to the subtree (NOT the project).
+   * Uses a SQLite recursive CTE bounded by `limit` (default 500). Fetches `limit + 1`
+   * rows so the service layer can detect truncation. Excludes the root itself.
+   */
+  readonly listSubtree: (
+    input: TicketSubtreeInput,
   ) => Effect.Effect<ReadonlyArray<PersistedTicket>, ProjectionRepositoryError>;
   readonly archiveTicket: (
     input: TicketLookupInput,

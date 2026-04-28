@@ -778,6 +778,57 @@ TicketingTestLayer("TicketingService", (it) => {
     }),
   );
 
+  it.effect(
+    "getTree({ rootTicketId }) returns the full recursive subtree, not just direct children",
+    () =>
+      Effect.gen(function* () {
+        const projectId = ProjectId.makeUnsafe("project-subtree-recursive");
+        const ticketing = yield* TicketingService;
+        yield* seedProject(projectId, "Subtree recursive project");
+
+        const root = yield* ticketing.create({ projectId, title: "Root" });
+        const childA = yield* ticketing.create({
+          projectId,
+          title: "Child A",
+          parentId: root.id,
+        });
+        const childB = yield* ticketing.create({
+          projectId,
+          title: "Child B",
+          parentId: root.id,
+        });
+        const grandA1 = yield* ticketing.create({
+          projectId,
+          title: "Grand A1",
+          parentId: childA.id,
+        });
+        const greatGrandA1A = yield* ticketing.create({
+          projectId,
+          title: "Great Grand A1A",
+          parentId: grandA1.id,
+        });
+
+        const result = yield* ticketing.getTree({ projectId, rootTicketId: root.id });
+
+        assert.strictEqual(result.truncated, false);
+        assert.strictEqual(result.totalCount, 4);
+
+        // Top-level roots are direct children of root.
+        assert.strictEqual(result.roots.length, 2);
+        const childIds = new Set(result.roots.map((node) => node.ticket.id));
+        assert.isTrue(childIds.has(childA.id));
+        assert.isTrue(childIds.has(childB.id));
+
+        const childANode = result.roots.find((node) => node.ticket.id === childA.id);
+        assert.ok(childANode);
+        assert.strictEqual(childANode!.children.length, 1);
+        const grandNode = childANode!.children[0]!;
+        assert.strictEqual(grandNode.ticket.id, grandA1.id);
+        assert.strictEqual(grandNode.children.length, 1);
+        assert.strictEqual(grandNode.children[0]!.ticket.id, greatGrandA1A.id);
+      }),
+  );
+
   it.effect("ingests an image dataUrl and rewrites the artifact payload to storage=local", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.makeUnsafe("project-attach-ingest");

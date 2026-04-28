@@ -95,6 +95,12 @@ const makeTicketTree = (...tickets: ReadonlyArray<Ticket>): TicketTreeNode[] =>
     dependencies: [],
   }));
 
+const makeTicketTreeResult = (...tickets: ReadonlyArray<Ticket>) => ({
+  roots: makeTicketTree(...tickets),
+  truncated: false,
+  totalCount: tickets.length,
+});
+
 const makeThread = (
   id: ThreadId,
   overrides: Partial<{
@@ -173,7 +179,7 @@ const makeTicketingService = (
   unarchive: () => Effect.die(new Error("not mocked")),
   reorder: () => Effect.void,
   search: () => Effect.succeed([]),
-  getTree: () => Effect.succeed([]),
+  getTree: () => Effect.succeed({ roots: [], truncated: false, totalCount: 0 }),
   setDependencies: () => Effect.void,
   addDependency: () => Effect.void,
   removeDependency: () => Effect.void,
@@ -288,7 +294,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
-        getTree: () => Effect.succeed(makeTicketTree(ticket)),
+        getTree: () => Effect.succeed(makeTicketTreeResult(ticket)),
         getByIdentifier: ({ identifier }) =>
           identifier === ticket.identifier
             ? Effect.succeed(ticket)
@@ -339,7 +345,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
-        getTree: () => Effect.succeed(makeTicketTree(ticket)),
+        getTree: () => Effect.succeed(makeTicketTreeResult(ticket)),
         getByIdentifier: ({ identifier }) =>
           identifier === ticket.identifier
             ? Effect.succeed(ticket)
@@ -432,7 +438,7 @@ describe("OrchestrationRunService", () => {
           }),
       }),
       ticketing: makeTicketingService({
-        getTree: () => Effect.succeed(makeTicketTree(...tickets)),
+        getTree: () => Effect.succeed(makeTicketTreeResult(...tickets)),
         getByIdentifier: ({ identifier }) => {
           const ticket = tickets.find((entry) => entry.identifier === identifier);
           return ticket

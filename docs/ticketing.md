@@ -264,6 +264,16 @@ Every mutation records a `TicketHistoryEntry` with:
 
 **Tickets**: `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket`, `delete_ticket`, `reorder_tickets`, `search_tickets`, `get_ticket_tree`
 
+`get_ticket_tree` returns `{ roots, truncated, totalCount }`:
+
+- `roots`: array of `TicketTreeNode` — the top-level subtree nodes (children of the requested `rootTicketId`, or top-level project tickets when no root is given). Each node includes `ticket: TicketSummary`, `children: TicketTreeNode[]`, and `dependencies: TicketDependency[]`.
+- `truncated`: `true` when the result was capped by the server's subtree limit (currently 500 nodes).
+- `totalCount`: number of nodes returned (excluding the root). Equals the cap when `truncated` is `true`.
+
+When `rootTicketId` is provided, the server uses a recursive CTE bounded to that ticket's subtree — it never loads the rest of the project. Without `rootTicketId`, the full project tree is loaded (used by orchestration views).
+
+**Sub-tickets tree (UI):** the ticket detail view renders the full descendant subtree recursively under "Sub-tickets (N)", where each node is collapsible (open by default). Collapsed state is persisted per-ticket in localStorage. When a subtree exceeds 500 nodes the UI surfaces a "Subtree is large — showing the first 500 descendants" affordance.
+
 **Dependencies**: `set_ticket_dependencies`, `add_ticket_dependency`, `remove_ticket_dependency`
 
 **Criteria**: `update_criterion_status`
