@@ -190,7 +190,7 @@ The model carries two service collections:
 - `declaredServices`: immutable launch-time names copied from the project action.
 - `runtimeServices`: canonical per-service entries for the live run, validated periodically.
 
-Composite runs pre-populate `runtimeServices` from declared services at launch (`validationStatus: "unknown"`, `inferenceSource: "declared"`), so per-service log tabs render before inference returns. Inference then **enriches** those entries — replacing each grounded one with an LLM-canonicalised version while leaving ungrounded entries as their stubs. Legacy runs build `runtimeServices` purely from inference output.
+Composite runs pre-populate `runtimeServices` from declared services at launch (`validationStatus: "unknown"`, `inferenceSource: "declared"`), so per-service log tabs render before inference returns. Inference then **enriches** those entries with LLM-canonicalised names, roles, and health checks when the model returns a schema-valid service. Legacy runs build `runtimeServices` purely from inference output.
 
 ### Health check types
 
@@ -205,9 +205,9 @@ Implementation: `apps/server/src/managedRuns/healthCheck.ts`
 
 ### Inference + polling
 
-`ManagedRunInference` performs **one** structured LLM call per run — same code path for legacy and composite. The call is fed the merged log across all services (legacy reads `<runId>.ndjson`; composite's `<runId>/` directory is auto-merged by `readNdjsonLines`) and the run's full `declaredServices` list. The LLM proposes one runtime service per declared service with a canonical health check; grounding then verifies each URL/port appears in the captured evidence before the entry is adopted.
+`ManagedRunInference` performs **one** structured LLM call per run — same code path for legacy and composite. The call is fed the merged log across all services (legacy reads `<runId>.ndjson`; composite's `<runId>/` directory is auto-merged by `readNdjsonLines`) and the run's full `declaredServices` list. ANSI-styled terminal output is normalized before URL/port extraction so tools like Vite can be inferred reliably. The LLM proposes runtime services with canonical health checks; schema-valid health checks are adopted, then normal health validation determines whether those targets are reachable.
 
-For composite runs there's a small post-pass: each LLM-emitted runtime service carries a `declaredServiceName`, which we match against the run's declared services to look up the deterministic composite serviceId; that overrides the LLM's auto-slug so per-service tabs/streams line up. Any service the LLM grounded replaces its stub in `runtimeServices`; ungrounded services keep their stub so the per-service tab still renders. Hallucinated services with no matching declared name are dropped.
+For composite runs there's a small post-pass: each LLM-emitted runtime service carries a `declaredServiceName`, which we match against the run's declared services to look up the deterministic composite serviceId; that overrides the LLM's auto-slug so per-service tabs/streams line up. Any matched schema-valid service replaces its stub in `runtimeServices`; services the model omits or cannot express with a valid health check keep their stub so the per-service tab still renders. Hallucinated services with no matching declared name are dropped.
 
 For legacy runs the LLM's runtime services are adopted as-is (no slug remap, no stubs to merge into).
 
@@ -227,7 +227,7 @@ A menu button in the toolbar showing:
 - List of active runs with status badges
 - Per-runtime-service validation indicators (green/red/gray dots)
 - Service summary (e.g. "2/3 services validated")
-- Inference-aware secondary text when runtime targets are still pending or ungrounded
+- Inference-aware secondary text when runtime targets are still pending or inference could not produce canonical services
 - Hover/focus stop affordance: the status pill swaps to a same-size stop button with confirmation before stopping the run
 
 ### Settings Runs Page (`/settings/runs`)
@@ -238,13 +238,13 @@ It shows:
 
 - The latest inference attempts in a table
 - Provider/model used for each inference
-- Status (`ready`, `failed`, `ungrounded`)
+- Status (`ready`, `failed`, `ungrounded`; `ungrounded` is retained for historical records)
 - Resolved runtime-service count
 - A detail panel with:
   - declared services snapshot
   - normalized payload
   - raw payload
-  - grounding failures
+  - inference failures
   - evidence excerpt
 
 This page is intentionally read-only in v1. It is an audit surface, not a control surface.
@@ -360,7 +360,7 @@ There is no polling. Cleanup latency is one event-loop tick from action deletion
 | **REST API**              | `apps/server/src/managedRuns/http.ts`                               | REST endpoint with tool registrations                                  |
 | **System prompt**         | `apps/server/src/managedRuns/systemPrompt.ts`                       | Prompt injected into AI sessions                                       |
 | **Health checks**         | `apps/server/src/managedRuns/healthCheck.ts`                        | URL/docker/port/command health check implementations                   |
-| **Run inference**         | `apps/server/src/managedRuns/Layers/Inference.ts`                   | LLM-backed runtime-service inference + grounding                       |
+| **Run inference**         | `apps/server/src/managedRuns/Layers/Inference.ts`                   | LLM-backed runtime-service inference and evidence normalization        |
 | **Inference service**     | `apps/server/src/managedRuns/Services/Inference.ts`                 | Effect service contract for inference                                  |
 | **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                 | Core run lifecycle: launch, track, poll, stop, orphan cleanup          |
 | **Run service interface** | `apps/server/src/managedRuns/Services/ManagedRuns.ts`               | Effect service interface                                               |

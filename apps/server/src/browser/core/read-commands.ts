@@ -11,8 +11,6 @@ import type { BrowserManager } from './browser-manager';
 import { consoleBuffer, networkBuffer, dialogBuffer } from './buffers';
 import type { Page, Frame } from 'playwright';
 import * as fs from 'fs';
-import * as path from 'path';
-import { TEMP_DIR } from './platform';
 import { inspectElement, formatInspectorResult, getModificationHistory } from './cdp-inspector';
 import { validateReadPath } from './path-security';
 // Re-export for backward compatibility (tests import from read-commands)

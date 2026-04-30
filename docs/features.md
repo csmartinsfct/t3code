@@ -345,7 +345,7 @@ ProjectScript {
 
 ### Service inference
 
-An LLM analyzes script output logs to infer what services are running, their roles (frontend, backend, proxy, worker, database, devtool), URLs, and health status. Inference records include the model used, raw/normalized payloads, grounding evidence, and confidence levels.
+An LLM analyzes script output logs to infer what services are running, their roles (frontend, backend, proxy, worker, database, devtool), URLs, and health status. Inference records include the model used, raw/normalized payloads, provenance metadata, and confidence levels. Inferred health checks are adopted when they satisfy the schema, then regular service validation determines whether each target is reachable.
 
 **User interaction:**
 

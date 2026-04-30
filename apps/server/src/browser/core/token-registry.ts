@@ -28,7 +28,6 @@
  */
 
 import * as crypto from 'crypto';
-import { READ_COMMANDS, WRITE_COMMANDS, META_COMMANDS } from './commands';
 
 // ─── Scope Definitions ─────────────────────────────────────────
 // Derived from commands.ts, but reclassified by actual side effects.

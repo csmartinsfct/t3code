@@ -9,6 +9,7 @@ import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  Loader2Icon,
   ScrollText,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
@@ -141,7 +142,7 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
   );
 }
 
-function serviceSummary(run: ManagedRunSummary) {
+export function serviceSummary(run: ManagedRunSummary) {
   if (run.runtimeServices.length === 0) return null;
   const healthy = run.runtimeServices.filter(
     (service) => service.validationStatus === "healthy",
@@ -149,13 +150,20 @@ function serviceSummary(run: ManagedRunSummary) {
   return `${healthy}/${run.runtimeServices.length}`;
 }
 
-function secondaryText(run: ManagedRunSummary, scripts?: ReadonlyArray<ProjectScript>) {
+export function runServiceStatusLabel(run: ManagedRunSummary) {
+  if (run.inferenceStatus === "pending") return null;
+  if (run.inferenceStatus === "ungrounded") return "Ungrounded";
+  if (run.inferenceError) return "Inference failed";
+  return serviceSummary(run);
+}
+
+export function secondaryText(run: ManagedRunSummary, scripts?: ReadonlyArray<ProjectScript>) {
   if (run.detectedUrl) return run.detectedUrl;
+  if (run.inferenceStatus === "pending") return "Inferring runtime services…";
+  if (run.inferenceStatus === "ungrounded") return "Inference could not produce a runtime target";
+  if (run.inferenceError) return run.inferenceError;
   const summary = serviceSummary(run);
   if (summary) return `${summary} services validated`;
-  if (run.inferenceStatus === "pending") return "Inferring runtime services…";
-  if (run.inferenceStatus === "ungrounded") return "Inference could not ground a runtime target";
-  if (run.inferenceError) return run.inferenceError;
   const command = resolveRunCommand(run, scripts);
   return command ? truncate(command, 56) : run.scriptId;
 }
@@ -262,6 +270,8 @@ function RunCard({
   scripts?: ReadonlyArray<ProjectScript>;
 }) {
   const runName = resolveRunName(run, scripts);
+  const statusLabel = runServiceStatusLabel(run);
+  const isInferring = run.inferenceStatus === "pending";
 
   return (
     <div
@@ -271,9 +281,13 @@ function RunCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 font-medium text-foreground">{truncate(runName, 24)}</div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {serviceSummary(run) && (
-            <span className="text-[10px] text-muted-foreground">{serviceSummary(run)}</span>
+          {isInferring && (
+            <Loader2Icon
+              className="size-3 animate-spin text-muted-foreground"
+              aria-label="Inferring runtime services"
+            />
           )}
+          {statusLabel && <span className="text-[10px] text-muted-foreground">{statusLabel}</span>}
           <RunLogsButton run={run} runName={runName} />
           <RunStatusControl run={run} runName={runName} />
         </div>

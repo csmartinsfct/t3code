@@ -20,7 +20,7 @@
 
 import * as crypto from 'crypto';
 import type { BrowserManager } from './browser-manager';
-import { findInstalledBrowsers, listProfiles, listDomains, importCookies, importCookiesViaCdp, hasV20Cookies, CookieImportError, type PlaywrightCookie } from './cookie-import-browser';
+import { findInstalledBrowsers, listProfiles, listDomains, importCookies, importCookiesViaCdp, hasV20Cookies, CookieImportError } from './cookie-import-browser';
 import { getCookiePickerHTML } from './cookie-picker-ui';
 
 // ─── Auth State ─────────────────────────────────────────────────

@@ -1,5 +1,4 @@
 import {
-  ManagedRunDetail,
   ManagedRunInferenceRecordDetail,
   ManagedRunInferenceRecordSummary,
   ManagedRunEvidence,

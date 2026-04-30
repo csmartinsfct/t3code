@@ -1,11 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-30T03:21:00.716Z",
-  "lastProcessedCommit": "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb",
+  "generatedAt": "2026-04-30T03:40:11.738Z",
+  "lastProcessedCommit": "ab0cd9158340cd69d7babd50283a2bcedec039a6",
   "groups": [
     {
       "date": "2026-04-30",
       "entries": [
+        {
+          "id": "8b86f29d3789abc9",
+          "title": "More reliable composite managed run detection",
+          "summary": "Improved how composite managed runs are identified so related services are recognized more consistently and mapped to the correct service in the UI.",
+          "category": "improvement",
+          "commitShas": ["ab0cd9158340cd69d7babd50283a2bcedec039a6"]
+        },
         {
           "id": "61874efa665534f6",
           "title": "Managed runs now support multi-service actions with clearer log views",
@@ -2666,6 +2673,16 @@
           "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb"
         ],
         "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-30T03:40:11.573Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb",
+        "toInclusiveCommit": "ab0cd9158340cd69d7babd50283a2bcedec039a6",
+        "commitShas": ["ab0cd9158340cd69d7babd50283a2bcedec039a6"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

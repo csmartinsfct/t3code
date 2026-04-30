@@ -65,13 +65,46 @@ function unique<T>(values: ReadonlyArray<T>): ReadonlyArray<T> {
   return Array.from(new Set(values));
 }
 
-function extractUrls(lines: ReadonlyArray<string>): ReadonlyArray<string> {
-  const matches = lines.flatMap((line) => line.match(/https?:\/\/[^\s"'`)>]+/g) ?? []);
-  return unique(matches);
+const ANSI_ESC = String.fromCharCode(0x1b);
+const ANSI_CSI = String.fromCharCode(0x9b);
+const ANSI_BEL = String.fromCharCode(0x07);
+const ANSI_ESCAPE_PATTERN = new RegExp(
+  `[${ANSI_ESC}${ANSI_CSI}][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?${ANSI_BEL})|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]))`,
+  "g",
+);
+
+export function normalizeInferenceLogLine(line: string): string {
+  return line.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
-function extractPorts(lines: ReadonlyArray<string>): ReadonlyArray<number> {
-  const matches = lines.flatMap((line) =>
+function trimUrlCandidate(candidate: string): string {
+  return candidate.replace(/[.,;]+$/g, "");
+}
+
+function normalizeUrlForGrounding(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const normalizedPath = parsed.pathname.replace(/\/+$/g, "");
+    return `${parsed.origin}${normalizedPath}${parsed.search}`;
+  } catch {
+    return url.replace(/\/+$/g, "");
+  }
+}
+
+function urlMatchesGrounding(candidate: string, proposed: string): boolean {
+  return normalizeUrlForGrounding(candidate) === normalizeUrlForGrounding(proposed);
+}
+
+export function extractUrls(lines: ReadonlyArray<string>): ReadonlyArray<string> {
+  const matches = lines.flatMap(
+    (line) => normalizeInferenceLogLine(line).match(/https?:\/\/[^\s"'`)>]+/g) ?? [],
+  );
+  return unique(matches.map(trimUrlCandidate));
+}
+
+export function extractPorts(lines: ReadonlyArray<string>): ReadonlyArray<number> {
+  const normalizedLines = lines.map(normalizeInferenceLogLine);
+  const matches = normalizedLines.flatMap((line) =>
     Array.from(
       line.matchAll(
         /(?:(?:localhost|127\.0\.0\.1|0\.0\.0\.0):|port(?:\s+is|\s*=|\s+)?)(\d{2,5})/gi,
@@ -80,6 +113,146 @@ function extractPorts(lines: ReadonlyArray<string>): ReadonlyArray<number> {
     ),
   );
   return unique(matches.filter((port) => Number.isInteger(port) && port > 0 && port <= 65_535));
+}
+
+function extractPortFromUrl(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.port.length > 0) {
+      const port = Number(parsed.port);
+      return Number.isInteger(port) && port > 0 && port <= 65_535 ? port : null;
+    }
+    if (parsed.protocol === "https:") return 443;
+    if (parsed.protocol === "http:") return 80;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeEvidenceLineForComparison(line: string): string {
+  return normalizeInferenceLogLine(line)
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "");
+}
+
+function selectGroundedEvidenceLines(
+  proposedLines: ReadonlyArray<string>,
+  evidenceExcerpt: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const evidenceByComparable = new Map(
+    evidenceExcerpt.map((line) => [normalizeEvidenceLineForComparison(line), line] as const),
+  );
+  return proposedLines.flatMap((line) => {
+    const matched = evidenceByComparable.get(normalizeEvidenceLineForComparison(line));
+    return matched ? [matched] : [];
+  });
+}
+
+/*
+ * Backward-compatibility note: this provenance helper is informational only.
+ * Inference now accepts any schema-valid health check and lets the health
+ * validator decide whether the target is actually reachable.
+ */
+function detectGroundingSources(
+  healthCheck: typeof ServiceHealthCheck.Type,
+  input: ManagedRunInferenceInput,
+  declaredServiceName: string | null,
+): ReadonlyArray<"log" | "declared" | "evidence"> {
+  const sources = new Set<"log" | "declared" | "evidence">();
+
+  const declaredService =
+    declaredServiceName === null
+      ? null
+      : (input.declaredServices.find((service) => service.name === declaredServiceName) ?? null);
+
+  switch (healthCheck.type) {
+    case "url": {
+      const proposedUrl = trimUrlCandidate(healthCheck.url);
+      if (input.candidateUrls.some((url) => urlMatchesGrounding(url, proposedUrl))) {
+        sources.add("log");
+      }
+      if (input.detectedUrl !== null && urlMatchesGrounding(input.detectedUrl, proposedUrl)) {
+        sources.add("evidence");
+      }
+      if (
+        declaredService?.healthCheck?.type === "url" &&
+        urlMatchesGrounding(declaredService.healthCheck.url, proposedUrl)
+      ) {
+        sources.add("declared");
+      }
+      if (
+        input.evidenceExcerpt.some((line) => normalizeInferenceLogLine(line).includes(proposedUrl))
+      ) {
+        sources.add("log");
+      }
+      break;
+    }
+    case "port": {
+      if (input.candidatePorts.includes(healthCheck.port)) {
+        sources.add("log");
+      }
+      if (input.candidateUrls.some((url) => extractPortFromUrl(url) === healthCheck.port)) {
+        sources.add("log");
+      }
+      if (input.detectedPort === healthCheck.port) {
+        sources.add("evidence");
+      }
+      if (
+        declaredService?.healthCheck?.type === "port" &&
+        declaredService.healthCheck.port === healthCheck.port
+      ) {
+        sources.add("declared");
+      }
+      if (
+        input.evidenceExcerpt.some((line) => {
+          const normalized = normalizeInferenceLogLine(line);
+          return (
+            normalized.includes(`:${healthCheck.port}`) ||
+            normalized.includes(` ${healthCheck.port}`) ||
+            normalized.includes(`port ${healthCheck.port}`)
+          );
+        })
+      ) {
+        sources.add("log");
+      }
+      break;
+    }
+    case "docker": {
+      if (
+        declaredService?.healthCheck?.type === "docker" &&
+        declaredService.healthCheck.container === healthCheck.container
+      ) {
+        sources.add("declared");
+      }
+      if (
+        input.evidenceExcerpt.some((line) =>
+          normalizeInferenceLogLine(line).includes(healthCheck.container),
+        )
+      ) {
+        sources.add("log");
+      }
+      break;
+    }
+    case "command": {
+      if (
+        declaredService?.healthCheck?.type === "command" &&
+        declaredService.healthCheck.command === healthCheck.command
+      ) {
+        sources.add("declared");
+      }
+      if (
+        input.evidenceExcerpt.some((line) =>
+          normalizeInferenceLogLine(line).includes(healthCheck.command),
+        )
+      ) {
+        sources.add("log");
+      }
+      break;
+    }
+  }
+
+  return Array.from(sources);
 }
 
 function buildPrompt(input: ManagedRunInferenceInput): string {
@@ -125,98 +298,13 @@ function normalizeHealthCheck(
   }
 }
 
-function detectGroundingSources(
-  healthCheck: typeof ServiceHealthCheck.Type,
-  input: ManagedRunInferenceInput,
-  declaredServiceName: string | null,
-): ReadonlyArray<"log" | "declared" | "evidence"> {
-  const sources = new Set<"log" | "declared" | "evidence">();
-
-  const declaredService =
-    declaredServiceName === null
-      ? null
-      : (input.declaredServices.find((service) => service.name === declaredServiceName) ?? null);
-
-  switch (healthCheck.type) {
-    case "url": {
-      if (input.candidateUrls.includes(healthCheck.url)) {
-        sources.add("log");
-      }
-      if (input.detectedUrl === healthCheck.url) {
-        sources.add("evidence");
-      }
-      if (
-        declaredService?.healthCheck?.type === "url" &&
-        declaredService.healthCheck.url === healthCheck.url
-      ) {
-        sources.add("declared");
-      }
-      if (input.evidenceExcerpt.some((line) => line.includes(healthCheck.url))) {
-        sources.add("log");
-      }
-      break;
-    }
-    case "port": {
-      if (input.candidatePorts.includes(healthCheck.port)) {
-        sources.add("log");
-      }
-      if (input.detectedPort === healthCheck.port) {
-        sources.add("evidence");
-      }
-      if (
-        declaredService?.healthCheck?.type === "port" &&
-        declaredService.healthCheck.port === healthCheck.port
-      ) {
-        sources.add("declared");
-      }
-      if (
-        input.evidenceExcerpt.some(
-          (line) =>
-            line.includes(`:${healthCheck.port}`) ||
-            line.includes(` ${healthCheck.port}`) ||
-            line.includes(`port ${healthCheck.port}`),
-        )
-      ) {
-        sources.add("log");
-      }
-      break;
-    }
-    case "docker": {
-      if (
-        declaredService?.healthCheck?.type === "docker" &&
-        declaredService.healthCheck.container === healthCheck.container
-      ) {
-        sources.add("declared");
-      }
-      if (input.evidenceExcerpt.some((line) => line.includes(healthCheck.container))) {
-        sources.add("log");
-      }
-      break;
-    }
-    case "command": {
-      if (
-        declaredService?.healthCheck?.type === "command" &&
-        declaredService.healthCheck.command === healthCheck.command
-      ) {
-        sources.add("declared");
-      }
-      if (input.evidenceExcerpt.some((line) => line.includes(healthCheck.command))) {
-        sources.add("log");
-      }
-      break;
-    }
-  }
-
-  return Array.from(sources);
-}
-
 const makeManagedRunInference = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
 
   const buildInferenceInput = (input: ManagedRunInferenceBuildInput) =>
     Effect.sync(() => {
       const evidenceExcerpt = input.logs
-        .map((entry) => entry.line.trimEnd())
+        .map((entry) => normalizeInferenceLogLine(entry.line).trimEnd())
         .filter((line) => line.length > 0)
         .slice(-MAX_EVIDENCE_LINES);
 
@@ -350,15 +438,9 @@ const makeManagedRunInference = Effect.gen(function* () {
             service.declaredServiceName?.trim() || null,
           );
 
-          if (groundedBy.length === 0) {
-            groundingFailures.push(
-              `${service.resolvedName || service.declaredServiceName || "service"} proposed an ungrounded target.`,
-            );
-            return [];
-          }
-
-          const evidenceLines = service.evidenceLines.filter((line) =>
-            input.evidenceExcerpt.includes(line),
+          const evidenceLines = selectGroundedEvidenceLines(
+            service.evidenceLines,
+            input.evidenceExcerpt,
           );
 
           const resolvedName =
@@ -388,11 +470,7 @@ const makeManagedRunInference = Effect.gen(function* () {
         });
 
         const status: ManagedRunInferenceResult["status"] =
-          runtimeServices.length > 0
-            ? "ready"
-            : rawPayload.services.length > 0
-              ? "ungrounded"
-              : "failed";
+          runtimeServices.length > 0 ? "ready" : "failed";
 
         return {
           provider,

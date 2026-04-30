@@ -1,8 +1,8 @@
-import type { ManagedRunSummary } from "@t3tools/contracts";
+import type { ManagedRunRuntimeService, ManagedRunSummary } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { truncate } from "@t3tools/shared/String";
+import { runServiceStatusLabel, secondaryText } from "./ManagedRunsControl";
 
 function makeMockRun(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSummary {
   return {
@@ -30,6 +30,25 @@ function makeMockRun(overrides: Partial<ManagedRunSummary> = {}): ManagedRunSumm
     inferenceStatus: "pending",
     inferenceUpdatedAt: null,
     inferenceError: null,
+    ...overrides,
+  };
+}
+
+function makeMockRuntimeService(
+  overrides: Partial<ManagedRunRuntimeService> = {},
+): ManagedRunRuntimeService {
+  return {
+    serviceId: "frontend" as ManagedRunRuntimeService["serviceId"],
+    declaredServiceName: "Frontend" as ManagedRunRuntimeService["declaredServiceName"],
+    resolvedName: "Frontend" as ManagedRunRuntimeService["resolvedName"],
+    role: "unknown",
+    canonicalHealthCheck: null,
+    validationStatus: "unknown",
+    inferenceConfidence: "low",
+    inferenceSource: "declared",
+    groundedBy: ["declared"],
+    evidenceLines: [],
+    lastCheckedAt: null,
     ...overrides,
   };
 }
@@ -88,5 +107,25 @@ describe("ManagedRunsControl", () => {
     expect(html).toContain("web");
     expect(html).toContain("api");
     expect(html).toContain("worker");
+  });
+
+  it("does not hide pending inference behind declared composite service stubs", () => {
+    const run = makeMockRun({
+      runtimeServices: [makeMockRuntimeService()],
+      inferenceStatus: "pending",
+    });
+
+    expect(runServiceStatusLabel(run)).toBeNull();
+    expect(secondaryText(run)).toBe("Inferring runtime services…");
+  });
+
+  it("surfaces ungrounded inference instead of a misleading validation count", () => {
+    const run = makeMockRun({
+      runtimeServices: [makeMockRuntimeService()],
+      inferenceStatus: "ungrounded",
+    });
+
+    expect(runServiceStatusLabel(run)).toBe("Ungrounded");
+    expect(secondaryText(run)).toBe("Inference could not produce a runtime target");
   });
 });

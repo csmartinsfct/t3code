@@ -4,12 +4,10 @@ import { Effect, Layer, Schema, Struct } from "effect";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
-  DeleteTicketThreadLinksByMessageIdInput,
   ListTicketThreadLinksByThreadInput,
   ListTicketThreadLinksByTicketInput,
   LookupTicketIdsByIdentifiersInput,
   PersistedTicketThreadLink,
-  ReplaceMentionLinksForMessageInput,
   TicketIdentifierLookupRow,
   TicketThreadLinkLookupRow,
   TicketThreadLinkRepository,

@@ -667,7 +667,7 @@ const makeManagedRunService = Effect.gen(function* () {
     // authoritative composite serviceId by matching `declaredServiceName`.
     // Tabs/streams are keyed on those serviceIds, so the LLM's auto-slug must
     // be replaced. Then merge enriched results into the pre-populated stubs
-    // so ungrounded services keep rendering their tab.
+    // so omitted or invalid services keep rendering their tab.
     let runtimeServices: ReadonlyArray<ManagedRunRuntimeService> = inferenceResult.runtimeServices;
     if (isComposite && live) {
       const declaredNameToServiceId = new Map<string, string>();

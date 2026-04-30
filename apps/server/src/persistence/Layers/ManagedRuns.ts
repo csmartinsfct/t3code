@@ -1,6 +1,6 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 
 import {
   ManagedRunDeclaredServiceSnapshot,
@@ -12,7 +12,6 @@ import {
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   CreateManagedRunInferenceRecordInput,
-  CreateManagedRunInput,
   ManagedRunEvidenceInsert,
   ManagedRunListByProjectInput,
   ManagedRunListByStatusesInput,
@@ -22,7 +21,6 @@ import {
   PersistedManagedRun,
   PersistedManagedRunInferenceRecordDetail,
   PersistedManagedRunInferenceRecordSummary,
-  UpdateManagedRunInput,
 } from "../Services/ManagedRuns.ts";
 
 const ManagedRunRow = Schema.Struct({

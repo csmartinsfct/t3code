@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TEMP_DIR, isPathWithin } from './platform';
 import { SAFE_DIRECTORIES } from './path-security';
-import { modifyStyle, undoModification, resetModifications, getModificationHistory } from './cdp-inspector';
+import { modifyStyle, undoModification } from './cdp-inspector';
 
 /**
  * Aggressive page cleanup selectors and heuristics.
