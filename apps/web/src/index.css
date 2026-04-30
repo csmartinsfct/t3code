@@ -546,14 +546,50 @@ label:has(> select#reasoning-effort) select {
 
 .ticket-markdown table {
   width: 100%;
-  border-collapse: collapse;
+  max-width: 100%;
+  margin: 0.65rem 0 1rem;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #191918;
 }
 
 .ticket-markdown th,
 .ticket-markdown td {
-  border: 1px solid var(--border);
-  padding: 0.2rem 0.35rem;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  padding: 0.55rem 0.65rem;
   text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  background: #191918;
+}
+
+.ticket-markdown th {
+  background: #1c1c1b;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.ticket-markdown tr:first-child > th,
+.ticket-markdown tr:first-child > td {
+  border-top: 0;
+}
+
+.ticket-markdown th:first-child,
+.ticket-markdown td:first-child {
+  border-left: 0;
+}
+
+.ticket-markdown th > p,
+.ticket-markdown td > p {
+  margin: 0;
 }
 
 /* Tiptap description editor */
