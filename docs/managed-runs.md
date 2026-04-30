@@ -205,7 +205,13 @@ Implementation: `apps/server/src/managedRuns/healthCheck.ts`
 
 ### Inference + polling
 
-`ManagedRunInference` performs one structured LLM call per run. Composite runs branch internally and run inference once **per service**, each call seeded only with that service's own NDJSON tail; the LLM's auto-slug is overridden by the authoritative composite serviceId so per-service tabs line up. Inference records are written to `managed_run_inferences` for audit.
+`ManagedRunInference` performs **one** structured LLM call per run — same code path for legacy and composite. The call is fed the merged log across all services (legacy reads `<runId>.ndjson`; composite's `<runId>/` directory is auto-merged by `readNdjsonLines`) and the run's full `declaredServices` list. The LLM proposes one runtime service per declared service with a canonical health check; grounding then verifies each URL/port appears in the captured evidence before the entry is adopted.
+
+For composite runs there's a small post-pass: each LLM-emitted runtime service carries a `declaredServiceName`, which we match against the run's declared services to look up the deterministic composite serviceId; that overrides the LLM's auto-slug so per-service tabs/streams line up. Any service the LLM grounded replaces its stub in `runtimeServices`; ungrounded services keep their stub so the per-service tab still renders. Hallucinated services with no matching declared name are dropped.
+
+For legacy runs the LLM's runtime services are adopted as-is (no slug remap, no stubs to merge into).
+
+A single audit record is written to `managed_run_inferences` per run, in both shapes.
 
 After inference, health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`) against `runtimeServices[*].canonicalHealthCheck`. A run that goes "all unhealthy" transitions to `stopped` automatically. Status changes are persisted and pushed to clients via WebSocket.
 
