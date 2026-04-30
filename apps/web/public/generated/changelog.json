@@ -1,8 +1,51 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-25T22:51:10.497Z",
-  "lastProcessedCommit": "ea6911b8fb879796006a3d7f9309b947ad4378cd",
+  "generatedAt": "2026-04-30T03:21:00.716Z",
+  "lastProcessedCommit": "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb",
   "groups": [
+    {
+      "date": "2026-04-30",
+      "entries": [
+        {
+          "id": "61874efa665534f6",
+          "title": "Managed runs now support multi-service actions with clearer log views",
+          "summary": "Managed runs can now launch composite actions that run multiple services at once. The logs experience has been redesigned with per-run tabs, service-specific sub-tabs, and a merged view so it is easier to follow activity across complex runs.",
+          "category": "feature",
+          "commitShas": ["f2c8d0ef7e4b9e20dd7d66e88ec130b3ab87347f"]
+        },
+        {
+          "id": "ae463db138c1f84b",
+          "title": "Managed run cleanup and stop behavior is more reliable",
+          "summary": "Run lifecycle handling is more robust during launches, removals, and deleted actions, reducing cases where partial failures or buffered output could leave behind stale runs or inconsistent log state.",
+          "category": "improvement",
+          "commitShas": ["f2c8d0ef7e4b9e20dd7d66e88ec130b3ab87347f"]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-28",
+      "entries": [
+        {
+          "id": "44f5057e8446ba40",
+          "title": "Sub-tickets now appear in a collapsible tree",
+          "summary": "Ticket details now show the full sub-ticket hierarchy in a recursive tree instead of a flat list, making it easier to navigate nested work. Expanded and collapsed state is remembered per ticket, and hover previews remain available alongside existing selection, context menu, and drag-to-chat actions.",
+          "category": "feature",
+          "commitShas": ["3ff9a989fe8f74c9611720549ecbe73806088404"]
+        }
+      ]
+    },
+    {
+      "date": "2026-04-27",
+      "entries": [
+        {
+          "id": "89f3a867df2a4ae2",
+          "title": "Project-specific browser panel visibility",
+          "summary": "Browser panel visibility is now remembered separately for each project, so switching projects preserves each workspace’s own browser setup instead of applying one global state.",
+          "category": "improvement",
+          "commitShas": ["9fe8072e22ed66b5656dd2e74525b7cb49214280"]
+        }
+      ]
+    },
     {
       "date": "2026-04-26",
       "entries": [
@@ -2587,6 +2630,42 @@
         "toInclusiveCommit": "ea6911b8fb879796006a3d7f9309b947ad4378cd",
         "commitShas": ["ea6911b8fb879796006a3d7f9309b947ad4378cd"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-27T02:21:49.800Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ea6911b8fb879796006a3d7f9309b947ad4378cd",
+        "toInclusiveCommit": "9fe8072e22ed66b5656dd2e74525b7cb49214280",
+        "commitShas": ["9fe8072e22ed66b5656dd2e74525b7cb49214280"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-28T15:53:50.379Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "9fe8072e22ed66b5656dd2e74525b7cb49214280",
+        "toInclusiveCommit": "8a71385adae4be982c941356a88fd652e088547b",
+        "commitShas": [
+          "3ff9a989fe8f74c9611720549ecbe73806088404",
+          "8a71385adae4be982c941356a88fd652e088547b"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-30T03:21:00.542Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "8a71385adae4be982c941356a88fd652e088547b",
+        "toInclusiveCommit": "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb",
+        "commitShas": [
+          "f2c8d0ef7e4b9e20dd7d66e88ec130b3ab87347f",
+          "9b497c305cdd6f85d5bef3825c938dd5cc9a7beb"
+        ],
+        "commitCount": 2,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

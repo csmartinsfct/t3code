@@ -41,7 +41,7 @@ import { ServerConfig } from "../../config";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ManagedRunRepository } from "../../persistence/Services/ManagedRuns";
 import { TerminalManager } from "../../terminal/Services/Manager";
-import { ManagedRunInference, type ManagedRunInferenceResult } from "../Services/Inference.ts";
+import { ManagedRunInference } from "../Services/Inference.ts";
 import { ManagedRunService, type ManagedRunMcpAccess } from "../Services/ManagedRuns";
 
 const MANAGED_RUN_TERMINAL_COLS = 120;
@@ -630,174 +630,23 @@ const makeManagedRunService = Effect.gen(function* () {
 
     const script = yield* resolveScript(detail.projectId, detail.scriptId);
     const live = yield* Ref.get(liveRunsRef).pipe(Effect.map((runs) => runs.get(runId) ?? null));
+    const isComposite = live?.composite ?? false;
 
-    if (live?.composite) {
-      // Composite: one inference call per service, each fed only that service's
-      // own NDJSON tail. Runs in parallel and produces one inference record per
-      // service. The matched composite serviceId overrides whatever slug the
-      // LLM proposed so runtimeServices line up with the per-service tabs.
-      const serviceStates = Array.from(live.services.values());
-      const declaredByName = new Map(
-        detail.declaredServices.map((entry) => [entry.name, entry] as const),
-      );
+    // Build a meaningful command string. For composite scripts there is no
+    // top-level command; concatenate the per-service commands so the LLM has
+    // real context (`Frontend: cd fe && bun dev` etc.) rather than the
+    // scriptId slug.
+    const commandForPrompt = (() => {
+      if (script?.command && script.command.length > 0) return script.command;
+      const parts = (script?.services ?? [])
+        .filter((s) => !!s.command && s.command.length > 0)
+        .map((s) => `${s.name}: ${s.command}`);
+      return parts.length > 0 ? parts.join("\n") : detail.scriptId;
+    })();
 
-      type PerService = {
-        readonly serviceId: string;
-        readonly declaredName: string;
-        readonly result: ManagedRunInferenceResult;
-        readonly inferenceId: string;
-        readonly createdAt: string;
-        readonly runtimeServices: ReadonlyArray<ManagedRunRuntimeService>;
-      };
-      const perServiceResults: ReadonlyArray<PerService> = yield* Effect.forEach(
-        serviceStates,
-        (svc) =>
-          Effect.gen(function* () {
-            const declaredName = svc.declaredName ?? svc.serviceId;
-            const declared = declaredByName.get(declaredName) ?? {
-              name: declaredName,
-            };
-            const serviceLogs = yield* Effect.tryPromise({
-              try: () => readNdjsonLines(logsDir, detail.projectId, detail.runId, svc.serviceId),
-              catch: (cause) =>
-                toManagedRunOperationError("managedRuns.readLogsForInference", cause),
-            }).pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<ManagedRunLogLine>)));
-
-            const builtInput = yield* inference.buildInferenceInput({
-              runId: detail.runId,
-              cwd: detail.cwd,
-              command: script?.command ?? detail.scriptId,
-              declaredServices: [declared],
-              detectedUrl: null,
-              detectedPort: null,
-              logs: serviceLogs,
-            });
-            const result = yield* inference.inferRunServices(builtInput);
-
-            // Override the LLM's auto-slug serviceId with the authoritative
-            // composite serviceId so the UI can route each runtime entry back
-            // to its tab.
-            const runtimeServices: ReadonlyArray<ManagedRunRuntimeService> =
-              result.runtimeServices.map((entry) => ({
-                ...entry,
-                serviceId: svc.serviceId,
-                declaredServiceName: declaredName,
-              }));
-
-            return {
-              serviceId: svc.serviceId,
-              declaredName,
-              result,
-              inferenceId: randomUUID(),
-              createdAt: nowIso(),
-              runtimeServices,
-            } satisfies PerService;
-          }),
-        { concurrency: "unbounded" },
-      );
-
-      // Persist one record per service so the audit trail captures each call.
-      yield* Effect.forEach(
-        perServiceResults,
-        (entry) =>
-          repository
-            .createInferenceRecord({
-              inferenceId: entry.inferenceId,
-              runId: detail.runId,
-              projectId: detail.projectId,
-              scriptId: detail.scriptId,
-              scriptName: entry.declaredName,
-              cwd: detail.cwd,
-              provider: entry.result.provider,
-              model: entry.result.model,
-              status: entry.result.status,
-              createdAt: entry.createdAt,
-              runtimeServiceCount: entry.runtimeServices.length,
-              declaredServices: [
-                {
-                  name: entry.declaredName,
-                  ...(declaredByName.get(entry.declaredName)?.healthCheck
-                    ? { healthCheck: declaredByName.get(entry.declaredName)!.healthCheck! }
-                    : {}),
-                },
-              ],
-              normalizedPayload: entry.result.normalizedPayload,
-              rawPayload: entry.result.rawPayload,
-              inferenceError: entry.result.inferenceError,
-              groundingFailures: [...entry.result.groundingFailures],
-              evidenceExcerpt: [...entry.result.evidenceExcerpt],
-            })
-            .pipe(Effect.catch(() => Effect.void)),
-        { discard: true },
-      );
-
-      // Inference is an ENRICHMENT pass for composite runs — it does not
-      // create services (those exist deterministically from the script's
-      // declarations and were pre-populated as stubs at launch). For each
-      // service the LLM grounded successfully, replace the stub entry with the
-      // enriched runtime service. For services it didn't ground, keep the stub
-      // intact so the per-service tab still renders.
-      const enrichedByServiceId = new Map<string, ManagedRunRuntimeService>();
-      for (const entry of perServiceResults) {
-        const enriched = entry.runtimeServices[0];
-        if (enriched) {
-          enrichedByServiceId.set(entry.serviceId, enriched);
-        }
-      }
-      const mergedRuntimeServices: ReadonlyArray<ManagedRunRuntimeService> =
-        detail.runtimeServices.map(
-          (existing) => enrichedByServiceId.get(existing.serviceId) ?? existing,
-        );
-
-      const anyGrounded = enrichedByServiceId.size > 0;
-      const allFailed =
-        perServiceResults.length > 0 &&
-        perServiceResults.every((entry) => entry.result.status === "failed");
-      const aggregatedStatus: ManagedRunInferenceResult["status"] = anyGrounded
-        ? "ready"
-        : allFailed
-          ? "failed"
-          : "ungrounded";
-      const lastEntry = perServiceResults.at(-1);
-      const inferenceUpdatedAt = lastEntry?.createdAt ?? nowIso();
-
-      const updated = yield* updateRun(runId, (current) => ({
-        ...current,
-        runtimeServices: mergedRuntimeServices,
-        inferenceStatus: aggregatedStatus,
-        inferenceUpdatedAt,
-        inferenceError:
-          perServiceResults
-            .map((entry) => entry.result.inferenceError)
-            .filter((value): value is string => value !== null)
-            .join("; ") || null,
-        detectedUrl: deriveDetectedUrl(mergedRuntimeServices),
-        detectedPort: deriveDetectedPort(mergedRuntimeServices),
-        updatedAt: inferenceUpdatedAt,
-        latestInference: lastEntry
-          ? {
-              inferenceId: lastEntry.inferenceId,
-              provider: lastEntry.result.provider,
-              model: lastEntry.result.model,
-              rawPayload: lastEntry.result.rawPayload,
-              normalizedPayload: lastEntry.result.normalizedPayload,
-              createdAt: lastEntry.createdAt,
-            }
-          : null,
-      }));
-
-      if (updated.runtimeServices.length === 0) {
-        return updated;
-      }
-
-      const validated = yield* validateRuntimeServices(runId);
-      if (validated.status === "running" || validated.status === "starting") {
-        yield* startHealthPollFiber(runId);
-      }
-      return validated;
-    }
-
-    // Legacy single-process inference: one call against merged logs.
+    // One inference call against merged logs across all services. The LLM
+    // already knows how to handle multiple declared services — we don't need
+    // to split it into N calls.
     const logs = yield* Effect.tryPromise({
       try: () => readNdjsonLines(logsDir, detail.projectId, detail.runId),
       catch: (cause) => toManagedRunOperationError("managedRuns.readLogsForInference", cause),
@@ -806,13 +655,40 @@ const makeManagedRunService = Effect.gen(function* () {
     const builtInput = yield* inference.buildInferenceInput({
       runId: detail.runId,
       cwd: detail.cwd,
-      command: script?.command ?? detail.scriptId,
+      command: commandForPrompt,
       declaredServices: detail.declaredServices,
       detectedUrl: detail.detectedUrl,
       detectedPort: detail.detectedPort,
       logs,
     });
     const inferenceResult = yield* inference.inferRunServices(builtInput);
+
+    // For composite runs, map each LLM-output runtime service back to the
+    // authoritative composite serviceId by matching `declaredServiceName`.
+    // Tabs/streams are keyed on those serviceIds, so the LLM's auto-slug must
+    // be replaced. Then merge enriched results into the pre-populated stubs
+    // so ungrounded services keep rendering their tab.
+    let runtimeServices: ReadonlyArray<ManagedRunRuntimeService> = inferenceResult.runtimeServices;
+    if (isComposite && live) {
+      const declaredNameToServiceId = new Map<string, string>();
+      for (const svc of live.services.values()) {
+        if (svc.declaredName) declaredNameToServiceId.set(svc.declaredName, svc.serviceId);
+      }
+      const remapped = inferenceResult.runtimeServices
+        .map((entry) => {
+          const declaredName = entry.declaredServiceName;
+          const compositeServiceId = declaredName
+            ? (declaredNameToServiceId.get(declaredName) ?? null)
+            : null;
+          if (!compositeServiceId) return null; // LLM hallucinated a service the script doesn't declare; drop it.
+          return { ...entry, serviceId: compositeServiceId };
+        })
+        .filter((entry): entry is ManagedRunRuntimeService => entry !== null);
+      const enrichedById = new Map(remapped.map((entry) => [entry.serviceId, entry] as const));
+      runtimeServices = detail.runtimeServices.map(
+        (stub) => enrichedById.get(stub.serviceId) ?? stub,
+      );
+    }
 
     const inferenceId = randomUUID();
     const createdAt = nowIso();
@@ -828,7 +704,7 @@ const makeManagedRunService = Effect.gen(function* () {
         model: inferenceResult.model,
         status: inferenceResult.status,
         createdAt,
-        runtimeServiceCount: inferenceResult.runtimeServices.length,
+        runtimeServiceCount: runtimeServices.length,
         declaredServices: detail.declaredServices,
         normalizedPayload: inferenceResult.normalizedPayload,
         rawPayload: inferenceResult.rawPayload,
@@ -844,12 +720,12 @@ const makeManagedRunService = Effect.gen(function* () {
 
     const updated = yield* updateRun(runId, (current) => ({
       ...current,
-      runtimeServices: [...inferenceResult.runtimeServices],
+      runtimeServices: [...runtimeServices],
       inferenceStatus: inferenceResult.status,
       inferenceUpdatedAt: createdAt,
       inferenceError: inferenceResult.inferenceError,
-      detectedUrl: deriveDetectedUrl(inferenceResult.runtimeServices),
-      detectedPort: deriveDetectedPort(inferenceResult.runtimeServices),
+      detectedUrl: deriveDetectedUrl(runtimeServices),
+      detectedPort: deriveDetectedPort(runtimeServices),
       updatedAt: createdAt,
       latestInference: {
         inferenceId,
