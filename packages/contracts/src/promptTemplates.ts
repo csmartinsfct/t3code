@@ -297,44 +297,42 @@ const MANAGED_RUNS_DEFAULT_TEXT = `## T3 Managed Runs
 This project has T3 managed runs support via the T3 managed runs REST API. When you need to start a long-running service (dev server, build watcher, docker compose, etc.):
 
 1. Call list_managed_runs to check what's already running AND what actions are available.
-2. If a matching action exists in the availableActions list, use launch_project_script with its scriptId to start it. Match by command/purpose, not just by name — an action named "Magneto" running "yarn dev" is the right match for "start the magneto dev server".
+2. If a matching action exists in the availableActions list, use launch_project_script with its scriptId to start it. Match by command/purpose, not just by name — an action named "Magneto" running "yarn dev" is the right match for "start the magneto dev server". If the user is working in a worktree (or any directory other than the project root), pass \`cwd\` to run the action there; otherwise it runs in the thread's default working directory.
 3. Only if NO existing action matches, use propose_project_script to suggest a new one to the user.
 4. Do NOT start long-running services directly via Bash or terminal — always use managed runs so T3 can track lifecycle, detect service health, and manage logs.
 5. Use get_managed_run_logs to check output and get_managed_run to see service health status.
 
 ### Declaring Services
 
-When proposing a project action, you MUST investigate what the command actually launches and declare each service with a health check. T3 monitors declared services independently of the launcher process — this is critical for commands that exit after starting background services (e.g. docker compose, supabase start).
+When proposing a project action, investigate what the command actually launches and declare each service by name. T3 binds health checks automatically — never specify a \`healthCheck\` field.
 
-Health check types:
-- Web servers/APIs: { "type": "url", "url": "http://localhost:PORT" }
-- Docker containers: { "type": "docker", "container": "container_name" }
-- Services on known ports: { "type": "port", "port": PORT }
-- Other services: { "type": "command", "command": "status-check-command" }
+Two shapes are supported.
 
-Example for npx supabase start:
+**Legacy single-process action** — one top-level \`command\` plus a flat list of services as named metadata:
+
 {
   "name": "Supabase",
   "command": "cd magneto && npx supabase start",
   "icon": "play",
   "services": [
-    { "name": "Supabase API", "healthCheck": { "type": "url", "url": "http://127.0.0.1:54321" } },
-    { "name": "Supabase Studio", "healthCheck": { "type": "url", "url": "http://127.0.0.1:54323" } },
-    { "name": "Supabase DB", "healthCheck": { "type": "docker", "container": "supabase_db_magneto" } }
+    { "name": "Supabase API" },
+    { "name": "Supabase Studio" },
+    { "name": "Supabase DB" }
   ]
 }
 
-Example for npm run dev:
+**Composite multi-service action** — omit the top-level \`command\` and provide a per-service \`command\` for every entry. Each service runs in its own subprocess with its own log tab, ideal when the user benefits from per-service log separation:
+
 {
-  "name": "Dev Server",
-  "command": "npm run dev",
+  "name": "Web Dev (split)",
   "icon": "play",
   "services": [
-    { "name": "Next.js", "healthCheck": { "type": "url", "url": "http://localhost:3000" } }
+    { "name": "Backend", "command": "bun run dev:server" },
+    { "name": "Vite", "command": "bun run dev:web" }
   ]
 }
 
-Always declare services — even for simple foreground dev servers. This enables T3 to show accurate service health in the Runs UI.`;
+Mixing the two shapes (top-level \`command\` AND per-service \`command\`s) is rejected by T3 — pick one. Use composite when the user benefits from per-service log separation; use the legacy single-command shape otherwise.`;
 
 const SCHEDULED_TASKS_DEFAULT_TEXT = `## T3 Scheduled Tasks
 

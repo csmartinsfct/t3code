@@ -10,6 +10,7 @@ import {
   type ManagedRunInferenceInput,
   type ManagedRunInferenceResult,
 } from "../Services/Inference.ts";
+import { slugifyServiceName } from "../utils.ts";
 
 const RUN_INFERENCE_OPERATION = "inferManagedRunServices";
 const MAX_EVIDENCE_LINES = 40;
@@ -145,7 +146,7 @@ function detectGroundingSources(
         sources.add("evidence");
       }
       if (
-        declaredService?.healthCheck.type === "url" &&
+        declaredService?.healthCheck?.type === "url" &&
         declaredService.healthCheck.url === healthCheck.url
       ) {
         sources.add("declared");
@@ -163,7 +164,7 @@ function detectGroundingSources(
         sources.add("evidence");
       }
       if (
-        declaredService?.healthCheck.type === "port" &&
+        declaredService?.healthCheck?.type === "port" &&
         declaredService.healthCheck.port === healthCheck.port
       ) {
         sources.add("declared");
@@ -182,7 +183,7 @@ function detectGroundingSources(
     }
     case "docker": {
       if (
-        declaredService?.healthCheck.type === "docker" &&
+        declaredService?.healthCheck?.type === "docker" &&
         declaredService.healthCheck.container === healthCheck.container
       ) {
         sources.add("declared");
@@ -194,7 +195,7 @@ function detectGroundingSources(
     }
     case "command": {
       if (
-        declaredService?.healthCheck.type === "command" &&
+        declaredService?.healthCheck?.type === "command" &&
         declaredService.healthCheck.command === healthCheck.command
       ) {
         sources.add("declared");
@@ -233,6 +234,21 @@ const makeManagedRunInference = Effect.gen(function* () {
       const modelSelection = settings.managedRunInferenceModelSelection;
       const provider = baseProviderKind(modelSelection.provider);
       const prompt = buildPrompt(input);
+      const failureResult = (cause: unknown): ManagedRunInferenceResult => ({
+        provider,
+        model: modelSelection.model,
+        status: "failed" as const,
+        rawPayload: { error: cause instanceof Error ? cause.message : String(cause) },
+        normalizedPayload: {
+          summary: "Managed run inference failed.",
+          notes: [],
+          runtimeServices: [],
+        },
+        runtimeServices: [],
+        inferenceError: cause instanceof Error ? cause.message : String(cause),
+        groundingFailures: [],
+        evidenceExcerpt: input.evidenceExcerpt,
+      });
 
       if (provider === "gemini") {
         return {
@@ -254,142 +270,155 @@ const makeManagedRunInference = Effect.gen(function* () {
         } satisfies ManagedRunInferenceResult;
       }
 
-      const rawPayload =
-        provider === "claudeAgent"
-          ? yield* runClaudeStructuredOutput({
-              operation: RUN_INFERENCE_OPERATION,
-              cwd: input.cwd,
-              prompt,
-              outputSchema: ManagedRunInferenceOutput,
-              modelSelection: {
-                provider: "claudeAgent",
-                model: modelSelection.model,
-                ...(modelSelection.options ? { options: modelSelection.options } : {}),
-              },
-              ...(settings.providers.claudeAgent.binaryPath
-                ? { binaryPath: settings.providers.claudeAgent.binaryPath }
-                : {}),
-              ...(modelSelection.options &&
-              "effort" in modelSelection.options &&
-              typeof modelSelection.options.effort === "string"
-                ? { effort: modelSelection.options.effort }
-                : {}),
-              ...(modelSelection.options &&
-              "thinking" in modelSelection.options &&
-              typeof modelSelection.options.thinking === "boolean"
-                ? { thinking: modelSelection.options.thinking }
-                : {}),
-              ...(modelSelection.options &&
-              "fastMode" in modelSelection.options &&
-              typeof modelSelection.options.fastMode === "boolean"
-                ? { fastMode: modelSelection.options.fastMode }
-                : {}),
-            })
-          : yield* runCodexStructuredOutput({
-              operation: RUN_INFERENCE_OPERATION,
-              cwd: input.cwd,
-              prompt,
-              outputSchema: ManagedRunInferenceOutput,
-              modelSelection: {
-                provider: "codex",
-                model: modelSelection.model,
-                ...(modelSelection.options ? { options: modelSelection.options } : {}),
-              },
-              ...(settings.providers.codex.binaryPath
-                ? { binaryPath: settings.providers.codex.binaryPath }
-                : {}),
-              ...(settings.providers.codex.homePath
-                ? { homePath: settings.providers.codex.homePath }
-                : {}),
-              reasoningEffort:
-                modelSelection.options &&
-                "reasoningEffort" in modelSelection.options &&
-                typeof modelSelection.options.reasoningEffort === "string"
-                  ? modelSelection.options.reasoningEffort
-                  : "low",
-              ...(modelSelection.options &&
-              "fastMode" in modelSelection.options &&
-              typeof modelSelection.options.fastMode === "boolean"
-                ? { fastMode: modelSelection.options.fastMode }
-                : {}),
-            });
+      return yield* Effect.gen(function* () {
+        const rawPayload =
+          provider === "claudeAgent"
+            ? yield* runClaudeStructuredOutput({
+                operation: RUN_INFERENCE_OPERATION,
+                cwd: input.cwd,
+                prompt,
+                outputSchema: ManagedRunInferenceOutput,
+                modelSelection: {
+                  provider: "claudeAgent",
+                  model: modelSelection.model,
+                  ...(modelSelection.options ? { options: modelSelection.options } : {}),
+                },
+                ...(settings.providers.claudeAgent.binaryPath
+                  ? { binaryPath: settings.providers.claudeAgent.binaryPath }
+                  : {}),
+                ...(modelSelection.options &&
+                "effort" in modelSelection.options &&
+                typeof modelSelection.options.effort === "string"
+                  ? { effort: modelSelection.options.effort }
+                  : {}),
+                ...(modelSelection.options &&
+                "thinking" in modelSelection.options &&
+                typeof modelSelection.options.thinking === "boolean"
+                  ? { thinking: modelSelection.options.thinking }
+                  : {}),
+                ...(modelSelection.options &&
+                "fastMode" in modelSelection.options &&
+                typeof modelSelection.options.fastMode === "boolean"
+                  ? { fastMode: modelSelection.options.fastMode }
+                  : {}),
+              })
+            : yield* runCodexStructuredOutput({
+                operation: RUN_INFERENCE_OPERATION,
+                cwd: input.cwd,
+                prompt,
+                outputSchema: ManagedRunInferenceOutput,
+                modelSelection: {
+                  provider: "codex",
+                  model: modelSelection.model,
+                  ...(modelSelection.options ? { options: modelSelection.options } : {}),
+                },
+                ...(settings.providers.codex.binaryPath
+                  ? { binaryPath: settings.providers.codex.binaryPath }
+                  : {}),
+                ...(settings.providers.codex.homePath
+                  ? { homePath: settings.providers.codex.homePath }
+                  : {}),
+                reasoningEffort:
+                  modelSelection.options &&
+                  "reasoningEffort" in modelSelection.options &&
+                  typeof modelSelection.options.reasoningEffort === "string"
+                    ? modelSelection.options.reasoningEffort
+                    : "low",
+                ...(modelSelection.options &&
+                "fastMode" in modelSelection.options &&
+                typeof modelSelection.options.fastMode === "boolean"
+                  ? { fastMode: modelSelection.options.fastMode }
+                  : {}),
+              });
 
-      const groundingFailures: string[] = [];
-      const runtimeServices = rawPayload.services.flatMap((service) => {
-        const canonicalHealthCheck = normalizeHealthCheck(service.canonicalHealthCheck);
+        const groundingFailures: string[] = [];
+        const runtimeServices = rawPayload.services.flatMap((service) => {
+          const canonicalHealthCheck = normalizeHealthCheck(service.canonicalHealthCheck);
 
-        if (canonicalHealthCheck === null) {
-          if (service.canonicalHealthCheck !== null) {
-            groundingFailures.push(
-              `${service.resolvedName || service.declaredServiceName || "service"} proposed an invalid health check.`,
-            );
+          if (canonicalHealthCheck === null) {
+            if (service.canonicalHealthCheck !== null) {
+              groundingFailures.push(
+                `${service.resolvedName || service.declaredServiceName || "service"} proposed an invalid health check.`,
+              );
+            }
+            return [];
           }
-          return [];
-        }
 
-        const groundedBy = detectGroundingSources(
-          canonicalHealthCheck,
-          input,
-          service.declaredServiceName?.trim() || null,
-        );
-
-        if (groundedBy.length === 0) {
-          groundingFailures.push(
-            `${service.resolvedName || service.declaredServiceName || "service"} proposed an ungrounded target.`,
-          );
-          return [];
-        }
-
-        const evidenceLines = service.evidenceLines.filter((line) =>
-          input.evidenceExcerpt.includes(line),
-        );
-
-        return [
-          {
-            declaredServiceName: service.declaredServiceName?.trim() || null,
-            resolvedName:
-              service.resolvedName.trim() ||
-              service.declaredServiceName?.trim() ||
-              "Unknown service",
-            role: service.role,
+          const groundedBy = detectGroundingSources(
             canonicalHealthCheck,
-            validationStatus: "unknown",
-            inferenceConfidence: service.confidence,
-            inferenceSource: "llm",
-            groundedBy,
-            evidenceLines,
-            lastCheckedAt: null,
-          } as const,
-        ];
-      });
+            input,
+            service.declaredServiceName?.trim() || null,
+          );
 
-      const status: ManagedRunInferenceResult["status"] =
-        runtimeServices.length > 0
-          ? "ready"
-          : rawPayload.services.length > 0
-            ? "ungrounded"
-            : "failed";
+          if (groundedBy.length === 0) {
+            groundingFailures.push(
+              `${service.resolvedName || service.declaredServiceName || "service"} proposed an ungrounded target.`,
+            );
+            return [];
+          }
 
-      return {
-        provider,
-        model: modelSelection.model,
-        status,
-        rawPayload,
-        normalizedPayload: {
-          summary: rawPayload.summary,
-          notes: rawPayload.notes,
+          const evidenceLines = service.evidenceLines.filter((line) =>
+            input.evidenceExcerpt.includes(line),
+          );
+
+          const resolvedName =
+            service.resolvedName.trim() || service.declaredServiceName?.trim() || "Unknown service";
+          // Inferred services don't have an authoritative serviceId — we
+          // synthesise one from the resolved name. Composite runs supply their
+          // own serviceId upfront via `LiveServiceState`, so this slug is only
+          // ever used by legacy runs that surface inferred services in their
+          // runtimeServices array.
+          const serviceIdSlug = slugifyServiceName(resolvedName);
+
+          return [
+            {
+              serviceId: serviceIdSlug,
+              declaredServiceName: service.declaredServiceName?.trim() || null,
+              resolvedName,
+              role: service.role,
+              canonicalHealthCheck,
+              validationStatus: "unknown",
+              inferenceConfidence: service.confidence,
+              inferenceSource: "llm",
+              groundedBy,
+              evidenceLines,
+              lastCheckedAt: null,
+            } as const,
+          ];
+        });
+
+        const status: ManagedRunInferenceResult["status"] =
+          runtimeServices.length > 0
+            ? "ready"
+            : rawPayload.services.length > 0
+              ? "ungrounded"
+              : "failed";
+
+        return {
+          provider,
+          model: modelSelection.model,
+          status,
+          rawPayload,
+          normalizedPayload: {
+            summary: rawPayload.summary,
+            notes: rawPayload.notes,
+            runtimeServices,
+          },
           runtimeServices,
-        },
-        runtimeServices,
-        inferenceError:
-          status === "failed" ? "Managed run inference returned no canonical services." : null,
-        groundingFailures,
-        evidenceExcerpt: input.evidenceExcerpt,
-      } satisfies ManagedRunInferenceResult;
+          inferenceError:
+            status === "failed" ? "Managed run inference returned no canonical services." : null,
+          groundingFailures,
+          evidenceExcerpt: input.evidenceExcerpt,
+        } satisfies ManagedRunInferenceResult;
+      }).pipe(Effect.catch((cause) => Effect.succeed(failureResult(cause))));
     }).pipe(
+      // If settings resolution itself fails we can't attribute the failure to
+      // a specific provider — surface "unknown" rather than mis-tagging the
+      // audit record. The inner catch above handles LLM-call failures with
+      // the resolved provider.
       Effect.catch((cause) =>
         Effect.succeed({
-          provider: "codex",
+          provider: "unknown",
           model: "unknown",
           status: "failed" as const,
           rawPayload: { error: cause instanceof Error ? cause.message : String(cause) },

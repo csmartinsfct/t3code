@@ -4,16 +4,24 @@ import type {
   ProjectScript,
   ServiceHealthCheck,
 } from "@t3tools/contracts";
-import { ActivitySquareIcon, CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import {
+  ActivitySquareIcon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  ScrollText,
+} from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { truncate } from "@t3tools/shared/String";
 import { readNativeApi } from "~/nativeApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useRunLogsDrawerStore } from "~/runLogsDrawerStore";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuTrigger } from "./ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 
 interface ManagedRunsControlProps {
   runs: ReadonlyArray<ManagedRunSummary>;
@@ -211,6 +219,41 @@ function RunStatusControl({ run, runName }: { run: ManagedRunSummary; runName: s
   );
 }
 
+function RunLogsButton({ run, runName }: { run: ManagedRunSummary; runName: string }) {
+  const openTab = useRunLogsDrawerStore((state) => state.openTab);
+
+  const handleClick = useCallback(() => {
+    openTab({ runId: run.runId, projectId: run.projectId, label: runName });
+  }, [openTab, run.projectId, run.runId, runName]);
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        render={
+          <button
+            type="button"
+            className="pointer-events-none inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition group-hover/run-card:pointer-events-auto group-hover/run-card:opacity-100 group-focus-within/run-card:pointer-events-auto group-focus-within/run-card:opacity-100 hover:bg-accent hover:text-foreground"
+            onClick={handleClick}
+            aria-label={`View logs for ${runName}`}
+          >
+            <ScrollText className="size-3" />
+          </button>
+        }
+      />
+      <PopoverPopup
+        tooltipStyle
+        side="bottom"
+        sideOffset={6}
+        align="center"
+        className="pointer-events-none select-none"
+      >
+        View logs
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
 function RunCard({
   run,
   scripts,
@@ -231,6 +274,7 @@ function RunCard({
           {serviceSummary(run) && (
             <span className="text-[10px] text-muted-foreground">{serviceSummary(run)}</span>
           )}
+          <RunLogsButton run={run} runName={runName} />
           <RunStatusControl run={run} runName={runName} />
         </div>
       </div>

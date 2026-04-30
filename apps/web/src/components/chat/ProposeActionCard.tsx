@@ -1,6 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import type { DeclaredService, ProjectScriptIcon } from "@t3tools/contracts";
-import { CheckIcon, ContainerIcon, GlobeIcon, PlugIcon, TerminalIcon, XIcon } from "lucide-react";
+import { CheckIcon, XIcon } from "lucide-react";
 
 import { ScriptIcon, SCRIPT_ICONS } from "../ProjectScriptsControl";
 import { Badge } from "../ui/badge";
@@ -24,34 +24,6 @@ export interface ProposeActionCardProps {
   onReject: () => void;
 }
 
-function healthCheckLabel(check: DeclaredService["healthCheck"]): string {
-  switch (check.type) {
-    case "url":
-      return check.url;
-    case "docker":
-      return `container: ${check.container}`;
-    case "port":
-      return `port ${check.port}${check.host ? ` on ${check.host}` : ""}`;
-    case "command":
-      return check.command;
-  }
-}
-
-function HealthCheckIcon({ type }: { type: string }) {
-  switch (type) {
-    case "url":
-      return <GlobeIcon className="size-3 shrink-0 text-muted-foreground" />;
-    case "docker":
-      return <ContainerIcon className="size-3 shrink-0 text-muted-foreground" />;
-    case "port":
-      return <PlugIcon className="size-3 shrink-0 text-muted-foreground" />;
-    case "command":
-      return <TerminalIcon className="size-3 shrink-0 text-muted-foreground" />;
-    default:
-      return null;
-  }
-}
-
 function ProposeActionCard({
   name: initialName,
   command: initialCommand,
@@ -68,6 +40,14 @@ function ProposeActionCard({
   const [status, setStatus] = useState<"pending" | "accepted" | "rejected">("pending");
 
   const disabled = isStreaming || status !== "pending";
+  // Composite when every declared service has its own command — the run is
+  // launched by the per-service commands, not a top-level one.
+  const compositeMode =
+    services !== undefined &&
+    services.length > 0 &&
+    services.every((s) => typeof s.command === "string" && s.command.trim().length > 0);
+  const acceptDisabled =
+    name.trim().length === 0 || (!compositeMode && command.trim().length === 0);
 
   const handleAccept = useCallback(() => {
     if (disabled) return;
@@ -155,15 +135,18 @@ function ProposeActionCard({
           />
         </div>
 
-        {/* Command */}
-        <Textarea
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          disabled={disabled}
-          placeholder="Command"
-          rows={2}
-          className="resize-none text-xs font-mono"
-        />
+        {/* Command — only for legacy single-process actions. Composite actions
+            launch via per-service commands rendered below. */}
+        {!compositeMode && (
+          <Textarea
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            disabled={disabled}
+            placeholder="Command"
+            rows={2}
+            className="resize-none text-xs font-mono"
+          />
+        )}
 
         {/* Declared Services */}
         {services && services.length > 0 && (
@@ -173,12 +156,13 @@ function ProposeActionCard({
             </div>
             <div className="space-y-1">
               {services.map((service, i) => (
-                <div key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <HealthCheckIcon type={service.healthCheck.type} />
+                <div key={i} className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground/80">{service.name}</span>
-                  <span className="truncate text-[10px]">
-                    {healthCheckLabel(service.healthCheck)}
-                  </span>
+                  {service.command !== undefined && service.command.length > 0 && (
+                    <div className="truncate font-mono text-[10px] text-muted-foreground/80">
+                      $ {service.command}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -201,7 +185,7 @@ function ProposeActionCard({
               size="xs"
               variant="default"
               onClick={handleAccept}
-              disabled={name.trim().length === 0 || command.trim().length === 0}
+              disabled={acceptDisabled}
               className="gap-1"
             >
               <CheckIcon className="size-3" />

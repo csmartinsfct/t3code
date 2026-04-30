@@ -1,4 +1,19 @@
 /**
+ * Slugify a human-readable service name into a stable per-run id. Lowercase,
+ * `-`-separated, capped at 48 chars, with a fallback when the name has no
+ * alphanumerics. Callers are responsible for collision handling.
+ */
+export function slugifyServiceName(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "service"
+  );
+}
+
+/**
  * Normalize CRLF and bare CR to LF in a terminal output chunk.
  */
 export function normalizeTerminalOutputChunk(chunk: string): string {

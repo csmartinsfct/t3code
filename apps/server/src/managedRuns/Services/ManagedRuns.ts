@@ -5,12 +5,14 @@ import {
   ManagedRunGetInput,
   ManagedRunGetLogsInput,
   ManagedRunInferenceRecordDetail,
+  ManagedRunId,
   ManagedRunInferenceRecordSummary,
   ManagedRunLaunchProjectScriptInput,
   ManagedRunLaunchProjectScriptResult,
   ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
+  ManagedRunLogStreamEvent,
   ManagedRunStreamEvent,
   ManagedRunSummary,
   ManagedRunStopInput,
@@ -50,6 +52,16 @@ export interface ManagedRunServiceShape {
   ) => Effect.Effect<ManagedRunInferenceRecordDetail, ManagedRunError>;
   readonly stop: (input: ManagedRunStopInput) => Effect.Effect<void, ManagedRunError>;
   readonly streamEvents: (projectId: ProjectId) => Stream.Stream<ManagedRunStreamEvent, never>;
+  readonly streamLogs: (
+    runId: ManagedRunId,
+    serviceId?: string,
+  ) => Stream.Stream<ManagedRunLogStreamEvent, never>;
+  /**
+   * Reconcile orphaned runs for a single project — used by the orphan reactor
+   * when it sees a `project.meta-updated` event. Closes live PTYs, deletes
+   * the run row and per-run NDJSON logs, publishes a `removed` stream event.
+   */
+  readonly cleanupOrphansForProject: (projectId: ProjectId) => Effect.Effect<void, never>;
   readonly issueMcpAccess: (
     projectId: ProjectId,
     threadId: ThreadId,

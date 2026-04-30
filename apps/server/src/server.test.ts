@@ -370,6 +370,8 @@ const buildAppUnderTest = (options?: {
           getInferenceRecord: () => Effect.die(new Error("not mocked")),
           stop: () => Effect.void,
           streamEvents: () => Stream.empty,
+          streamLogs: () => Stream.empty,
+          cleanupOrphansForProject: () => Effect.void,
           issueMcpAccess: () =>
             Effect.succeed({
               token: "test",

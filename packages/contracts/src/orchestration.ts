@@ -247,21 +247,105 @@ export const ServiceHealthCheck = Schema.Union([
 ]);
 export type ServiceHealthCheck = typeof ServiceHealthCheck.Type;
 
+const ProjectScriptEnvKey = Schema.String.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/)).check(
+  Schema.isMaxLength(128),
+);
+const ProjectScriptEnvValue = Schema.String.check(Schema.isMaxLength(8_192));
+const ProjectScriptEnv = Schema.Record(ProjectScriptEnvKey, ProjectScriptEnvValue).check(
+  Schema.isMaxProperties(128),
+);
+
 export const DeclaredService = Schema.Struct({
   name: TrimmedNonEmptyString,
-  healthCheck: ServiceHealthCheck,
+  /**
+   * When set, this service is launched as its own subprocess (composite run)
+   * with its own PTY and per-service log file. When omitted, the service is
+   * a hint to inference (legacy single-process run).
+   */
+  command: Schema.optional(TrimmedNonEmptyString),
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  env: Schema.optional(ProjectScriptEnv),
+  /**
+   * Optional grounding hint for inference. Stays in the schema for backward
+   * compatibility with on-disk legacy actions that still carry one; new
+   * authoring surfaces no longer produce it. Inference proposes a health
+   * check from the service's logs and treats any value here as one signal
+   * among others.
+   */
+  healthCheck: Schema.optional(ServiceHealthCheck),
 });
 export type DeclaredService = typeof DeclaredService.Type;
 
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
-  command: TrimmedNonEmptyString,
+  /**
+   * Optional. Either this top-level command is set (legacy single-process
+   * action) OR every entry in `services` has a `command` (composite action).
+   * Mixed shapes are rejected by `validateProjectScriptShape`.
+   */
+  command: Schema.optional(TrimmedNonEmptyString),
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
   services: Schema.optional(Schema.Array(DeclaredService)),
 });
 export type ProjectScript = typeof ProjectScript.Type;
+
+/**
+ * A composite project script declares N services, each with its own command.
+ * The launcher spawns one PTY per service and captures logs separately.
+ */
+export function isCompositeProjectScript(script: ProjectScript): boolean {
+  const services = script.services;
+  if (!services || services.length === 0) return false;
+  if (script.command && script.command.length > 0) return false;
+  return services.every((service) => !!service.command && service.command.length > 0);
+}
+
+/**
+ * Validates that a ProjectScript is exactly legacy OR exactly composite.
+ * Returns null on success, or an error message describing the violation.
+ *
+ * Rules:
+ *  - Legacy: top-level `command` is set, services may exist (health-check only).
+ *  - Composite: top-level `command` is empty/omitted, every service has its own `command`.
+ *  - Mixed (top-level command + any service command, or composite missing per-service commands)
+ *    is rejected.
+ */
+export function validateProjectScriptShape(script: ProjectScript): string | null {
+  const hasTopLevelCommand = !!script.command && script.command.length > 0;
+  const services = script.services ?? [];
+  const servicesWithCommand = services.filter(
+    (service) => !!service.command && service.command.length > 0,
+  );
+
+  if (servicesWithCommand.length === 0) {
+    return hasTopLevelCommand
+      ? null
+      : "Project script must define a top-level `command` or at least one service with a `command`.";
+  }
+
+  if (hasTopLevelCommand) {
+    return "Project script cannot define both a top-level `command` and per-service `command`s. Pick one shape.";
+  }
+
+  if (servicesWithCommand.length !== services.length) {
+    return "Composite project scripts must define a `command` on every declared service.";
+  }
+
+  // Per-service slugs become NDJSON file names + tab keys; duplicate names
+  // would alias each other and clobber logs.
+  const namesSeen = new Set<string>();
+  for (const service of services) {
+    const key = service.name.trim().toLowerCase();
+    if (namesSeen.has(key)) {
+      return `Composite project scripts must use unique service names; '${service.name}' is duplicated.`;
+    }
+    namesSeen.add(key);
+  }
+
+  return null;
+}
 
 export const ProjectPromptOverrides = Schema.Struct({
   orchestration: OrchestrationPromptOverrides.pipe(Schema.withDecodingDefault(() => ({}))),

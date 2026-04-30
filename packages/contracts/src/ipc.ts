@@ -134,6 +134,7 @@ import type {
   ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
+  ManagedRunLogStreamEvent,
   ManagedRunStreamEvent,
   ManagedRunStopInput,
   ManagedRunSummary,
@@ -371,6 +372,10 @@ export interface NativeApi {
     ) => Promise<ManagedRunInferenceRecordDetail>;
     stop: (input: ManagedRunStopInput) => Promise<void>;
     onEvent: (projectId: string, callback: (event: ManagedRunStreamEvent) => void) => () => void;
+    subscribeLogs: (
+      input: { readonly runId: string; readonly serviceId?: string },
+      callback: (event: ManagedRunLogStreamEvent) => void,
+    ) => () => void;
   };
   scheduledTasks: {
     list: () => Promise<ReadonlyArray<ScheduledTask>>;

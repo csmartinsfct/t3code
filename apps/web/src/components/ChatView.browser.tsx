@@ -2713,6 +2713,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
             runId: "run-snapshot-menu" as ManagedRunSummary["runId"],
             runtimeServices: [
               {
+                serviceId: "preview",
                 declaredServiceName: "preview",
                 resolvedName: "Frontend",
                 role: "frontend",
@@ -2728,6 +2729,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 lastCheckedAt: NOW_ISO,
               },
               {
+                serviceId: "api",
                 declaredServiceName: "api",
                 resolvedName: "Backend",
                 role: "backend",
@@ -2828,6 +2830,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           status: "running",
           runtimeServices: [
             {
+              serviceId: "preview",
               declaredServiceName: "preview",
               resolvedName: "Frontend",
               role: "frontend",

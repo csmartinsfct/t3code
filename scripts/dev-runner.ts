@@ -29,7 +29,6 @@ const MODE_ARGS = {
   dev: [
     "run",
     "dev",
-    "--ui=tui",
     "--filter=@t3tools/contracts",
     "--filter=@t3tools/web",
     "--filter=t3",
@@ -39,6 +38,18 @@ const MODE_ARGS = {
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
   "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
+
+/**
+ * Turbo's TUI swallows child stdout, which means logs disappear when the
+ * dev runner is launched under a managed run, CI, or any other non-TTY
+ * context. Prefer `--ui=stream` whenever stdout isn't a real terminal so
+ * child output is forwarded line-by-line. Respect an explicit `TURBO_UI`
+ * env var if the user set one.
+ */
+function resolveTurboUiArgs(env: Record<string, string | undefined>): ReadonlyArray<string> {
+  if (env.TURBO_UI && env.TURBO_UI.length > 0) return [];
+  return process.stdout.isTTY ? ["--ui=tui"] : ["--ui=stream"];
+}
 
 type DevMode = keyof typeof MODE_ARGS;
 type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
@@ -1020,7 +1031,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const child = yield* ChildProcess.make(
       "turbo",
-      [...MODE_ARGS[input.mode], ...input.turboArgs],
+      [...MODE_ARGS[input.mode], ...resolveTurboUiArgs(env), ...input.turboArgs],
       {
         stdin: "inherit",
         stdout: "inherit",
