@@ -66,8 +66,10 @@ import {
   ManagedRunListInferenceRecordsInput,
   ManagedRunListInput,
   ManagedRunLogLine,
+  ManagedRunLogStreamEvent,
   ManagedRunStopInput,
   ManagedRunStreamEvent,
+  ManagedRunSubscribeLogsInput,
   ManagedRunSummary,
 } from "./managedRuns";
 import {
@@ -322,6 +324,7 @@ export const WS_METHODS = {
   subscribeOrchestrationRunEvents: "subscribeOrchestrationRunEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeManagedRunEvents: "subscribeManagedRunEvents",
+  subscribeManagedRunLogs: "subscribeManagedRunLogs",
   subscribeScheduledTaskEvents: "subscribeScheduledTaskEvents",
   subscribeTicketingEvents: "subscribeTicketingEvents",
   subscribeServerConfig: "subscribeServerConfig",
@@ -767,6 +770,12 @@ export const WsSubscribeManagedRunEventsRpc = Rpc.make(WS_METHODS.subscribeManag
   stream: true,
 });
 
+export const WsSubscribeManagedRunLogsRpc = Rpc.make(WS_METHODS.subscribeManagedRunLogs, {
+  payload: ManagedRunSubscribeLogsInput,
+  success: ManagedRunLogStreamEvent,
+  stream: true,
+});
+
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
@@ -1134,6 +1143,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeOrchestrationDomainEventsRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeManagedRunEventsRpc,
+  WsSubscribeManagedRunLogsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsScheduledTasksListRpc,

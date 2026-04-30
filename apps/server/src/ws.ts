@@ -1353,6 +1353,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           }),
           { "rpc.aggregate": "managed-runs" },
         ),
+      [WS_METHODS.subscribeManagedRunLogs]: ({ runId, serviceId }) =>
+        observeRpcStream(
+          WS_METHODS.subscribeManagedRunLogs,
+          managedRuns.streamLogs(runId, serviceId),
+          { "rpc.aggregate": "managed-runs" },
+        ),
       [WS_METHODS.subscribeServerConfig]: (_input) =>
         observeRpcStreamEffect(
           WS_METHODS.subscribeServerConfig,

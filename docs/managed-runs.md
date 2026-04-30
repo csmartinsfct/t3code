@@ -51,14 +51,24 @@ An **action** is a saved script associated with a project. Actions are what the 
 ProjectScript {
   id: string           // kebab-case, auto-generated from name
   name: string         // "Dev Server", "Run Tests", etc.
-  command: string      // "npm run dev", "docker compose up", etc.
+  // Required for legacy actions; OMITTED for composite (where every service
+  // carries its own command). Mixed shapes are rejected at write time.
+  command?: string
   icon: "play" | "test" | "lint" | "configure" | "build" | "debug"
   runOnWorktreeCreate: boolean
-  services?: DeclaredService[]  // services this command launches
+  services?: DeclaredService[]
+}
+
+DeclaredService {
+  name: string                     // human-readable, must be unique per script
+  command?: string                 // composite-only: launches this service in its own PTY
+  cwd?: string                     // optional per-service cwd override
+  env?: Record<string, string>     // optional per-service env, layered on the run's env
+  // Note: NO healthCheck field. T3 infers health checks from logs at runtime.
 }
 ```
 
-Defined in `packages/contracts/src/orchestration.ts`.
+Defined in `packages/contracts/src/orchestration.ts`. Helpers `isCompositeProjectScript()` and `validateProjectScriptShape()` enforce the legacy-vs-composite split and reject duplicate service names within a composite script.
 
 ### Storage
 
@@ -94,14 +104,14 @@ Each provider session gets a short-lived bearer token via `managedRunService.iss
 
 ### Tools
 
-| Tool                     | Purpose                                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `list_managed_runs`      | List active (and optionally historical) runs for the project. Check before launching to avoid duplicates.                       |
-| `launch_project_script`  | Launch an action as a managed run. Fails if a run for the same script is already active.                                        |
-| `get_managed_run`        | Get full metadata and evidence for a run (detected URLs, ports, docker info).                                                   |
-| `get_managed_run_logs`   | Read timestamped log lines. Supports `stream` filter and `tailLines`.                                                           |
-| `stop_managed_run`       | Stop an active run.                                                                                                             |
-| `propose_project_script` | Propose a new action. Returns a JSON payload that the AI must include as a ` ```t3:propose-action ` code block in its response. |
+| Tool                     | Purpose                                                                                                                                                                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_managed_runs`      | List active (and optionally historical) runs for the project. Check before launching to avoid duplicates.                                                                                                                                                                          |
+| `launch_project_script`  | Launch an action as a managed run. Fails if a run for the same script is already active.                                                                                                                                                                                           |
+| `get_managed_run`        | Get full metadata and evidence for a run (detected URLs, ports, docker info).                                                                                                                                                                                                      |
+| `get_managed_run_logs`   | Read timestamped log lines. Supports `stream` filter, `tailLines`, and an optional `serviceId` for composite runs (omit it to receive merged-by-timestamp lines across all services).                                                                                              |
+| `stop_managed_run`       | Stop an active run.                                                                                                                                                                                                                                                                |
+| `propose_project_script` | Propose a new action. Returns a JSON payload the AI must include as a ` ```t3:propose-action ` code block in its response. The endpoint rejects any service-level `healthCheck` outright (the system prompt instructs the AI not to author them; this endpoint enforces the rule). |
 
 ### Service config injection into providers
 
@@ -115,17 +125,20 @@ When a provider session starts and the thread belongs to a project:
 
 ## Injected System Prompt
 
-`apps/server/src/managedRuns/systemPrompt.ts`
+The shipped default text lives in `packages/contracts/src/promptTemplates.ts` (constant `MANAGED_RUNS_DEFAULT_TEXT`); `apps/server/src/managedRuns/systemPrompt.ts` is a thin re-export that resolves to the configured prompt block.
 
-When tool injection is configured, a system prompt section is appended to the AI's instructions:
+The prompt instructs the AI to:
 
-1. Call `list_managed_runs` first to check what's already running.
-2. Use `launch_project_script` for existing actions.
+1. Call `list_managed_runs` first to discover both running runs and the project's `availableActions`.
+2. Use `launch_project_script` for an existing action when the command/purpose matches; pass `cwd` if the user is working in a worktree.
 3. Use `propose_project_script` for new actions.
-4. **Never** start long-running services via bash directly.
-5. When proposing, **always** declare services with health checks.
+4. Never start long-running services via bash directly.
+5. Declare services by name only — **never** include a `healthCheck` field. T3 infers health checks from runtime logs.
 
-The prompt includes examples for common patterns (npm run dev, docker compose, supabase start).
+It also documents the two valid action shapes and tells the AI to pick composite when per-service log separation matters:
+
+- **Legacy single-process action** — top-level `command`, optional `services[]` as named metadata.
+- **Composite multi-service action** — top-level `command` omitted, every entry in `services[]` carries its own `command`, `cwd?`, `env?`.
 
 ---
 
@@ -142,12 +155,13 @@ starting → running → completed (exit 0)
 
 ### Launch flow
 
-1. `launchProjectScript()` creates a run record in SQLite with status `"starting"`.
-2. A PTY terminal (120x30) is spawned with the script command.
-3. Environment variables injected: `T3CODE_PROJECT_ROOT`, `T3CODE_WORKTREE_PATH`.
-4. Output is captured to an NDJSON log file (each line: `{timestamp, stream, line}`).
+1. `launchProjectScript()` validates the script shape, marks the runId as launching (`launchingRunsRef`), and creates the run record in SQLite with status `"starting"`.
+2. One PTY terminal (120x30) is spawned per service — one for legacy runs, N for composite runs. All siblings share the run's `terminalThreadId`. If any open fails, every successfully-opened sibling is closed and the DB row is deleted before propagating the error (no leaked PTYs / orphan rows).
+3. Environment variables injected: `T3CODE_PROJECT_ROOT`, `T3CODE_WORKTREE_PATH`. Per-service `cwd` and `env` overrides apply when set.
+4. Each PTY's output is captured to an NDJSON log file: legacy → `<runId>.ndjson`, composite → `<runId>/<serviceId>.ndjson` (one file per service).
 5. After a 1.5s startup grace period, status moves to `"running"`.
-6. Evidence is collected: process PID, detected URLs/ports from output, docker containers.
+6. Evidence is collected: process PID per service, detected URLs/ports from output, docker containers.
+7. Once `liveRunsRef` is registered the launching marker clears; subsequent orphan-cleanup events can act on the run safely.
 
 ### Restart trigger actions
 
@@ -160,18 +174,23 @@ running them; auto-resume can reconnect the session after the new build comes up
 
 ### Log retention
 
-Logs are retained for 48 hours (`LOG_RETENTION_MS`). A background fiber cleans up expired logs every hour.
+Logs are retained for 48 hours (`LOG_RETENTION_MS`). A background fiber sweeps every hour and:
+
+- Removes NDJSON files (legacy `<runId>.ndjson` and composite `<runId>/` directories alike) for runs whose `logsExpireAt` has passed.
+- Sweeps expired MCP access tokens from the `(projectId, threadId)` map (24h TTL).
 
 ---
 
 ## Service Health Checks
 
-Managed runs now separate:
+Health checks are **inferred** by T3 from runtime logs — never authored by the user or the AI. Authoring surfaces (`ProjectScriptsControl`, `ProposeActionCard`, `propose_project_script`) do not surface a healthCheck field, and the propose REST endpoint rejects payloads that include one.
 
-- `declaredServices`: immutable launch-time hints copied from the project action
-- `runtimeServices`: LLM-inferred canonical targets for the live run
+The model carries two service collections:
 
-Declared services are still important because they provide validation hints and grounding context, but they are no longer treated as the source of truth for a running process. This is what makes dynamic ports and multiple worktrees safe to track independently.
+- `declaredServices`: immutable launch-time names copied from the project action.
+- `runtimeServices`: canonical per-service entries for the live run, validated periodically.
+
+Composite runs pre-populate `runtimeServices` from declared services at launch (`validationStatus: "unknown"`, `inferenceSource: "declared"`), so per-service log tabs render before inference returns. Inference then **enriches** those entries — replacing each grounded one with an LLM-canonicalised version while leaving ungrounded entries as their stubs. Legacy runs build `runtimeServices` purely from inference output.
 
 ### Health check types
 
@@ -184,19 +203,11 @@ Declared services are still important because they provide validation hints and 
 
 Implementation: `apps/server/src/managedRuns/healthCheck.ts`
 
-### Polling
+### Inference + polling
 
-Inference runs once shortly after launch, using only that run's own logs plus declared-service context. Any inferred canonical target must be grounded in the run evidence before it is adopted.
+`ManagedRunInference` performs one structured LLM call per run. Composite runs branch internally and run inference once **per service**, each call seeded only with that service's own NDJSON tail; the LLM's auto-slug is overridden by the authoritative composite serviceId so per-service tabs line up. Inference records are written to `managed_run_inferences` for audit.
 
-After inference succeeds, health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`) against `runtimeServices[*].canonicalHealthCheck`. Status changes are stored in the database and published to connected clients via WebSocket.
-
-The current flow is:
-
-1. Launch snapshots declared services.
-2. The run captures startup logs.
-3. `ManagedRunInference` performs one structured LLM call.
-4. Grounded runtime services become the live run view.
-5. Ongoing polling validates those runtime services only.
+After inference, health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`) against `runtimeServices[*].canonicalHealthCheck`. A run that goes "all unhealthy" transitions to `stopped` automatically. Status changes are persisted and pushed to clients via WebSocket.
 
 ---
 
@@ -247,6 +258,52 @@ On accept:
 2. A confirmation message is injected: `"Action added: {name} (id: {id}, command: {command})"`.
 3. The AI can then call `launch_project_script` to start it.
 
+### Composite (multi-service) actions
+
+A `ProjectScript` can declare multiple services that each run in their own subprocess. Each service has its own command and optional `cwd`/`env`. Each gets its own PTY and its own per-service NDJSON log file so the Run Logs Drawer can surface them as separate sub-tabs.
+
+A script is **composite** when its top-level `command` is empty/omitted AND every entry in `services[]` carries its own `command`. Mixed shapes (top-level command AND any per-service command) are rejected by `validateProjectScriptShape` (`packages/contracts/src/orchestration.ts`). Duplicate service names within a composite script are also rejected — slugs are used as file names and tab keys, so collisions would alias each other. The launcher branches on `isCompositeProjectScript(script)`.
+
+Composite runs:
+
+- Spawn one PTY per service, all sharing the run's `terminalThreadId` (the `TerminalManager` keys terminals by `(threadId, terminalId)`).
+- Persist logs to `~/.t3/{env}/logs/managed-runs/<projectId>/<runId>/<serviceId>.ndjson` (one file per service, rather than the legacy single `<runId>.ndjson`).
+- Each `serviceId` is a stable slug derived from the service name (`slugifyServiceName` in `apps/server/src/managedRuns/utils.ts`), with collision-suffixing and the synthetic `"main"` reserved for legacy runs.
+- Pre-populate `runtimeServices` with stubs at launch so per-service tabs render immediately; inference enriches each entry by serviceId once it returns.
+- Aggregate run-level status from per-service exits: an explicit Stop transitions to `stopped` (any service that crashed during the stop is recorded on `lastError`); any non-zero exit without an intentional stop fails the run; all-zero exits complete it.
+
+Legacy single-command runs are unchanged: one PTY, single `<runId>.ndjson`, inference fills `runtimeServices` from scratch.
+
+#### Authoring composite actions
+
+- **Settings UI** (`apps/web/src/components/ProjectScriptsControl.tsx`): each service row has an optional `Cmd` input. Filling it on any service flips the editor into composite mode (parent command field hidden). No health-check authoring surface — the field was removed entirely.
+- **AI tool** (`propose_project_script`): accepts optional per-service `command`, `cwd`, `env`. Health-check fields are rejected with a clear error.
+- **Propose card** (`apps/web/src/components/chat/ProposeActionCard.tsx`): renders `$ <command>` under each service row when composite.
+
+### Run Logs Drawer (`RunLogsDrawer.tsx`)
+
+A bottom-anchored drawer that shows live and historical NDJSON logs for any active managed run. It mirrors the visual treatment of `ThreadTerminalDrawer` (border-t, top resize handle, xterm viewport) and stacks above it when both are open.
+
+- Opened by clicking the hover-revealed `ScrollText` icon on each `RunCard` row in the Active Runs popover (see `ManagedRunsControl.tsx` → `RunLogsButton`).
+- Top tab strip: each opened run gets its own tab. Tabs show a state dot (green for `running`/`starting`, muted otherwise) and a hover-revealed `×` close. Tab labels are cached at open time so a tab keeps a meaningful name after the run is stopped or its action is deleted.
+- For composite runs (≥2 declared services), a sub-strip below the tab strip exposes an `All` tab plus one tab per service. The `All` view interleaves per-service streams by timestamp and prefixes each line with `[<service-name>]` in a stable per-service ANSI colour (6-colour palette, indexed by `serviceId`). Per-service tabs render their own stream verbatim, no prefix.
+- For single-service / legacy runs the sub-strip is hidden and the viewport binds directly to that one service's stream — no merged-view prefix.
+- Inactive viewports stay mounted so switching tabs preserves accumulated buffers.
+- Read-only xterm viewport (`disableStdin: true`); theme + fonts shared via `apps/web/src/components/terminal/xtermShared.ts`.
+- Drawer height is independently resizable and persists in `localStorage` under `t3code:run-logs-drawer:height:v1`.
+- State lives in `apps/web/src/runLogsDrawerStore.ts` (Zustand). Tabs are session-only — they clear on page reload. The store also tracks the active sub-tab per run (`activeServiceId`).
+- The drawer reacts to `removed` stream events (see [Orphan cleanup](#orphan-cleanup)): when a run's action is deleted, the corresponding tab closes immediately.
+
+### Log streaming (`useManagedRunLogs`)
+
+Each viewport uses the `useManagedRunLogs` hook (`apps/web/src/hooks/useManagedRunLogs.ts`) which:
+
+1. Subscribes to live lines first via `managedRuns.subscribeLogs({ runId, serviceId? })`, then fetches the last 1000 historical lines via `managedRuns.getLogs` and writes them into the xterm instance.
+2. Lines that arrive between the subscribe and historical fetch resolving are buffered (capped at 50,000 with FIFO eviction so a hung fetch can't grow the buffer unbounded), deduplicated by timestamp against the historical tail, and flushed in order so nothing is dropped or doubled.
+3. `stderr` lines are tinted red. In merged-view mode (`serviceId === null` for a composite run) each line is prefixed with the service name in a stable ANSI colour.
+
+Server-side, log appends publish to a per-`(runId, serviceId)` PubSub (eager-created at launch so subscribers that arrive before the first published line still see live events). The WebSocket method is `subscribeManagedRunLogs` (registered in `apps/server/src/ws.ts`) and emits `ManagedRunLogStreamEvent` records of `{ runId, serviceId, line }`. When `serviceId` is omitted on subscribe, the server merges per-service PubSubs for the run via `Stream.mergeAll`. For runs that are no longer live, the merge falls back to the persisted `runtimeServices[*].serviceId` from the DB row instead of the legacy synthetic id, so subscribers tailing a finished composite run see the right per-service streams.
+
 ### Completion Toasts (`useManagedRunCompletionToasts.ts`)
 
 Subscribes to `ManagedRunStreamEvent` via WebSocket. When a run reaches a terminal state:
@@ -269,8 +326,22 @@ The **"Ask AI" button** on failure toasts:
 
 The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 
-- `snapshot` events on initial subscribe (seeds the run list)
-- `upserted` events as runs change (status transitions, inference updates, validation updates)
+- `snapshot` events on initial subscribe (seeds the run list).
+- `upserted` events as runs change (status transitions, inference updates, validation updates).
+- `removed` events when a run is fully torn down (orphan cleanup, manual removal). Subscribers must drop UI state for the run, including any open log-drawer tab.
+
+For per-run log tailing, the client additionally subscribes via `subscribeManagedRunLogs({ runId, serviceId? })` and receives one `ManagedRunLogStreamEvent` per appended log line.
+
+### Orphan cleanup
+
+When the user (or AI) deletes an action from a project, every managed run that referenced that action becomes an orphan. T3 reacts to this **deterministically** via `OrphanRunsReactor` (`apps/server/src/managedRuns/Layers/OrphanRunsReactor.ts`):
+
+1. The reactor subscribes to the orchestration engine's domain-event stream.
+2. On every `project.meta-updated` event whose payload includes a `scripts` field, it calls `managedRuns.cleanupOrphansForProject(projectId)`.
+3. That method walks all known runs for the project, skips any that are still mid-launch (tracked via `launchingRunsRef`), and tears down the rest via `removeRunAndPublish`.
+4. `removeRunAndPublish` marks the run as `removing` (so terminal output buffered by node-pty can't recreate the log dir after delete), closes every PTY, deletes the DB row, removes the NDJSON file/directory, and publishes a `removed` stream event so the UI drops its tab immediately.
+
+There is no polling. Cleanup latency is one event-loop tick from action deletion to tab disappearing.
 
 ---
 
@@ -285,8 +356,10 @@ The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 | **Health checks**         | `apps/server/src/managedRuns/healthCheck.ts`                        | URL/docker/port/command health check implementations                   |
 | **Run inference**         | `apps/server/src/managedRuns/Layers/Inference.ts`                   | LLM-backed runtime-service inference + grounding                       |
 | **Inference service**     | `apps/server/src/managedRuns/Services/Inference.ts`                 | Effect service contract for inference                                  |
-| **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                 | Core run lifecycle: launch, track, poll, stop                          |
+| **Run service**           | `apps/server/src/managedRuns/Layers/ManagedRuns.ts`                 | Core run lifecycle: launch, track, poll, stop, orphan cleanup          |
 | **Run service interface** | `apps/server/src/managedRuns/Services/ManagedRuns.ts`               | Effect service interface                                               |
+| **Orphan reactor**        | `apps/server/src/managedRuns/Layers/OrphanRunsReactor.ts`           | Subscribes to orchestration events; tears down runs on action delete   |
+| **Slug helper**           | `apps/server/src/managedRuns/utils.ts`                              | `slugifyServiceName` shared between launcher and inference             |
 | **SQL layer**             | `apps/server/src/persistence/Layers/ManagedRuns.ts`                 | SQLite persistence for runs, evidence, and inference audit records     |
 | **Provider injection**    | `apps/server/src/provider/Layers/ClaudeAdapter.ts`                  | Service config + prompt injection for Claude                           |
 | **Provider injection**    | `apps/server/src/provider/Layers/CodexAdapter.ts`                   | Service config + prompt injection for Codex                            |
@@ -295,6 +368,9 @@ The client subscribes via `subscribeManagedRunEvents(projectId)` and receives:
 | **Runs settings UI**      | `apps/web/src/components/settings/RunsSettingsPanel.tsx`            | Read-only inference audit surface                                      |
 | **Propose card**          | `apps/web/src/components/chat/ProposeActionCard.tsx`                | Interactive action proposal card                                       |
 | **Propose parser**        | `apps/web/src/lib/proposeActionParser.ts`                           | Validates `t3:propose-action` code blocks                              |
+| **Run logs drawer**       | `apps/web/src/components/RunLogsDrawer.tsx`                         | Bottom-anchored drawer with per-run tabs + per-service sub-tabs        |
+| **Run logs store**        | `apps/web/src/runLogsDrawerStore.ts`                                | Zustand store: tabs, active run, active service, drawer height         |
+| **Log streaming hook**    | `apps/web/src/hooks/useManagedRunLogs.ts`                           | Historical fetch + live subscribe with per-service ANSI prefixes       |
 | **Toasts**                | `apps/web/src/hooks/useManagedRunCompletionToasts.ts`               | Toast notifications + "Ask AI" on failure                              |
 | **Event subscription**    | `apps/web/src/components/ChatView.tsx`                              | WebSocket subscribe + action accept handler                            |
 | **Migrations**            | `apps/server/src/persistence/Migrations/020_ManagedRuns.ts`         | Initial managed_runs table                                             |

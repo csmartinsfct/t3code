@@ -1,13 +1,12 @@
-import type { DeclaredService, ProjectScriptIcon, ServiceHealthCheck } from "@t3tools/contracts";
+import type { DeclaredService, ProjectScriptIcon } from "@t3tools/contracts";
 
 const PROPOSE_ACTION_LANGUAGE = "language-t3:propose-action";
 
 const VALID_ICONS = new Set<string>(["play", "test", "lint", "configure", "build", "debug"]);
 
-const VALID_HEALTH_CHECK_TYPES = new Set<string>(["url", "docker", "port", "command"]);
-
 export interface ProposeActionPayload {
   name: string;
+  /** Empty for composite actions where every entry in `services` has its own command. */
   command: string;
   icon: ProjectScriptIcon;
   services?: DeclaredService[];
@@ -20,45 +19,24 @@ export function isProposeActionBlock(className: string | undefined): boolean {
   return className?.includes(PROPOSE_ACTION_LANGUAGE) === true;
 }
 
-/**
- * Validate and parse a service health check from raw JSON.
- */
-function parseHealthCheck(raw: unknown): ServiceHealthCheck | null {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const check = raw as Record<string, unknown>;
-  const type = typeof check.type === "string" ? check.type : "";
-  if (!VALID_HEALTH_CHECK_TYPES.has(type)) return null;
-
-  switch (type) {
-    case "url": {
-      const url = typeof check.url === "string" ? check.url.trim() : "";
-      if (!url) return null;
-      return { type: "url", url } as ServiceHealthCheck;
-    }
-    case "docker": {
-      const container = typeof check.container === "string" ? check.container.trim() : "";
-      if (!container) return null;
-      return { type: "docker", container } as ServiceHealthCheck;
-    }
-    case "port": {
-      const port = typeof check.port === "number" ? check.port : 0;
-      if (port <= 0 || port > 65535) return null;
-      const host = typeof check.host === "string" ? check.host.trim() : undefined;
-      return { type: "port", port, ...(host ? { host } : {}) } as ServiceHealthCheck;
-    }
-    case "command": {
-      const command = typeof check.command === "string" ? check.command.trim() : "";
-      if (!command) return null;
-      const cwd = typeof check.cwd === "string" ? check.cwd.trim() : undefined;
-      return { type: "command", command, ...(cwd ? { cwd } : {}) } as ServiceHealthCheck;
-    }
-    default:
-      return null;
+function parseServiceEnv(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(record)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || key.length > 128) continue;
+    if (typeof value !== "string" || value.length > 8_192) continue;
+    out[key] = value;
+    count += 1;
+    if (count >= 128) break;
   }
+  return count > 0 ? out : undefined;
 }
 
 /**
- * Parse declared services from raw JSON array.
+ * Parse declared services from raw JSON array. Health checks are no longer
+ * authored by the AI — T3 infers them from logs at runtime.
  */
 function parseServices(raw: unknown): DeclaredService[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
@@ -69,9 +47,15 @@ function parseServices(raw: unknown): DeclaredService[] | undefined {
     const record = item as Record<string, unknown>;
     const name = typeof record.name === "string" ? record.name.trim() : "";
     if (!name) continue;
-    const healthCheck = parseHealthCheck(record.healthCheck);
-    if (!healthCheck) continue;
-    services.push({ name, healthCheck } as DeclaredService);
+    const serviceCommand = typeof record.command === "string" ? record.command.trim() : "";
+    const serviceCwd = typeof record.cwd === "string" ? record.cwd.trim() : "";
+    const serviceEnv = parseServiceEnv(record.env);
+    services.push({
+      name,
+      ...(serviceCommand.length > 0 ? { command: serviceCommand } : {}),
+      ...(serviceCwd.length > 0 ? { cwd: serviceCwd } : {}),
+      ...(serviceEnv ? { env: serviceEnv } : {}),
+    } satisfies DeclaredService);
   }
 
   return services.length > 0 ? services : undefined;
@@ -97,7 +81,7 @@ export function parseProposeActionPayload(code: string): ProposeActionPayload | 
     const name = typeof record.name === "string" ? record.name.trim() : "";
     const command = typeof record.command === "string" ? record.command.trim() : "";
 
-    if (name.length === 0 || command.length === 0) {
+    if (name.length === 0) {
       return null;
     }
 
@@ -108,7 +92,22 @@ export function parseProposeActionPayload(code: string): ProposeActionPayload | 
 
     const services = parseServices(record.services);
 
-    return { name, command, icon, ...(services ? { services } : {}) };
+    // Valid if EITHER top-level command is set (legacy) OR every parsed service
+    // carries its own command (composite). Streaming partials with neither are
+    // null until at least one command shows up.
+    const everyServiceHasCommand =
+      services !== undefined &&
+      services.length > 0 &&
+      services.every((s) => typeof s.command === "string" && s.command.length > 0);
+    if (command.length === 0 && !everyServiceHasCommand) {
+      return null;
+    }
+    // Mixed shape (top-level command AND every-service command) is invalid —
+    // drop the top-level command and treat the proposal as composite. This
+    // mirrors `validateProjectScriptShape` server-side.
+    const sanitizedCommand = everyServiceHasCommand ? "" : command;
+
+    return { name, command: sanitizedCommand, icon, ...(services ? { services } : {}) };
   } catch {
     // Incomplete JSON during streaming, or genuinely malformed
     return null;

@@ -24,7 +24,6 @@ import {
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
-  TerminalOpenInput,
   type SkillEntry,
   type DeclaredService,
 } from "@t3tools/contracts";
@@ -99,7 +98,6 @@ import {
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
-  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   type SessionPhase,
@@ -121,6 +119,8 @@ import { useOrchestrationData } from "../hooks/useOrchestrationData";
 import { useOrchestrationTimelineRows } from "../hooks/useOrchestrationTimeline";
 import { useOrchestrationSwitcherDerived } from "../hooks/useOrchestrationSwitcher";
 import { getWsRpcClient } from "../wsRpcClient";
+import { useRunLogsDrawerStore } from "~/runLogsDrawerStore";
+import RunLogsDrawer from "./RunLogsDrawer";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
@@ -374,8 +374,6 @@ function formatOutgoingPrompt(params: {
   return params.text;
 }
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
-const SCRIPT_TERMINAL_COLS = 120;
-const SCRIPT_TERMINAL_ROWS = 30;
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -852,7 +850,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
-  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
   const threads = useStore((state) => state.threads);
   const serverThreadIds = useMemo(() => threads.map((thread) => thread.id), [threads]);
@@ -2414,6 +2411,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setActiveManagedRuns(event.runs);
         return;
       }
+      if (event.type === "removed") {
+        setActiveManagedRuns((current) => current.filter((run) => run.runId !== event.runId));
+        useRunLogsDrawerStore.getState().closeTab(event.runId);
+        return;
+      }
       setActiveManagedRuns((current) => upsertRun(current, event.run));
     });
   }, [activeProject?.id, handleRunEvent]);
@@ -2493,12 +2495,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
         input.name,
         activeProject.scripts.map((script) => script.id),
       );
+      // Composite shape: every declared service has its own command. The
+      // top-level command is omitted in that case (the schema's
+      // `validateProjectScriptShape` rejects mixed shapes).
+      const isComposite =
+        input.services !== undefined &&
+        input.services.length > 0 &&
+        input.services.every(
+          (service) => typeof service.command === "string" && service.command.length > 0,
+        );
       const nextScript: ProjectScript = {
         id: nextId,
         name: input.name,
-        command: input.command,
+        ...(!isComposite && input.command.length > 0 ? { command: input.command } : {}),
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        ...(input.services ? { services: input.services } : {}),
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [
@@ -2537,10 +2549,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
           event.name,
           activeProject.scripts.map((s) => s.id),
         );
+        // Defensively detect composite shape: if every declared service has
+        // its own command, this is a composite action and the top-level
+        // command must be omitted (schema rejects mixed shapes via
+        // validateProjectScriptShape on launch).
+        const isComposite =
+          event.services !== undefined &&
+          event.services.length > 0 &&
+          event.services.every(
+            (service) => typeof service.command === "string" && service.command.length > 0,
+          );
         const nextScript: ProjectScript = {
           id: nextId,
           name: event.name,
-          command: event.command,
+          ...(!isComposite && event.command.length > 0 ? { command: event.command } : {}),
           icon: event.icon,
           runOnWorktreeCreate: false,
           ...(event.services ? { services: event.services } : {}),
@@ -2555,7 +2577,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
 
         const messageIdForSend = newMessageId();
-        const messageText = `Action added: ${event.name} (id: ${nextId}, command: ${event.command})`;
+        const messageText = isComposite
+          ? `Action added: ${event.name} (id: ${nextId}, composite — ${event.services?.length ?? 0} services)`
+          : `Action added: ${event.name} (id: ${nextId}, command: ${event.command})`;
         const createdAt = new Date().toISOString();
 
         setOptimisticUserMessages((existing) => [
@@ -2717,13 +2741,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
         throw new Error("Script not found.");
       }
 
+      const baseScript = { ...existingScript };
+      // command may flip from set ↔ unset depending on whether the edit
+      // converts the action to/from composite shape; remove the property
+      // entirely when empty so the schema validator accepts it.
+      if ("command" in baseScript) {
+        delete (baseScript as { command?: string }).command;
+      }
+      const isComposite =
+        input.services !== undefined &&
+        input.services.length > 0 &&
+        input.services.every(
+          (service) => typeof service.command === "string" && service.command.length > 0,
+        );
       const updatedScript: ProjectScript = {
-        ...existingScript,
+        ...baseScript,
         name: input.name,
-        command: input.command,
+        ...(!isComposite && input.command.length > 0 ? { command: input.command } : {}),
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
-        services: input.services,
+        ...(input.services ? { services: input.services } : {}),
       };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
@@ -5862,6 +5899,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ) : null}
       </div>
       {/* end horizontal flex container */}
+
+      <RunLogsDrawer
+        resolveTabLabel={(runId) => {
+          const run = activeManagedRuns.find((candidate) => candidate.runId === runId);
+          if (!run) return runId.slice(0, 12);
+          const script = activeProject?.scripts?.find((candidate) => candidate.id === run.scriptId);
+          return script?.name ?? run.scriptId;
+        }}
+        resolveRunRunning={(runId) => {
+          const run = activeManagedRuns.find((candidate) => candidate.runId === runId);
+          return run?.status === "running" || run?.status === "starting";
+        }}
+        resolveRunServices={(runId) => {
+          const run = activeManagedRuns.find((candidate) => candidate.runId === runId);
+          if (!run) return [];
+          // Filter out the synthetic "main" entry that legacy single-process
+          // runs surface — those don't get a sub-tab strip in the drawer.
+          return run.runtimeServices
+            .filter((service) => service.serviceId !== "main")
+            .map((service) => ({
+              serviceId: service.serviceId,
+              label: service.declaredServiceName ?? service.resolvedName,
+              validationStatus: service.validationStatus,
+            }));
+        }}
+      />
 
       {mountedTerminalThreadIds.map((mountedThreadId) => (
         <PersistentThreadTerminalDrawer

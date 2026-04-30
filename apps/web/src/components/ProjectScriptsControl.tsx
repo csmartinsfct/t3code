@@ -3,7 +3,6 @@ import type {
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
-  ServiceHealthCheck,
 } from "@t3tools/contracts";
 import {
   BugIcon,
@@ -83,6 +82,7 @@ export function ScriptIcon({
 
 export interface NewProjectScriptInput {
   name: string;
+  /** Empty string for composite actions (per-service commands carry the load). */
   command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
@@ -90,56 +90,19 @@ export interface NewProjectScriptInput {
   services: DeclaredService[] | undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Health-check types supported by the services editor
-// ---------------------------------------------------------------------------
-
-const HEALTH_CHECK_TYPES = [
-  { id: "url" as const, label: "URL" },
-  { id: "port" as const, label: "Port" },
-  { id: "docker" as const, label: "Docker" },
-  { id: "command" as const, label: "Command" },
-];
-
 let nextDraftKey = 0;
 
 /** Mutable draft kept in component state while editing. */
 interface ServiceDraft {
   key: number;
   name: string;
-  type: ServiceHealthCheck["type"];
-  value: string; // url, port number, container name, or command string
-  host: string; // only used for type=port
-}
-
-function serviceToHealthCheck(draft: ServiceDraft): ServiceHealthCheck {
-  switch (draft.type) {
-    case "url":
-      return { type: "url", url: draft.value };
-    case "docker":
-      return { type: "docker", container: draft.value };
-    case "port":
-      return {
-        type: "port",
-        port: Number(draft.value),
-        ...(draft.host.trim() ? { host: draft.host.trim() } : {}),
-      };
-    case "command":
-      return { type: "command", command: draft.value };
-  }
-}
-
-function healthCheckToValue(check: ServiceHealthCheck): { value: string; host: string } {
-  switch (check.type) {
-    case "url":
-      return { value: check.url, host: "" };
-    case "docker":
-      return { value: check.container, host: "" };
-    case "port":
-      return { value: String(check.port), host: check.host ?? "" };
-    case "command":
-      return { value: check.command, host: "" };
-  }
+  /**
+   * Optional command for composite actions: when set, this service runs as
+   * its own subprocess and gets its own log tab. Mutually exclusive with the
+   * parent script's top-level `command` (validated server-side via
+   * `validateProjectScriptShape`).
+   */
+  command: string;
 }
 
 function declaredServicesToDrafts(
@@ -149,16 +112,28 @@ function declaredServicesToDrafts(
   return services.map((s) => ({
     key: ++nextDraftKey,
     name: s.name,
-    type: s.healthCheck.type,
-    ...healthCheckToValue(s.healthCheck),
+    command: s.command ?? "",
   }));
 }
 
 function draftsToServices(drafts: ServiceDraft[]): DeclaredService[] | undefined {
-  const valid = drafts.filter((d) => d.name.trim() && d.value.trim());
-  return valid.length > 0
-    ? valid.map((d) => ({ name: d.name.trim(), healthCheck: serviceToHealthCheck(d) }))
-    : undefined;
+  const valid = drafts.filter((d) => d.name.trim().length > 0);
+  if (valid.length === 0) return undefined;
+  return valid.map((d) => {
+    const trimmedCommand = d.command.trim();
+    return {
+      name: d.name.trim(),
+      ...(trimmedCommand.length > 0 ? { command: trimmedCommand } : {}),
+    };
+  });
+}
+
+/**
+ * True when at least one draft has a per-service command — the action will be
+ * persisted as a composite script and the parent `command` field is hidden.
+ */
+function isCompositeDraft(drafts: ReadonlyArray<ServiceDraft>): boolean {
+  return drafts.some((d) => d.command.trim().length > 0);
 }
 
 interface ProjectScriptsControlProps {
@@ -241,6 +216,7 @@ export default function ProjectScriptsControl({
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [serviceDrafts, setServiceDrafts] = useState<ServiceDraft[]>([]);
+  const compositeMode = isCompositeDraft(serviceDrafts);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
@@ -271,13 +247,25 @@ export default function ProjectScriptsControl({
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedCommand = command.trim();
+    const composite = isCompositeDraft(serviceDrafts);
     if (trimmedName.length === 0) {
       setValidationError("Name is required.");
       return;
     }
-    if (trimmedCommand.length === 0) {
+    if (!composite && trimmedCommand.length === 0) {
       setValidationError("Command is required.");
       return;
+    }
+    if (composite) {
+      const missing = serviceDrafts.find(
+        (d) => d.name.trim().length > 0 && d.command.trim().length === 0,
+      );
+      if (missing) {
+        setValidationError(
+          `Composite actions must define a command for every service. Service '${missing.name}' is missing one.`,
+        );
+        return;
+      }
     }
 
     setValidationError(null);
@@ -328,7 +316,7 @@ export default function ProjectScriptsControl({
   const openEditDialog = (script: ProjectScript) => {
     setEditingScriptId(script.id);
     setName(script.name);
-    setCommand(script.command);
+    setCommand(script.command ?? "");
     setIcon(script.icon);
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
@@ -520,15 +508,17 @@ export default function ProjectScriptsControl({
                   Press a shortcut. Use <code>Backspace</code> to clear.
                 </p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-command">Command</Label>
-                <Textarea
-                  id="script-command"
-                  placeholder="bun test"
-                  value={command}
-                  onChange={(event) => setCommand(event.target.value)}
-                />
-              </div>
+              {!compositeMode && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="script-command">Command</Label>
+                  <Textarea
+                    id="script-command"
+                    placeholder="bun test"
+                    value={command}
+                    onChange={(event) => setCommand(event.target.value)}
+                  />
+                </div>
+              )}
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
                 <span>Run automatically on worktree creation</span>
                 <Switch
@@ -537,9 +527,12 @@ export default function ProjectScriptsControl({
                 />
               </label>
 
-              {/* Services / health checks */}
+              {/* Services */}
               <div className="space-y-1.5">
                 <Label>Services</Label>
+                <p className="text-xs text-muted-foreground">
+                  Add a CMD to run a service as its own subprocess with a separate log tab.
+                </p>
                 <div className="overflow-hidden rounded-md border border-border/70">
                   {serviceDrafts.length === 0 ? (
                     <button
@@ -548,109 +541,61 @@ export default function ProjectScriptsControl({
                       onClick={() =>
                         setServiceDrafts((prev) => [
                           ...prev,
-                          { key: ++nextDraftKey, name: "", type: "url", value: "", host: "" },
+                          { key: ++nextDraftKey, name: "", command: "" },
                         ])
                       }
                     >
                       <PlusIcon className="size-3" />
-                      Add service for health monitoring
+                      Add service
                     </button>
                   ) : (
                     <>
                       {serviceDrafts.map((draft, idx) => (
                         <div
                           key={draft.key}
-                          className={`group flex items-center gap-2 px-2.5 py-2 ${idx > 0 ? "border-t border-border/50" : ""}`}
+                          className={`group flex flex-col gap-1.5 px-2.5 py-2 ${idx > 0 ? "border-t border-border/50" : ""}`}
                         >
-                          <select
-                            className="h-6 shrink-0 cursor-pointer appearance-none rounded border-none bg-transparent pl-0.5 pr-5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground focus:outline-none"
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                              backgroundRepeat: "no-repeat",
-                              backgroundPosition: "right 2px center",
-                            }}
-                            value={draft.type}
-                            onChange={(e) =>
-                              setServiceDrafts((prev) =>
-                                prev.map((d, i) =>
-                                  i === idx
-                                    ? {
-                                        ...d,
-                                        type: e.target.value as ServiceHealthCheck["type"],
-                                        value: "",
-                                        host: "",
-                                      }
-                                    : d,
-                                ),
-                              )
-                            }
-                          >
-                            {HEALTH_CHECK_TYPES.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.label}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="h-4 w-px shrink-0 bg-border/60" />
-                          <input
-                            placeholder="Name"
-                            value={draft.name}
-                            className="h-6 w-24 shrink-0 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                            onChange={(e) =>
-                              setServiceDrafts((prev) =>
-                                prev.map((d, i) =>
-                                  i === idx ? { ...d, name: e.target.value } : d,
-                                ),
-                              )
-                            }
-                          />
-                          <div className="h-4 w-px shrink-0 bg-border/60" />
-                          <input
-                            placeholder={
-                              draft.type === "url"
-                                ? "http://localhost:3000"
-                                : draft.type === "port"
-                                  ? "3000"
-                                  : draft.type === "docker"
-                                    ? "container_name"
-                                    : "status-check-cmd"
-                            }
-                            value={draft.value}
-                            className="h-6 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                            onChange={(e) =>
-                              setServiceDrafts((prev) =>
-                                prev.map((d, i) =>
-                                  i === idx ? { ...d, value: e.target.value } : d,
-                                ),
-                              )
-                            }
-                          />
-                          {draft.type === "port" && (
-                            <>
-                              <div className="h-4 w-px shrink-0 bg-border/60" />
-                              <input
-                                placeholder="host"
-                                value={draft.host}
-                                className="h-6 w-16 shrink-0 bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                                onChange={(e) =>
-                                  setServiceDrafts((prev) =>
-                                    prev.map((d, i) =>
-                                      i === idx ? { ...d, host: e.target.value } : d,
-                                    ),
-                                  )
-                                }
-                              />
-                            </>
-                          )}
-                          <button
-                            type="button"
-                            className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground hover:!text-destructive focus-visible:text-muted-foreground"
-                            onClick={() =>
-                              setServiceDrafts((prev) => prev.filter((_, i) => i !== idx))
-                            }
-                          >
-                            <TrashIcon className="size-3" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <input
+                              placeholder="Name (e.g. Backend)"
+                              value={draft.name}
+                              className="h-6 min-w-0 flex-1 bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                              onChange={(e) =>
+                                setServiceDrafts((prev) =>
+                                  prev.map((d, i) =>
+                                    i === idx ? { ...d, name: e.target.value } : d,
+                                  ),
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground hover:!text-destructive focus-visible:text-muted-foreground"
+                              onClick={() =>
+                                setServiceDrafts((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                            >
+                              <TrashIcon className="size-3" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 pl-1">
+                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                              Cmd
+                            </span>
+                            <div className="h-4 w-px shrink-0 bg-border/60" />
+                            <input
+                              placeholder="(optional) run as own subprocess — e.g. bun run dev:server"
+                              value={draft.command}
+                              className="h-6 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                              onChange={(e) =>
+                                setServiceDrafts((prev) =>
+                                  prev.map((d, i) =>
+                                    i === idx ? { ...d, command: e.target.value } : d,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
                         </div>
                       ))}
                       <button
@@ -659,7 +604,7 @@ export default function ProjectScriptsControl({
                         onClick={() =>
                           setServiceDrafts((prev) => [
                             ...prev,
-                            { key: ++nextDraftKey, name: "", type: "url", value: "", host: "" },
+                            { key: ++nextDraftKey, name: "", command: "" },
                           ])
                         }
                       >

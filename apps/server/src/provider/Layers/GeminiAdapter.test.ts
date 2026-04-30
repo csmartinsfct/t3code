@@ -69,6 +69,8 @@ const managedRunServiceTestLayer = Layer.succeed(ManagedRunService, {
   getInferenceRecord: () => Effect.die(new Error("not mocked")),
   stop: () => Effect.void,
   streamEvents: () => Stream.empty,
+  streamLogs: () => Stream.empty,
+  cleanupOrphansForProject: () => Effect.void,
   issueMcpAccess: (projectId, threadId) =>
     Effect.succeed({ token: "test-token", projectId, threadId }),
   resolveContextForToken: () => Effect.succeed(null),

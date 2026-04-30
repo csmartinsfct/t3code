@@ -58,6 +58,7 @@ import { dynamicChatUiRouteLayer } from "./dynamicChatUi/http";
 import { BrowserManagerServiceLive } from "./browser/Layers/BrowserManager";
 import { ManagedRunServiceLive } from "./managedRuns/Layers/ManagedRuns";
 import { ManagedRunInferenceLive } from "./managedRuns/Layers/Inference";
+import { OrphanRunsReactorLive } from "./managedRuns/Layers/OrphanRunsReactor";
 import { ScheduledTaskRepositoryLive } from "./persistence/Layers/ScheduledTasks";
 import { ScheduledTaskServiceLive } from "./scheduledTasks/Layers/ScheduledTasks";
 import { scheduledTasksRouteLayer } from "./scheduledTasks/http";
@@ -237,6 +238,12 @@ const WorkspaceLayerLive = Layer.mergeAll(
 const RuntimeCoreServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerRuntimeStartupLive),
   Layer.provideMerge(ReactorLayerLive),
+  // Listens for `project.meta-updated` events and immediately tears down any
+  // managed runs whose action was just removed from the project. Sits
+  // alongside ReactorLayerLive at the top of the pipe chain so its
+  // ManagedRunService + OrchestrationEngineService deps are satisfied by
+  // layers provided below.
+  Layer.provideMerge(OrphanRunsReactorLive),
 
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),

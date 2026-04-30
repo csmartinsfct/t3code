@@ -134,6 +134,13 @@ export function useManagedRunCompletionToasts(options: {
         }
         return;
       }
+      if (event.type === "removed") {
+        // The run was orphaned and cleaned up; drop it from our notified-set
+        // bookkeeping so a future re-run with the same id (unlikely but
+        // possible) is treated cleanly.
+        notifiedRunIdsRef.current.delete(event.runId);
+        return;
+      }
 
       const { run } = event;
       if (!isTerminalStatus(run.status)) return;

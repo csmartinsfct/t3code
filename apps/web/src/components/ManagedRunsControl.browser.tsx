@@ -19,6 +19,7 @@ const NOW_ISO = "2026-04-11T12:00:00.000Z";
 
 function createRuntimeService(input?: Partial<ManagedRunRuntimeService>): ManagedRunRuntimeService {
   return {
+    serviceId: "frontend",
     declaredServiceName: "frontend",
     resolvedName: "Frontend",
     role: "frontend",

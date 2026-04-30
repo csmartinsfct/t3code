@@ -65,18 +65,35 @@ export type ManagedRunRuntimeServiceRole = typeof ManagedRunRuntimeServiceRole.T
 
 export const ManagedRunDeclaredServiceSnapshot = Schema.Struct({
   name: TrimmedNonEmptyString,
-  healthCheck: ServiceHealthCheck,
+  /**
+   * Optional inference grounding hint. Composite runs declare services with no
+   * health check at all (inference fills in); legacy runs that historically
+   * carried one still surface it here.
+   */
+  healthCheck: Schema.optional(ServiceHealthCheck).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
 });
 export type ManagedRunDeclaredServiceSnapshot = typeof ManagedRunDeclaredServiceSnapshot.Type;
 
 export const ManagedRunRuntimeService = Schema.Struct({
+  /**
+   * Stable id within the run (slug-of-name, collision-suffixed). For legacy
+   * single-process runs this is the synthetic value `"main"`. For composite
+   * runs it matches the per-service log file at
+   * `<logsDir>/managed-runs/<projectId>/<runId>/<serviceId>.ndjson`.
+   *
+   * Optional for backward compatibility with rows persisted before this field
+   * was introduced; decoding defaults to the legacy synthetic id.
+   */
+  serviceId: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(() => "main")),
   declaredServiceName: Schema.NullOr(TrimmedNonEmptyString),
   resolvedName: TrimmedNonEmptyString,
   role: ManagedRunRuntimeServiceRole,
   canonicalHealthCheck: Schema.NullOr(ServiceHealthCheck),
   validationStatus: ManagedRunValidationStatus,
   inferenceConfidence: ManagedRunInferenceConfidence,
-  inferenceSource: Schema.Literal("llm"),
+  inferenceSource: Schema.Literals(["llm", "declared"]),
   groundedBy: Schema.Array(ManagedRunInferenceGroundingSource),
   evidenceLines: Schema.Array(Schema.String),
   lastCheckedAt: Schema.NullOr(IsoDateTime),
@@ -218,6 +235,12 @@ export const ManagedRunLogLine = Schema.Struct({
   timestamp: IsoDateTime,
   stream: ManagedRunLogStream,
   line: Schema.String,
+  /**
+   * Stable per-run service id, or null for legacy single-process runs. Composite
+   * runs always populate this. Legacy log files (`<runId>.ndjson`) contain
+   * records with `serviceId: null`.
+   */
+  serviceId: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type ManagedRunLogLine = typeof ManagedRunLogLine.Type;
 
@@ -236,6 +259,12 @@ export const ManagedRunGetLogsInput = Schema.Struct({
   runId: ManagedRunId,
   stream: Schema.optional(ManagedRunLogStream),
   tailLines: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  /**
+   * When set, returns lines only for the matching per-service NDJSON file.
+   * When omitted on a composite run, the server merges all per-service files
+   * by timestamp and returns the unified stream.
+   */
+  serviceId: Schema.optional(TrimmedNonEmptyString),
 });
 export type ManagedRunGetLogsInput = typeof ManagedRunGetLogsInput.Type;
 
@@ -292,8 +321,40 @@ export const ManagedRunStreamEvent = Schema.Union([
     projectId: ProjectId,
     run: ManagedRunSummary,
   }),
+  /**
+   * Emitted when a run is fully removed from the system (e.g. orphaned by an
+   * action deletion and cleaned up). Subscribers should drop any UI state
+   * associated with the run, including open log-drawer tabs.
+   */
+  Schema.Struct({
+    type: Schema.Literal("removed"),
+    projectId: ProjectId,
+    runId: ManagedRunId,
+  }),
 ]);
 export type ManagedRunStreamEvent = typeof ManagedRunStreamEvent.Type;
+
+export const ManagedRunSubscribeLogsInput = Schema.Struct({
+  runId: ManagedRunId,
+  /**
+   * When set, subscribe only to the matching service's PubSub. When omitted,
+   * the server merges all per-service PubSubs for this run and tags each
+   * event with its `serviceId`.
+   */
+  serviceId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ManagedRunSubscribeLogsInput = typeof ManagedRunSubscribeLogsInput.Type;
+
+export const ManagedRunLogStreamEvent = Schema.Struct({
+  runId: ManagedRunId,
+  /**
+   * Mirrored from `line.serviceId` for convenience. Null means the event came
+   * from a legacy single-process run.
+   */
+  serviceId: Schema.NullOr(TrimmedNonEmptyString),
+  line: ManagedRunLogLine,
+});
+export type ManagedRunLogStreamEvent = typeof ManagedRunLogStreamEvent.Type;
 
 export class ManagedRunNotFoundError extends Schema.TaggedErrorClass<ManagedRunNotFoundError>()(
   "ManagedRunNotFoundError",

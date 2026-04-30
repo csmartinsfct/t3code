@@ -4,6 +4,7 @@ import {
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type ManagedRunLogStreamEvent,
   type ManagedRunStreamEvent,
   type ListPromptDefinitionsInput,
   type ListPromptDefinitionsResult,
@@ -147,6 +148,10 @@ export interface WsRpcClient {
     readonly onEvent: (
       projectId: string,
       listener: (event: ManagedRunStreamEvent) => void,
+    ) => () => void;
+    readonly subscribeLogs: (
+      input: { readonly runId: string; readonly serviceId?: string },
+      listener: (event: ManagedRunLogStreamEvent) => void,
     ) => () => void;
   };
   readonly scheduledTasks: {
@@ -347,6 +352,16 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       onEvent: (projectId, listener) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeManagedRunEvents]({ projectId } as never),
+          listener,
+        ),
+      subscribeLogs: (input, listener) =>
+        transport.subscribe(
+          (client) =>
+            client[WS_METHODS.subscribeManagedRunLogs](
+              (input.serviceId !== undefined
+                ? { runId: input.runId, serviceId: input.serviceId }
+                : { runId: input.runId }) as never,
+            ),
           listener,
         ),
     },
