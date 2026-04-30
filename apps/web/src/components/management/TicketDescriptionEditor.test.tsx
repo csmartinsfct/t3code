@@ -13,4 +13,16 @@ describe("TicketDescriptionEditor", () => {
     expect(mod.TicketDescriptionEditor).toBeDefined();
     expect(typeof mod.TicketDescriptionEditor).toBe("function");
   });
+
+  it("registers table nodes required for GFM markdown tables", async () => {
+    const mod = await import("./TicketDescriptionEditor");
+    const extensionNames = mod
+      .createTicketDescriptionEditorExtensions()
+      .map((extension) => extension.name);
+
+    expect(extensionNames).toContain("table");
+    expect(extensionNames).toContain("tableRow");
+    expect(extensionNames).toContain("tableHeader");
+    expect(extensionNames).toContain("tableCell");
+  });
 });

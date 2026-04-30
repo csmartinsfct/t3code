@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import Placeholder from "@tiptap/extension-placeholder";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { Markdown } from "tiptap-markdown";
 import type { MarkdownStorage } from "tiptap-markdown";
 
@@ -36,6 +37,28 @@ interface TicketDescriptionEditorProps {
 
 const DEBOUNCE_MS = 1000;
 
+export function createTicketDescriptionEditorExtensions() {
+  return [
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3] },
+    }),
+    // These nodes let tiptap-markdown preserve GFM table HTML instead of flattening cells.
+    Table,
+    TableRow,
+    TableHeader,
+    TableCell,
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: { rel: "noopener noreferrer nofollow" },
+    }),
+    Underline,
+    Placeholder.configure({
+      placeholder: "Add a description...",
+    }),
+    Markdown,
+  ];
+}
+
 export function TicketDescriptionEditor({
   ticketId,
   initialContent,
@@ -59,20 +82,7 @@ export function TicketDescriptionEditor({
   );
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-      }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: { rel: "noopener noreferrer nofollow" },
-      }),
-      Underline,
-      Placeholder.configure({
-        placeholder: "Add a description...",
-      }),
-      Markdown,
-    ],
+    extensions: createTicketDescriptionEditorExtensions(),
     content: initialContent ?? "",
     autofocus: false,
     editorProps: {
