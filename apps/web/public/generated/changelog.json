@@ -1,11 +1,18 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-30T03:40:11.738Z",
-  "lastProcessedCommit": "ab0cd9158340cd69d7babd50283a2bcedec039a6",
+  "generatedAt": "2026-04-30T03:57:50.951Z",
+  "lastProcessedCommit": "ffbdf750524b20ba864eec8d116775621c913a2b",
   "groups": [
     {
       "date": "2026-04-30",
       "entries": [
+        {
+          "id": "4a1388bdd0c44e24",
+          "title": "Managed runs now handle composite actions correctly",
+          "summary": "Fixed managed run inference so composite actions resolve reliably, improving run execution and keeping action mapping predictable for users.",
+          "category": "fix",
+          "commitShas": ["ffbdf750524b20ba864eec8d116775621c913a2b"]
+        },
         {
           "id": "8b86f29d3789abc9",
           "title": "More reliable composite managed run detection",
@@ -2683,6 +2690,19 @@
         "toInclusiveCommit": "ab0cd9158340cd69d7babd50283a2bcedec039a6",
         "commitShas": ["ab0cd9158340cd69d7babd50283a2bcedec039a6"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-30T03:57:50.769Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ab0cd9158340cd69d7babd50283a2bcedec039a6",
+        "toInclusiveCommit": "ffbdf750524b20ba864eec8d116775621c913a2b",
+        "commitShas": [
+          "fbe5a68cc74210e4f641e63e540bce9f27d533a7",
+          "ffbdf750524b20ba864eec8d116775621c913a2b"
+        ],
+        "commitCount": 2,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

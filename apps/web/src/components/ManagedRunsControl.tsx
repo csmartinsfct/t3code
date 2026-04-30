@@ -231,8 +231,8 @@ function RunLogsButton({ run, runName }: { run: ManagedRunSummary; runName: stri
   const openTab = useRunLogsDrawerStore((state) => state.openTab);
 
   const handleClick = useCallback(() => {
-    openTab({ runId: run.runId, projectId: run.projectId, label: runName });
-  }, [openTab, run.projectId, run.runId, runName]);
+    openTab({ runId: run.runId, projectId: run.projectId, scriptId: run.scriptId, label: runName });
+  }, [openTab, run.projectId, run.runId, run.scriptId, runName]);
 
   return (
     <Popover>

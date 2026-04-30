@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Schedule, Schema } from "effect";
 
 import { baseProviderKind, ServiceHealthCheck } from "@t3tools/contracts";
 
@@ -14,6 +14,7 @@ import { slugifyServiceName } from "../utils.ts";
 
 const RUN_INFERENCE_OPERATION = "inferManagedRunServices";
 const MAX_EVIDENCE_LINES = 40;
+const STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 
 const LlmServiceHealthCheck = Schema.Union([
   Schema.Struct({
@@ -359,9 +360,9 @@ const makeManagedRunInference = Effect.gen(function* () {
       }
 
       return yield* Effect.gen(function* () {
-        const rawPayload =
+        const rawPayload = yield* (
           provider === "claudeAgent"
-            ? yield* runClaudeStructuredOutput({
+            ? runClaudeStructuredOutput({
                 operation: RUN_INFERENCE_OPERATION,
                 cwd: input.cwd,
                 prompt,
@@ -390,7 +391,7 @@ const makeManagedRunInference = Effect.gen(function* () {
                   ? { fastMode: modelSelection.options.fastMode }
                   : {}),
               })
-            : yield* runCodexStructuredOutput({
+            : runCodexStructuredOutput({
                 operation: RUN_INFERENCE_OPERATION,
                 cwd: input.cwd,
                 prompt,
@@ -417,7 +418,13 @@ const makeManagedRunInference = Effect.gen(function* () {
                 typeof modelSelection.options.fastMode === "boolean"
                   ? { fastMode: modelSelection.options.fastMode }
                   : {}),
-              });
+              })
+        ).pipe(
+          Effect.retry({
+            schedule: Schedule.spaced("250 millis"),
+            times: STRUCTURED_OUTPUT_RETRY_COUNT,
+          }),
+        );
 
         const groundingFailures: string[] = [];
         const runtimeServices = rawPayload.services.flatMap((service) => {
@@ -469,8 +476,7 @@ const makeManagedRunInference = Effect.gen(function* () {
           ];
         });
 
-        const status: ManagedRunInferenceResult["status"] =
-          runtimeServices.length > 0 ? "ready" : "failed";
+        const status: ManagedRunInferenceResult["status"] = "ready";
 
         return {
           provider,
@@ -483,8 +489,7 @@ const makeManagedRunInference = Effect.gen(function* () {
             runtimeServices,
           },
           runtimeServices,
-          inferenceError:
-            status === "failed" ? "Managed run inference returned no canonical services." : null,
+          inferenceError: null,
           groundingFailures,
           evidenceExcerpt: input.evidenceExcerpt,
         } satisfies ManagedRunInferenceResult;

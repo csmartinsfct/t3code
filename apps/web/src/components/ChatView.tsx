@@ -2382,6 +2382,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const [activeManagedRuns, setActiveManagedRuns] = useState<ReadonlyArray<ManagedRunSummary>>([]);
+  const activeManagedRunsRef = useRef<ReadonlyArray<ManagedRunSummary>>([]);
+
+  useEffect(() => {
+    activeManagedRunsRef.current = activeManagedRuns;
+  }, [activeManagedRuns]);
 
   const { handleRunEvent } = useManagedRunCompletionToasts({
     projectId: activeProject?.id,
@@ -2393,6 +2398,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const projectId = activeProject?.id;
     if (!api || !projectId) {
       setActiveManagedRuns([]);
+      activeManagedRunsRef.current = [];
       return;
     }
 
@@ -2405,20 +2411,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return next;
     };
 
+    const resolveRunLabel = (run: ManagedRunSummary) => {
+      const script = activeProject?.scripts?.find((candidate) => candidate.id === run.scriptId);
+      return script?.name ?? run.scriptId;
+    };
+
     return api.managedRuns.onEvent(projectId, (event) => {
       handleRunEvent(event);
       if (event.type === "snapshot") {
         setActiveManagedRuns(event.runs);
+        activeManagedRunsRef.current = event.runs;
         return;
       }
       if (event.type === "removed") {
-        setActiveManagedRuns((current) => current.filter((run) => run.runId !== event.runId));
+        setActiveManagedRuns((current) => {
+          const next = current.filter((run) => run.runId !== event.runId);
+          activeManagedRunsRef.current = next;
+          return next;
+        });
         useRunLogsDrawerStore.getState().closeTab(event.runId);
         return;
       }
-      setActiveManagedRuns((current) => upsertRun(current, event.run));
+      if (event.run.status === "starting" || event.run.status === "running") {
+        useRunLogsDrawerStore.getState().retargetStaleScriptTab({
+          runId: event.run.runId,
+          projectId: event.run.projectId,
+          scriptId: event.run.scriptId,
+          label: resolveRunLabel(event.run),
+          activeRunIds: [...activeManagedRunsRef.current.map((run) => run.runId), event.run.runId],
+        });
+      }
+      setActiveManagedRuns((current) => {
+        const next = upsertRun(current, event.run);
+        activeManagedRunsRef.current = next;
+        return next;
+      });
     });
-  }, [activeProject?.id, handleRunEvent]);
+  }, [activeProject?.id, activeProject?.scripts, handleRunEvent]);
 
   useEffect(() => {
     if (!pendingPullRequestSetupRequest || !activeProject || !activeThreadId || !activeThread) {

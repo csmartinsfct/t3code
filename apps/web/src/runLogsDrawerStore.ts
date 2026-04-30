@@ -10,6 +10,7 @@ const HEIGHT_STORAGE_KEY = "t3code:run-logs-drawer:height:v1";
 export interface RunLogsTab {
   readonly runId: string;
   readonly projectId: string;
+  readonly scriptId: string;
   readonly openedAt: string;
   /**
    * Display label captured at open time. Persists across run-stop / eviction
@@ -29,7 +30,14 @@ interface RunLogsDrawerState {
   readonly tabs: ReadonlyArray<RunLogsTab>;
   readonly activeRunId: string | null;
   readonly height: number;
-  openTab: (input: { runId: string; projectId: string; label: string }) => void;
+  openTab: (input: { runId: string; projectId: string; scriptId: string; label: string }) => void;
+  retargetStaleScriptTab: (input: {
+    runId: string;
+    projectId: string;
+    scriptId: string;
+    label: string;
+    activeRunIds: ReadonlyArray<string>;
+  }) => void;
   closeTab: (runId: string) => void;
   setActive: (runId: string) => void;
   setActiveService: (runId: string, serviceId: string | null) => void;
@@ -61,17 +69,20 @@ export const useRunLogsDrawerStore = create<RunLogsDrawerState>((set, get) => ({
   tabs: [],
   activeRunId: null,
   height: readPersistedHeight(),
-  openTab: ({ runId, projectId, label }) =>
+  openTab: ({ runId, projectId, scriptId, label }) =>
     set((state) => {
       const existing = state.tabs.find((tab) => tab.runId === runId);
       if (existing) {
         // Refresh the cached label in case the script was renamed since open.
-        const tabs = state.tabs.map((tab) => (tab.runId === runId ? { ...tab, label } : tab));
+        const tabs = state.tabs.map((tab) =>
+          tab.runId === runId ? { ...tab, projectId, scriptId, label } : tab,
+        );
         return { tabs, activeRunId: runId };
       }
       const nextTab: RunLogsTab = {
         runId,
         projectId,
+        scriptId,
         openedAt: new Date().toISOString(),
         label,
         activeServiceId: null,
@@ -79,6 +90,39 @@ export const useRunLogsDrawerStore = create<RunLogsDrawerState>((set, get) => ({
       return {
         tabs: [...state.tabs, nextTab],
         activeRunId: runId,
+      };
+    }),
+  retargetStaleScriptTab: ({ runId, projectId, scriptId, label, activeRunIds }) =>
+    set((state) => {
+      const activeRunIdSet = new Set(activeRunIds);
+      const staleTab = state.tabs.find(
+        (tab) =>
+          tab.projectId === projectId &&
+          tab.scriptId === scriptId &&
+          tab.runId !== runId &&
+          !activeRunIdSet.has(tab.runId),
+      );
+      if (!staleTab) return state;
+
+      const alreadyOpen = state.tabs.some((tab) => tab.runId === runId);
+      const tabs = alreadyOpen
+        ? state.tabs.filter((tab) => tab.runId !== staleTab.runId)
+        : state.tabs.map((tab) =>
+            tab.runId === staleTab.runId
+              ? {
+                  ...tab,
+                  runId,
+                  projectId,
+                  scriptId,
+                  label,
+                  openedAt: new Date().toISOString(),
+                  activeServiceId: null,
+                }
+              : tab,
+          );
+      return {
+        tabs,
+        activeRunId: state.activeRunId === staleTab.runId ? runId : state.activeRunId,
       };
     }),
   closeTab: (runId) =>

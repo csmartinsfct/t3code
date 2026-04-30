@@ -205,7 +205,9 @@ Implementation: `apps/server/src/managedRuns/healthCheck.ts`
 
 ### Inference + polling
 
-`ManagedRunInference` performs **one** structured LLM call per run — same code path for legacy and composite. The call is fed the merged log across all services (legacy reads `<runId>.ndjson`; composite's `<runId>/` directory is auto-merged by `readNdjsonLines`) and the run's full `declaredServices` list. ANSI-styled terminal output is normalized before URL/port extraction so tools like Vite can be inferred reliably. The LLM proposes runtime services with canonical health checks; schema-valid health checks are adopted, then normal health validation determines whether those targets are reachable.
+`ManagedRunInference` performs **one** structured LLM call per run — same code path for legacy and composite. Actual structured-output request failures are retried twice with a short delay before the run records inference as failed. The call is fed the merged log across all services (legacy reads `<runId>.ndjson`; composite's `<runId>/` directory is auto-merged by `readNdjsonLines`) and the run's full `declaredServices` list. ANSI-styled terminal output is normalized before URL/port extraction so tools like Vite can be inferred reliably. The LLM proposes runtime services with canonical health checks; schema-valid health checks are adopted, then normal health validation determines whether those targets are reachable.
+
+An empty useful inference result is not a failure. If the model returns no canonical runtime services, inference is recorded as `ready` with zero runtime services and no inference error; the UI simply has no inferred target to show. `failed` is reserved for failures in the inference request/runner itself.
 
 For composite runs there's a small post-pass: each LLM-emitted runtime service carries a `declaredServiceName`, which we match against the run's declared services to look up the deterministic composite serviceId; that overrides the LLM's auto-slug so per-service tabs/streams line up. Any matched schema-valid service replaces its stub in `runtimeServices`; services the model omits or cannot express with a valid health check keep their stub so the per-service tab still renders. Hallucinated services with no matching declared name are dropped.
 
@@ -298,6 +300,7 @@ A bottom-anchored drawer that shows live and historical NDJSON logs for any acti
 - Read-only xterm viewport (`disableStdin: true`); theme + fonts shared via `apps/web/src/components/terminal/xtermShared.ts`.
 - Drawer height is independently resizable and persists in `localStorage` under `t3code:run-logs-drawer:height:v1`.
 - State lives in `apps/web/src/runLogsDrawerStore.ts` (Zustand). Tabs are session-only — they clear on page reload. The store also tracks the active sub-tab per run (`activeServiceId`).
+- Tabs remember the script they were opened for. If the user stops a run while its logs tab is open and starts the same script again, the stale tab is retargeted to the fresh `runId` so live logs resume instead of staying attached to the stopped process.
 - The drawer reacts to `removed` stream events (see [Orphan cleanup](#orphan-cleanup)): when a run's action is deleted, the corresponding tab closes immediately.
 
 ### Log streaming (`useManagedRunLogs`)

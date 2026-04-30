@@ -345,7 +345,7 @@ ProjectScript {
 
 ### Service inference
 
-An LLM analyzes script output logs to infer what services are running, their roles (frontend, backend, proxy, worker, database, devtool), URLs, and health status. Inference records include the model used, raw/normalized payloads, provenance metadata, and confidence levels. Inferred health checks are adopted when they satisfy the schema, then regular service validation determines whether each target is reachable.
+An LLM analyzes script output logs to infer what services are running, their roles (frontend, backend, proxy, worker, database, devtool), URLs, and health status. Inference records include the model used, raw/normalized payloads, provenance metadata, and confidence levels. Inferred health checks are adopted when they satisfy the schema, then regular service validation determines whether each target is reachable. A zero-service inference result is treated as a successful empty result; only inference request or runner errors are marked failed, after a short retry window.
 
 **User interaction:**
 
@@ -353,6 +353,7 @@ An LLM analyzes script output logs to infer what services are running, their rol
 - Click to see service details: role, URL (with copy/open buttons), validation status.
 - Launch scripts from the project action menu.
 - Stop scripts manually.
+- Keep an open run-logs drawer attached across stop/start cycles for the same script; stale tabs retarget to the fresh run so live logs resume.
 - View inference records in Settings → Managed Runs with detailed JSON payloads.
 
 **Agent interaction (REST API — `/api/managed-runs`):**
