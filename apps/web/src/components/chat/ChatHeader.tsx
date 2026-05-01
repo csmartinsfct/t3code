@@ -9,7 +9,7 @@ import { memo } from "react";
 import type { MultiRepoGitStatus } from "../../lib/multiRepoTypes";
 import type { UseOrchestrationSwitcherReturn } from "../../hooks/useOrchestrationSwitcher";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, FolderOpenIcon, ListTodoIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -42,6 +42,8 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   multiRepoStatus: MultiRepoGitStatus;
   diffOpen: boolean;
+  fileExplorerOpen: boolean;
+  fileExplorerAvailable: boolean;
   onTogglePlanSidebar: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
@@ -49,6 +51,7 @@ interface ChatHeaderProps {
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
+  onToggleFileExplorer: () => void;
   orchestrationSwitcher: UseOrchestrationSwitcherReturn | null;
   onSwitchThread: ((threadId: string) => void) | undefined;
   activeTicketBadge?:
@@ -87,6 +90,8 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   multiRepoStatus,
   diffOpen,
+  fileExplorerOpen,
+  fileExplorerAvailable,
   onTogglePlanSidebar,
   onRunProjectScript,
   onAddProjectScript,
@@ -94,6 +99,7 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onToggleTerminal,
   onToggleDiff,
+  onToggleFileExplorer,
   orchestrationSwitcher,
   onSwitchThread,
   activeTicketBadge,
@@ -207,6 +213,30 @@ export const ChatHeader = memo(function ChatHeader({
               : terminalToggleShortcutLabel
                 ? `Toggle terminal drawer (${terminalToggleShortcutLabel})`
                 : "Toggle terminal drawer"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={fileExplorerOpen}
+                onPressedChange={onToggleFileExplorer}
+                aria-label="Toggle file explorer"
+                variant="outline"
+                size="xs"
+                disabled={!fileExplorerAvailable}
+              >
+                <FolderOpenIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {!fileExplorerAvailable
+              ? "File explorer is unavailable until this thread has an active project."
+              : fileExplorerOpen
+                ? "Close file explorer"
+                : "Open file explorer"}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>

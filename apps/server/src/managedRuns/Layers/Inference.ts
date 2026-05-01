@@ -285,15 +285,28 @@ function buildPrompt(input: ManagedRunInferenceInput): string {
   ].join("\n");
 }
 
-function normalizeHealthCheck(
+export function normalizeHealthCheck(
   healthCheck: typeof LlmServiceHealthCheck.Type | null,
 ): typeof ServiceHealthCheck.Type | null {
   if (healthCheck === null) {
     return null;
   }
 
+  const normalized =
+    healthCheck.type === "port" && healthCheck.host === null
+      ? {
+          type: healthCheck.type,
+          port: healthCheck.port,
+        }
+      : healthCheck.type === "command" && healthCheck.cwd === null
+        ? {
+            type: healthCheck.type,
+            command: healthCheck.command,
+          }
+        : healthCheck;
+
   try {
-    return Schema.decodeUnknownSync(ServiceHealthCheck)(healthCheck);
+    return Schema.decodeUnknownSync(ServiceHealthCheck)(normalized);
   } catch {
     return null;
   }
