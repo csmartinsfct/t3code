@@ -42,6 +42,7 @@ describe("OrchestrateConfirmDialog model labels", () => {
     expect(
       getRunnableTicketIdentifiers({
         kind: "valid",
+        externalDeps: [],
         orderedTickets: [
           {
             annotation: "warn-reprocess",
@@ -80,14 +81,30 @@ describe("OrchestrateConfirmDialog model labels", () => {
 
     expect(
       isOrchestrationSubmitDisabled({
-        plan: { kind: "valid", orderedTickets: [] },
+        plan: { kind: "valid", orderedTickets: [], externalDeps: [] },
         isSubmitting: true,
       }),
     ).toBe(true);
 
     expect(
       isOrchestrationSubmitDisabled({
-        plan: { kind: "valid", orderedTickets: [] },
+        plan: { kind: "valid", orderedTickets: [], externalDeps: [] },
+        isSubmitting: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      isOrchestrationSubmitDisabled({
+        plan: {
+          kind: "valid",
+          orderedTickets: [],
+          externalDeps: [
+            {
+              ticket: { identifier: "T3CO-1" } as never,
+              dependsOn: { identifier: "T3CO-2", title: "Dependency", status: "todo" },
+            },
+          ],
+        },
         isSubmitting: false,
       }),
     ).toBe(false);
@@ -102,6 +119,7 @@ describe("OrchestrateConfirmDialog model labels", () => {
       submitOrchestrationConfirm({
         plan: {
           kind: "valid",
+          externalDeps: [],
           orderedTickets: [
             {
               annotation: "will-run",
@@ -128,6 +146,7 @@ describe("OrchestrateConfirmDialog model labels", () => {
       submitOrchestrationConfirm({
         plan: {
           kind: "valid",
+          externalDeps: [],
           orderedTickets: [
             {
               annotation: "will-run",

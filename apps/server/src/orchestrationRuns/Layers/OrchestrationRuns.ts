@@ -234,15 +234,6 @@ export const makeOrchestrationRunServiceFromDeps = (deps: OrchestrationRunServic
           flattenTicketTree(ticketTree),
         );
 
-        if (plan.kind === "blocked-external") {
-          const first = plan.externalDeps[0];
-          return yield* new OrchestrationRunError({
-            message: first
-              ? `Cannot orchestrate ${first.ticket.identifier} because it depends on unfinished ticket ${first.dependsOn.identifier}`
-              : "Cannot orchestrate because there are unfinished external dependencies",
-          });
-        }
-
         if (plan.kind === "blocked-cycle") {
           return yield* new OrchestrationRunError({
             message: "Cannot orchestrate because the selected tickets contain a dependency cycle",

@@ -161,6 +161,10 @@ export function OrchestrateConfirmDialog({
 
             <DialogPanel>
               <div className="flex flex-col gap-3">
+                {plan.externalDeps.length > 0 ? (
+                  <BlockedExternalState externalDeps={plan.externalDeps} />
+                ) : null}
+
                 {/* Execution order list */}
                 <div className="flex flex-col gap-1">
                   {plan.orderedTickets.map((entry, index) => (
@@ -202,11 +206,6 @@ export function OrchestrateConfirmDialog({
               </Button>
             </DialogFooter>
           </>
-        ) : plan?.kind === "blocked-external" ? (
-          <BlockedExternalState
-            externalDeps={plan.externalDeps}
-            onClose={() => onOpenChange(false)}
-          />
         ) : plan?.kind === "blocked-cycle" ? (
           <BlockedCycleState cycles={plan.cycles} onClose={() => onOpenChange(false)} />
         ) : null}
@@ -361,51 +360,38 @@ function ErrorState({ error, onClose }: { error: string; onClose: () => void }) 
 
 function BlockedExternalState({
   externalDeps,
-  onClose,
 }: {
   externalDeps: Array<{
     ticket: TicketSummary;
     dependsOn: { identifier: string; title: string; status: string };
   }>;
-  onClose: () => void;
 }) {
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <TriangleAlertIcon className="size-4 text-amber-500" />
-          Cannot orchestrate
-        </DialogTitle>
-        <DialogDescription>
-          Some selected tickets depend on unfinished tickets that are not included in this
-          orchestration. Complete or include them first.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogPanel>
-        <div className="flex flex-col gap-2">
-          {externalDeps.map((dep, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs"
-            >
-              <span className="font-mono text-muted-foreground">{dep.ticket.identifier}</span>
-              <LinkIcon className="size-3 shrink-0 text-muted-foreground" />
-              <span className="font-mono text-amber-600 dark:text-amber-400">
-                {dep.dependsOn.identifier}
-              </span>
-              <Badge size="sm" variant="outline" className="ml-auto shrink-0">
-                {dep.dependsOn.status.replace("_", " ")}
-              </Badge>
-            </div>
-          ))}
-        </div>
-      </DialogPanel>
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          Close
-        </Button>
-      </DialogFooter>
-    </>
+    <div className="flex flex-col gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+      <div className="flex items-center gap-2 text-xs">
+        <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-500" />
+        <span className="text-muted-foreground">
+          Some included tickets have unfinished dependencies outside this run.
+        </span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {externalDeps.map((dep) => (
+          <div
+            key={`${dep.ticket.identifier}:${dep.dependsOn.identifier}`}
+            className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-background/40 px-2.5 py-2 text-xs"
+          >
+            <span className="font-mono text-muted-foreground">{dep.ticket.identifier}</span>
+            <LinkIcon className="size-3 shrink-0 text-muted-foreground" />
+            <span className="font-mono text-amber-600 dark:text-amber-400">
+              {dep.dependsOn.identifier}
+            </span>
+            <Badge size="sm" variant="outline" className="ml-auto shrink-0">
+              {dep.dependsOn.status.replace("_", " ")}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

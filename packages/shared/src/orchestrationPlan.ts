@@ -15,6 +15,7 @@ export interface ExternalDep {
 }
 
 interface DependencyDescriptor {
+  ticketId: TicketId;
   dependsOnTicketId: TicketId;
   identifier: string;
   title: string;
@@ -22,8 +23,7 @@ interface DependencyDescriptor {
 }
 
 export type OrchestrationPlan =
-  | { kind: "valid"; orderedTickets: OrchestrationPlanTicket[] }
-  | { kind: "blocked-external"; externalDeps: ExternalDep[] }
+  | { kind: "valid"; orderedTickets: OrchestrationPlanTicket[]; externalDeps: ExternalDep[] }
   | { kind: "blocked-cycle"; cycles: TicketSummary[][] };
 
 const STATUS_ORDER: Record<TicketStatus, number> = {
@@ -94,6 +94,7 @@ function buildTreeIndexes(input: {
         node.ticket.id,
         nodeDependencies.map((dep) => ({
           dependsOnTicketId: dep.dependsOnTicketId,
+          ticketId: dep.ticketId,
           identifier: dep.identifier,
           title: dep.title,
           status: dep.status,
@@ -295,7 +296,7 @@ export function buildOrchestrationPlan(
   allTickets: readonly TicketSummary[],
 ): OrchestrationPlan {
   if (selectedIds.size === 0) {
-    return { kind: "valid", orderedTickets: [] };
+    return { kind: "valid", orderedTickets: [], externalDeps: [] };
   }
 
   const { ticketById, depsById, childIdsByParentId, parentIdByTicketId } = buildTreeIndexes({
@@ -373,14 +374,15 @@ export function buildOrchestrationPlan(
     const deps = collectInheritedDependencies(ticket.id);
     for (const dep of deps) {
       if (selectedTreeIds.has(dep.dependsOnTicketId)) continue;
+      const sourceTicket = ticketById.get(dep.ticketId) ?? ticket;
       const depTicket = ticketById.get(dep.dependsOnTicketId);
       const depStatus = depTicket?.status ?? dep.status;
       if (TERMINAL_STATUSES.has(depStatus)) continue;
-      const externalDepKey = `${ticket.id}:${dep.dependsOnTicketId}`;
+      const externalDepKey = `${sourceTicket.id}:${dep.dependsOnTicketId}`;
       if (seenExternalDeps.has(externalDepKey)) continue;
       seenExternalDeps.add(externalDepKey);
       externalDeps.push({
-        ticket,
+        ticket: sourceTicket,
         dependsOn: {
           identifier: depTicket?.identifier ?? dep.identifier,
           title: depTicket?.title ?? dep.title,
@@ -388,10 +390,6 @@ export function buildOrchestrationPlan(
         },
       });
     }
-  }
-
-  if (externalDeps.length > 0) {
-    return { kind: "blocked-external", externalDeps };
   }
 
   const runnableTickets = selectedTickets.filter((ticket) => !TERMINAL_STATUSES.has(ticket.status));
@@ -433,7 +431,7 @@ export function buildOrchestrationPlan(
     })),
   ];
 
-  return { kind: "valid", orderedTickets };
+  return { kind: "valid", orderedTickets, externalDeps };
 }
 
 export function getSelectedTicketForExecutionEntry<TTicket>(input: {

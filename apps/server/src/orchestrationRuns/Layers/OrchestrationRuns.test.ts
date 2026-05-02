@@ -6,6 +6,7 @@ import {
   ThreadId,
   TicketId,
   type Ticket,
+  type TicketDependency,
   type TicketTreeNode,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
@@ -99,6 +100,14 @@ const makeTicketTreeResult = (...tickets: ReadonlyArray<Ticket>) => ({
   roots: makeTicketTree(...tickets),
   truncated: false,
   totalCount: tickets.length,
+});
+
+const makeTicketDependency = (ticket: Ticket, dependsOn: Ticket): TicketDependency => ({
+  ticketId: ticket.id,
+  dependsOnTicketId: dependsOn.id,
+  identifier: dependsOn.identifier,
+  title: dependsOn.title,
+  status: dependsOn.status,
 });
 
 const makeThread = (
@@ -386,6 +395,82 @@ describe("OrchestrationRunService", () => {
     expect(threadCreates).toHaveLength(2);
     expect(threadCreates[1]?.title).toBe(ticket.title);
     expect(result.workingThreadIds).toHaveLength(1);
+  });
+
+  it("allows creating a run when selected tickets have unfinished external dependencies", async () => {
+    const ticket = makeTicket({ id: "ticket-1", identifier: "T3CO-1", title: "First ticket" });
+    const dependency = makeTicket({
+      id: "ticket-2",
+      identifier: "T3CO-2",
+      title: "External dependency",
+    });
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const createdRuns: PersistedOrchestrationRun[] = [];
+    const layer = makeServiceLayer({
+      repository: makeRunRepository({
+        create: (input) =>
+          Effect.sync(() => {
+            createdRuns.push(input);
+          }),
+      }),
+      ticketing: makeTicketingService({
+        getTree: () =>
+          Effect.succeed({
+            roots: [
+              {
+                ticket: {
+                  ...ticket,
+                  subTicketCount: 0,
+                  dependencyCount: 1,
+                },
+                children: [],
+                dependencies: [makeTicketDependency(ticket, dependency)],
+              },
+              {
+                ticket: {
+                  ...dependency,
+                  subTicketCount: 0,
+                  dependencyCount: 0,
+                },
+                children: [],
+                dependencies: [],
+              },
+            ],
+            truncated: false,
+            totalCount: 2,
+          }),
+        getByIdentifier: ({ identifier }) =>
+          identifier === ticket.identifier
+            ? Effect.succeed(ticket)
+            : Effect.die(new Error("unexpected ticket lookup")),
+      }),
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatchedCommands.push(command);
+          return { sequence: dispatchedCommands.length };
+        }),
+    });
+
+    const result = await Effect.runPromise(
+      serviceEffect(layer, (service) =>
+        service.create({
+          projectId,
+          selectedTicketIdentifiers: [ticket.identifier],
+          implementerModelSelection: baseModelSelection,
+          reviewerModelSelection: baseModelSelection,
+          maxReviewIterations: 0,
+        }),
+      ),
+    );
+
+    expect(result.workingThreadIds).toHaveLength(1);
+    expect(JSON.parse(createdRuns[0]?.ticketOrderJson ?? "[]")).toEqual([
+      {
+        ticketId: ticket.id,
+        selectedTicketId: ticket.id,
+        workingThreadId: expect.any(String),
+      },
+    ]);
   });
 
   it("rejects tickets that belong to a different project", async () => {

@@ -132,7 +132,7 @@ describe("buildOrchestrationPlan", () => {
     ]);
   });
 
-  it("still blocks external dependencies for execution leaves", () => {
+  it("surfaces external dependency warnings without blocking execution leaves", () => {
     const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
     const child = makeTicket({
       id: "child" as TicketId,
@@ -151,7 +151,54 @@ describe("buildOrchestrationPlan", () => {
 
     const plan = buildOrchestrationPlan(new Set([parent.id]), tree, [parent, child, dep]);
 
-    expect(plan.kind).toBe("blocked-external");
+    expect(plan.kind).toBe("valid");
+    if (plan.kind !== "valid") return;
+
+    expect(plan.orderedTickets.map((entry) => entry.ticket.identifier)).toEqual(["T-CHILD"]);
+    expect(plan.externalDeps).toEqual([
+      expect.objectContaining({
+        ticket: expect.objectContaining({ identifier: "T-CHILD" }),
+        dependsOn: expect.objectContaining({ identifier: "T-DEP" }),
+      }),
+    ]);
+  });
+
+  it("reports inherited external dependency warnings on the ancestor that owns them", () => {
+    const parent = makeTicket({ id: "parent" as TicketId, identifier: "T-PARENT" });
+    const childA = makeTicket({
+      id: "child-a" as TicketId,
+      identifier: "T-CHILD-A",
+      parentId: parent.id,
+      sortOrder: 1000,
+    });
+    const childB = makeTicket({
+      id: "child-b" as TicketId,
+      identifier: "T-CHILD-B",
+      parentId: parent.id,
+      sortOrder: 2000,
+    });
+    const dep = makeTicket({ id: "dep" as TicketId, identifier: "T-DEP" });
+    const tree = [
+      makeTreeNode(
+        parent,
+        [makeDep(parent.id, dep.id, dep.identifier, "todo")],
+        [makeTreeNode(childA), makeTreeNode(childB)],
+      ),
+      makeTreeNode(dep),
+    ];
+
+    const plan = buildOrchestrationPlan(new Set([parent.id]), tree, [parent, childA, childB, dep]);
+
+    expect(plan.kind).toBe("valid");
+    if (plan.kind !== "valid") return;
+
+    expect(plan.externalDeps).toHaveLength(1);
+    expect(plan.externalDeps[0]).toEqual(
+      expect.objectContaining({
+        ticket: expect.objectContaining({ identifier: "T-PARENT" }),
+        dependsOn: expect.objectContaining({ identifier: "T-DEP" }),
+      }),
+    );
   });
 });
 

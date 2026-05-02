@@ -179,7 +179,7 @@ describe("buildOrchestrationPlan", () => {
     }
   });
 
-  it("blocks a selected leaf when its parent has an unmet external dependency", () => {
+  it("warns on a selected leaf when its parent has an unmet external dependency", () => {
     const phase2 = makeTicket({ id: "phase-2" as TicketId, identifier: "T-PHASE-2" });
     const phase4 = makeTicket({ id: "phase-4" as TicketId, identifier: "T-PHASE-4" });
     const phase4Leaf = makeTicket({
@@ -201,11 +201,11 @@ describe("buildOrchestrationPlan", () => {
       phase4,
       phase4Leaf,
     ]);
-    expect(plan.kind).toBe("blocked-external");
-    if (plan.kind === "blocked-external") {
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
       expect(plan.externalDeps).toEqual([
         expect.objectContaining({
-          ticket: expect.objectContaining({ identifier: "T-PHASE-4-LEAF" }),
+          ticket: expect.objectContaining({ identifier: "T-PHASE-4" }),
           dependsOn: expect.objectContaining({ identifier: "T-PHASE-2" }),
         }),
       ]);
@@ -323,7 +323,7 @@ describe("buildOrchestrationPlan", () => {
     }
   });
 
-  it("blocks on external non-done dependency", () => {
+  it("warns on external non-done dependency", () => {
     const t1 = makeTicket({ id: "1" as TicketId, identifier: "T-1" });
     const t2 = makeTicket({ id: "2" as TicketId, identifier: "T-2" });
     // T-1 depends on T-2, but T-2 is NOT selected
@@ -333,8 +333,8 @@ describe("buildOrchestrationPlan", () => {
     ];
 
     const plan = buildOrchestrationPlan(new Set(["1" as TicketId]), tree, [t1, t2]);
-    expect(plan.kind).toBe("blocked-external");
-    if (plan.kind === "blocked-external") {
+    expect(plan.kind).toBe("valid");
+    if (plan.kind === "valid") {
       expect(plan.externalDeps).toHaveLength(1);
       expect(plan.externalDeps[0]!.dependsOn.identifier).toBe("T-2");
     }

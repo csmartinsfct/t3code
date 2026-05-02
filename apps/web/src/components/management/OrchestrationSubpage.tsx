@@ -465,7 +465,7 @@ export function OrchestrationSubpage({
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {plan?.kind === "blocked-external" ? (
+                {plan?.kind === "valid" && plan.externalDeps.length > 0 ? (
                   <BlockedExternalInline externalDeps={plan.externalDeps} />
                 ) : plan?.kind === "blocked-cycle" ? (
                   <BlockedCycleInline cycles={plan.cycles} />
@@ -827,13 +827,13 @@ function BlockedExternalInline({
       <div className="flex items-center gap-2 text-xs">
         <TriangleAlertIcon className="size-3.5 shrink-0 text-amber-500" />
         <span className="text-muted-foreground">
-          Some selected tickets depend on unfinished tickets not included in this orchestration.
+          Some included tickets have unfinished dependencies outside this run.
         </span>
       </div>
       <div className="flex flex-col gap-2">
-        {externalDeps.map((dep, i) => (
+        {externalDeps.map((dep) => (
           <div
-            key={i}
+            key={`${dep.ticket.identifier}:${dep.dependsOn.identifier}`}
             className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-xs"
           >
             <span className="font-mono text-muted-foreground">{dep.ticket.identifier}</span>
