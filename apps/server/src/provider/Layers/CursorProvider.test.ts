@@ -159,7 +159,7 @@ describe("checkCursorProviderStatus", () => {
               if (joined === "models") {
                 return {
                   stdout:
-                    "Available models\nauto - Auto\ncomposer-2-fast - Composer 2 Fast (current, default)\n",
+                    "Available models\nauto - Auto\ncomposer-2-fast - Composer 2 Fast (current, default)\ncomposer-2 - Composer 2\n",
                   stderr: "",
                   code: 0,
                 };
@@ -187,6 +187,7 @@ describe("checkCursorProviderStatus", () => {
     expect(provider.version).toBe("2026.05.01-eea359f");
     expect(provider.auth.status).toBe("authenticated");
     expect(provider.auth.label).toBe("Cursor Pro");
+    expect(provider.models[0]?.slug).toBe("composer-2");
     expect(provider.models.some((model) => model.slug === "custom-cursor-model")).toBe(true);
   });
 
@@ -222,6 +223,7 @@ describe("checkCursorProviderStatus", () => {
     expect(provider.status).toBe("warning");
     expect(provider.auth.status).toBe("authenticated");
     expect(provider.message).toContain("models unavailable");
+    expect(provider.models[0]?.slug).toBe("composer-2");
     expect(provider.models.some((model) => model.slug === "composer-2-fast")).toBe(true);
   });
 

@@ -310,9 +310,9 @@ Implemented in T3CO-396:
   `cursor:<profileId>`.
 - Avoid exposing raw account emails in provider status labels.
 
-Built-in models should start with locally verified names from `agent models` plus
-documented examples such as `gpt-5`, `sonnet-4`, and `sonnet-4-thinking`.
-Unknown/custom model slugs remain supported through settings.
+Built-in models should start with `composer-2` as T3's Cursor default, followed
+by locally verified names from `agent models`. Unknown/custom model slugs remain
+supported through settings.
 
 Deferred:
 

@@ -42,8 +42,8 @@ const CURSOR_MODEL_CAPABILITIES: ModelCapabilities = {
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "auto",
-    name: "Auto",
+    slug: "composer-2",
+    name: "Composer 2",
     isCustom: false,
     capabilities: CURSOR_MODEL_CAPABILITIES,
   },
@@ -54,8 +54,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     capabilities: CURSOR_MODEL_CAPABILITIES,
   },
   {
-    slug: "composer-2",
-    name: "Composer 2",
+    slug: "auto",
+    name: "Auto",
     isCustom: false,
     capabilities: CURSOR_MODEL_CAPABILITIES,
   },

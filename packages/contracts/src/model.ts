@@ -71,7 +71,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<BaseProviderKind, string> = {
   codex: "gpt-5.5",
   claudeAgent: "claude-sonnet-4-6",
   gemini: "auto-gemini-3",
-  cursor: "gpt-5",
+  cursor: "composer-2",
 };
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -81,7 +81,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<BaseProviderK
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
   gemini: "gemini-2.5-flash",
-  cursor: "gpt-5",
+  cursor: "composer-2",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<string, string>> = {
@@ -131,8 +131,10 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<str
   },
   cursor: {
     "cursor-auto": "auto",
-    composer: "auto",
-    "composer-fast": "auto",
+    composer: "composer-2",
+    "cursor-composer": "composer-2",
+    "composer-fast": "composer-2-fast",
+    "cursor-composer-fast": "composer-2-fast",
     gpt5: "gpt-5",
     "cursor-gpt5": "gpt-5",
     sonnet: "sonnet-4",

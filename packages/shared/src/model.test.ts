@@ -83,6 +83,8 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
+    expect(normalizeModelSlug("composer", "cursor")).toBe("composer-2");
+    expect(normalizeModelSlug("composer-fast", "cursor")).toBe("composer-2-fast");
     expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5");
     expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("sonnet-4-thinking");
   });
