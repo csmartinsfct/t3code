@@ -13,9 +13,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { useUiStateStore } from "../../uiStateStore";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SubTicketRowButton, buildTicketDetailLookupInput } from "./KanbanTicketDetail";
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import {
+  SharedSubTicketPreviewPopup,
+  useSubTicketPreviewHoverTarget,
+} from "./SubTicketPreviewPopup";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 interface SubTicketsTreeProps {
@@ -185,44 +187,17 @@ export function SubTicketsTree({
     [orderedTickets, toggleTicket, rangeSelectTo],
   );
 
-  // Single preview state for the whole tree — at most one preview open at a time.
-  // Two timer refs (open: 500ms, close: 750ms) are shared across all rows so
-  // entering any row always cancels whatever the previous row started.
-  const [previewTicketId, setPreviewTicketId] = useState<TicketId | null>(null);
-  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const cancelTimers = useCallback(() => {
-    if (openTimerRef.current !== null) {
-      clearTimeout(openTimerRef.current);
-      openTimerRef.current = null;
-    }
-    if (closeTimerRef.current !== null) {
-      clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => cancelTimers, [cancelTimers]);
-
-  const handleRowMouseEnter = useCallback(
-    (id: TicketId) => {
-      cancelTimers();
-      openTimerRef.current = setTimeout(() => {
-        openTimerRef.current = null;
-        setPreviewTicketId(id);
-      }, 500);
-    },
-    [cancelTimers],
-  );
-
-  const handleRowMouseLeave = useCallback(() => {
-    cancelTimers();
-    closeTimerRef.current = setTimeout(() => {
-      closeTimerRef.current = null;
-      setPreviewTicketId(null);
-    }, 750);
-  }, [cancelTimers]);
+  // Single preview state for the whole tree — one mounted preview shell whose
+  // content/anchor swaps as the pointer moves between rows.
+  const {
+    cancelPreviewTimers,
+    handlePreviewMouseEnter: handleRowMouseEnter,
+    handlePreviewMouseLeave: handleRowMouseLeave,
+    previewTarget,
+  } = useSubTicketPreviewHoverTarget({
+    closeDelayMs: 200,
+    openDelayMs: 300,
+  });
 
   if (roots === null && error === null) {
     return (
@@ -261,7 +236,7 @@ export function SubTicketsTree({
             node={node}
             selectedTicketIds={selectedTicketIds}
             selectedSubtreeTickets={selectedSubtreeTickets}
-            previewTicketId={previewTicketId}
+            previewTicketId={previewTarget?.ticketId ?? null}
             onRowMouseEnter={handleRowMouseEnter}
             onRowMouseLeave={handleRowMouseLeave}
             onMultiSelectClick={handleMultiSelectClick}
@@ -271,11 +246,22 @@ export function SubTicketsTree({
             }}
             onMoveToBoardRequest={onMoveToBoardRequest}
             onArchiveRequest={onArchiveRequest}
-            fetchPreview={fetchPreview}
-            getCached={getCached}
           />
         ))}
       </ul>
+      <SharedSubTicketPreviewPopup
+        anchorElement={previewTarget?.anchorElement ?? null}
+        ticketId={previewTarget?.ticketId ?? null}
+        side="top"
+        align="end"
+        alignOffset={-190}
+        sideOffset={4}
+        collisionPadding={12}
+        fetchPreview={fetchPreview}
+        getCached={getCached}
+        onMouseEnter={cancelPreviewTimers}
+        onMouseLeave={handleRowMouseLeave}
+      />
     </div>
   );
 }
@@ -285,14 +271,12 @@ interface SubTicketTreeNodeRowProps {
   selectedTicketIds: ReadonlySet<TicketId>;
   selectedSubtreeTickets: readonly TicketSummary[];
   previewTicketId: TicketId | null;
-  onRowMouseEnter: (id: TicketId) => void;
+  onRowMouseEnter: (id: TicketId, anchorElement: Element) => void;
   onRowMouseLeave: () => void;
   onMultiSelectClick: (e: React.MouseEvent, sub: TicketSummary) => void;
   onNavigate: (ticketId: TicketId) => void;
   onMoveToBoardRequest: (tickets: readonly TicketSummary[]) => void;
   onArchiveRequest: (tickets: readonly TicketSummary[]) => void;
-  fetchPreview: (id: TicketId) => Promise<Ticket | null>;
-  getCached: (id: TicketId) => Ticket | undefined;
 }
 
 function SubTicketTreeNodeRow({
@@ -306,8 +290,6 @@ function SubTicketTreeNodeRow({
   onNavigate,
   onMoveToBoardRequest,
   onArchiveRequest,
-  fetchPreview,
-  getCached,
 }: SubTicketTreeNodeRowProps) {
   const ticket = node.ticket;
   const ticketId = ticket.id;
@@ -372,17 +354,13 @@ function SubTicketTreeNodeRow({
     ],
   );
 
-  // Anchors the popup to the row header div (chevron + button), not the full
-  // <li> which would include expanded children and misposition the popup.
-  const rowHeaderRef = useRef<HTMLDivElement>(null);
   const isPreviewOpen = previewTicketId === ticketId;
 
   return (
     <li className="flex flex-col" data-ticket-id={ticketId}>
       <div
-        ref={rowHeaderRef}
         className="flex w-full items-center gap-1"
-        onMouseEnter={() => onRowMouseEnter(ticketId)}
+        onMouseEnter={(event) => onRowMouseEnter(ticketId, event.currentTarget)}
         onMouseLeave={onRowMouseLeave}
       >
         {hasChildren ? (
@@ -404,49 +382,26 @@ function SubTicketTreeNodeRow({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <Popover open={isPreviewOpen}>
-            <PopoverTrigger
-              render={
-                <SubTicketRowButton
-                  subTicket={ticket}
-                  isSelected={isSelected}
-                  isDragging={isDragging}
-                  isPreviewOpen={isPreviewOpen}
-                  buttonRef={setNodeRef}
-                  onClick={(e) => {
-                    if (e.altKey || e.metaKey || e.shiftKey) {
-                      onMultiSelectClick(e, ticket);
-                      return;
-                    }
-                    onNavigate(ticketId);
-                  }}
-                  buttonProps={{
-                    "data-ticket-selectable": true,
-                    onContextMenu: handleContextMenu,
-                    ...attributes,
-                    ...listeners,
-                  }}
-                />
+          <SubTicketRowButton
+            subTicket={ticket}
+            isSelected={isSelected}
+            isDragging={isDragging}
+            isPreviewOpen={isPreviewOpen}
+            buttonRef={setNodeRef}
+            onClick={(e) => {
+              if (e.altKey || e.metaKey || e.shiftKey) {
+                onMultiSelectClick(e, ticket);
+                return;
               }
-            />
-            <PopoverPopup
-              anchor={rowHeaderRef}
-              side="top"
-              align="end"
-              alignOffset={-190}
-              sideOffset={4}
-              positionMethod="fixed"
-              collisionAvoidance={{ side: "flip" }}
-              collisionPadding={12}
-              className="w-[380px] [&_[data-slot=popover-viewport]]:pb-0"
-            >
-              <SubTicketPreviewContent
-                ticketId={ticketId}
-                fetchPreview={fetchPreview}
-                getCached={getCached}
-              />
-            </PopoverPopup>
-          </Popover>
+              onNavigate(ticketId);
+            }}
+            buttonProps={{
+              "data-ticket-selectable": true,
+              ...attributes,
+              ...listeners,
+              onContextMenu: handleContextMenu,
+            }}
+          />
         </div>
       </div>
       {isOpen ? (
@@ -467,8 +422,6 @@ function SubTicketTreeNodeRow({
               onNavigate={onNavigate}
               onMoveToBoardRequest={onMoveToBoardRequest}
               onArchiveRequest={onArchiveRequest}
-              fetchPreview={fetchPreview}
-              getCached={getCached}
             />
           ))}
         </ul>

@@ -151,6 +151,8 @@ The ticket detail view supports promoting sub-tickets to top-level board tickets
 - when multiple sub-tickets are selected, right-clicking one of the selected rows offers `Move all tickets to the board`
 - promoting a sub-ticket removes its `parentId`, keeps its current status, refreshes the current detail view in place, and lets the normal ticket stream update the rest of the board
 
+Sub-ticket rows also share one fixed hover preview surface across the flat list and recursive tree. The preview opens near the first hovered row, can be resized from its bottom-right corner, can be dragged from its bottom-left handle, and reuses the same persisted size/position for all sub-ticket previews. While the preview is open, hovering between rows swaps only the body content; the shell does not re-anchor or resize from content, so long descriptions stay clipped inside the internal scroll area.
+
 ### Sort Order Strategy
 
 After `arrayMove`, sort orders are reassigned as `index * 1000` for each ticket in the affected column. This gives clean integer ordering with room for future insertions.

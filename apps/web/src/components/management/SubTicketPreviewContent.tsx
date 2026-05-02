@@ -15,17 +15,37 @@ export function SubTicketPreviewContent({
   fetchPreview,
   getCached,
 }: SubTicketPreviewContentProps) {
-  const [ticket, setTicket] = useState<Ticket | null | undefined>(getCached(ticketId) ?? undefined);
+  const [loadedPreview, setLoadedPreview] = useState<{
+    ticket: Ticket | null | undefined;
+    ticketId: TicketId;
+  }>(() => ({
+    ticket: getCached(ticketId) ?? undefined,
+    ticketId,
+  }));
+
+  const cachedTicket = getCached(ticketId);
+  const ticket =
+    loadedPreview.ticketId === ticketId ? loadedPreview.ticket : (cachedTicket ?? undefined);
 
   useEffect(() => {
     const cached = getCached(ticketId);
     if (cached) {
-      setTicket(cached);
+      setLoadedPreview({ ticket: cached, ticketId });
       return;
     }
+    setLoadedPreview((currentPreview) =>
+      currentPreview.ticketId === ticketId
+        ? currentPreview
+        : {
+            ticket: undefined,
+            ticketId,
+          },
+    );
     let cancelled = false;
     void fetchPreview(ticketId).then((result) => {
-      if (!cancelled) setTicket(result);
+      if (!cancelled) {
+        setLoadedPreview({ ticket: result, ticketId });
+      }
     });
     return () => {
       cancelled = true;
@@ -44,15 +64,15 @@ export function SubTicketPreviewContent({
   const metCount = criteria.filter((c) => c.status === "met").length;
 
   return (
-    <div className="-mr-4 flex max-h-[300px] flex-col gap-3 overflow-y-auto pr-4">
+    <div className="flex min-h-0 min-w-0 max-w-full flex-col gap-3 overflow-hidden [overflow-wrap:anywhere]">
       {/* Title */}
       <h4 className="text-sm font-medium leading-snug text-foreground">{ticket.title}</h4>
 
       {/* Description */}
       {ticket.description && (
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 max-w-full flex-col gap-1 overflow-hidden">
           <span className="text-[11px] font-medium text-muted-foreground">Description</span>
-          <div className="text-foreground/80">
+          <div className="min-w-0 max-w-full overflow-hidden text-foreground/80">
             <TicketMarkdown>{ticket.description}</TicketMarkdown>
           </div>
         </div>
@@ -65,8 +85,8 @@ export function SubTicketPreviewContent({
             Acceptance Criteria ({metCount}/{criteria.length})
           </span>
           <div className="flex flex-col gap-1">
-            {criteria.map((c, i) => (
-              <ReadOnlyCriterion key={i} criterion={c} />
+            {criteria.map((c) => (
+              <ReadOnlyCriterion key={c.id ?? `${c.status}-${c.text}`} criterion={c} />
             ))}
           </div>
         </div>
@@ -92,7 +112,7 @@ function ReadOnlyCriterion({ criterion }: { criterion: AcceptanceCriterion }) {
         )}
       </div>
       <span
-        className={`text-xs leading-snug ${
+        className={`min-w-0 max-w-full text-xs leading-snug [overflow-wrap:anywhere] ${
           criterion.status === "met"
             ? "text-muted-foreground line-through"
             : criterion.status === "not_met"
@@ -108,7 +128,7 @@ function ReadOnlyCriterion({ criterion }: { criterion: AcceptanceCriterion }) {
 
 function PreviewSkeleton() {
   return (
-    <div className="flex animate-pulse flex-col gap-3">
+    <div className="flex animate-pulse flex-col gap-3" data-testid="sub-ticket-preview-skeleton">
       <div className="h-4 w-3/4 rounded bg-muted" />
       <div className="flex flex-col gap-1.5">
         <div className="h-3 w-full rounded bg-muted" />

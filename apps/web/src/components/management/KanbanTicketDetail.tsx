@@ -43,9 +43,11 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import {
+  SharedSubTicketPreviewPopup,
+  useSubTicketPreviewHoverTarget,
+} from "./SubTicketPreviewPopup";
 import { SubTicketsTree } from "./SubTicketsTree";
 import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
@@ -1356,6 +1358,12 @@ export function SubTicketsList({
     return cacheRef.current.get(id as string);
   }, []);
 
+  const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
+    useSubTicketPreviewHoverTarget({
+      closeDelayMs: 200,
+      openDelayMs: 300,
+    });
+
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-medium text-muted-foreground">
@@ -1376,11 +1384,20 @@ export function SubTicketsList({
             onArchiveRequest={onArchiveRequest}
             selectedTicketIds={selectedTicketIds}
             selectedTickets={selectedSubTickets}
-            fetchPreview={fetchPreview}
-            getCached={getCached}
+            isPreviewOpen={previewTarget?.ticketId === sub.id}
+            onPreviewMouseEnter={handlePreviewMouseEnter}
+            onPreviewMouseLeave={handlePreviewMouseLeave}
           />
         ))}
       </div>
+      <SharedSubTicketPreviewPopup
+        anchorElement={previewTarget?.anchorElement ?? null}
+        ticketId={previewTarget?.ticketId ?? null}
+        fetchPreview={fetchPreview}
+        getCached={getCached}
+        onMouseEnter={cancelPreviewTimers}
+        onMouseLeave={handlePreviewMouseLeave}
+      />
     </div>
   );
 }
@@ -1394,8 +1411,9 @@ function DraggableSubTicket({
   onArchiveRequest,
   selectedTicketIds,
   selectedTickets,
-  fetchPreview,
-  getCached,
+  isPreviewOpen,
+  onPreviewMouseEnter,
+  onPreviewMouseLeave,
 }: {
   sub: TicketSummary;
   isSelected: boolean;
@@ -1405,8 +1423,9 @@ function DraggableSubTicket({
   onArchiveRequest: (tickets: readonly TicketSummary[]) => void;
   selectedTicketIds: ReadonlySet<TicketId>;
   selectedTickets: readonly TicketSummary[];
-  fetchPreview: (id: TicketId) => Promise<Ticket | null>;
-  getCached: (id: TicketId) => Ticket | undefined;
+  isPreviewOpen: boolean;
+  onPreviewMouseEnter: (id: TicketId, anchorElement: Element) => void;
+  onPreviewMouseLeave: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: sub.id,
@@ -1444,46 +1463,27 @@ function DraggableSubTicket({
   );
 
   return (
-    <Popover>
-      <PopoverTrigger
-        openOnHover
-        delay={300}
-        closeDelay={150}
-        render={
-          <SubTicketRowButton
-            subTicket={sub}
-            isSelected={isSelected}
-            isDragging={isDragging}
-            buttonRef={setNodeRef}
-            onClick={(e) => {
-              if (e.altKey || e.metaKey || e.shiftKey) {
-                onMultiSelectClick(e, sub);
-                return;
-              }
-              onNavigate();
-            }}
-            buttonProps={{
-              "data-ticket-selectable": true,
-              onContextMenu: handleContextMenu,
-              ...attributes,
-              ...listeners,
-            }}
-          />
+    <SubTicketRowButton
+      subTicket={sub}
+      isSelected={isSelected}
+      isDragging={isDragging}
+      isPreviewOpen={isPreviewOpen}
+      buttonRef={setNodeRef}
+      onClick={(e) => {
+        if (e.altKey || e.metaKey || e.shiftKey) {
+          onMultiSelectClick(e, sub);
+          return;
         }
-      />
-      <PopoverPopup
-        side="bottom"
-        align="end"
-        alignOffset={-190}
-        sideOffset={4}
-        className="w-[380px]"
-      >
-        <SubTicketPreviewContent
-          ticketId={sub.id}
-          fetchPreview={fetchPreview}
-          getCached={getCached}
-        />
-      </PopoverPopup>
-    </Popover>
+        onNavigate();
+      }}
+      buttonProps={{
+        "data-ticket-selectable": true,
+        ...attributes,
+        ...listeners,
+        onContextMenu: handleContextMenu,
+        onMouseEnter: (event) => onPreviewMouseEnter(sub.id, event.currentTarget),
+        onMouseLeave: onPreviewMouseLeave,
+      }}
+    />
   );
 }

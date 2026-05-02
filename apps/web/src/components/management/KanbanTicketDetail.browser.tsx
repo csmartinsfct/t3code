@@ -4,10 +4,19 @@ import type { Ticket, TicketId, TicketSummary } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
-import { dispatchModifiedClick, findButtonByText } from "~/test-utils/browser";
+import { dispatchModifiedClick, findButtonByText, waitForElement } from "~/test-utils/browser";
 
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import {
+  SharedSubTicketPreviewPopup,
+  useSubTicketPreviewHoverTarget,
+} from "./SubTicketPreviewPopup";
+import {
+  SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
+  SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
+  SUB_TICKET_PREVIEW_VIEWPORT_PADDING,
+} from "./subTicketPreviewSize";
 
 // Audit traceability: 5f27fa2, 5dba42d, 1f727cb.
 // This file covers the browser-only hover preview flow that KanbanTicketDetail wires around
@@ -246,6 +255,49 @@ function DeferredPreviewHarness({
   );
 }
 
+function ResizablePreviewHarness({
+  fetchPreview,
+  getCached,
+}: {
+  fetchPreview: (id: TicketId) => Promise<Ticket | null>;
+  getCached: (id: TicketId) => Ticket | undefined;
+}) {
+  const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
+    useSubTicketPreviewHoverTarget({
+      closeDelayMs: 150,
+      openDelayMs: 300,
+    });
+
+  return (
+    <div className="flex flex-col gap-1">
+      {[
+        ["child-ticket", "T3CO-202 Preview child ticket"],
+        ["second-child-ticket", "T3CO-203 Second preview child ticket"],
+      ].map(([ticketId, label]) => (
+        <button
+          key={ticketId}
+          type="button"
+          className="rounded-md px-2 py-1.5 text-left text-xs"
+          onMouseEnter={(event) =>
+            handlePreviewMouseEnter(ticketId as TicketId, event.currentTarget)
+          }
+          onMouseLeave={handlePreviewMouseLeave}
+        >
+          {label}
+        </button>
+      ))}
+      <SharedSubTicketPreviewPopup
+        anchorElement={previewTarget?.anchorElement ?? null}
+        ticketId={previewTarget?.ticketId ?? null}
+        fetchPreview={fetchPreview}
+        getCached={getCached}
+        onMouseEnter={cancelPreviewTimers}
+        onMouseLeave={handlePreviewMouseLeave}
+      />
+    </div>
+  );
+}
+
 async function mountPreviewHarness(input: {
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
   getCached?: (id: TicketId) => Ticket | undefined;
@@ -278,6 +330,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
     mockUseParams.mockReset();
     mockUseParams.mockReturnValue(null);
     capturedDraggables.length = 0;
+    localStorage.clear();
     selectionStoreState.selectedTicketIds = new Set();
     selectionStoreState.selectedTickets = new Map();
     document.body.innerHTML = "";
@@ -446,6 +499,510 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
         },
       ]),
     );
+  });
+
+  it("resizes the hover preview from a fixed top-left and applies preferences to other previews", async () => {
+    const fetchPreview = vi.fn(async () =>
+      makePreviewTicket({
+        description: Array.from(
+          { length: 12 },
+          (_, index) => `Preview paragraph ${index + 1}.`,
+        ).join("\n\n"),
+      }),
+    );
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+    let firstSurfaceUnmounted = false;
+
+    vi.useFakeTimers();
+    try {
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Preview paragraph 1.");
+      });
+
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
+        "Unable to find sub-ticket preview popup.",
+      );
+      const handle = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            "button[aria-label='Resize sub-ticket preview']",
+          ),
+        "Unable to find sub-ticket preview resize handle.",
+      );
+      const startingRect = popup.getBoundingClientRect();
+
+      handle.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: 0,
+          clientY: 0,
+          pointerId: 1,
+        }),
+      );
+      handle.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: 120,
+          clientY: 80,
+          pointerId: 1,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(popup.style.height).toBe("380px");
+      });
+      expect(Math.abs(popup.getBoundingClientRect().left - startingRect.left)).toBeLessThanOrEqual(
+        2.5,
+      );
+      expect(Math.abs(popup.getBoundingClientRect().top - startingRect.top)).toBeLessThanOrEqual(
+        2.5,
+      );
+
+      handle.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientX: 120,
+          clientY: 80,
+          pointerId: 1,
+        }),
+      );
+
+      const expectedWidth = Number.parseInt(popup.style.width, 10);
+      const stored = JSON.parse(localStorage.getItem(SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY) ?? "{}");
+      expect(popup.style.height).toBe("380px");
+      expect(stored).toMatchObject({
+        version: 1,
+        width: expectedWidth,
+        maxHeight: 380,
+      });
+
+      await screen.unmount();
+      host.remove();
+      firstSurfaceUnmounted = true;
+
+      const secondHost = document.createElement("div");
+      document.body.append(secondHost);
+      const secondScreen = await render(
+        <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+        { container: secondHost },
+      );
+      try {
+        await page.getByRole("button", { name: /T3CO-203 Second preview child ticket/i }).hover();
+        await vi.advanceTimersByTimeAsync(300);
+
+        await vi.waitFor(() => {
+          const nextPopup = document.querySelector<HTMLElement>("[data-slot='popover-popup']");
+          expect(nextPopup?.style.width).toBe(`${expectedWidth}px`);
+        });
+      } finally {
+        await secondScreen.unmount();
+        secondHost.remove();
+      }
+    } finally {
+      if (!firstSurfaceUnmounted) {
+        await screen.unmount();
+        host.remove();
+      }
+    }
+  });
+
+  it("keeps the preview shell mounted while hovering between different sub-tickets", async () => {
+    const fetchPreview = vi.fn(async (id: TicketId) =>
+      makePreviewTicket({
+        id: id as Ticket["id"],
+        title:
+          id === ("second-child-ticket" as TicketId)
+            ? "Second preview child ticket detail"
+            : "Preview child ticket detail",
+        description:
+          id === ("second-child-ticket" as TicketId)
+            ? "Second preview description"
+            : "First preview description",
+      }),
+    );
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+
+    vi.useFakeTimers();
+    try {
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("First preview description");
+      });
+      const firstPopup = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
+        "Unable to find first sub-ticket preview popup.",
+      );
+      expect(firstPopup.querySelector("[data-slot='popover-viewport']")).toBeNull();
+      expect(firstPopup.querySelector("[data-current], [data-previous]")).toBeNull();
+
+      const firstTrigger = findButtonByText(host, "T3CO-202");
+      const secondTrigger = findButtonByText(host, "T3CO-203");
+      firstTrigger.dispatchEvent(
+        new MouseEvent("mouseout", {
+          bubbles: true,
+          relatedTarget: secondTrigger,
+        }),
+      );
+      secondTrigger.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: firstTrigger,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Second preview description");
+      });
+      expect(document.querySelector<HTMLElement>("[data-slot='popover-popup']")).toBe(firstPopup);
+      expect(firstPopup.querySelector("[data-slot='popover-viewport']")).toBeNull();
+      expect(firstPopup.querySelector("[data-current], [data-previous]")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("does not render stale preview text after the hover target changes before the next body loads", async () => {
+    let resolveSecondPreview: ((ticket: Ticket | null) => void) | null = null;
+    const fetchPreview = vi.fn(async (id: TicketId) => {
+      if (id === ("second-child-ticket" as TicketId)) {
+        return new Promise<Ticket | null>((resolve) => {
+          resolveSecondPreview = resolve;
+        });
+      }
+      return makePreviewTicket({
+        id: id as Ticket["id"],
+        title: "Preview child ticket detail",
+        description: "First preview description",
+      });
+    });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+
+    vi.useFakeTimers();
+    try {
+      const firstTrigger = findButtonByText(host, "T3CO-202");
+      const secondTrigger = findButtonByText(host, "T3CO-203");
+
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("First preview description");
+      });
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
+        "Unable to find sub-ticket preview popup.",
+      );
+      const firstRect = popup.getBoundingClientRect();
+
+      firstTrigger.dispatchEvent(
+        new MouseEvent("mouseout", {
+          bubbles: true,
+          relatedTarget: secondTrigger,
+        }),
+      );
+      secondTrigger.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: firstTrigger,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(fetchPreview).toHaveBeenCalledWith("second-child-ticket");
+        expect(popup.textContent ?? "").not.toContain("First preview description");
+        expect(popup.querySelector("[data-testid='sub-ticket-preview-skeleton']")).not.toBeNull();
+      });
+      const pendingRect = popup.getBoundingClientRect();
+      expect(Math.abs(pendingRect.left - firstRect.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(pendingRect.top - firstRect.top)).toBeLessThanOrEqual(1);
+
+      expect(resolveSecondPreview).not.toBeNull();
+      resolveSecondPreview!(
+        makePreviewTicket({
+          id: "second-child-ticket" as Ticket["id"],
+          title: "Second preview child ticket detail",
+          description: "Second preview description",
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(popup.textContent ?? "").toContain("Second preview description");
+      });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("reopens the preview without a stale close after switching tickets and fully closing", async () => {
+    const fetchPreview = vi.fn(async (id: TicketId) =>
+      makePreviewTicket({
+        id: id as Ticket["id"],
+        description:
+          id === ("second-child-ticket" as TicketId)
+            ? "Second preview description"
+            : "First preview description",
+      }),
+    );
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+
+    vi.useFakeTimers();
+    try {
+      const firstTrigger = findButtonByText(host, "T3CO-202");
+      const secondTrigger = findButtonByText(host, "T3CO-203");
+
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("First preview description");
+      });
+
+      firstTrigger.dispatchEvent(
+        new MouseEvent("mouseout", {
+          bubbles: true,
+          relatedTarget: secondTrigger,
+        }),
+      );
+      secondTrigger.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: firstTrigger,
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Second preview description");
+      });
+
+      secondTrigger.dispatchEvent(
+        new MouseEvent("mouseout", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(151);
+      await vi.waitFor(() => {
+        expect(document.querySelector<HTMLElement>("[data-slot='popover-popup']")).toBeNull();
+      });
+
+      firstTrigger.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(300);
+      await vi.waitFor(() => {
+        expect(document.querySelector<HTMLElement>("[data-slot='popover-popup']")).not.toBeNull();
+        expect(document.body.textContent ?? "").toContain("First preview description");
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(document.querySelector<HTMLElement>("[data-slot='popover-popup']")).not.toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("keeps an oversized stored preview fully inside the viewport safe area", async () => {
+    localStorage.setItem(
+      SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
+      JSON.stringify({ version: 1, width: 720, maxHeight: 960 }),
+    );
+    localStorage.setItem(
+      SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        x: 520,
+        y: 520,
+        viewportWidth: 1440,
+        viewportHeight: 1100,
+      }),
+    );
+
+    const fetchPreview = vi.fn(async () =>
+      makePreviewTicket({
+        description: Array.from(
+          { length: 24 },
+          (_, index) => `Long preview paragraph ${index + 1}.`,
+        ).join("\n\n"),
+      }),
+    );
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+
+    vi.useFakeTimers();
+    try {
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
+        "Unable to find sub-ticket preview popup.",
+      );
+
+      await vi.waitFor(() => {
+        const rect = popup.getBoundingClientRect();
+        expect(rect.top).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(rect.left).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(rect.right).toBeLessThanOrEqual(
+          window.innerWidth - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+        );
+        expect(rect.bottom).toBeLessThanOrEqual(
+          window.innerHeight - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+        );
+      });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("persists dragged preview position as a viewport position across later previews", async () => {
+    const fetchPreview = vi.fn(async () => makePreviewTicket());
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+      { container: host },
+    );
+    let firstSurfaceUnmounted = false;
+
+    vi.useFakeTimers();
+    try {
+      await page.getByRole("button", { name: /T3CO-202 Preview child ticket/i }).hover();
+      await vi.advanceTimersByTimeAsync(300);
+
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
+        "Unable to find sub-ticket preview popup.",
+      );
+      const moveHandle = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>("button[aria-label='Move sub-ticket preview']"),
+        "Unable to find sub-ticket preview move handle.",
+      );
+      const handleRect = moveHandle.getBoundingClientRect();
+      const pointerStart = {
+        x: handleRect.left + handleRect.width / 2,
+        y: handleRect.top + handleRect.height / 2,
+      };
+
+      moveHandle.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: pointerStart.x,
+          clientY: pointerStart.y,
+          pointerId: 10,
+        }),
+      );
+      moveHandle.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: pointerStart.x - 120,
+          clientY: pointerStart.y + 140,
+          pointerId: 10,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        const movedRect = popup.getBoundingClientRect();
+        expect(movedRect.left).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(movedRect.bottom).toBeLessThanOrEqual(
+          window.innerHeight - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+        );
+      });
+
+      moveHandle.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientX: pointerStart.x - 120,
+          clientY: pointerStart.y + 140,
+          pointerId: 10,
+        }),
+      );
+
+      const draggedRect = popup.getBoundingClientRect();
+      const storedPosition = JSON.parse(
+        localStorage.getItem(SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY) ?? "{}",
+      );
+      expect(storedPosition).toMatchObject({
+        version: 1,
+        x: Math.round(draggedRect.left),
+        y: Math.round(draggedRect.top),
+      });
+
+      await screen.unmount();
+      host.remove();
+      firstSurfaceUnmounted = true;
+
+      const secondHost = document.createElement("div");
+      secondHost.style.marginTop = "260px";
+      document.body.append(secondHost);
+      const secondScreen = await render(
+        <ResizablePreviewHarness fetchPreview={fetchPreview} getCached={() => undefined} />,
+        { container: secondHost },
+      );
+      try {
+        await page.getByRole("button", { name: /T3CO-203 Second preview child ticket/i }).hover();
+        await vi.advanceTimersByTimeAsync(300);
+
+        await vi.waitFor(() => {
+          const nextPopup = document.querySelector<HTMLElement>("[data-slot='popover-popup']");
+          const nextRect = nextPopup?.getBoundingClientRect();
+          expect(nextRect).toBeDefined();
+          expect(Math.abs((nextRect?.left ?? 0) - draggedRect.left)).toBeLessThanOrEqual(3);
+          expect(Math.abs((nextRect?.top ?? 0) - draggedRect.top)).toBeLessThanOrEqual(3);
+        });
+      } finally {
+        await secondScreen.unmount();
+        secondHost.remove();
+      }
+    } finally {
+      if (!firstSurfaceUnmounted) {
+        await screen.unmount();
+        host.remove();
+      }
+    }
   });
 });
 
