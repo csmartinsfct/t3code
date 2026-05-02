@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   asProviderInput,
   baseProviderKind,
+  type CanonicalItemType,
   EventId,
   RuntimeItemId,
   ThreadId,
@@ -44,6 +45,7 @@ import {
   type CursorTurnRunResult,
   runCursorTurn,
 } from "../cursor/CursorTurnRunner";
+import type { CursorStreamJsonEvent, CursorToolCallEvent } from "../cursor/CursorStreamJson";
 import type {
   LifecycleEntry,
   ProviderLifecycleLoggerShape,
@@ -70,6 +72,8 @@ interface CursorTurnState {
   readonly items: Array<unknown>;
   fiber: Fiber.Fiber<void, never> | undefined;
   assistantStarted: boolean;
+  assistantText: string;
+  reasoningText: string;
   completed: boolean;
   cancelRequested: boolean;
 }
@@ -122,6 +126,10 @@ function toMessage(cause: unknown, fallback: string): string {
 function trimOrUndefined(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cursorCleanupPolicyDetails(): Record<string, unknown> {
@@ -259,6 +267,113 @@ function appendSessionContextPrompt(
     prompt: `${context.sessionContextPrompt}\n\n---\n\n${text}`,
     injected: true,
   };
+}
+
+function resolveCursorTextDelta(
+  emittedText: string,
+  incomingText: string,
+): { readonly delta: string; readonly nextText: string } | null {
+  if (!incomingText) return null;
+
+  if (incomingText === emittedText || emittedText.startsWith(incomingText)) {
+    return { delta: "", nextText: emittedText };
+  }
+
+  if (incomingText.startsWith(emittedText)) {
+    return {
+      delta: incomingText.slice(emittedText.length),
+      nextText: incomingText,
+    };
+  }
+
+  return {
+    delta: incomingText,
+    nextText: `${emittedText}${incomingText}`,
+  };
+}
+
+function titleCaseToolName(value: string): string {
+  const withoutSuffix = value.replace(/ToolCall$/u, "");
+  const spaced = withoutSuffix
+    .replace(/[_-]+/gu, " ")
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .trim();
+  return spaced.length > 0
+    ? spaced.replace(/\b\w/gu, (char) => char.toUpperCase())
+    : "Cursor tool call";
+}
+
+function extractCursorToolName(toolCall: unknown, fallback: string | undefined): string {
+  if (isRecord(toolCall)) {
+    const key = Object.keys(toolCall).find((candidate) => candidate.trim().length > 0);
+    if (key) return key;
+  }
+  return fallback && fallback.trim() ? fallback : "cursorToolCall";
+}
+
+function isCursorToolCallEvent(event: CursorStreamJsonEvent): event is CursorToolCallEvent {
+  return event.type === "tool_call";
+}
+
+function cursorToolItemId(toolName: string, callId: string | undefined): RuntimeItemId {
+  const raw = callId && callId.trim() ? callId : toolName;
+  const safe = raw.replace(/[^a-zA-Z0-9._:-]+/gu, "-").replace(/^-+|-+$/gu, "");
+  return RuntimeItemId.makeUnsafe(`cursor-tool-${safe || "tool"}`);
+}
+
+function extractCursorToolArgs(toolCall: unknown): unknown {
+  if (!isRecord(toolCall)) return undefined;
+  const key = Object.keys(toolCall).find((candidate) => candidate.trim().length > 0);
+  if (!key) return undefined;
+  const body = toolCall[key];
+  return isRecord(body) && "args" in body ? body.args : body;
+}
+
+function summarizeCursorToolDetail(toolName: string, args: unknown): string | undefined {
+  if (args === undefined) return undefined;
+  const normalizedName = titleCaseToolName(toolName);
+  const command = isRecord(args)
+    ? typeof args.command === "string"
+      ? args.command
+      : typeof args.cmd === "string"
+        ? args.cmd
+        : undefined
+    : undefined;
+  if (command && command.trim()) {
+    return `${normalizedName}: ${command.trim().slice(0, 400)}`;
+  }
+
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(args);
+  } catch {
+    return normalizedName;
+  }
+  if (!serialized) return normalizedName;
+  return `${normalizedName}: ${serialized.length <= 400 ? serialized : `${serialized.slice(0, 397)}...`}`;
+}
+
+function classifyCursorToolItemType(toolName: string): CanonicalItemType {
+  const normalized = toolName.toLowerCase();
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("bash") ||
+    normalized.includes("terminal") ||
+    normalized.includes("command")
+  ) {
+    return "command_execution";
+  }
+  if (
+    normalized.includes("edit") ||
+    normalized.includes("write") ||
+    normalized.includes("patch") ||
+    normalized.includes("create") ||
+    normalized.includes("delete") ||
+    normalized.includes("file")
+  ) {
+    return "file_change";
+  }
+  return "dynamic_tool_call";
 }
 
 export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
@@ -533,22 +648,38 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         if (!turn) return;
         for (const event of result.events) {
           if (event.type === "assistant" && "text" in event && event.text) {
+            const resolved = resolveCursorTextDelta(turn.assistantText, event.text);
+            if (!resolved) continue;
+            turn.assistantText = resolved.nextText;
+            if (!resolved.delta) continue;
             ensureAssistantItemStarted(context, turn);
-            turn.items.push({ type: "assistant_text", delta: event.text, createdAt: nowIso() });
+            turn.items.push({
+              type: "assistant_text",
+              delta: resolved.delta,
+              createdAt: nowIso(),
+            });
             offerRuntimeEvent({
               ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
               type: "content.delta",
               itemId: turn.assistantItemId,
-              payload: { streamKind: "assistant_text", delta: event.text },
+              payload: { streamKind: "assistant_text", delta: resolved.delta },
             });
           } else if (event.type === "thinking" && "text" in event && event.text) {
+            const resolved = resolveCursorTextDelta(turn.reasoningText, event.text);
+            if (!resolved) continue;
+            turn.reasoningText = resolved.nextText;
+            if (!resolved.delta) continue;
             ensureAssistantItemStarted(context, turn);
-            turn.items.push({ type: "reasoning_text", delta: event.text, createdAt: nowIso() });
+            turn.items.push({
+              type: "reasoning_text",
+              delta: resolved.delta,
+              createdAt: nowIso(),
+            });
             offerRuntimeEvent({
               ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
               type: "content.delta",
               itemId: turn.assistantItemId,
-              payload: { streamKind: "reasoning_text", delta: event.text },
+              payload: { streamKind: "reasoning_text", delta: resolved.delta },
             });
           } else if (event.type === "interaction_query") {
             offerRuntimeEvent({
@@ -557,6 +688,35 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               payload: {
                 message:
                   "Cursor emitted an interaction query. T3 logs it, but provider-native interaction responses are not supported yet.",
+              },
+            });
+          } else if (isCursorToolCallEvent(event)) {
+            const toolName = extractCursorToolName(event.toolCall, event.callId);
+            const itemType = classifyCursorToolItemType(toolName);
+            const args = extractCursorToolArgs(event.toolCall);
+            const itemId = cursorToolItemId(toolName, event.callId);
+            const detail = summarizeCursorToolDetail(toolName, args);
+            const eventType =
+              event.subtype === "completed"
+                ? "item.completed"
+                : event.subtype === "started"
+                  ? "item.started"
+                  : "item.updated";
+            offerRuntimeEvent({
+              ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
+              type: eventType,
+              itemId,
+              payload: {
+                itemType,
+                status: eventType === "item.completed" ? "completed" : "inProgress",
+                title: titleCaseToolName(toolName),
+                ...(detail ? { detail } : {}),
+                data: {
+                  toolName,
+                  args,
+                  toolCall: event.toolCall,
+                  subtype: event.subtype,
+                },
               },
             });
           }
@@ -784,6 +944,8 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           items: [],
           fiber: undefined,
           assistantStarted: false,
+          assistantText: "",
+          reasoningText: "",
           completed: false,
           cancelRequested: false,
         };

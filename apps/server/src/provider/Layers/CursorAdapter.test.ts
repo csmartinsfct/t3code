@@ -160,6 +160,25 @@ function makeCursorRunResult(
   };
 }
 
+function makeCursorRunResultWithAssistantEvents(
+  sessionId: string,
+  assistantTexts: ReadonlyArray<string>,
+): CursorTurnRunResult {
+  const base = makeCursorRunResult(sessionId, "");
+  const assistantEvents = assistantTexts.map((text) => ({
+    type: "assistant" as const,
+    text,
+    raw: {
+      type: "assistant",
+      message: { content: [{ type: "text", text }] },
+    },
+  }));
+  return {
+    ...base,
+    events: [...assistantEvents, base.result],
+  };
+}
+
 it.effect("CursorAdapterLive starts a Cursor session and sends a text turn", () => {
   const runInputs: CursorTurnCommandInput[] = [];
   const createChat = vi.fn(() => Effect.succeed("cursor-session-1"));
@@ -216,6 +235,117 @@ it.effect("CursorAdapterLive starts a Cursor session and sends a text turn", () 
     assert.equal(runInputs[0]?.runtimeMode, "full-access");
     assert.equal(runInputs[0]?.model, "auto");
     assert.equal(runInputs[0]?.streamPartialOutput, true);
+  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+});
+
+it.effect("CursorAdapterLive skips duplicate final Cursor assistant snapshots", () => {
+  const createChat = vi.fn(() => Effect.succeed("cursor-session-dedup"));
+  const runTurn = vi.fn((input: CursorTurnCommandInput) =>
+    Effect.succeed(
+      makeCursorRunResultWithAssistantEvents(input.resumeSessionId ?? "cursor-session-dedup", [
+        "stored",
+        " cursor-orchid-9137",
+        "stored cursor-orchid-9137",
+      ]),
+    ),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-dedup");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Remember the nonce.",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
+    const assistantDeltas = Array.from(events)
+      .filter((event) => event.type === "content.delta")
+      .map((event) => event.payload.delta);
+
+    assert.deepEqual(assistantDeltas, ["stored", " cursor-orchid-9137"]);
+  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+});
+
+it.effect("CursorAdapterLive maps Cursor tool calls into item lifecycle events", () => {
+  const createChat = vi.fn(() => Effect.succeed("cursor-session-tools"));
+  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
+    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-tools", "");
+    return Effect.succeed({
+      ...base,
+      events: [
+        {
+          type: "tool_call" as const,
+          subtype: "started",
+          callId: "tool-1",
+          toolCall: { shellToolCall: { args: { command: "git status --short" } } },
+          raw: {
+            type: "tool_call",
+            subtype: "started",
+            call_id: "tool-1",
+            tool_call: { shellToolCall: { args: { command: "git status --short" } } },
+          },
+        },
+        {
+          type: "tool_call" as const,
+          subtype: "completed",
+          callId: "tool-1",
+          toolCall: { shellToolCall: { args: { command: "git status --short" } } },
+          raw: {
+            type: "tool_call",
+            subtype: "completed",
+            call_id: "tool-1",
+            tool_call: { shellToolCall: { args: { command: "git status --short" } } },
+          },
+        },
+        base.result,
+      ],
+    } satisfies CursorTurnRunResult);
+  });
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-tools");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Run git status." });
+
+    const events = yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
+    const toolEvents = Array.from(events).filter(
+      (event) => event.type === "item.started" || event.type === "item.completed",
+    );
+
+    assert.equal(toolEvents.length, 2);
+    assert.deepEqual(
+      toolEvents.map((event) => event.type),
+      ["item.started", "item.completed"],
+    );
+    assert.deepInclude(toolEvents[0]?.payload ?? {}, {
+      itemType: "command_execution",
+      status: "inProgress",
+      title: "Shell",
+      detail: "Shell: git status --short",
+    });
+    assert.deepInclude(toolEvents[1]?.payload ?? {}, {
+      itemType: "command_execution",
+      status: "completed",
+      title: "Shell",
+    });
+    assert.equal(String(toolEvents[0]?.itemId), String(toolEvents[1]?.itemId));
   }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
 });
 
