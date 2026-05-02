@@ -410,6 +410,7 @@ describe("KanbanTicketDetail", () => {
     ).toEqual({
       id: "ticket-55",
       projectId: "project-55",
+      includeBody: true,
     });
   });
 

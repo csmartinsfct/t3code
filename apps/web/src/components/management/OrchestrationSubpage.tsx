@@ -63,6 +63,8 @@ import {
   submitOrchestrationConfirm,
   type OrchestrationConfirmOnConfirm,
 } from "./OrchestrateConfirmDialog";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
+import { useTicketPreviewCache } from "./ticketPreviewCache";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -105,6 +107,11 @@ interface DisplayGroup {
 
 type DisplayEntry = DisplayStandalone | DisplayGroup;
 
+interface TicketPreviewHandlers {
+  onPreviewMouseEnter: (ticketId: TicketId, anchorElement: Element) => void;
+  onPreviewMouseLeave: () => void;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -121,6 +128,12 @@ export function OrchestrationSubpage({
   const [treeLoading, setTreeLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { fetchPreview, getCached } = useTicketPreviewCache(projectId);
+  const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
+    useTicketPreviewHoverTarget({
+      closeDelayMs: 160,
+      openDelayMs: 250,
+    });
 
   // Fetch the full ticket tree once per project; it doesn't change as the user
   // toggles checkboxes, and we need it for both entry expansion and plan
@@ -477,6 +490,8 @@ export function OrchestrationSubpage({
                         key={entry.leaf.ticket.id}
                         leaf={entry.leaf}
                         onToggle={(checked) => toggleIncluded(entry.leaf.ticket.id, checked)}
+                        onPreviewMouseEnter={handlePreviewMouseEnter}
+                        onPreviewMouseLeave={handlePreviewMouseLeave}
                       />
                     ) : (
                       <GroupBlock
@@ -489,6 +504,8 @@ export function OrchestrationSubpage({
                           )
                         }
                         onToggleLeaf={toggleIncluded}
+                        onPreviewMouseEnter={handlePreviewMouseEnter}
+                        onPreviewMouseLeave={handlePreviewMouseLeave}
                       />
                     ),
                   )}
@@ -609,6 +626,14 @@ export function OrchestrationSubpage({
         scopeInput={editorScopeInput}
         onLocalSave={handleLocalSave}
       />
+      <SharedTicketPreviewPopup
+        anchorElement={previewTarget?.anchorElement ?? null}
+        ticketId={previewTarget?.ticketId ?? null}
+        fetchPreview={fetchPreview}
+        getCached={getCached}
+        onMouseEnter={cancelPreviewTimers}
+        onMouseLeave={handlePreviewMouseLeave}
+      />
     </div>
   );
 }
@@ -620,10 +645,12 @@ export function OrchestrationSubpage({
 function TicketRow({
   leaf,
   onToggle,
+  onPreviewMouseEnter,
+  onPreviewMouseLeave,
 }: {
   leaf: DisplayLeaf;
   onToggle: (checked: boolean) => void;
-}) {
+} & TicketPreviewHandlers) {
   const { ticket, planIndex, annotation, included } = leaf;
   const isSkipped = annotation === "skipped-done";
   const isWarn = annotation === "warn-reprocess";
@@ -631,7 +658,11 @@ function TicketRow({
   const dim = !included || isSkipped;
 
   return (
-    <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${dim ? "opacity-50" : ""}`}>
+    <div
+      className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${dim ? "opacity-50" : ""}`}
+      onMouseEnter={(event) => onPreviewMouseEnter(ticket.id, event.currentTarget)}
+      onMouseLeave={onPreviewMouseLeave}
+    >
       <Checkbox
         checked={included}
         onCheckedChange={(checked) => onToggle(Boolean(checked))}
@@ -670,11 +701,13 @@ function GroupBlock({
   entry,
   onToggleGroup,
   onToggleLeaf,
+  onPreviewMouseEnter,
+  onPreviewMouseLeave,
 }: {
   entry: DisplayGroup;
   onToggleGroup: () => void;
   onToggleLeaf: (ticketId: TicketId, checked: boolean) => void;
-}) {
+} & TicketPreviewHandlers) {
   const { parent, leaves, includedCount, totalCount, state } = entry;
   const dim = state === "off";
   const allOn = state === "on";
@@ -686,6 +719,8 @@ function GroupBlock({
         className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/40 ${
           dim ? "opacity-60" : ""
         }`}
+        onMouseEnter={(event) => onPreviewMouseEnter(parent.id, event.currentTarget)}
+        onMouseLeave={onPreviewMouseLeave}
       >
         <Checkbox
           checked={allOn}
@@ -717,6 +752,8 @@ function GroupBlock({
               key={leaf.ticket.id}
               leaf={leaf}
               onToggle={(checked) => onToggleLeaf(leaf.ticket.id, checked)}
+              onPreviewMouseEnter={onPreviewMouseEnter}
+              onPreviewMouseLeave={onPreviewMouseLeave}
             />
           ))}
         </div>

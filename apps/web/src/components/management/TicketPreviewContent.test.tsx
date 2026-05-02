@@ -2,7 +2,7 @@ import type { Ticket } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import { TicketPreviewContent } from "./TicketPreviewContent";
 
 // Audit traceability: c709853.
 function makePreviewTicket(overrides: Partial<Ticket> = {}): Ticket {
@@ -40,12 +40,12 @@ preview fenced block
   };
 }
 
-describe("SubTicketPreviewContent", () => {
+describe("TicketPreviewContent", () => {
   it("renders cached preview descriptions with Markdown/GFM structure", () => {
     const ticket = makePreviewTicket();
 
     const html = renderToStaticMarkup(
-      <SubTicketPreviewContent
+      <TicketPreviewContent
         ticketId={ticket.id}
         fetchPreview={async () => null}
         getCached={() => ticket}

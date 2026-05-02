@@ -43,9 +43,9 @@ import {
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
+import { buildTicketDetailLookupInput, useTicketPreviewCache } from "./ticketPreviewCache";
 import { SubTicketsTree } from "./SubTicketsTree";
 import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
@@ -61,6 +61,8 @@ import {
 } from "../settings/ticketUtils";
 import { PriorityIcon } from "./PriorityIcon";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
+
+export { buildTicketDetailLookupInput } from "./ticketPreviewCache";
 
 export const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
 
@@ -111,21 +113,6 @@ export function resolveNullableInlineTextSave(input: {
     return { action: "skip", nextValue: input.currentValue };
   }
   return { action: "save", nextValue };
-}
-
-export function buildTicketDetailLookupInput(
-  ticketId: TicketId,
-  projectId: string,
-): {
-  id: TicketId;
-  projectId: ProjectId;
-  includeBody: true;
-} {
-  return {
-    id: ticketId,
-    projectId: projectId as ProjectId,
-    includeBody: true,
-  };
 }
 
 export function shouldAutoBackFromTicketProjectMismatch(input: {
@@ -1315,46 +1302,13 @@ export function SubTicketsList({
     [toggleTicket, rangeSelectTo, subTickets],
   );
 
-  // Hover-preview cache scoped to this list's lifetime
-  const cacheRef = useRef(new Map<string, Ticket>());
-  const inflightRef = useRef(new Map<string, Promise<Ticket | null>>());
+  const { fetchPreview, getCached } = useTicketPreviewCache(projectId);
 
-  // Invalidate cache when a sub-ticket is updated externally
-  useEffect(() => {
-    const api = ensureNativeApi();
-    return api.ticketing.onEvent((event: TicketingStreamEvent) => {
-      if (event.type === "ticket_upserted") {
-        cacheRef.current.delete(event.ticket.id as string);
-      }
+  const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
+    useTicketPreviewHoverTarget({
+      closeDelayMs: 200,
+      openDelayMs: 300,
     });
-  }, []);
-
-  const fetchPreview = useCallback(
-    async (id: TicketId): Promise<Ticket | null> => {
-      const key = id as string;
-      const cached = cacheRef.current.get(key);
-      if (cached) return cached;
-      const existing = inflightRef.current.get(key);
-      if (existing) return existing;
-      const promise = ensureNativeApi()
-        .ticketing.getById(buildTicketDetailLookupInput(id, projectId))
-        .then((t) => {
-          cacheRef.current.set(key, t);
-          return t;
-        })
-        .catch(() => null)
-        .finally(() => {
-          inflightRef.current.delete(key);
-        });
-      inflightRef.current.set(key, promise);
-      return promise;
-    },
-    [projectId],
-  );
-
-  const getCached = useCallback((id: TicketId): Ticket | undefined => {
-    return cacheRef.current.get(id as string);
-  }, []);
 
   return (
     <div className="flex flex-col gap-2">
@@ -1376,11 +1330,20 @@ export function SubTicketsList({
             onArchiveRequest={onArchiveRequest}
             selectedTicketIds={selectedTicketIds}
             selectedTickets={selectedSubTickets}
-            fetchPreview={fetchPreview}
-            getCached={getCached}
+            isPreviewOpen={previewTarget?.ticketId === sub.id}
+            onPreviewMouseEnter={handlePreviewMouseEnter}
+            onPreviewMouseLeave={handlePreviewMouseLeave}
           />
         ))}
       </div>
+      <SharedTicketPreviewPopup
+        anchorElement={previewTarget?.anchorElement ?? null}
+        ticketId={previewTarget?.ticketId ?? null}
+        fetchPreview={fetchPreview}
+        getCached={getCached}
+        onMouseEnter={cancelPreviewTimers}
+        onMouseLeave={handlePreviewMouseLeave}
+      />
     </div>
   );
 }
@@ -1394,8 +1357,9 @@ function DraggableSubTicket({
   onArchiveRequest,
   selectedTicketIds,
   selectedTickets,
-  fetchPreview,
-  getCached,
+  isPreviewOpen,
+  onPreviewMouseEnter,
+  onPreviewMouseLeave,
 }: {
   sub: TicketSummary;
   isSelected: boolean;
@@ -1405,8 +1369,9 @@ function DraggableSubTicket({
   onArchiveRequest: (tickets: readonly TicketSummary[]) => void;
   selectedTicketIds: ReadonlySet<TicketId>;
   selectedTickets: readonly TicketSummary[];
-  fetchPreview: (id: TicketId) => Promise<Ticket | null>;
-  getCached: (id: TicketId) => Ticket | undefined;
+  isPreviewOpen: boolean;
+  onPreviewMouseEnter: (id: TicketId, anchorElement: Element) => void;
+  onPreviewMouseLeave: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: sub.id,
@@ -1444,46 +1409,27 @@ function DraggableSubTicket({
   );
 
   return (
-    <Popover>
-      <PopoverTrigger
-        openOnHover
-        delay={300}
-        closeDelay={150}
-        render={
-          <SubTicketRowButton
-            subTicket={sub}
-            isSelected={isSelected}
-            isDragging={isDragging}
-            buttonRef={setNodeRef}
-            onClick={(e) => {
-              if (e.altKey || e.metaKey || e.shiftKey) {
-                onMultiSelectClick(e, sub);
-                return;
-              }
-              onNavigate();
-            }}
-            buttonProps={{
-              "data-ticket-selectable": true,
-              onContextMenu: handleContextMenu,
-              ...attributes,
-              ...listeners,
-            }}
-          />
+    <SubTicketRowButton
+      subTicket={sub}
+      isSelected={isSelected}
+      isDragging={isDragging}
+      isPreviewOpen={isPreviewOpen}
+      buttonRef={setNodeRef}
+      onClick={(e) => {
+        if (e.altKey || e.metaKey || e.shiftKey) {
+          onMultiSelectClick(e, sub);
+          return;
         }
-      />
-      <PopoverPopup
-        side="bottom"
-        align="end"
-        alignOffset={-190}
-        sideOffset={4}
-        className="w-[380px]"
-      >
-        <SubTicketPreviewContent
-          ticketId={sub.id}
-          fetchPreview={fetchPreview}
-          getCached={getCached}
-        />
-      </PopoverPopup>
-    </Popover>
+        onNavigate();
+      }}
+      buttonProps={{
+        "data-ticket-selectable": true,
+        ...attributes,
+        ...listeners,
+        onContextMenu: handleContextMenu,
+        onMouseEnter: (event) => onPreviewMouseEnter(sub.id, event.currentTarget),
+        onMouseLeave: onPreviewMouseLeave,
+      }}
+    />
   );
 }

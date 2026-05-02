@@ -16,8 +16,8 @@ vi.mock("../../nativeApi", () => ({
   }),
 }));
 
-vi.mock("./SubTicketPreviewContent", () => ({
-  SubTicketPreviewContent: () => null,
+vi.mock("./TicketPreviewContent", () => ({
+  TicketPreviewContent: () => null,
 }));
 
 import { SubTicketsTree, countTreeNodes } from "./SubTicketsTree";
