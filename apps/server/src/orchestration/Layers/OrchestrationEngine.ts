@@ -226,6 +226,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             );
           }
         }
+        yield* Effect.logInfo(
+          formatTimelineLog("server.orchestration", "command.published", {
+            commandId: envelope.command.commandId,
+            commandType: envelope.command.type,
+            eventCount: committedCommand.committedEvents.length,
+            eventTypes: committedCommand.committedEvents.map((event) => event.type),
+            firstSequence: committedCommand.committedEvents.at(0)?.sequence ?? null,
+            lastSequence: committedCommand.lastSequence,
+            sequences: committedCommand.committedEvents.map((event) => event.sequence),
+          }),
+        );
         return { sequence: committedCommand.lastSequence };
       }).pipe(Effect.withSpan(`orchestration.command.${envelope.command.type}`)),
     ).pipe(

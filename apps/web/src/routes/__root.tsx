@@ -303,6 +303,18 @@ function EventRouter() {
     const pendingDomainEvents: OrchestrationEvent[] = [];
     let flushPendingDomainEventsScheduled = false;
     let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    let observedDomainEventCount = 0;
+
+    const summarizeDomainEventForLog = (event: OrchestrationEvent): Record<string, unknown> => {
+      const payload = event.payload as Record<string, unknown>;
+      return {
+        aggregateId: event.aggregateId,
+        aggregateKind: event.aggregateKind,
+        sequence: event.sequence,
+        threadId: typeof payload.threadId === "string" ? payload.threadId : null,
+        type: event.type,
+      };
+    };
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
@@ -349,14 +361,29 @@ function EventRouter() {
     );
 
     const applyEventBatch = (events: ReadonlyArray<OrchestrationEvent>) => {
+      const stateBeforeMark = recovery.getState();
       const nextEvents = recovery.markEventBatchApplied(events);
       if (nextEvents.length === 0) {
+        logWebTimeline("orchestration.domain-event.batch-skip", {
+          inputCount: events.length,
+          latestSequence: recovery.getState().latestSequence,
+          reason: "no-new-events",
+          stateBeforeMark,
+        });
         return;
       }
+      const createdThreadIds = nextEvents
+        .filter((event) => event.type === "thread.created")
+        .map((event) => ThreadId.makeUnsafe(event.aggregateId));
+      const storeBeforeApply = useStore.getState();
       logWebTimeline("orchestration.domain-event.batch-apply", {
         count: nextEvents.length,
+        createdThreadIds,
         firstSequence: nextEvents[0]?.sequence ?? null,
+        inputCount: events.length,
         lastSequence: nextEvents.at(-1)?.sequence ?? null,
+        latestSequenceAfterMark: recovery.getState().latestSequence,
+        stateBeforeMark,
         types: nextEvents.map((event) => event.type),
       });
 
@@ -375,6 +402,26 @@ function EventRouter() {
       }
 
       applyOrchestrationEvents(uiEvents);
+      if (createdThreadIds.length > 0) {
+        const storeAfterApply = useStore.getState();
+        logWebTimeline("orchestration.domain-event.store-applied", {
+          createdThreadIds,
+          presentInSidebarAfter: createdThreadIds.map((threadId) =>
+            Boolean(storeAfterApply.sidebarThreadsById[threadId]),
+          ),
+          presentInSidebarBefore: createdThreadIds.map((threadId) =>
+            Boolean(storeBeforeApply.sidebarThreadsById[threadId]),
+          ),
+          presentInThreadsAfter: createdThreadIds.map((threadId) =>
+            Boolean(storeAfterApply.threadsById[threadId]),
+          ),
+          presentInThreadsBefore: createdThreadIds.map((threadId) =>
+            Boolean(storeBeforeApply.threadsById[threadId]),
+          ),
+          threadCountAfter: storeAfterApply.threads.length,
+          threadCountBefore: storeBeforeApply.threads.length,
+        });
+      }
       const startupRecoveryClearThreadIds = deriveStartupRecoveryClearThreadIds({
         events: nextEvents,
         threadsById: useStore.getState().threadsById,
@@ -421,18 +468,34 @@ function EventRouter() {
       flushPendingDomainEventsScheduled = false;
       pendingFlushTimer = null;
       if (disposed || pendingDomainEvents.length === 0) {
+        logWebTimeline("orchestration.domain-event.flush-skip", {
+          disposed,
+          pendingCount: pendingDomainEvents.length,
+        });
         return;
       }
 
       const events = pendingDomainEvents.splice(0, pendingDomainEvents.length);
+      logWebTimeline("orchestration.domain-event.flush", {
+        count: events.length,
+        firstSequence: events[0]?.sequence ?? null,
+        lastSequence: events.at(-1)?.sequence ?? null,
+        pendingCountAfter: pendingDomainEvents.length,
+      });
       applyEventBatch(events);
     };
     const schedulePendingDomainEventFlush = () => {
       if (flushPendingDomainEventsScheduled) {
+        logWebTimeline("orchestration.domain-event.flush-already-scheduled", {
+          pendingCount: pendingDomainEvents.length,
+        });
         return;
       }
 
       flushPendingDomainEventsScheduled = true;
+      logWebTimeline("orchestration.domain-event.flush-scheduled", {
+        pendingCount: pendingDomainEvents.length,
+      });
       pendingFlushTimer = setTimeout(flushPendingDomainEvents, 16);
     };
 
@@ -522,10 +585,25 @@ function EventRouter() {
     };
     const unsubDomainEvent = getWsRpcClient().orchestration.onDomainEvent(
       (event) => {
+        observedDomainEventCount += 1;
         const action = recovery.classifyDomainEvent(event.sequence);
+        const shouldLogClassification =
+          observedDomainEventCount <= 100 || action !== "apply" || event.type === "thread.created";
+        if (shouldLogClassification) {
+          logWebTimeline("orchestration.domain-event.classified", {
+            action,
+            observedCount: observedDomainEventCount,
+            pendingCount: pendingDomainEvents.length,
+            recoveryState: recovery.getState(),
+            ...summarizeDomainEventForLog(event),
+          });
+        }
         if (action === "apply") {
           pendingDomainEvents.push(event);
           schedulePendingDomainEventFlush();
+          return;
+        }
+        if (action === "defer" || action === "ignore") {
           return;
         }
         if (action === "recover") {

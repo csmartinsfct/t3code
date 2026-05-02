@@ -104,6 +104,8 @@ function summarizeOrchestrationEvent(event: OrchestrationEvent): Record<string, 
   };
 }
 
+let orchestrationDomainEventSubscriptionCounter = 0;
+
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly terminal: {
@@ -689,26 +691,38 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         });
         return result;
       },
-      onDomainEvent: (listener, options) =>
-        transport.subscribe(
+      onDomainEvent: (listener, options) => {
+        const subscriptionId = `domain-${++orchestrationDomainEventSubscriptionCounter}`;
+        return transport.subscribe(
           (client) => {
             const fromSequenceExclusive = options?.getFromSequenceExclusive?.();
-            logWebTimeline(
-              "orchestration.domain-event.subscribe",
-              fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : undefined,
-            );
+            logWebTimeline("orchestration.domain-event.subscribe", {
+              fromSequenceExclusive: fromSequenceExclusive ?? null,
+              subscriptionId,
+            });
             return client[WS_METHODS.subscribeOrchestrationDomainEvents](
               fromSequenceExclusive !== undefined ? { fromSequenceExclusive } : {},
             );
           },
           (event) => {
-            logWebTimeline(
-              "orchestration.domain-event.received",
-              summarizeOrchestrationEvent(event),
-            );
+            logWebTimeline("orchestration.domain-event.received", {
+              subscriptionId,
+              ...summarizeOrchestrationEvent(event),
+            });
             listener(event);
           },
-        ),
+          {
+            describeValue: (event) => ({
+              aggregateId: event.aggregateId,
+              aggregateKind: event.aggregateKind,
+              sequence: event.sequence,
+              subscriptionId,
+              type: event.type,
+            }),
+            label: `orchestration.domain-events:${subscriptionId}`,
+          },
+        );
+      },
       onRunEvent: (projectId, listener) =>
         transport.subscribe(
           (client) => {

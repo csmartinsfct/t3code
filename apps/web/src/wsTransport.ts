@@ -8,8 +8,10 @@ import {
 } from "./rpc/protocol";
 import { RpcClient } from "effect/unstable/rpc";
 
-interface SubscribeOptions {
+interface SubscribeOptions<TValue = unknown> {
   readonly retryDelay?: Duration.Input;
+  readonly label?: string;
+  readonly describeValue?: (value: TValue) => Record<string, unknown>;
 }
 
 interface RequestOptions {
@@ -81,28 +83,60 @@ export class WsTransport {
   subscribe<TValue>(
     connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
-    options?: SubscribeOptions,
+    options?: SubscribeOptions<TValue>,
   ): () => void {
     if (this.disposed) {
       return () => undefined;
     }
 
     let active = true;
+    let attempt = 0;
     const retryDelayMs = options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS;
+    const label = options?.label ?? "anonymous";
+    console.info(formatTimelineLog("web", "ws.subscription.requested", { label }));
     const cancel = this.runtime.runCallback(
       Effect.promise(() => this.clientPromise).pipe(
         Effect.flatMap((client) =>
-          Stream.runForEach(connect(client), (value) =>
-            Effect.sync(() => {
-              if (!active) {
-                return;
-              }
-              try {
-                listener(value);
-              } catch {
-                // Swallow listener errors so the stream stays live.
-              }
-            }),
+          Effect.sync(() => {
+            attempt += 1;
+            console.info(
+              formatTimelineLog("web", "ws.subscription.stream.start", { attempt, label }),
+            );
+          }).pipe(
+            Effect.andThen(
+              Stream.runForEach(connect(client), (value) =>
+                Effect.sync(() => {
+                  if (!active) {
+                    return;
+                  }
+                  const description = options?.describeValue?.(value);
+                  if (description) {
+                    console.info(
+                      formatTimelineLog("web", "ws.subscription.stream.value", {
+                        attempt,
+                        label,
+                        ...description,
+                      }),
+                    );
+                  }
+                  try {
+                    listener(value);
+                  } catch {
+                    // Swallow listener errors so the stream stays live.
+                  }
+                }),
+              ),
+            ),
+            Effect.tap(() =>
+              Effect.sync(() => {
+                console.info(
+                  formatTimelineLog("web", "ws.subscription.stream.completed", {
+                    attempt,
+                    label,
+                  }),
+                );
+              }),
+            ),
           ),
         ),
         Effect.catch((error) => {
@@ -112,7 +146,9 @@ export class WsTransport {
           return Effect.sync(() => {
             console.warn(
               formatTimelineLog("web", "ws.subscription.disconnected", {
+                attempt,
                 error: formatErrorMessage(error),
+                label,
               }),
             );
           }).pipe(Effect.andThen(Effect.sleep(retryDelayMs)));
@@ -123,6 +159,7 @@ export class WsTransport {
 
     return () => {
       active = false;
+      console.info(formatTimelineLog("web", "ws.subscription.unsubscribe", { attempt, label }));
       cancel();
     };
   }

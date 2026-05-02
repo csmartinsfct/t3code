@@ -568,12 +568,15 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcStreamEffect(
           WS_METHODS.subscribeOrchestrationDomainEvents,
           Effect.gen(function* () {
+            const subscriptionId = crypto.randomUUID();
             const snapshot = yield* orchestrationEngine.getReadModel();
             const fromSequenceExclusive = input.fromSequenceExclusive ?? snapshot.snapshotSequence;
             yield* Effect.logInfo(
               formatTimelineLog("server.ws", "orchestration.domain-events.subscribe", {
+                explicitFromSequenceExclusive: input.fromSequenceExclusive ?? null,
                 fromSequenceExclusive,
                 snapshotSequence: snapshot.snapshotSequence,
+                subscriptionId,
               }),
             );
             const replayEvents: Array<OrchestrationEvent> = yield* Stream.runCollect(
@@ -582,27 +585,130 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               Effect.map((events) => Array.from(events)),
               Effect.catch(() => Effect.succeed([] as Array<OrchestrationEvent>)),
             );
-            const replayStream = Stream.fromIterable(replayEvents);
-            const source = Stream.merge(replayStream, orchestrationEngine.streamDomainEvents);
+            yield* Effect.logInfo(
+              formatTimelineLog("server.ws", "orchestration.domain-events.replay.loaded", {
+                firstReplaySequence: replayEvents.at(0)?.sequence ?? null,
+                fromSequenceExclusive,
+                lastReplaySequence: replayEvents.at(-1)?.sequence ?? null,
+                replayCount: replayEvents.length,
+                subscriptionId,
+              }),
+            );
+            type StreamSource = "replay" | "live";
+            type SourcedEvent = {
+              readonly event: OrchestrationEvent;
+              readonly source: StreamSource;
+            };
+            const replayStream = Stream.fromIterable(
+              replayEvents.map((event): SourcedEvent => ({ event, source: "replay" })),
+            );
+            const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              Stream.map((event): SourcedEvent => ({ event, source: "live" })),
+            );
+            const source = Stream.merge(replayStream, liveStream);
             type SequenceState = {
+              readonly duplicateCount: number;
+              readonly emittedCount: number;
+              readonly maxPendingSize: number;
               readonly nextSequence: number;
               readonly pendingBySequence: Map<number, OrchestrationEvent>;
+              readonly receivedCount: number;
+              readonly staleCount: number;
             };
+            type SequenceDiagnostic = {
+              readonly action: "duplicate" | "queued" | "stale";
+              readonly duplicateCount: number;
+              readonly emittedCount: number;
+              readonly emittedFirstSequence: number | null;
+              readonly emittedLastSequence: number | null;
+              readonly eventType: string;
+              readonly maxPendingSize: number;
+              readonly nextSequenceAfter: number;
+              readonly nextSequenceBefore: number;
+              readonly pendingSize: number;
+              readonly receivedCount: number;
+              readonly sequence: number;
+              readonly source: StreamSource;
+              readonly staleCount: number;
+              readonly subscriptionId: string;
+            };
+            const shouldLogSequenceDiagnostic = (diagnostic: SequenceDiagnostic): boolean =>
+              diagnostic.receivedCount <= 50 ||
+              diagnostic.action !== "queued" ||
+              diagnostic.pendingSize > 0 ||
+              diagnostic.emittedCount > 1 ||
+              diagnostic.emittedFirstSequence === fromSequenceExclusive + 1 ||
+              diagnostic.eventType === "thread.created";
             const state = yield* Ref.make<SequenceState>({
+              duplicateCount: 0,
+              emittedCount: 0,
+              maxPendingSize: 0,
               nextSequence: fromSequenceExclusive + 1,
               pendingBySequence: new Map<number, OrchestrationEvent>(),
+              receivedCount: 0,
+              staleCount: 0,
             });
 
             return source.pipe(
-              Stream.mapEffect((event) =>
+              Stream.mapEffect((sourcedEvent) =>
                 Ref.modify(
                   state,
                   ({
+                    duplicateCount,
+                    emittedCount,
+                    maxPendingSize,
                     nextSequence,
                     pendingBySequence,
-                  }): [Array<OrchestrationEvent>, SequenceState] => {
+                    receivedCount,
+                    staleCount,
+                  }): [
+                    {
+                      readonly diagnostic: SequenceDiagnostic;
+                      readonly events: Array<OrchestrationEvent>;
+                    },
+                    SequenceState,
+                  ] => {
+                    const { event, source: eventSource } = sourcedEvent;
+                    const nextReceivedCount = receivedCount + 1;
+                    const baseDiagnostic = {
+                      eventType: event.type,
+                      nextSequenceBefore: nextSequence,
+                      receivedCount: nextReceivedCount,
+                      sequence: event.sequence,
+                      source: eventSource,
+                      subscriptionId,
+                    } as const;
                     if (event.sequence < nextSequence || pendingBySequence.has(event.sequence)) {
-                      return [[], { nextSequence, pendingBySequence }];
+                      const action = event.sequence < nextSequence ? "stale" : "duplicate";
+                      const nextDuplicateCount =
+                        action === "duplicate" ? duplicateCount + 1 : duplicateCount;
+                      const nextStaleCount = action === "stale" ? staleCount + 1 : staleCount;
+                      return [
+                        {
+                          diagnostic: {
+                            ...baseDiagnostic,
+                            action,
+                            duplicateCount: nextDuplicateCount,
+                            emittedCount: 0,
+                            emittedFirstSequence: null,
+                            emittedLastSequence: null,
+                            maxPendingSize,
+                            nextSequenceAfter: nextSequence,
+                            pendingSize: pendingBySequence.size,
+                            staleCount: nextStaleCount,
+                          },
+                          events: [],
+                        },
+                        {
+                          duplicateCount: nextDuplicateCount,
+                          emittedCount,
+                          maxPendingSize,
+                          nextSequence,
+                          pendingBySequence,
+                          receivedCount: nextReceivedCount,
+                          staleCount: nextStaleCount,
+                        },
+                      ];
                     }
 
                     const updatedPending = new Map(pendingBySequence);
@@ -620,8 +726,48 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                       expected += 1;
                     }
 
-                    return [emit, { nextSequence: expected, pendingBySequence: updatedPending }];
+                    const nextEmittedCount = emittedCount + emit.length;
+                    const nextMaxPendingSize = Math.max(maxPendingSize, updatedPending.size);
+                    return [
+                      {
+                        diagnostic: {
+                          ...baseDiagnostic,
+                          action: "queued",
+                          duplicateCount,
+                          emittedCount: emit.length,
+                          emittedFirstSequence: emit.at(0)?.sequence ?? null,
+                          emittedLastSequence: emit.at(-1)?.sequence ?? null,
+                          maxPendingSize: nextMaxPendingSize,
+                          nextSequenceAfter: expected,
+                          pendingSize: updatedPending.size,
+                          staleCount,
+                        },
+                        events: emit,
+                      },
+                      {
+                        duplicateCount,
+                        emittedCount: nextEmittedCount,
+                        maxPendingSize: nextMaxPendingSize,
+                        nextSequence: expected,
+                        pendingBySequence: updatedPending,
+                        receivedCount: nextReceivedCount,
+                        staleCount,
+                      },
+                    ];
                   },
+                ).pipe(
+                  Effect.flatMap((decision) =>
+                    (shouldLogSequenceDiagnostic(decision.diagnostic)
+                      ? Effect.logInfo(
+                          formatTimelineLog(
+                            "server.ws",
+                            "orchestration.domain-events.sequence",
+                            decision.diagnostic,
+                          ),
+                        )
+                      : Effect.void
+                    ).pipe(Effect.as(decision.events)),
+                  ),
                 ),
               ),
               Stream.flatMap((events) => Stream.fromIterable(events)),
