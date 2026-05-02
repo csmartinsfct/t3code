@@ -51,8 +51,9 @@ export function buildProviderOptions(
     label: p.displayName ?? providerDisplayName(p.provider),
     available: true,
   }));
-  // Append coming-soon entries
-  options.push({ value: "cursor", label: "Cursor", available: false });
+  if (!serverProviders.some((provider) => provider.provider === "cursor")) {
+    options.push({ value: "cursor", label: "Cursor", available: false });
+  }
   return options;
 }
 

@@ -151,19 +151,23 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 
 ### Cursor
 
-- Planned provider using Cursor Agent CLI print mode:
-  `agent --print --output-format stream-json`.
-- Runtime shape: process-per-turn adapter with Cursor `session_id` stored as
-  T3's provider resume cursor and passed back through `--resume`.
-- Authentication and model availability are delegated to Cursor CLI status,
-  about, and model probes for the selected profile.
-- **Profiles:** Multiple named profiles are planned from the first milestone.
-  The default provider appears as `cursor`; profiles appear as exact provider
-  entries such as `cursor:metric` and keep independent HOME/config/data paths,
-  accounts, status probes, resume cursors, rate-limit keys, and draft state.
-- Configuration: enabled/disabled, binary path or launch command, profile HOME,
-  `CURSOR_CONFIG_DIR`, `CURSOR_DATA_DIR`, custom environment, and custom model
-  slugs.
+- Provider status discovery is registered for the default Cursor Agent CLI and
+  named Cursor profiles. The server reports install/version/auth/model
+  snapshots before the runtime adapter is enabled.
+- Authentication and model availability are delegated to Cursor CLI probes:
+  `agent about --format json`, fallback `agent status`, and `agent models`.
+  Account identifiers are treated as sensitive and are not displayed in provider
+  status labels.
+- **Profiles:** Multiple named profiles are supported in status/settings from
+  the first Cursor milestone. The default provider appears as `cursor`; profiles
+  appear as exact provider entries such as `cursor:metric` and keep independent
+  HOME/config/data paths, accounts, status probes, resume cursors, rate-limit
+  keys, and draft state.
+- Configuration: enabled/disabled, binary path, optional launch command, profile
+  HOME, `CURSOR_CONFIG_DIR`, `CURSOR_DATA_DIR`, custom environment, and custom
+  model slugs.
+- Runtime shape: planned process-per-turn adapter with Cursor `session_id`
+  stored as T3's provider resume cursor and passed back through `--resume`.
 - Runtime access: T3 maps full access to Cursor force/sandbox-disabled flags and
   maps approval-required mode to Cursor's default non-interactive behavior until
   a stable approval round trip is proven.

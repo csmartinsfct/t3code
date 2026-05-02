@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  buildProviderOptions,
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -1331,7 +1332,7 @@ describe("deriveActiveWorkStartedAt", () => {
 });
 
 describe("PROVIDER_OPTIONS", () => {
-  it("advertises supported providers while keeping Cursor as a placeholder", () => {
+  it("keeps a static Cursor fallback until server provider snapshots arrive", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
     const gemini = PROVIDER_OPTIONS.find((option) => option.value === "gemini");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
@@ -1356,5 +1357,37 @@ describe("PROVIDER_OPTIONS", () => {
       label: "Cursor",
       available: false,
     });
+  });
+
+  it("uses server-provided Cursor status instead of duplicating the fallback", () => {
+    const options = buildProviderOptions([
+      {
+        provider: "cursor",
+        displayName: "Cursor",
+        enabled: true,
+        installed: true,
+        version: "2026.05.01-eea359f",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-05-02T00:00:00.000Z",
+        models: [],
+      },
+      {
+        provider: "cursor:metric" as never,
+        displayName: "Cursor (metric)",
+        enabled: true,
+        installed: true,
+        version: "2026.05.01-eea359f",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-05-02T00:00:00.000Z",
+        models: [],
+      },
+    ]);
+
+    expect(options).toEqual([
+      { value: "cursor", label: "Cursor", available: true },
+      { value: "cursor:metric", label: "Cursor (metric)", available: true },
+    ]);
   });
 });

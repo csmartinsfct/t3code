@@ -131,6 +131,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     homePlaceholder: "GEMINI_CLI_HOME",
     homeDescription: "Optional custom Gemini CLI home and config directory.",
   },
+  {
+    provider: "cursor",
+    title: "Cursor",
+    binaryPlaceholder: "Cursor agent binary path",
+    binaryDescription: "Path to the Cursor Agent CLI binary",
+  },
 ] as const;
 
 const PROVIDER_STATUS_STYLES = {
@@ -580,6 +586,16 @@ export function GeneralSettingsPanel() {
       settings.providers.gemini.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.gemini.homePath ||
       settings.providers.gemini.customModels.length > 0,
     ),
+    cursor: Boolean(
+      settings.providers.cursor.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.cursor.binaryPath ||
+      settings.providers.cursor.launchCommand.length > 0 ||
+      settings.providers.cursor.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.cursor.homePath ||
+      settings.providers.cursor.configDir !== DEFAULT_UNIFIED_SETTINGS.providers.cursor.configDir ||
+      settings.providers.cursor.dataDir !== DEFAULT_UNIFIED_SETTINGS.providers.cursor.dataDir ||
+      !Equal.equals(settings.providers.cursor.env, DEFAULT_UNIFIED_SETTINGS.providers.cursor.env) ||
+      settings.providers.cursor.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Partial<Record<ProviderKind, string>>
@@ -587,6 +603,7 @@ export function GeneralSettingsPanel() {
     codex: "",
     claudeAgent: "",
     gemini: "",
+    cursor: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -842,7 +859,9 @@ export function GeneralSettingsPanel() {
     // Add entries for discovered provider profiles from server providers
     for (const sp of serverProviders) {
       const kind = sp.provider as string;
-      if (kind === "codex" || kind === "claudeAgent" || kind === "gemini") continue;
+      if (kind === "codex" || kind === "claudeAgent" || kind === "gemini" || kind === "cursor") {
+        continue;
+      }
       if (kind.startsWith("codex:")) {
         base.push({
           provider: "codex" as BaseProviderKind,
@@ -860,6 +879,14 @@ export function GeneralSettingsPanel() {
           title: sp.displayName ?? sp.provider,
           binaryPlaceholder: "Claude binary path",
           binaryDescription: "Path to the Claude binary",
+          _profileProviderKind: sp.provider as ProviderKind,
+        });
+      } else if (kind.startsWith("cursor:")) {
+        base.push({
+          provider: "cursor" as BaseProviderKind,
+          title: sp.displayName ?? sp.provider,
+          binaryPlaceholder: "Cursor agent binary path",
+          binaryDescription: "Path to the Cursor Agent CLI binary",
           _profileProviderKind: sp.provider as ProviderKind,
         });
       }
@@ -1922,7 +1949,9 @@ export function GeneralSettingsPanel() {
                               ? "gpt-6.7-codex-ultra-preview"
                               : providerCard.provider === "gemini"
                                 ? "gemini-3.1-pro-preview"
-                                : "claude-sonnet-5-0"
+                                : providerCard.provider === "cursor"
+                                  ? "sonnet-4-thinking"
+                                  : "claude-sonnet-5-0"
                           }
                           spellCheck={false}
                         />

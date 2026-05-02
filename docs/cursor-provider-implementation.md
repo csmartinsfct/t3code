@@ -287,7 +287,7 @@ Files:
 - `apps/server/src/provider/Layers/ProviderRegistry.ts`
 - `apps/server/src/serverSettings.ts`
 
-Required behavior:
+Implemented in T3CO-396:
 
 - Resolve a launch configuration for `cursor` and every configured/discovered
   Cursor profile.
@@ -299,11 +299,18 @@ Required behavior:
 - Cache status by resolved launch config, not only by binary name.
 - Register each profile as a distinct `ServerProvider` with provider kind
   `cursor:<profileId>`.
-- Surface duplicate-account warnings without exposing raw email addresses.
+- Avoid exposing raw account emails in provider status labels.
 
 Built-in models should start with locally verified names from `agent models` plus
 documented examples such as `gpt-5`, `sonnet-4`, and `sonnet-4-thinking`.
 Unknown/custom model slugs remain supported through settings.
+
+Deferred:
+
+- Cache status by resolved launch config if Cursor probes become expensive.
+- Surface duplicate-account warnings without exposing raw email addresses.
+- Promote additional model capability metadata only after the CLI exposes stable
+  machine-readable model details.
 
 ### Turn Runner And Stream Parser
 

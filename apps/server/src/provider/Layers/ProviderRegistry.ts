@@ -8,14 +8,17 @@ import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive, makeClaudeProfileProvider } from "./ClaudeProvider";
 import { CodexProviderLive, makeCodexProfileProvider } from "./CodexProvider";
+import { CursorProviderLive, makeCursorProfileProvider } from "./CursorProvider";
 import { GeminiProviderLive } from "./GeminiProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { CodexProvider } from "../Services/CodexProvider";
+import { CursorProvider } from "../Services/CursorProvider";
 import { GeminiProvider } from "../Services/GeminiProvider";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry";
 import type { ServerProviderShape } from "../Services/ServerProvider";
 import { discoverClaudeProfiles, mergeClaudeProfiles } from "../claudeProfileDiscovery";
 import { discoverCodexProfiles, mergeCodexProfiles } from "../codexProfileDiscovery";
+import { discoverCursorProfiles, mergeCursorProfiles } from "../cursorProfileDiscovery";
 import { ServerSettingsService } from "../../serverSettings";
 
 export const haveProvidersChanged = (
@@ -29,14 +32,17 @@ export const ProviderRegistryLive = Layer.effect(
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
     const geminiProvider = yield* GeminiProvider;
+    const cursorProvider = yield* CursorProvider;
     const serverSettings = yield* ServerSettingsService;
 
     // ── Discover provider profiles ─────────────────────────────────
     const discoveredCodex = yield* discoverCodexProfiles();
     const discoveredClaude = yield* discoverClaudeProfiles();
+    const discoveredCursor = yield* discoverCursorProfiles();
     const settings = yield* serverSettings.getSettings;
     const codexProfiles = mergeCodexProfiles(discoveredCodex, settings.providers.codexProfiles);
     const claudeProfiles = mergeClaudeProfiles(discoveredClaude, settings.providers.claudeProfiles);
+    const cursorProfiles = mergeCursorProfiles(discoveredCursor, settings.providers.cursorProfiles);
 
     const profileProviders: Array<{ kind: ProviderKind; provider: ServerProviderShape }> = [];
     for (const profile of codexProfiles) {
@@ -47,6 +53,10 @@ export const ProviderRegistryLive = Layer.effect(
       const provider = yield* makeClaudeProfileProvider(profile);
       profileProviders.push({ kind: profile.providerKind, provider });
     }
+    for (const profile of cursorProfiles) {
+      const provider = yield* makeCursorProfileProvider(profile);
+      profileProviders.push({ kind: profile.providerKind, provider });
+    }
 
     // ── Aggregate all providers ────────────────────────────────────
 
@@ -54,6 +64,7 @@ export const ProviderRegistryLive = Layer.effect(
       { kind: "codex", provider: codexProvider },
       { kind: "claudeAgent", provider: claudeProvider },
       { kind: "gemini", provider: geminiProvider },
+      { kind: "cursor", provider: cursorProvider },
       ...profileProviders,
     ];
 
@@ -100,6 +111,8 @@ export const ProviderRegistryLive = Layer.effect(
         } else if (baseProviderKind(provider) === "claudeAgent") {
           // Refresh the default Claude provider for unknown Claude profiles
           yield* claudeProvider.refresh;
+        } else if (baseProviderKind(provider) === "cursor") {
+          yield* cursorProvider.refresh;
         }
       } else {
         yield* Effect.all(
@@ -129,4 +142,5 @@ export const ProviderRegistryLive = Layer.effect(
   Layer.provideMerge(CodexProviderLive),
   Layer.provideMerge(ClaudeProviderLive),
   Layer.provideMerge(GeminiProviderLive),
+  Layer.provideMerge(CursorProviderLive),
 );
