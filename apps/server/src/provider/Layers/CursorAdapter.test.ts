@@ -12,6 +12,10 @@ import {
 import { ServerSettingsService } from "../../serverSettings";
 import { ProviderAdapterRequestError, type ProviderAdapterError } from "../Errors";
 import { CursorAdapter, type CursorAdapterShape } from "../Services/CursorAdapter";
+import type {
+  LifecycleEntry,
+  ProviderLifecycleLoggerShape,
+} from "../Services/ProviderLifecycleLogger";
 import type { CursorTurnCommandInput, CursorTurnRunResult } from "../cursor/CursorTurnRunner";
 import { makeCursorAdapterLive, type CursorAdapterLiveOptions } from "./CursorAdapter";
 
@@ -375,6 +379,44 @@ it.effect("CursorAdapterLive rejects concurrent turns and recovers after runner 
     assert.ok(recovered.turnId.startsWith("cursor-turn-"));
     assert.equal(calls, 3);
   }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+});
+
+it.effect("CursorAdapterLive writes lifecycle entries while interrupting active turns", () => {
+  const lifecycleEntries: Array<{ threadId: ThreadId | null; entry: LifecycleEntry }> = [];
+  const lifecycleLogger: ProviderLifecycleLoggerShape = {
+    log: (threadId, entry) =>
+      Effect.sync(() => {
+        lifecycleEntries.push({ threadId, entry });
+      }),
+    close: () => Effect.void,
+  };
+  const createChat = vi.fn(() => Effect.succeed("cursor-session-lifecycle"));
+  const runTurn = vi.fn(
+    () => Effect.never as Effect.Effect<CursorTurnRunResult, ProviderAdapterError>,
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-lifecycle");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    const turn = yield* adapter.sendTurn({ threadId, input: "Keep working." });
+    yield* adapter.interruptTurn(threadId, turn.turnId);
+
+    const events = lifecycleEntries.map((entry) => entry.entry.event);
+    assert.deepEqual(events, ["cursor.turn.interrupt.requested", "cursor.turn.interrupt.finished"]);
+    assert.equal(lifecycleEntries[0]?.threadId, threadId);
+    assert.deepInclude(lifecycleEntries[0]?.entry.details ?? {}, {
+      cleanupRunner: "CursorTurnRunner",
+      graceMs: 2000,
+      adapterWaitMs: 5000,
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn, lifecycleLogger })));
 });
 
 it.effect(

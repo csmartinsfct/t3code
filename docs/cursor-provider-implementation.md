@@ -142,6 +142,15 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
   unless the process group or process tree is cleaned up.
 - Cursor adapter interrupt and stop paths must use process-group/tree cleanup,
   not only `child.kill("SIGINT")` on the direct parent process.
+- T3CO-400 added Cursor runner cleanup that starts turn processes as detached
+  process-group leaders on POSIX and, on interruption, escalates
+  `SIGINT -> SIGTERM -> SIGKILL` across the root process group and discovered
+  descendants. Windows uses `taskkill /T`, adding `/F` for force-kill.
+- The adapter writes sanitized lifecycle entries for interrupt/stop requests and
+  runner cleanup stages. Look for `cursor.turn.interrupt.requested`,
+  `cursor.turn.interrupt.finished`, and `cursor.process_tree.*` events in the
+  thread `.lifecycle.log`; entries include the signal sequence, grace timeout,
+  adapter wait timeout, pid, stage, and signal, but never child command lines.
 
 ### Multiple Profiles
 
@@ -390,9 +399,9 @@ Recommended lifecycle:
      if Cursor returns a newer value.
 3. `interruptTurn`
    - Mark the active turn cancel requested.
-   - Interrupt the active adapter fiber and mark the T3 turn interrupted.
-   - Follow-up hardening should own the full process group/tree and perform
-     explicit cleanup on interrupt, stop, timeout, and process exit.
+   - Interrupt the active adapter fiber so the Cursor runner finalizer can clean
+     the process group/tree with timeout escalation.
+   - Mark the T3 turn interrupted and preserve the resume cursor.
    - Emit interrupted state only once.
 4. `stopSession`
    - If a turn is active, interrupt and clean it up.
@@ -579,6 +588,10 @@ Add a `cursor-adapter` lifecycle category and log:
 - process exit code/signal
 - interrupt cleanup actions
 
+T3CO-400 writes interrupt cleanup lifecycle events under `cursor.adapter` and
+`cursor.process_tree`. Cleanup stages are sanitized and include only operational
+metadata (`pid`, `stage`, `signal`, timeout policy), not process command lines.
+
 Never log raw API keys, tokens, full account emails, or full prompt contents.
 
 ## Implementation Order
@@ -591,7 +604,9 @@ Never log raw API keys, tokens, full account emails, or full prompt contents.
 5. Add `CursorAdapter` lifecycle and runtime-event normalization. (Done in
    T3CO-398 for assistant/reasoning deltas, token usage, terminal turn state,
    resume persistence, and unsupported capability errors.)
-6. Add process-tree interrupt cleanup.
+6. Add process-tree interrupt cleanup. (Done in T3CO-400 for runner
+   interruption, adapter interrupt/stop, lifecycle cleanup visibility, unit
+   coverage, and local installed-agent verification.)
 7. Wire web provider picker, composer traits, draft persistence, and settings.
 8. Add MCP discovery and document the initial T3 REST service injection path.
 9. Decide attachment and secondary inference behavior with local probes.
@@ -653,7 +668,8 @@ Do not run `bun test`; use `bun run test` for any targeted Vitest suites.
   each profile launch uses the intended HOME/keychain setup.
 - `result.result` duplicates assistant text emitted as deltas.
 - Process interrupts can orphan shell children unless the adapter owns process
-  group/tree cleanup.
+  group/tree cleanup. T3CO-400 covers the Cursor runner path; keep this in mind
+  for any future long-lived Cursor transport.
 - Cursor history may be cwd-scoped. Resume validation should include cwd.
 - Cursor MCP config precedence needs verification before T3 edits or writes any
   Cursor MCP config.

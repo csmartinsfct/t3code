@@ -9,6 +9,7 @@ import {
   type CursorResultEvent,
   type CursorStreamJsonEvent,
 } from "./CursorStreamJson";
+import { cleanupCursorProcessTree, type CursorProcessCleanupOptions } from "./CursorProcessTree";
 
 export type CursorHeadlessMode = "plan" | "ask";
 export type CursorSandboxMode = "enabled" | "disabled";
@@ -44,6 +45,8 @@ export interface CursorTurnRunResult {
   readonly exitCode: number;
   readonly stderr: string;
 }
+
+export interface CursorTurnRunnerOptions extends CursorProcessCleanupOptions {}
 
 export type CursorTurnRunnerErrorKind =
   | "spawn"
@@ -146,6 +149,7 @@ export function commandFromCursorTurnSpec(spec: CursorTurnCommandSpec): ChildPro
     cwd: spec.cwd,
     env: spec.env,
     shell: spec.shell,
+    detached: process.platform !== "win32",
   });
 }
 
@@ -233,7 +237,10 @@ export function resolveCursorTurnRunResult(input: {
   });
 }
 
-export const runCursorTurn = (input: CursorTurnCommandInput) =>
+export const runCursorTurn = (
+  input: CursorTurnCommandInput,
+  options: CursorTurnRunnerOptions = {},
+) =>
   Effect.gen(function* () {
     const spec = buildCursorTurnCommand(input);
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -256,6 +263,17 @@ export const runCursorTurn = (input: CursorTurnCommandInput) =>
         child.exitCode.pipe(Effect.map(Number)),
       ],
       { concurrency: "unbounded" },
+    ).pipe(
+      Effect.onInterrupt(() =>
+        cleanupCursorProcessTree(Number(child.pid), {
+          ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
+          ...(options.processTreeTerminator
+            ? { processTreeTerminator: options.processTreeTerminator }
+            : {}),
+          ...(options.isProcessRunning ? { isProcessRunning: options.isProcessRunning } : {}),
+          ...(options.onCleanupEvent ? { onCleanupEvent: options.onCleanupEvent } : {}),
+        }),
+      ),
     );
 
     return yield* Effect.try({

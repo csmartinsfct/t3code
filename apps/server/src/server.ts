@@ -197,7 +197,7 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provide(managedRunDeps),
       Layer.provide(snapshotQueryDeps),
     );
-    const cursorAdapterLayer = makeCursorAdapterLive().pipe(
+    const cursorAdapterLayer = makeCursorAdapterLive({ lifecycleLogger }).pipe(
       Layer.provide(managedRunDeps),
       Layer.provide(snapshotQueryDeps),
     );

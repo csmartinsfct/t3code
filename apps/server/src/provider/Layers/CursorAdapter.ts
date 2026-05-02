@@ -40,11 +40,19 @@ import {
   buildCursorTurnEnv,
   type CursorHeadlessMode,
   type CursorTurnCommandInput,
+  type CursorTurnRunnerOptions,
   type CursorTurnRunResult,
   runCursorTurn,
 } from "../cursor/CursorTurnRunner";
+import type {
+  LifecycleEntry,
+  ProviderLifecycleLoggerShape,
+} from "../Services/ProviderLifecycleLogger";
+import type { CursorProcessCleanupEvent } from "../cursor/CursorProcessTree";
 
 const PROVIDER = "cursor" as const;
+const CURSOR_ADAPTER_INTERRUPT_WAIT_MS = 5_000;
+const CURSOR_RUNNER_CLEANUP_GRACE_MS = 2_000;
 
 interface CursorResumeCursor {
   readonly version: 1;
@@ -86,7 +94,9 @@ export interface CursorAdapterLiveOptions {
   }) => Effect.Effect<string, ProviderAdapterError>;
   readonly runTurn?: (
     input: CursorTurnCommandInput,
+    options?: CursorTurnRunnerOptions,
   ) => Effect.Effect<CursorTurnRunResult, ProviderAdapterError>;
+  readonly lifecycleLogger?: ProviderLifecycleLoggerShape;
 }
 
 function nowIso(): string {
@@ -112,6 +122,17 @@ function toMessage(cause: unknown, fallback: string): string {
 function trimOrUndefined(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function cursorCleanupPolicyDetails(): Record<string, unknown> {
+  return {
+    cleanupRunner: "CursorTurnRunner",
+    signalSequence: ["SIGINT", "SIGTERM", "SIGKILL"],
+    graceMs: CURSOR_RUNNER_CLEANUP_GRACE_MS,
+    adapterWaitMs: CURSOR_ADAPTER_INTERRUPT_WAIT_MS,
+    posixTarget: "detached process group plus descendants",
+    windowsTarget: "taskkill /T; force kill uses /F",
+  };
 }
 
 function extractCursorSessionId(cursor: unknown): string | null {
@@ -269,8 +290,8 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           ));
       const runTurn =
         options?.runTurn ??
-        ((input: CursorTurnCommandInput) =>
-          runCursorTurn(input).pipe(
+        ((input: CursorTurnCommandInput, runnerOptions?: CursorTurnRunnerOptions) =>
+          runCursorTurn(input, runnerOptions).pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
             Effect.mapError(
               (cause) =>
@@ -282,6 +303,25 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
                 }),
             ),
           ));
+      const lifecycle = options?.lifecycleLogger;
+      const lfcyl = (
+        threadId: ThreadId | null,
+        entry: Omit<LifecycleEntry, "sessionId" | "turnId"> & {
+          readonly sessionId?: string | undefined;
+          readonly turnId?: string | undefined;
+        },
+      ) => {
+        const clean = {
+          scope: entry.scope,
+          event: entry.event,
+          ...(entry.details !== undefined ? { details: entry.details } : {}),
+          ...(entry.sessionId !== undefined ? { sessionId: entry.sessionId } : {}),
+          ...(entry.turnId !== undefined ? { turnId: entry.turnId } : {}),
+        } satisfies LifecycleEntry;
+        return lifecycle
+          ? lifecycle.log(threadId, clean).pipe(Effect.ignoreCause({ log: true }))
+          : Effect.void;
+      };
 
       const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
         Queue.offerUnsafe(runtimeEventQueue, event);
@@ -349,6 +389,80 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           ),
           Effect.withSpan(`CursorAdapter.${operation}`),
         );
+
+      const logCursorProcessCleanupEvent = (
+        context: CursorSessionContext,
+        turn: CursorTurnState,
+        event: CursorProcessCleanupEvent,
+      ) =>
+        lfcyl(context.session.threadId, {
+          scope: "cursor.process_tree",
+          event: `cursor.process_tree.${event.stage}`,
+          sessionId: context.providerSessionId,
+          turnId: turn.turnId,
+          details: {
+            ...cursorCleanupPolicyDetails(),
+            stage: event.stage,
+            pid: event.pid,
+            ...(event.signal ? { signal: event.signal } : {}),
+            ...(event.graceMs !== undefined ? { graceMs: event.graceMs } : {}),
+            ...(event.message ? { message: event.message } : {}),
+          },
+        });
+
+      const interruptActiveTurnFiber = (
+        context: CursorSessionContext,
+        activeTurn: CursorTurnState,
+        operation: "interruptTurn" | "stopSession",
+      ) =>
+        Effect.gen(function* () {
+          if (!activeTurn.fiber) {
+            yield* lfcyl(context.session.threadId, {
+              scope: "cursor.adapter",
+              event: "cursor.turn.interrupt.skipped",
+              sessionId: context.providerSessionId,
+              turnId: activeTurn.turnId,
+              details: {
+                operation,
+                reason: "missing_fiber",
+                ...cursorCleanupPolicyDetails(),
+              },
+            });
+            return;
+          }
+
+          yield* lfcyl(context.session.threadId, {
+            scope: "cursor.adapter",
+            event: "cursor.turn.interrupt.requested",
+            sessionId: context.providerSessionId,
+            turnId: activeTurn.turnId,
+            details: {
+              operation,
+              ...cursorCleanupPolicyDetails(),
+            },
+          });
+
+          const outcome = yield* Fiber.interrupt(activeTurn.fiber).pipe(
+            Effect.as("completed" as const),
+            Effect.raceFirst(
+              Effect.sleep(`${CURSOR_ADAPTER_INTERRUPT_WAIT_MS} millis`).pipe(
+                Effect.as("timeout" as const),
+              ),
+            ),
+          );
+
+          yield* lfcyl(context.session.threadId, {
+            scope: "cursor.adapter",
+            event: "cursor.turn.interrupt.finished",
+            sessionId: context.providerSessionId,
+            turnId: activeTurn.turnId,
+            details: {
+              operation,
+              outcome,
+              ...cursorCleanupPolicyDetails(),
+            },
+          });
+        });
 
       const ensureAssistantItemStarted = (context: CursorSessionContext, turn: CursorTurnState) => {
         if (turn.assistantStarted) return;
@@ -675,16 +789,21 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         };
         context.activeTurn = turn;
 
-        const turnEffect = runTurn({
-          settings: context.settings,
-          cwd: context.session.cwd ?? process.cwd(),
-          prompt: promptInput.prompt,
-          runtimeMode: context.session.runtimeMode,
-          resumeSessionId: context.providerSessionId,
-          ...(selectedModel ? { model: selectedModel } : {}),
-          ...(headlessMode ? { headlessMode } : {}),
-          streamPartialOutput: true,
-        });
+        const turnEffect = runTurn(
+          {
+            settings: context.settings,
+            cwd: context.session.cwd ?? process.cwd(),
+            prompt: promptInput.prompt,
+            runtimeMode: context.session.runtimeMode,
+            resumeSessionId: context.providerSessionId,
+            ...(selectedModel ? { model: selectedModel } : {}),
+            ...(headlessMode ? { headlessMode } : {}),
+            streamPartialOutput: true,
+          },
+          {
+            onCleanupEvent: (event) => logCursorProcessCleanupEvent(context, turn, event),
+          },
+        );
         const fiber = yield* Effect.forkDetach(
           turnEffect.pipe(
             Effect.match({
@@ -725,7 +844,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           if (!activeTurn || (turnId && activeTurn.turnId !== turnId)) return;
           activeTurn.cancelRequested = true;
           if (activeTurn.fiber) {
-            yield* Effect.sync(() => activeTurn.fiber?.interruptUnsafe());
+            yield* interruptActiveTurnFiber(context, activeTurn, "interruptTurn");
           }
           offerRuntimeEvent({
             ...eventBase(context),
@@ -753,7 +872,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           if (context.activeTurn) {
             context.activeTurn.cancelRequested = true;
             if (context.activeTurn.fiber) {
-              yield* Effect.sync(() => context.activeTurn?.fiber?.interruptUnsafe());
+              yield* interruptActiveTurnFiber(context, context.activeTurn, "stopSession");
             }
             finishTurn(context, "interrupted", { errorMessage: "Cursor session stopped." });
             context.activeTurn = undefined;

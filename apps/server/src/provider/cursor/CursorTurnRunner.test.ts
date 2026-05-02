@@ -1,6 +1,6 @@
 import type { CursorSettings } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Sink, Stream } from "effect";
+import { Effect, Fiber, Layer, Sink, Stream } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -8,6 +8,7 @@ import {
   buildCursorTurnArgs,
   buildCursorTurnCommand,
   buildCursorTurnEnv,
+  commandFromCursorTurnSpec,
   CursorTurnRunnerError,
   resolveCursorTurnRunResult,
   runCursorTurn,
@@ -35,6 +36,21 @@ function mockHandle(result: { stdout: string; stderr: string; code: number }) {
     stdin: Sink.drain,
     stdout: Stream.make(encoder.encode(result.stdout)),
     stderr: Stream.make(encoder.encode(result.stderr)),
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
+
+function mockRunningHandle(pid = 1) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(pid),
+    exitCode: Effect.never,
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    stdout: Stream.empty,
+    stderr: Stream.empty,
     all: Stream.empty,
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
@@ -234,6 +250,20 @@ describe("buildCursorTurnCommand", () => {
       "hello",
     ]);
   });
+
+  it("builds a detached process command on POSIX so cleanup can signal the process group", () => {
+    const spec = buildCursorTurnCommand({
+      settings: baseSettings,
+      cwd: "/repo",
+      prompt: "hello",
+      runtimeMode: "approval-required",
+    });
+    const command = commandFromCursorTurnSpec(spec) as unknown as {
+      options: { detached?: boolean };
+    };
+
+    expect(command.options.detached).toBe(process.platform !== "win32");
+  });
 });
 
 describe("resolveCursorTurnRunResult", () => {
@@ -335,5 +365,51 @@ describe("runCursorTurn", () => {
     if (exit._tag === "Failure") {
       expect(String(exit.cause)).toContain("CursorTurnRunnerError");
     }
+  });
+
+  it("cleans up the Cursor process tree when interrupted", async () => {
+    const signals: Array<{ pid: number; signal: "SIGINT" | "SIGTERM" | "SIGKILL" }> = [];
+    const cleanupStages: string[] = [];
+    const layer = Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() => Effect.succeed(mockRunningHandle(123))),
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkDetach(
+          runCursorTurn(
+            {
+              settings: baseSettings,
+              cwd: "/repo",
+              prompt: "sleep please",
+              runtimeMode: "full-access",
+            },
+            {
+              graceMs: 0,
+              processTreeTerminator: (pid, signal) =>
+                Effect.sync(() => {
+                  signals.push({ pid, signal });
+                }),
+              isProcessRunning: () => true,
+              onCleanupEvent: (event) =>
+                Effect.sync(() => {
+                  cleanupStages.push(event.stage);
+                }),
+            },
+          ).pipe(Effect.provide(layer)),
+          { startImmediately: true },
+        );
+        yield* Effect.sleep("10 millis");
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+
+    expect(signals).toEqual([
+      { pid: 123, signal: "SIGINT" },
+      { pid: 123, signal: "SIGTERM" },
+      { pid: 123, signal: "SIGKILL" },
+    ]);
+    expect(cleanupStages).toEqual(["signal", "escalating", "force_kill", "complete"]);
   });
 });
