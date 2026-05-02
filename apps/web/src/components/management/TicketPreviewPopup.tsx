@@ -266,17 +266,17 @@ export function SharedTicketPreviewPopup({
       ref={popupRef}
       data-slot="popover-popup"
       className={cn(
-        "fixed z-50 flex rounded-lg border bg-popover text-popover-foreground shadow-lg/5 outline-none",
+        "fixed z-50 flex flex-col rounded-lg border bg-popover text-popover-foreground shadow-lg/5 outline-none",
         "before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)]",
         "dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
-        "group/ticket-preview isolate overflow-clip p-4 [contain:layout_paint]",
+        "group/ticket-preview isolate overflow-hidden [contain:layout_paint]",
       )}
       style={previewStyle(geometry)}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
       <div
-        className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-clip overflow-y-auto pr-1 [contain:layout_paint]"
+        className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-clip overflow-y-auto p-4 [contain:layout_paint]"
         data-ticket-preview-scroll
       >
         <TicketPreviewContent
@@ -285,19 +285,25 @@ export function SharedTicketPreviewPopup({
           getCached={getCached}
         />
       </div>
-      <TicketPreviewResizeHandle
-        geometryRef={geometryRef}
-        popupRef={popupRef}
-        onGeometryChange={updateGeometry}
-        onPositionCommit={persistPosition}
-        onPreviewSizeCommit={persistSize}
-      />
-      <TicketPreviewDragHandle
-        geometryRef={geometryRef}
-        popupRef={popupRef}
-        onGeometryChange={updateGeometry}
-        onPositionCommit={persistPosition}
-      />
+      <div
+        role="toolbar"
+        aria-label="Ticket preview controls"
+        className="flex h-8 shrink-0 items-center justify-between border-t border-border/70 bg-popover/95 px-1.5"
+      >
+        <TicketPreviewDragHandle
+          geometryRef={geometryRef}
+          popupRef={popupRef}
+          onGeometryChange={updateGeometry}
+          onPositionCommit={persistPosition}
+        />
+        <TicketPreviewResizeHandle
+          geometryRef={geometryRef}
+          popupRef={popupRef}
+          onGeometryChange={updateGeometry}
+          onPositionCommit={persistPosition}
+          onPreviewSizeCommit={persistSize}
+        />
+      </div>
     </div>,
     document.body,
   );
@@ -346,8 +352,7 @@ function TicketPreviewResizeHandle({
       aria-label="Resize ticket preview"
       title="Drag to resize preview"
       className={cn(
-        "absolute right-0 bottom-0 z-20 flex size-7 cursor-nwse-resize touch-none select-none items-center justify-center rounded-br-lg rounded-tl-md border-t border-l border-border/70 bg-popover/95 text-muted-foreground/80 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "before:absolute before:right-0 before:bottom-0 before:size-10 before:content-['']",
+        "flex size-7 cursor-nwse-resize touch-none select-none items-center justify-center rounded-md border border-transparent text-muted-foreground/80 transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
       onClick={(event) => {
         event.preventDefault();
@@ -436,8 +441,7 @@ function TicketPreviewDragHandle({
       aria-label="Move ticket preview"
       title="Drag to move preview"
       className={cn(
-        "absolute bottom-0 left-0 z-20 flex size-7 cursor-move touch-none select-none items-center justify-center rounded-tr-md rounded-bl-lg border-t border-r border-border/70 bg-popover/95 text-muted-foreground/80 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "before:absolute before:bottom-0 before:left-0 before:size-10 before:content-['']",
+        "flex size-7 cursor-move touch-none select-none items-center justify-center rounded-md border border-transparent text-muted-foreground/80 transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
       onClick={(event) => {
         event.preventDefault();

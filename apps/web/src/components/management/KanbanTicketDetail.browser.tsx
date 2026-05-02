@@ -534,6 +534,19 @@ describe("KanbanTicketDetail ticket preview", () => {
           document.querySelector<HTMLButtonElement>("button[aria-label='Resize ticket preview']"),
         "Unable to find ticket preview resize handle.",
       );
+      const toolbar = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            "[role='toolbar'][aria-label='Ticket preview controls']",
+          ),
+        "Unable to find ticket preview controls toolbar.",
+      );
+      expect(toolbar.contains(handle)).toBe(true);
+      expect(
+        toolbar.contains(
+          document.querySelector<HTMLButtonElement>("button[aria-label='Move ticket preview']"),
+        ),
+      ).toBe(true);
       const startingRect = popup.getBoundingClientRect();
 
       handle.dispatchEvent(
