@@ -3,6 +3,7 @@ import type {
   ManagedRunSummary,
   ProjectScript,
   ServiceHealthCheck,
+  ThreadId,
 } from "@t3tools/contracts";
 import {
   ActivitySquareIcon,
@@ -25,6 +26,7 @@ import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuTrigger } from "./ui/me
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 
 interface ManagedRunsControlProps {
+  activeThreadId: ThreadId;
   runs: ReadonlyArray<ManagedRunSummary>;
   scripts?: ReadonlyArray<ProjectScript>;
 }
@@ -227,12 +229,26 @@ function RunStatusControl({ run, runName }: { run: ManagedRunSummary; runName: s
   );
 }
 
-function RunLogsButton({ run, runName }: { run: ManagedRunSummary; runName: string }) {
+function RunLogsButton({
+  activeThreadId,
+  run,
+  runName,
+}: {
+  activeThreadId: ThreadId;
+  run: ManagedRunSummary;
+  runName: string;
+}) {
   const openTab = useRunLogsDrawerStore((state) => state.openTab);
 
   const handleClick = useCallback(() => {
-    openTab({ runId: run.runId, projectId: run.projectId, scriptId: run.scriptId, label: runName });
-  }, [openTab, run.projectId, run.runId, run.scriptId, runName]);
+    openTab({
+      threadId: activeThreadId,
+      runId: run.runId,
+      projectId: run.projectId,
+      scriptId: run.scriptId,
+      label: runName,
+    });
+  }, [activeThreadId, openTab, run.projectId, run.runId, run.scriptId, runName]);
 
   return (
     <Popover>
@@ -263,9 +279,11 @@ function RunLogsButton({ run, runName }: { run: ManagedRunSummary; runName: stri
 }
 
 function RunCard({
+  activeThreadId,
   run,
   scripts,
 }: {
+  activeThreadId: ThreadId;
   run: ManagedRunSummary;
   scripts?: ReadonlyArray<ProjectScript>;
 }) {
@@ -288,7 +306,7 @@ function RunCard({
             />
           )}
           {statusLabel && <span className="text-[10px] text-muted-foreground">{statusLabel}</span>}
-          <RunLogsButton run={run} runName={runName} />
+          <RunLogsButton activeThreadId={activeThreadId} run={run} runName={runName} />
           <RunStatusControl run={run} runName={runName} />
         </div>
       </div>
@@ -313,7 +331,11 @@ function RunCard({
   );
 }
 
-export default function ManagedRunsControl({ runs, scripts }: ManagedRunsControlProps) {
+export default function ManagedRunsControl({
+  activeThreadId,
+  runs,
+  scripts,
+}: ManagedRunsControlProps) {
   return (
     <Menu>
       <MenuTrigger
@@ -338,7 +360,12 @@ export default function ManagedRunsControl({ runs, scripts }: ManagedRunsControl
             ) : (
               <div className="space-y-1 p-1">
                 {runs.map((run) => (
-                  <RunCard key={run.runId} run={run} {...(scripts ? { scripts } : {})} />
+                  <RunCard
+                    key={run.runId}
+                    activeThreadId={activeThreadId}
+                    run={run}
+                    {...(scripts ? { scripts } : {})}
+                  />
                 ))}
               </div>
             )}

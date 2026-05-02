@@ -7,14 +7,18 @@ import type {
   ProjectId,
   ProjectScript,
 } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { __resetNativeApiForTests } from "../nativeApi";
+import { selectThreadRunLogsDrawerState, useRunLogsDrawerStore } from "../runLogsDrawerStore";
 import ManagedRunsControl from "./ManagedRunsControl";
 
 const PROJECT_ID = "project-1" as ProjectId;
+const ACTIVE_THREAD_ID = ThreadId.makeUnsafe("thread-1");
+const OTHER_THREAD_ID = ThreadId.makeUnsafe("thread-2");
 const NOW_ISO = "2026-04-11T12:00:00.000Z";
 
 function createRuntimeService(input?: Partial<ManagedRunRuntimeService>): ManagedRunRuntimeService {
@@ -77,6 +81,7 @@ describe("ManagedRunsControl browser coverage", () => {
 
   beforeEach(() => {
     __resetNativeApiForTests();
+    useRunLogsDrawerStore.setState({ tabsByThreadId: {} });
     clipboardWriteText.mockReset();
     clipboardWriteText.mockResolvedValue();
     openSpy.mockReset();
@@ -114,6 +119,7 @@ describe("ManagedRunsControl browser coverage", () => {
     }
     delete window.nativeApi;
     document.body.innerHTML = "";
+    useRunLogsDrawerStore.setState({ tabsByThreadId: {} });
   });
 
   it("covers the run hover card plus confirmed stop-run behavior", async () => {
@@ -129,7 +135,13 @@ describe("ManagedRunsControl browser coverage", () => {
       },
     ];
 
-    const screen = await render(<ManagedRunsControl runs={[createRun()]} scripts={scripts} />);
+    const screen = await render(
+      <ManagedRunsControl
+        activeThreadId={ACTIVE_THREAD_ID}
+        runs={[createRun()]}
+        scripts={scripts}
+      />,
+    );
 
     try {
       await page.getByRole("button", { name: /Runs/ }).click();
@@ -176,7 +188,9 @@ describe("ManagedRunsControl browser coverage", () => {
   it("does not stop a run when the confirmation is canceled", async () => {
     confirmSpy.mockResolvedValue(false);
 
-    const screen = await render(<ManagedRunsControl runs={[createRun()]} />);
+    const screen = await render(
+      <ManagedRunsControl activeThreadId={ACTIVE_THREAD_ID} runs={[createRun()]} />,
+    );
 
     try {
       await page.getByRole("button", { name: /Runs/ }).click();
@@ -193,6 +207,43 @@ describe("ManagedRunsControl browser coverage", () => {
         );
       });
       expect(stopSpy).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens run logs only under the active thread", async () => {
+    const scripts: readonly ProjectScript[] = [
+      {
+        id: "dev-server",
+        name: "Dev Server",
+        command: "bun run dev",
+        icon: "play",
+        runOnWorktreeCreate: false,
+        services: [],
+      },
+    ];
+
+    const screen = await render(
+      <ManagedRunsControl
+        activeThreadId={ACTIVE_THREAD_ID}
+        runs={[createRun()]}
+        scripts={scripts}
+      />,
+    );
+
+    try {
+      await page.getByRole("button", { name: /Runs/ }).click();
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="View logs for Dev Server"]')
+        ?.click();
+
+      expect(
+        selectThreadRunLogsDrawerState(useRunLogsDrawerStore.getState(), ACTIVE_THREAD_ID).tabs,
+      ).toMatchObject([{ runId: "run-1" }]);
+      expect(
+        selectThreadRunLogsDrawerState(useRunLogsDrawerStore.getState(), OTHER_THREAD_ID).tabs,
+      ).toEqual([]);
     } finally {
       await screen.unmount();
     }

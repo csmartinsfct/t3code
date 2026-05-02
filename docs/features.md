@@ -353,7 +353,7 @@ An LLM analyzes script output logs to infer what services are running, their rol
 - Click to see service details: role, URL (with copy/open buttons), validation status.
 - Launch scripts from the project action menu.
 - Stop scripts manually.
-- Keep an open run-logs drawer attached across stop/start cycles for the same script; stale tabs retarget to the fresh run so live logs resume.
+- Keep thread-scoped run-log tabs attached across stop/start cycles for the same script; stale tabs retarget to the fresh run only in threads where the logs tab was already open.
 - View inference records in Settings → Managed Runs with detailed JSON payloads.
 
 **Agent interaction (REST API — `/api/managed-runs`):**

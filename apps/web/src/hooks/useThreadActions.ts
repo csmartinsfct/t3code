@@ -10,6 +10,7 @@ import { useHandleNewThread } from "./useHandleNewThread";
 import { gitRemoveWorktreeMutationOptions } from "../lib/gitReactQuery";
 import { newCommandId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
+import { useRunLogsDrawerStore } from "../runLogsDrawerStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -37,6 +38,7 @@ interface DeleteThreadWithCascadeInput {
   clearComposerDraftForThread: (threadId: ThreadId) => void;
   clearProjectDraftThreadById: (projectId: Thread["projectId"], threadId: ThreadId) => void;
   clearTerminalState: (threadId: ThreadId) => void;
+  clearRunLogsDrawerState: (threadId: ThreadId) => void;
 }
 
 export async function deleteThreadWithCascade(
@@ -47,6 +49,7 @@ export async function deleteThreadWithCascade(
     api,
     clearComposerDraftForThread,
     clearProjectDraftThreadById,
+    clearRunLogsDrawerState,
     clearTerminalState,
     navigate,
     projects,
@@ -139,6 +142,7 @@ export async function deleteThreadWithCascade(
         clearComposerDraftForThread(child.id);
         clearProjectDraftThreadById(child.projectId, child.id);
         clearTerminalState(child.id);
+        clearRunLogsDrawerState(child.id);
       }),
     );
   }
@@ -179,6 +183,7 @@ export async function deleteThreadWithCascade(
   clearComposerDraftForThread(threadId);
   clearProjectDraftThreadById(thread.projectId, thread.id);
   clearTerminalState(threadId);
+  clearRunLogsDrawerState(threadId);
 
   if (shouldNavigateToFallback) {
     if (fallbackThreadId) {
@@ -225,6 +230,7 @@ export function useThreadActions() {
     (store) => store.clearProjectDraftThreadById,
   );
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
+  const clearRunLogsDrawerState = useRunLogsDrawerStore((state) => state.removeThreadState);
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -287,6 +293,7 @@ export function useThreadActions() {
           clearComposerDraftForThread,
           clearProjectDraftThreadById,
           clearTerminalState,
+          clearRunLogsDrawerState,
         },
         opts,
       );
@@ -294,6 +301,7 @@ export function useThreadActions() {
     [
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
+      clearRunLogsDrawerState,
       clearTerminalState,
       appSettings.sidebarThreadSortOrder,
       navigate,
@@ -429,6 +437,7 @@ export function useThreadActions() {
                 clearComposerDraftForThread(child.id);
                 clearProjectDraftThreadById(child.projectId, child.id);
                 clearTerminalState(child.id);
+                clearRunLogsDrawerState(child.id);
               }),
             );
           }),
@@ -467,6 +476,7 @@ export function useThreadActions() {
           clearComposerDraftForThread(id);
           clearProjectDraftThreadById(thread.projectId, id);
           clearTerminalState(id);
+          clearRunLogsDrawerState(id);
         }),
       );
 
@@ -520,6 +530,7 @@ export function useThreadActions() {
     [
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
+      clearRunLogsDrawerState,
       clearTerminalState,
       appSettings.sidebarThreadSortOrder,
       navigate,

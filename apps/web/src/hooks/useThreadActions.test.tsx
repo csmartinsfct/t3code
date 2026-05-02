@@ -2,6 +2,7 @@ import type { NativeApi, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useRunLogsDrawerStore } from "../runLogsDrawerStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import type { Project, Thread } from "../types";
 import { deleteThreadWithCascade } from "./useThreadActions";
@@ -179,6 +180,37 @@ describe("deleteThreadWithCascade", () => {
       },
       nextTerminalEventId: 3,
     });
+
+    useRunLogsDrawerStore.setState({
+      tabsByThreadId: {
+        [parentId]: {
+          tabs: [
+            {
+              runId: "run-parent",
+              projectId: "project-1",
+              scriptId: "dev",
+              openedAt: "2026-04-11T08:00:00.000Z",
+              label: "Dev",
+              activeServiceId: null,
+            },
+          ],
+          activeRunId: "run-parent",
+        },
+        [childId]: {
+          tabs: [
+            {
+              runId: "run-child",
+              projectId: "project-1",
+              scriptId: "dev",
+              openedAt: "2026-04-11T08:00:00.000Z",
+              label: "Dev",
+              activeServiceId: null,
+            },
+          ],
+          activeRunId: "run-child",
+        },
+      },
+    });
   });
 
   it("cascades orchestration-parent deletion through active runs, child cleanup, and fallback navigation", async () => {
@@ -251,6 +283,7 @@ describe("deleteThreadWithCascade", () => {
       clearComposerDraftForThread: useComposerDraftStore.getState().clearDraftThread,
       clearProjectDraftThreadById: useComposerDraftStore.getState().clearProjectDraftThreadById,
       clearTerminalState: useTerminalStateStore.getState().clearTerminalState,
+      clearRunLogsDrawerState: useRunLogsDrawerStore.getState().removeThreadState,
     });
 
     expect(listRunsSpy).toHaveBeenCalledWith({ projectId: "project-1" });
@@ -340,6 +373,12 @@ describe("deleteThreadWithCascade", () => {
           Array.isArray(value.runningTerminalIds) &&
           value.runningTerminalIds.length === 0),
     );
+    expect(
+      useRunLogsDrawerStore.getState().tabsByThreadId["thread-child-working" as ThreadId],
+    ).toBeUndefined();
+    expect(
+      useRunLogsDrawerStore.getState().tabsByThreadId["thread-parent" as ThreadId],
+    ).toBeUndefined();
 
     expect(navigateSpy).toHaveBeenCalledWith({
       to: "/$threadId",

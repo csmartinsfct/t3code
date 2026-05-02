@@ -1,3 +1,4 @@
+import type { ThreadId } from "@t3tools/contracts";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { XIcon } from "lucide-react";
@@ -14,6 +15,7 @@ import { useManagedRunLogs } from "~/hooks/useManagedRunLogs";
 import { cn } from "~/lib/utils";
 import {
   selectRunLogsDrawerOpen,
+  selectThreadRunLogsDrawerState,
   useRunLogsDrawerStore,
   type RunLogsTab,
 } from "~/runLogsDrawerStore";
@@ -240,6 +242,7 @@ function RunLogsServiceStrip({ services, activeServiceId, onSelect }: RunLogsSer
 }
 
 interface RunLogsTabContentsProps {
+  readonly threadId: ThreadId;
   readonly tab: RunLogsTab;
   readonly visible: boolean;
   readonly drawerHeight: number;
@@ -248,6 +251,7 @@ interface RunLogsTabContentsProps {
 }
 
 function RunLogsTabContents({
+  threadId,
   tab,
   visible,
   drawerHeight,
@@ -280,7 +284,7 @@ function RunLogsTabContents({
         <RunLogsServiceStrip
           services={services}
           activeServiceId={activeServiceId}
-          onSelect={(serviceId) => setActiveService(tab.runId, serviceId)}
+          onSelect={(serviceId) => setActiveService({ threadId, runId: tab.runId, serviceId })}
         />
       )}
       <div className="min-h-0 w-full flex-1 p-1">
@@ -328,20 +332,24 @@ function RunLogsTabContents({
 }
 
 interface RunLogsDrawerProps {
+  readonly threadId: ThreadId;
   readonly resolveTabLabel: (runId: string) => string;
   readonly resolveRunRunning: (runId: string) => boolean;
   readonly resolveRunServices: (runId: string) => ReadonlyArray<RunServiceDescriptor>;
 }
 
 export default function RunLogsDrawer({
+  threadId,
   resolveTabLabel,
   resolveRunRunning,
   resolveRunServices,
 }: RunLogsDrawerProps) {
-  const tabs = useRunLogsDrawerStore((state) => state.tabs);
-  const activeRunId = useRunLogsDrawerStore((state) => state.activeRunId);
+  const threadDrawerState = useRunLogsDrawerStore((state) =>
+    selectThreadRunLogsDrawerState(state, threadId),
+  );
+  const { tabs, activeRunId } = threadDrawerState;
   const height = useRunLogsDrawerStore((state) => state.height);
-  const open = useRunLogsDrawerStore(selectRunLogsDrawerOpen);
+  const open = useRunLogsDrawerStore((state) => selectRunLogsDrawerOpen(state, threadId));
   const setHeightStore = useRunLogsDrawerStore((state) => state.setHeight);
   const closeTab = useRunLogsDrawerStore((state) => state.closeTab);
   const setActive = useRunLogsDrawerStore((state) => state.setActive);
@@ -460,14 +468,15 @@ export default function RunLogsDrawer({
       <RunLogsTabStrip
         tabs={tabStripData}
         activeRunId={activeRunId}
-        onSelect={setActive}
-        onClose={closeTab}
+        onSelect={(runId) => setActive({ threadId, runId })}
+        onClose={(runId) => closeTab({ threadId, runId })}
       />
 
       <div className="min-h-0 w-full flex-1">
         {tabs.map((tab) => (
           <RunLogsTabContents
             key={tab.runId}
+            threadId={threadId}
             tab={tab}
             visible={tab.runId === activeRunId}
             resizeEpoch={resizeEpoch}

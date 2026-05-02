@@ -169,6 +169,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {activeProjectName && (
           <ManagedRunsControl
+            activeThreadId={activeThreadId}
             runs={activeManagedRuns}
             {...(activeProjectScripts ? { scripts: activeProjectScripts } : {})}
           />

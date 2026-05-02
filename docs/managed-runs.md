@@ -290,17 +290,17 @@ Legacy single-command runs are unchanged: one PTY, single `<runId>.ndjson`, infe
 
 ### Run Logs Drawer (`RunLogsDrawer.tsx`)
 
-A bottom-anchored drawer that shows live and historical NDJSON logs for any active managed run. It mirrors the visual treatment of `ThreadTerminalDrawer` (border-t, top resize handle, xterm viewport) and stacks above it when both are open.
+A bottom-anchored drawer that shows live and historical NDJSON logs for managed runs opened from the active thread. Managed runs remain project-level, but drawer tabs are thread-scoped UI state, matching the terminal drawer: a tab opened in one thread does not appear in sibling threads or other projects. It mirrors the visual treatment of `ThreadTerminalDrawer` (border-t, top resize handle, xterm viewport) and stacks above it when both are open.
 
-- Opened by clicking the hover-revealed `ScrollText` icon on each `RunCard` row in the Active Runs popover (see `ManagedRunsControl.tsx` → `RunLogsButton`).
+- Opened by clicking the hover-revealed `ScrollText` icon on each `RunCard` row in the Active Runs popover (see `ManagedRunsControl.tsx` → `RunLogsButton`). The clicked thread owns the opened logs tab; other threads stay closed until the user opens logs there too.
 - Top tab strip: each opened run gets its own tab. Tabs show a state dot (green for `running`/`starting`, muted otherwise) and a hover-revealed `×` close. Tab labels are cached at open time so a tab keeps a meaningful name after the run is stopped or its action is deleted.
 - For composite runs (≥2 declared services), a sub-strip below the tab strip exposes an `All` tab plus one tab per service. The `All` view interleaves per-service streams by timestamp and prefixes each line with `[<service-name>]` in a stable per-service ANSI colour (6-colour palette, indexed by `serviceId`). Per-service tabs render their own stream verbatim, no prefix.
 - For single-service / legacy runs the sub-strip is hidden and the viewport binds directly to that one service's stream — no merged-view prefix.
 - Inactive viewports stay mounted so switching tabs preserves accumulated buffers.
 - Read-only xterm viewport (`disableStdin: true`); theme + fonts shared via `apps/web/src/components/terminal/xtermShared.ts`.
 - Drawer height is independently resizable and persists in `localStorage` under `t3code:run-logs-drawer:height:v1`.
-- State lives in `apps/web/src/runLogsDrawerStore.ts` (Zustand). Tabs are session-only — they clear on page reload. The store also tracks the active sub-tab per run (`activeServiceId`).
-- Tabs remember the script they were opened for. If the user stops a run while its logs tab is open and starts the same script again, the stale tab is retargeted to the fresh `runId` so live logs resume instead of staying attached to the stopped process.
+- State lives in `apps/web/src/runLogsDrawerStore.ts` (Zustand). Tabs are session-only and scoped per thread — they clear on page reload. The store also tracks each thread's active run tab and each run tab's active sub-tab (`activeServiceId`).
+- Tabs remember the script they were opened for. If the user stops a run while its logs tab is open and starts the same script again, stale tabs in thread scopes that already had that tab are retargeted to the fresh `runId` so live logs resume instead of staying attached to the stopped process. Retargeting never creates tabs in unrelated threads.
 - The drawer reacts to `removed` stream events (see [Orphan cleanup](#orphan-cleanup)): when a run's action is deleted, the corresponding tab closes immediately.
 
 ### Log streaming (`useManagedRunLogs`)

@@ -2429,7 +2429,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeManagedRunsRef.current = next;
           return next;
         });
-        useRunLogsDrawerStore.getState().closeTab(event.runId);
+        useRunLogsDrawerStore.getState().closeRunEverywhere(event.runId);
         return;
       }
       if (event.run.status === "starting" || event.run.status === "running") {
@@ -5933,6 +5933,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* end horizontal flex container */}
 
       <RunLogsDrawer
+        threadId={activeThread.id}
         resolveTabLabel={(runId) => {
           const run = activeManagedRuns.find((candidate) => candidate.runId === runId);
           if (!run) return runId.slice(0, 12);
