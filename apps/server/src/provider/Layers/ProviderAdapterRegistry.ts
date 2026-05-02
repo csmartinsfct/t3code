@@ -18,6 +18,7 @@ import {
 } from "../Services/ProviderAdapterRegistry.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
+import { CursorAdapter } from "../Services/CursorAdapter.ts";
 import { GeminiAdapter } from "../Services/GeminiAdapter.ts";
 
 export interface ProviderAdapterRegistryLiveOptions {
@@ -30,7 +31,7 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
   const adapters =
     options?.adapters !== undefined
       ? options.adapters
-      : [yield* CodexAdapter, yield* ClaudeAdapter, yield* GeminiAdapter];
+      : [yield* CodexAdapter, yield* ClaudeAdapter, yield* GeminiAdapter, yield* CursorAdapter];
   const byProvider = new Map(adapters.map((adapter) => [adapter.provider, adapter]));
 
   const getByProvider: ProviderAdapterRegistryShape["getByProvider"] = (provider) => {

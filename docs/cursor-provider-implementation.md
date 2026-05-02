@@ -357,6 +357,15 @@ Files:
 - `apps/server/src/provider/Layers/ProviderService.ts`
 - `apps/server/src/sessionContextPrompt.ts`
 
+T3CO-398 landed the first Cursor adapter milestone. The adapter registers
+`cursor` with the provider adapter registry, creates a Cursor chat id with
+`agent create-chat` during `startSession`, persists that id in
+`ProviderRuntimeBinding.resumeCursor`, and runs each user turn through a fresh
+`agent --print --output-format stream-json --resume <session_id>` process. The
+same adapter path resolves exact Cursor profile settings, injects T3 session
+context only once per matching context hash, rejects concurrent turns, and fails
+rollback, fork, approval, and user-input APIs with explicit provider errors.
+
 Recommended lifecycle:
 
 1. `startSession`
@@ -381,7 +390,9 @@ Recommended lifecycle:
      if Cursor returns a newer value.
 3. `interruptTurn`
    - Mark the active turn cancel requested.
-   - Send SIGINT/SIGTERM to the process group and perform process-tree cleanup.
+   - Interrupt the active adapter fiber and mark the T3 turn interrupted.
+   - Follow-up hardening should own the full process group/tree and perform
+     explicit cleanup on interrupt, stop, timeout, and process exit.
    - Emit interrupted state only once.
 4. `stopSession`
    - If a turn is active, interrupt and clean it up.
@@ -577,7 +588,9 @@ Never log raw API keys, tokens, full account emails, or full prompt contents.
    `cursor`/`cursor:<profileId>`.
 3. Add profile resolution and provider status discovery.
 4. Add `CursorTurnRunner` and `CursorStreamJson` with fixture-driven tests.
-5. Add `CursorAdapter` lifecycle and runtime-event normalization.
+5. Add `CursorAdapter` lifecycle and runtime-event normalization. (Done in
+   T3CO-398 for assistant/reasoning deltas, token usage, terminal turn state,
+   resume persistence, and unsupported capability errors.)
 6. Add process-tree interrupt cleanup.
 7. Wire web provider picker, composer traits, draft persistence, and settings.
 8. Add MCP discovery and document the initial T3 REST service injection path.

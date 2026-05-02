@@ -7,7 +7,7 @@ import type {
   ServerProviderModel,
   ServerProviderState,
 } from "@t3tools/contracts";
-import { ServerSettingsError, type ServerSettings } from "@t3tools/contracts";
+import { ServerSettingsError } from "@t3tools/contracts";
 import { Effect, Equal, Layer, Result, Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -24,7 +24,10 @@ import {
 } from "../providerSnapshot";
 import { CursorProvider } from "../Services/CursorProvider";
 import type { ServerProviderShape } from "../Services/ServerProvider";
-import type { DiscoveredCursorProfile } from "../cursorProfileDiscovery";
+import {
+  resolveCursorSettingsForProvider,
+  type DiscoveredCursorProfile,
+} from "../cursorProfileDiscovery";
 
 const PROVIDER = "cursor" as const;
 
@@ -250,31 +253,6 @@ const resolveCursorSettings = Effect.fn("resolveCursorSettings")(function* (
     Effect.map((settings) => settings.providers.cursor),
   );
 });
-
-const effectiveProfileCursorSettings = (
-  settings: ServerSettings,
-  profile: DiscoveredCursorProfile,
-): CursorSettings => {
-  const configured = settings.providers.cursorProfiles.find(
-    (candidate) => candidate.profileId === profile.profileId,
-  );
-  return {
-    enabled: configured?.enabled ?? settings.providers.cursor.enabled,
-    binaryPath: configured?.binaryPath || settings.providers.cursor.binaryPath,
-    launchCommand:
-      configured && configured.launchCommand.length > 0
-        ? configured.launchCommand
-        : settings.providers.cursor.launchCommand,
-    homePath: configured?.homePath || profile.homePath,
-    configDir: configured?.configDir || profile.configDir,
-    dataDir: configured?.dataDir || profile.dataDir,
-    env: {
-      ...settings.providers.cursor.env,
-      ...configured?.env,
-    },
-    customModels: configured?.customModels ?? settings.providers.cursor.customModels,
-  };
-};
 
 function disabledProvider(
   providerKind: ProviderKind,
@@ -502,7 +480,7 @@ export function makeCursorProfileProvider(
     const serverSettings = yield* ServerSettingsService;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const getProfileSettings = serverSettings.getSettings.pipe(
-      Effect.map((settings) => effectiveProfileCursorSettings(settings, profile)),
+      Effect.map((settings) => resolveCursorSettingsForProvider(settings, profile.providerKind)),
       Effect.orDie,
     );
     const checkProvider = getProfileSettings.pipe(
@@ -520,7 +498,7 @@ export function makeCursorProfileProvider(
     return yield* makeManagedServerProvider<CursorSettings>({
       getSettings: getProfileSettings,
       streamSettings: serverSettings.streamChanges.pipe(
-        Stream.map((settings) => effectiveProfileCursorSettings(settings, profile)),
+        Stream.map((settings) => resolveCursorSettingsForProvider(settings, profile.providerKind)),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
       checkProvider,

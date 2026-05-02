@@ -27,6 +27,7 @@ const RuntimeEventRawSource = Schema.Literals([
   "gemini.acp.notification",
   "gemini.acp.request",
   "gemini.acp.response",
+  "cursor.stream-json",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 
