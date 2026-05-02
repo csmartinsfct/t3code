@@ -1820,16 +1820,42 @@ const makeManagedRunService = Effect.gen(function* () {
       ),
     );
 
+  const markStaleRunLost = Effect.fn("managedRuns.markStaleRunLost")(function* (
+    detail: ManagedRunDetail,
+  ) {
+    const completedAt = nowIso();
+    yield* stopHealthPollFiber(detail.runId);
+    yield* stopInferenceFiber(detail.runId);
+    yield* updateRun(detail.runId, (current) => ({
+      ...current,
+      status: "lost",
+      terminalThreadId: null,
+      terminalId: null,
+      terminalPid: null,
+      runtimeServices: current.runtimeServices.map((service) => ({
+        ...service,
+        validationStatus: "unknown" as const,
+        lastCheckedAt: null,
+      })),
+      updatedAt: completedAt,
+      completedAt: current.completedAt ?? completedAt,
+      lastError: current.lastError
+        ? `Managed run is no longer under live T3 control. Previous error: ${current.lastError}`
+        : "Managed run is no longer under live T3 control.",
+      logsExpireAt: current.logsExpireAt ?? logsExpiryIso(),
+    }));
+  });
+
   const stop = Effect.fn("managedRuns.stop")(function* (input: ManagedRunStopInput) {
     const detail = yield* readRunDetail(input.runId);
     const live = yield* Ref.get(liveRunsRef).pipe(
       Effect.map((runs) => runs.get(detail.runId) ?? null),
     );
     if (live === null) {
-      return yield* new ManagedRunOperationError({
-        operation: "managedRuns.stop",
-        message: `Managed run '${detail.runId}' is not under live T3 control.`,
-      });
+      if (isActiveStatus(detail.status)) {
+        yield* markStaleRunLost(detail);
+      }
+      return;
     }
     live.intentionalStop = true;
     // Close every per-service PTY in parallel. Each will deliver a terminal

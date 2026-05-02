@@ -172,6 +172,16 @@ existing repo-local Electron dev processes and starts `bun run dev:desktop` deta
 when agents working inside the Electron dev build need to restart the host process that is currently
 running them; auto-resume can reconnect the session after the new build comes up.
 
+### Stale stop reconciliation
+
+`stop_managed_run` is intentionally idempotent for active rows that are no longer present in the
+server's in-memory `liveRunsRef` (for example, after an attached terminal exits or T3 loses process
+control before persisting the terminal exit). Instead of returning "not under live T3 control" and
+leaving the card visually running, the stop path marks the run `"lost"`, clears stale terminal
+metadata (`terminalThreadId`, `terminalId`, `terminalPid`), resets runtime service validation to
+`"unknown"`, assigns log-retention expiry, and publishes the normal managed-run upsert event. Active
+run lists then drop the stale row, and the completion toast surfaces the `"connection lost"` warning.
+
 ### Log retention
 
 Logs are retained for 48 hours (`LOG_RETENTION_MS`). A background fiber sweeps every hour and:
