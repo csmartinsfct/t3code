@@ -5,7 +5,6 @@ import type {
   PromptDocumentState,
   PromptDocumentV1,
   PromptId,
-  Ticket,
   TicketId,
   TicketSummary,
   TicketTreeNode,
@@ -64,11 +63,8 @@ import {
   submitOrchestrationConfirm,
   type OrchestrationConfirmOnConfirm,
 } from "./OrchestrateConfirmDialog";
-import { buildTicketDetailLookupInput } from "./KanbanTicketDetail";
-import {
-  SharedSubTicketPreviewPopup,
-  useSubTicketPreviewHoverTarget,
-} from "./SubTicketPreviewPopup";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
+import { useTicketPreviewCache } from "./ticketPreviewCache";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -132,10 +128,9 @@ export function OrchestrationSubpage({
   const [treeLoading, setTreeLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const previewCacheRef = useRef<Map<string, Ticket>>(new Map());
-  const previewInflightRef = useRef<Map<string, Promise<Ticket | null>>>(new Map());
+  const { fetchPreview, getCached } = useTicketPreviewCache(projectId);
   const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
-    useSubTicketPreviewHoverTarget({
+    useTicketPreviewHoverTarget({
       closeDelayMs: 160,
       openDelayMs: 250,
     });
@@ -234,37 +229,6 @@ export function OrchestrationSubpage({
       return next;
     });
   }, []);
-
-  const getCachedPreview = useCallback(
-    (id: TicketId): Ticket | undefined => previewCacheRef.current.get(String(id)),
-    [],
-  );
-
-  const fetchPreview = useCallback(
-    async (id: TicketId): Promise<Ticket | null> => {
-      const key = String(id);
-      const cached = previewCacheRef.current.get(key);
-      if (cached) return cached;
-
-      const inflight = previewInflightRef.current.get(key);
-      if (inflight) return inflight;
-
-      const promise = ensureNativeApi()
-        .ticketing.getById(buildTicketDetailLookupInput(id, projectId))
-        .then((ticket) => {
-          previewCacheRef.current.set(key, ticket);
-          return ticket;
-        })
-        .catch(() => null)
-        .finally(() => {
-          previewInflightRef.current.delete(key);
-        });
-
-      previewInflightRef.current.set(key, promise);
-      return promise;
-    },
-    [projectId],
-  );
 
   // ── Settings + per-run model/review state ───────────────────────────
   const settings = useSettings();
@@ -662,11 +626,11 @@ export function OrchestrationSubpage({
         scopeInput={editorScopeInput}
         onLocalSave={handleLocalSave}
       />
-      <SharedSubTicketPreviewPopup
+      <SharedTicketPreviewPopup
         anchorElement={previewTarget?.anchorElement ?? null}
         ticketId={previewTarget?.ticketId ?? null}
         fetchPreview={fetchPreview}
-        getCached={getCachedPreview}
+        getCached={getCached}
         onMouseEnter={cancelPreviewTimers}
         onMouseLeave={handlePreviewMouseLeave}
       />

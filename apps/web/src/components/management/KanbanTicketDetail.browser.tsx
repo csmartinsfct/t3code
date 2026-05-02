@@ -7,20 +7,17 @@ import { render } from "vitest-browser-react";
 import { dispatchModifiedClick, findButtonByText, waitForElement } from "~/test-utils/browser";
 
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import { TicketPreviewContent } from "./TicketPreviewContent";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
 import {
-  SharedSubTicketPreviewPopup,
-  useSubTicketPreviewHoverTarget,
-} from "./SubTicketPreviewPopup";
-import {
-  SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
-  SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
-  SUB_TICKET_PREVIEW_VIEWPORT_PADDING,
-} from "./subTicketPreviewSize";
+  TICKET_PREVIEW_POSITION_STORAGE_KEY,
+  TICKET_PREVIEW_SIZE_STORAGE_KEY,
+  TICKET_PREVIEW_VIEWPORT_PADDING,
+} from "./ticketPreviewSize";
 
 // Audit traceability: 5f27fa2, 5dba42d, 1f727cb.
 // This file covers the browser-only hover preview flow that KanbanTicketDetail wires around
-// SubTicketPreviewContent, without mounting the full ticket detail surface.
+// TicketPreviewContent, without mounting the full ticket detail surface.
 
 const { mockNavigate, mockUseParams } = vi.hoisted(() => ({
   mockNavigate: vi.fn(async () => undefined),
@@ -245,7 +242,7 @@ function DeferredPreviewHarness({
         sideOffset={4}
         className="w-[380px]"
       >
-        <SubTicketPreviewContent
+        <TicketPreviewContent
           ticketId={"child-ticket" as Ticket["id"]}
           fetchPreview={fetchPreview}
           getCached={getCached}
@@ -263,7 +260,7 @@ function ResizablePreviewHarness({
   getCached: (id: TicketId) => Ticket | undefined;
 }) {
   const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
-    useSubTicketPreviewHoverTarget({
+    useTicketPreviewHoverTarget({
       closeDelayMs: 150,
       openDelayMs: 300,
     });
@@ -286,7 +283,7 @@ function ResizablePreviewHarness({
           {label}
         </button>
       ))}
-      <SharedSubTicketPreviewPopup
+      <SharedTicketPreviewPopup
         anchorElement={previewTarget?.anchorElement ?? null}
         ticketId={previewTarget?.ticketId ?? null}
         fetchPreview={fetchPreview}
@@ -323,7 +320,7 @@ async function mountPreviewHarness(input: {
   };
 }
 
-describe("KanbanTicketDetail sub-ticket preview", () => {
+describe("KanbanTicketDetail ticket preview", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -530,14 +527,12 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
       const popup = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
-        "Unable to find sub-ticket preview popup.",
+        "Unable to find ticket preview popup.",
       );
       const handle = await waitForElement(
         () =>
-          document.querySelector<HTMLButtonElement>(
-            "button[aria-label='Resize sub-ticket preview']",
-          ),
-        "Unable to find sub-ticket preview resize handle.",
+          document.querySelector<HTMLButtonElement>("button[aria-label='Resize ticket preview']"),
+        "Unable to find ticket preview resize handle.",
       );
       const startingRect = popup.getBoundingClientRect();
 
@@ -579,7 +574,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
       );
 
       const expectedWidth = Number.parseInt(popup.style.width, 10);
-      const stored = JSON.parse(localStorage.getItem(SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY) ?? "{}");
+      const stored = JSON.parse(localStorage.getItem(TICKET_PREVIEW_SIZE_STORAGE_KEY) ?? "{}");
       expect(popup.style.height).toBe("380px");
       expect(stored).toMatchObject({
         version: 1,
@@ -649,7 +644,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
       });
       const firstPopup = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
-        "Unable to find first sub-ticket preview popup.",
+        "Unable to find first ticket preview popup.",
       );
       expect(firstPopup.querySelector("[data-slot='popover-viewport']")).toBeNull();
       expect(firstPopup.querySelector("[data-current], [data-previous]")).toBeNull();
@@ -716,7 +711,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
       });
       const popup = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
-        "Unable to find sub-ticket preview popup.",
+        "Unable to find ticket preview popup.",
       );
       const firstRect = popup.getBoundingClientRect();
 
@@ -736,7 +731,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
       await vi.waitFor(() => {
         expect(fetchPreview).toHaveBeenCalledWith("second-child-ticket");
         expect(popup.textContent ?? "").not.toContain("First preview description");
-        expect(popup.querySelector("[data-testid='sub-ticket-preview-skeleton']")).not.toBeNull();
+        expect(popup.querySelector("[data-testid='ticket-preview-skeleton']")).not.toBeNull();
       });
       const pendingRect = popup.getBoundingClientRect();
       expect(Math.abs(pendingRect.left - firstRect.left)).toBeLessThanOrEqual(1);
@@ -838,11 +833,11 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
   it("keeps an oversized stored preview fully inside the viewport safe area", async () => {
     localStorage.setItem(
-      SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
+      TICKET_PREVIEW_SIZE_STORAGE_KEY,
       JSON.stringify({ version: 1, width: 720, maxHeight: 960 }),
     );
     localStorage.setItem(
-      SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
+      TICKET_PREVIEW_POSITION_STORAGE_KEY,
       JSON.stringify({
         version: 1,
         x: 520,
@@ -875,18 +870,18 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
       const popup = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
-        "Unable to find sub-ticket preview popup.",
+        "Unable to find ticket preview popup.",
       );
 
       await vi.waitFor(() => {
         const rect = popup.getBoundingClientRect();
-        expect(rect.top).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
-        expect(rect.left).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(rect.top).toBeGreaterThanOrEqual(TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(rect.left).toBeGreaterThanOrEqual(TICKET_PREVIEW_VIEWPORT_PADDING - 1);
         expect(rect.right).toBeLessThanOrEqual(
-          window.innerWidth - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+          window.innerWidth - TICKET_PREVIEW_VIEWPORT_PADDING + 1,
         );
         expect(rect.bottom).toBeLessThanOrEqual(
-          window.innerHeight - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+          window.innerHeight - TICKET_PREVIEW_VIEWPORT_PADDING + 1,
         );
       });
     } finally {
@@ -913,12 +908,11 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
       const popup = await waitForElement(
         () => document.querySelector<HTMLElement>("[data-slot='popover-popup']"),
-        "Unable to find sub-ticket preview popup.",
+        "Unable to find ticket preview popup.",
       );
       const moveHandle = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>("button[aria-label='Move sub-ticket preview']"),
-        "Unable to find sub-ticket preview move handle.",
+        () => document.querySelector<HTMLButtonElement>("button[aria-label='Move ticket preview']"),
+        "Unable to find ticket preview move handle.",
       );
       const handleRect = moveHandle.getBoundingClientRect();
       const pointerStart = {
@@ -946,9 +940,9 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
       await vi.waitFor(() => {
         const movedRect = popup.getBoundingClientRect();
-        expect(movedRect.left).toBeGreaterThanOrEqual(SUB_TICKET_PREVIEW_VIEWPORT_PADDING - 1);
+        expect(movedRect.left).toBeGreaterThanOrEqual(TICKET_PREVIEW_VIEWPORT_PADDING - 1);
         expect(movedRect.bottom).toBeLessThanOrEqual(
-          window.innerHeight - SUB_TICKET_PREVIEW_VIEWPORT_PADDING + 1,
+          window.innerHeight - TICKET_PREVIEW_VIEWPORT_PADDING + 1,
         );
       });
 
@@ -963,7 +957,7 @@ describe("KanbanTicketDetail sub-ticket preview", () => {
 
       const draggedRect = popup.getBoundingClientRect();
       const storedPosition = JSON.parse(
-        localStorage.getItem(SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY) ?? "{}",
+        localStorage.getItem(TICKET_PREVIEW_POSITION_STORAGE_KEY) ?? "{}",
       );
       expect(storedPosition).toMatchObject({
         version: 1,

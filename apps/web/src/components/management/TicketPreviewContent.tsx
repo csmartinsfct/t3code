@@ -4,17 +4,17 @@ import { useEffect, useState } from "react";
 
 import { TicketMarkdown } from "./TicketMarkdown";
 
-interface SubTicketPreviewContentProps {
+interface TicketPreviewContentProps {
   ticketId: TicketId;
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
   getCached: (id: TicketId) => Ticket | undefined;
 }
 
-export function SubTicketPreviewContent({
+export function TicketPreviewContent({
   ticketId,
   fetchPreview,
   getCached,
-}: SubTicketPreviewContentProps) {
+}: TicketPreviewContentProps) {
   const [loadedPreview, setLoadedPreview] = useState<{
     ticket: Ticket | null | undefined;
     ticketId: TicketId;
@@ -128,7 +128,7 @@ function ReadOnlyCriterion({ criterion }: { criterion: AcceptanceCriterion }) {
 
 function PreviewSkeleton() {
   return (
-    <div className="flex animate-pulse flex-col gap-3" data-testid="sub-ticket-preview-skeleton">
+    <div className="flex animate-pulse flex-col gap-3" data-testid="ticket-preview-skeleton">
       <div className="h-4 w-3/4 rounded bg-muted" />
       <div className="flex flex-col gap-1.5">
         <div className="h-3 w-full rounded bg-muted" />

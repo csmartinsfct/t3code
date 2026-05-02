@@ -16,37 +16,37 @@ import { createPortal } from "react-dom";
 import { setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 
-import { SubTicketPreviewContent } from "./SubTicketPreviewContent";
+import { TicketPreviewContent } from "./TicketPreviewContent";
 import {
-  SUB_TICKET_PREVIEW_DEFAULT_POSITION,
-  SUB_TICKET_PREVIEW_DEFAULT_SIZE,
-  SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
-  SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
-  SUB_TICKET_PREVIEW_VIEWPORT_PADDING,
-  SubTicketPreviewPositionSchema,
-  SubTicketPreviewSizeSchema,
-  clampSubTicketPreviewSize,
-  createSubTicketPreviewPosition,
-  getSubTicketPreviewViewport,
-  type SubTicketPreviewSize,
-} from "./subTicketPreviewSize";
+  TICKET_PREVIEW_DEFAULT_POSITION,
+  TICKET_PREVIEW_DEFAULT_SIZE,
+  TICKET_PREVIEW_POSITION_STORAGE_KEY,
+  TICKET_PREVIEW_SIZE_STORAGE_KEY,
+  TICKET_PREVIEW_VIEWPORT_PADDING,
+  TicketPreviewPositionSchema,
+  TicketPreviewSizeSchema,
+  clampTicketPreviewSize,
+  createTicketPreviewPosition,
+  getTicketPreviewViewport,
+  type TicketPreviewSize,
+} from "./ticketPreviewSize";
 
 type PreviewPoint = { x: number; y: number };
-type PreviewGeometry = PreviewPoint & SubTicketPreviewSize;
+type PreviewGeometry = PreviewPoint & TicketPreviewSize;
 
-export interface SubTicketPreviewTarget {
+export interface TicketPreviewTarget {
   anchorElement: Element;
   ticketId: TicketId;
 }
 
-interface SubTicketPreviewPlacementProps {
+interface TicketPreviewPlacementProps {
   align?: "start" | "center" | "end";
   alignOffset?: number;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
 }
 
-interface SharedSubTicketPreviewPopupProps extends SubTicketPreviewPlacementProps {
+interface SharedTicketPreviewPopupProps extends TicketPreviewPlacementProps {
   anchorElement: Element | null;
   collisionPadding?: number;
   fetchPreview: (id: TicketId) => Promise<Ticket | null>;
@@ -56,14 +56,14 @@ interface SharedSubTicketPreviewPopupProps extends SubTicketPreviewPlacementProp
   ticketId: TicketId | null;
 }
 
-export function useSubTicketPreviewHoverTarget({
+export function useTicketPreviewHoverTarget({
   closeDelayMs,
   openDelayMs,
 }: {
   closeDelayMs: number;
   openDelayMs: number;
 }) {
-  const [previewTarget, setPreviewTarget] = useState<SubTicketPreviewTarget | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<TicketPreviewTarget | null>(null);
   const targetRef = useRef(previewTarget);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,7 +118,7 @@ export function useSubTicketPreviewHoverTarget({
   };
 }
 
-export function SharedSubTicketPreviewPopup({
+export function SharedTicketPreviewPopup({
   anchorElement,
   ticketId,
   fetchPreview,
@@ -127,22 +127,22 @@ export function SharedSubTicketPreviewPopup({
   onMouseLeave,
   align = "end",
   alignOffset = -190,
-  collisionPadding = SUB_TICKET_PREVIEW_VIEWPORT_PADDING,
+  collisionPadding = TICKET_PREVIEW_VIEWPORT_PADDING,
   side = "bottom",
   sideOffset = 4,
-}: SharedSubTicketPreviewPopupProps) {
+}: SharedTicketPreviewPopupProps) {
   const [storedSize, setStoredSize] = useLocalStorage(
-    SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
-    { version: 1, ...SUB_TICKET_PREVIEW_DEFAULT_SIZE },
-    SubTicketPreviewSizeSchema,
+    TICKET_PREVIEW_SIZE_STORAGE_KEY,
+    { version: 1, ...TICKET_PREVIEW_DEFAULT_SIZE },
+    TicketPreviewSizeSchema,
   );
   const [storedPosition, setStoredPosition] = useLocalStorage(
-    SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
-    { version: 1, ...SUB_TICKET_PREVIEW_DEFAULT_POSITION },
-    SubTicketPreviewPositionSchema,
+    TICKET_PREVIEW_POSITION_STORAGE_KEY,
+    { version: 1, ...TICKET_PREVIEW_DEFAULT_POSITION },
+    TicketPreviewPositionSchema,
   );
   const [hasManualPosition, setHasManualPosition] = useState(() =>
-    hasStoredSubTicketPreviewPosition(),
+    hasStoredTicketPreviewPosition(),
   );
   const [lastTicketId, setLastTicketId] = useState<TicketId | null>(ticketId);
   const [geometry, setGeometry] = useState<PreviewGeometry | null>(null);
@@ -168,13 +168,9 @@ export function SharedSubTicketPreviewPopup({
   }, [ticketId]);
 
   const persistSize = useCallback(
-    (size: SubTicketPreviewSize) => {
-      const nextSize = clampSubTicketPreviewSize(size, getSubTicketPreviewViewport());
-      setLocalStorageItem(
-        SUB_TICKET_PREVIEW_SIZE_STORAGE_KEY,
-        nextSize,
-        SubTicketPreviewSizeSchema,
-      );
+    (size: TicketPreviewSize) => {
+      const nextSize = clampTicketPreviewSize(size, getTicketPreviewViewport());
+      setLocalStorageItem(TICKET_PREVIEW_SIZE_STORAGE_KEY, nextSize, TicketPreviewSizeSchema);
       storedSizeRef.current = nextSize;
       setStoredSize(nextSize);
     },
@@ -183,12 +179,12 @@ export function SharedSubTicketPreviewPopup({
 
   const persistPosition = useCallback(
     (position: PreviewPoint) => {
-      const viewport = getSubTicketPreviewViewport();
-      const nextPosition = createSubTicketPreviewPosition(position, viewport);
+      const viewport = getTicketPreviewViewport();
+      const nextPosition = createTicketPreviewPosition(position, viewport);
       setLocalStorageItem(
-        SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY,
+        TICKET_PREVIEW_POSITION_STORAGE_KEY,
         nextPosition,
-        SubTicketPreviewPositionSchema,
+        TicketPreviewPositionSchema,
       );
       hasManualPositionRef.current = true;
       storedPositionRef.current = nextPosition;
@@ -199,7 +195,7 @@ export function SharedSubTicketPreviewPopup({
   );
 
   const updateGeometry = useCallback((nextGeometry: PreviewGeometry) => {
-    const clampedGeometry = clampPreviewGeometry(nextGeometry, getSubTicketPreviewViewport());
+    const clampedGeometry = clampPreviewGeometry(nextGeometry, getTicketPreviewViewport());
     geometryRef.current = clampedGeometry;
     setGeometry(clampedGeometry);
   }, []);
@@ -215,7 +211,7 @@ export function SharedSubTicketPreviewPopup({
       return;
     }
 
-    const size = clampSubTicketPreviewSize(storedSizeRef.current, getSubTicketPreviewViewport());
+    const size = clampTicketPreviewSize(storedSizeRef.current, getTicketPreviewViewport());
     const nextGeometry = hasManualPositionRef.current
       ? clampPreviewGeometry(
           {
@@ -223,7 +219,7 @@ export function SharedSubTicketPreviewPopup({
             x: storedPositionRef.current.x,
             y: storedPositionRef.current.y,
           },
-          getSubTicketPreviewViewport(),
+          getTicketPreviewViewport(),
         )
       : createAnchoredGeometry({
           align,
@@ -273,7 +269,7 @@ export function SharedSubTicketPreviewPopup({
         "fixed z-50 flex rounded-lg border bg-popover text-popover-foreground shadow-lg/5 outline-none",
         "before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)]",
         "dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
-        "group/sub-ticket-preview isolate overflow-clip p-4 [contain:layout_paint]",
+        "group/ticket-preview isolate overflow-clip p-4 [contain:layout_paint]",
       )}
       style={previewStyle(geometry)}
       onMouseEnter={onMouseEnter}
@@ -281,22 +277,22 @@ export function SharedSubTicketPreviewPopup({
     >
       <div
         className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-clip overflow-y-auto pr-1 [contain:layout_paint]"
-        data-sub-ticket-preview-scroll
+        data-ticket-preview-scroll
       >
-        <SubTicketPreviewContent
+        <TicketPreviewContent
           ticketId={renderedTicketId}
           fetchPreview={fetchPreview}
           getCached={getCached}
         />
       </div>
-      <SubTicketPreviewResizeHandle
+      <TicketPreviewResizeHandle
         geometryRef={geometryRef}
         popupRef={popupRef}
         onGeometryChange={updateGeometry}
         onPositionCommit={persistPosition}
         onPreviewSizeCommit={persistSize}
       />
-      <SubTicketPreviewDragHandle
+      <TicketPreviewDragHandle
         geometryRef={geometryRef}
         popupRef={popupRef}
         onGeometryChange={updateGeometry}
@@ -307,7 +303,7 @@ export function SharedSubTicketPreviewPopup({
   );
 }
 
-function SubTicketPreviewResizeHandle({
+function TicketPreviewResizeHandle({
   geometryRef,
   popupRef,
   onGeometryChange,
@@ -318,7 +314,7 @@ function SubTicketPreviewResizeHandle({
   popupRef: RefObject<HTMLDivElement | null>;
   onGeometryChange: (geometry: PreviewGeometry) => void;
   onPositionCommit: (position: PreviewPoint) => void;
-  onPreviewSizeCommit: (size: SubTicketPreviewSize) => void;
+  onPreviewSizeCommit: (size: TicketPreviewSize) => void;
 }) {
   const resizeStateRef = useRef<{
     latestGeometry: PreviewGeometry;
@@ -347,7 +343,7 @@ function SubTicketPreviewResizeHandle({
   return (
     <button
       type="button"
-      aria-label="Resize sub-ticket preview"
+      aria-label="Resize ticket preview"
       title="Drag to resize preview"
       className={cn(
         "absolute right-0 bottom-0 z-20 flex size-7 cursor-nwse-resize touch-none select-none items-center justify-center rounded-br-lg rounded-tl-md border-t border-l border-border/70 bg-popover/95 text-muted-foreground/80 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -386,7 +382,7 @@ function SubTicketPreviewResizeHandle({
             width: resizeState.startGeometry.width + event.clientX - resizeState.startX,
             maxHeight: resizeState.startGeometry.maxHeight + event.clientY - resizeState.startY,
           },
-          getSubTicketPreviewViewport(),
+          getTicketPreviewViewport(),
         );
         resizeState.latestGeometry = nextGeometry;
         applyPreviewGeometry(popupRef.current, nextGeometry);
@@ -400,7 +396,7 @@ function SubTicketPreviewResizeHandle({
   );
 }
 
-function SubTicketPreviewDragHandle({
+function TicketPreviewDragHandle({
   geometryRef,
   popupRef,
   onGeometryChange,
@@ -437,7 +433,7 @@ function SubTicketPreviewDragHandle({
   return (
     <button
       type="button"
-      aria-label="Move sub-ticket preview"
+      aria-label="Move ticket preview"
       title="Drag to move preview"
       className={cn(
         "absolute bottom-0 left-0 z-20 flex size-7 cursor-move touch-none select-none items-center justify-center rounded-tr-md rounded-bl-lg border-t border-r border-border/70 bg-popover/95 text-muted-foreground/80 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -476,7 +472,7 @@ function SubTicketPreviewDragHandle({
             x: dragState.startGeometry.x + event.clientX - dragState.startX,
             y: dragState.startGeometry.y + event.clientY - dragState.startY,
           },
-          getSubTicketPreviewViewport(),
+          getTicketPreviewViewport(),
         );
         dragState.latestGeometry = nextGeometry;
         applyPreviewGeometry(popupRef.current, nextGeometry);
@@ -498,10 +494,10 @@ function createAnchoredGeometry({
   side,
   sideOffset,
   size,
-}: Required<SubTicketPreviewPlacementProps> & {
+}: Required<TicketPreviewPlacementProps> & {
   anchorElement: Element;
   collisionPadding: number;
-  size: SubTicketPreviewSize;
+  size: TicketPreviewSize;
 }): PreviewGeometry {
   const anchorRect = anchorElement.getBoundingClientRect();
   const baseGeometry = {
@@ -536,15 +532,15 @@ function createAnchoredGeometry({
     baseGeometry.y = anchorRect.top + alignOffset;
   }
 
-  return clampPreviewGeometry(baseGeometry, getSubTicketPreviewViewport(), collisionPadding);
+  return clampPreviewGeometry(baseGeometry, getTicketPreviewViewport(), collisionPadding);
 }
 
 function clampPreviewGeometry(
   geometry: Pick<PreviewGeometry, "maxHeight" | "width" | "x" | "y">,
   viewport: { width: number; height: number },
-  padding = SUB_TICKET_PREVIEW_VIEWPORT_PADDING,
+  padding = TICKET_PREVIEW_VIEWPORT_PADDING,
 ): PreviewGeometry {
-  const size = clampSubTicketPreviewSize(geometry, viewport);
+  const size = clampTicketPreviewSize(geometry, viewport);
   const maxX = viewport.width - padding - size.width;
   const maxY = viewport.height - padding - size.maxHeight;
 
@@ -582,11 +578,11 @@ function clampAxis(value: number, min: number, max: number): number {
   return Math.round(Math.max(min, Math.min(value, max)));
 }
 
-function hasStoredSubTicketPreviewPosition(): boolean {
+function hasStoredTicketPreviewPosition(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  return window.localStorage.getItem(SUB_TICKET_PREVIEW_POSITION_STORAGE_KEY) !== null;
+  return window.localStorage.getItem(TICKET_PREVIEW_POSITION_STORAGE_KEY) !== null;
 }
 
 function setPointerCaptureSafely(element: HTMLElement, pointerId: number): void {

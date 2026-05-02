@@ -44,10 +44,8 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  SharedSubTicketPreviewPopup,
-  useSubTicketPreviewHoverTarget,
-} from "./SubTicketPreviewPopup";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
+import { buildTicketDetailLookupInput, useTicketPreviewCache } from "./ticketPreviewCache";
 import { SubTicketsTree } from "./SubTicketsTree";
 import { MoveTicketToBoardDialog } from "./MoveTicketToBoardDialog";
 import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
@@ -63,6 +61,8 @@ import {
 } from "../settings/ticketUtils";
 import { PriorityIcon } from "./PriorityIcon";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
+
+export { buildTicketDetailLookupInput } from "./ticketPreviewCache";
 
 export const DECOMPOSE_PROMPT = `Decompose the attached ticket into sub-tickets.
 
@@ -113,21 +113,6 @@ export function resolveNullableInlineTextSave(input: {
     return { action: "skip", nextValue: input.currentValue };
   }
   return { action: "save", nextValue };
-}
-
-export function buildTicketDetailLookupInput(
-  ticketId: TicketId,
-  projectId: string,
-): {
-  id: TicketId;
-  projectId: ProjectId;
-  includeBody: true;
-} {
-  return {
-    id: ticketId,
-    projectId: projectId as ProjectId,
-    includeBody: true,
-  };
 }
 
 export function shouldAutoBackFromTicketProjectMismatch(input: {
@@ -1317,49 +1302,10 @@ export function SubTicketsList({
     [toggleTicket, rangeSelectTo, subTickets],
   );
 
-  // Hover-preview cache scoped to this list's lifetime
-  const cacheRef = useRef(new Map<string, Ticket>());
-  const inflightRef = useRef(new Map<string, Promise<Ticket | null>>());
-
-  // Invalidate cache when a sub-ticket is updated externally
-  useEffect(() => {
-    const api = ensureNativeApi();
-    return api.ticketing.onEvent((event: TicketingStreamEvent) => {
-      if (event.type === "ticket_upserted") {
-        cacheRef.current.delete(event.ticket.id as string);
-      }
-    });
-  }, []);
-
-  const fetchPreview = useCallback(
-    async (id: TicketId): Promise<Ticket | null> => {
-      const key = id as string;
-      const cached = cacheRef.current.get(key);
-      if (cached) return cached;
-      const existing = inflightRef.current.get(key);
-      if (existing) return existing;
-      const promise = ensureNativeApi()
-        .ticketing.getById(buildTicketDetailLookupInput(id, projectId))
-        .then((t) => {
-          cacheRef.current.set(key, t);
-          return t;
-        })
-        .catch(() => null)
-        .finally(() => {
-          inflightRef.current.delete(key);
-        });
-      inflightRef.current.set(key, promise);
-      return promise;
-    },
-    [projectId],
-  );
-
-  const getCached = useCallback((id: TicketId): Ticket | undefined => {
-    return cacheRef.current.get(id as string);
-  }, []);
+  const { fetchPreview, getCached } = useTicketPreviewCache(projectId);
 
   const { cancelPreviewTimers, handlePreviewMouseEnter, handlePreviewMouseLeave, previewTarget } =
-    useSubTicketPreviewHoverTarget({
+    useTicketPreviewHoverTarget({
       closeDelayMs: 200,
       openDelayMs: 300,
     });
@@ -1390,7 +1336,7 @@ export function SubTicketsList({
           />
         ))}
       </div>
-      <SharedSubTicketPreviewPopup
+      <SharedTicketPreviewPopup
         anchorElement={previewTarget?.anchorElement ?? null}
         ticketId={previewTarget?.ticketId ?? null}
         fetchPreview={fetchPreview}

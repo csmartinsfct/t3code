@@ -1,6 +1,5 @@
 import type {
   ProjectId,
-  Ticket,
   TicketId,
   TicketSummary,
   TicketTreeNode,
@@ -8,16 +7,14 @@ import type {
 } from "@t3tools/contracts";
 import { useDraggable } from "@dnd-kit/core";
 import { ChevronRightIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { useUiStateStore } from "../../uiStateStore";
-import { SubTicketRowButton, buildTicketDetailLookupInput } from "./KanbanTicketDetail";
-import {
-  SharedSubTicketPreviewPopup,
-  useSubTicketPreviewHoverTarget,
-} from "./SubTicketPreviewPopup";
+import { SubTicketRowButton } from "./KanbanTicketDetail";
+import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
+import { useTicketPreviewCache } from "./ticketPreviewCache";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 interface SubTicketsTreeProps {
@@ -103,8 +100,6 @@ export function SubTicketsTree({
       if (event.type === "ticket_upserted") {
         const idStr = event.ticket.id as string;
         const parentIdStr = (event.ticket.parentId ?? "") as string;
-        // Invalidate preview cache for updated tickets.
-        cacheRef.current.delete(idStr);
         // Refetch tree if the event affects this subtree.
         if (
           idsInSubtree.has(idStr) ||
@@ -121,36 +116,7 @@ export function SubTicketsTree({
     });
   }, [idsInSubtree, ticketId, fetchTree]);
 
-  // Hover-preview cache shared across the whole tree.
-  const cacheRef = useRef(new Map<string, Ticket>());
-  const inflightRef = useRef(new Map<string, Promise<Ticket | null>>());
-
-  const fetchPreview = useCallback(
-    async (id: TicketId): Promise<Ticket | null> => {
-      const key = id as string;
-      const cached = cacheRef.current.get(key);
-      if (cached) return cached;
-      const existing = inflightRef.current.get(key);
-      if (existing) return existing;
-      const promise = ensureNativeApi()
-        .ticketing.getById(buildTicketDetailLookupInput(id, projectId))
-        .then((t) => {
-          cacheRef.current.set(key, t);
-          return t;
-        })
-        .catch(() => null)
-        .finally(() => {
-          inflightRef.current.delete(key);
-        });
-      inflightRef.current.set(key, promise);
-      return promise;
-    },
-    [projectId],
-  );
-
-  const getCached = useCallback((id: TicketId): Ticket | undefined => {
-    return cacheRef.current.get(id as string);
-  }, []);
+  const { fetchPreview, getCached } = useTicketPreviewCache(projectId);
 
   // Selection store integration (same as the legacy flat list).
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
@@ -194,7 +160,7 @@ export function SubTicketsTree({
     handlePreviewMouseEnter: handleRowMouseEnter,
     handlePreviewMouseLeave: handleRowMouseLeave,
     previewTarget,
-  } = useSubTicketPreviewHoverTarget({
+  } = useTicketPreviewHoverTarget({
     closeDelayMs: 200,
     openDelayMs: 300,
   });
@@ -249,7 +215,7 @@ export function SubTicketsTree({
           />
         ))}
       </ul>
-      <SharedSubTicketPreviewPopup
+      <SharedTicketPreviewPopup
         anchorElement={previewTarget?.anchorElement ?? null}
         ticketId={previewTarget?.ticketId ?? null}
         side="top"
