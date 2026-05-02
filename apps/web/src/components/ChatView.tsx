@@ -1963,18 +1963,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
     [providerStatuses],
   );
+  const getModelOptionsForProvider = useCallback(
+    (provider: ProviderKind) => {
+      const liveModels = getProviderModels(providerStatuses, provider);
+      return liveModels.length > 0
+        ? liveModels
+        : (modelOptionsByProvider[baseProviderKind(provider)] ?? []);
+    },
+    [modelOptionsByProvider, providerStatuses],
+  );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
-    const currentOptions = modelOptionsByProvider[baseProviderKind(selectedProvider)];
+    const currentOptions = getModelOptionsForProvider(selectedProvider);
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
       ? selectedModelForPicker
       : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
-  }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
+  }, [getModelOptionsForProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
       getAvailableProviderOptions(providerStatuses)
         .filter((option) => lockedProvider === null || option.value === lockedProvider)
         .flatMap((option) =>
-          (modelOptionsByProvider[baseProviderKind(option.value)] ?? []).map(({ slug, name }) => ({
+          getModelOptionsForProvider(option.value).map(({ slug, name }) => ({
             provider: option.value,
             providerLabel: option.label,
             slug,
@@ -1984,7 +1993,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             searchProvider: option.label.toLowerCase(),
           })),
         ),
-    [lockedProvider, modelOptionsByProvider, providerStatuses],
+    [getModelOptionsForProvider, lockedProvider, providerStatuses],
   );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({

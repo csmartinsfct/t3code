@@ -27,6 +27,22 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const CURSOR_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "composer-2",
+    name: "Composer 2",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      supportsPlan: true,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  },
+];
+
 const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "claude-opus-4-7",
@@ -489,9 +505,41 @@ describe("getComposerProviderState", () => {
 
     expect(state.modelOptionsForDispatch).not.toHaveProperty("fastMode");
   });
+
+  it("does not create Cursor dispatch options or effort state when no traits are supported", () => {
+    const state = getComposerProviderState({
+      provider: "cursor",
+      model: "composer-2",
+      models: CURSOR_MODELS,
+      prompt: "",
+      modelOptions: {
+        cursor: {},
+      },
+    });
+
+    expect(state).toEqual({
+      provider: "cursor",
+      promptEffort: null,
+      modelOptionsForDispatch: undefined,
+    });
+  });
 });
 
 describe("renderProviderTraitsMenuContent", () => {
+  it("hides Cursor trait controls", () => {
+    const element = renderProviderTraitsMenuContent({
+      provider: "cursor",
+      threadId: ThreadId.makeUnsafe("thread-cursor-traits"),
+      model: "composer-2",
+      models: CURSOR_MODELS,
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: vi.fn(),
+    });
+
+    expect(element).toBeNull();
+  });
+
   it("preserves profiled provider keys for trait persistence", () => {
     const element = renderProviderTraitsMenuContent({
       provider: "claudeAgent:metric",

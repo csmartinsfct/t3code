@@ -64,10 +64,18 @@ export function getAvailableProviderOptions(
 
 /** @deprecated Use getAvailableProviderOptions with server providers instead */
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
-const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
 ] as const;
+
+function getUnavailableProviderOptions(
+  serverProviders?: ReadonlyArray<ServerProvider>,
+): Array<ProviderOption> {
+  const options = serverProviders?.length
+    ? buildProviderOptions(serverProviders)
+    : PROVIDER_OPTIONS;
+  return options.filter((option) => !option.available);
+}
 
 function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
@@ -115,6 +123,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
+  const unavailableProviderOptions = getUnavailableProviderOptions(props.providers);
   const getPickerModelOptions = (provider: ProviderKind) => {
     const liveModels = props.providers ? getProviderModels(props.providers, provider) : [];
     return liveModels.length > 0
@@ -317,8 +326,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 </MenuSub>
               );
             })}
-            {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
-            {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
+            {unavailableProviderOptions.length > 0 && <MenuDivider />}
+            {unavailableProviderOptions.map((option) => {
               const OptionIcon = getProviderIcon(option.value);
               return (
                 <MenuItem key={option.value} disabled>
@@ -333,7 +342,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 </MenuItem>
               );
             })}
-            {UNAVAILABLE_PROVIDER_OPTIONS.length === 0 && <MenuDivider />}
+            {unavailableProviderOptions.length === 0 && <MenuDivider />}
             {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
               const OptionIcon = option.icon;
               return (

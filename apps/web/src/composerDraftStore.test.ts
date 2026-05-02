@@ -4,7 +4,9 @@ import {
   ThreadId,
   type ModelSelection,
   type ProviderModelOptions,
+  type ServerProvider,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,6 +14,7 @@ import {
   clearPromotedDraftThread,
   clearPromotedDraftThreads,
   type ComposerImageAttachment,
+  deriveEffectiveComposerModelState,
   useComposerDraftStore,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
@@ -1306,6 +1309,90 @@ describe("composerDraftStore provider-scoped option updates", () => {
     );
     expect(draft?.modelSelectionByProvider.claudeAgent?.options).toEqual({ effort: "max" });
     expect(draft?.activeProvider).toBe("codex");
+  });
+});
+
+describe("deriveEffectiveComposerModelState", () => {
+  const providers: ReadonlyArray<ServerProvider> = [
+    {
+      provider: "codex",
+      enabled: true,
+      installed: true,
+      version: "0.116.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-05-03T00:00:00.000Z",
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    },
+    {
+      provider: "cursor",
+      enabled: true,
+      installed: true,
+      version: "2026.05.01-eea359f",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-05-03T00:00:00.000Z",
+      models: [
+        {
+          slug: "composer-2",
+          name: "Composer 2",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    },
+    {
+      provider: "cursor:metric" as never,
+      displayName: "Cursor (metric)",
+      enabled: true,
+      installed: true,
+      version: "2026.05.01-eea359f",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-05-03T00:00:00.000Z",
+      models: [
+        {
+          slug: "composer-2-fast",
+          name: "Composer 2 Fast",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    },
+  ];
+
+  it("uses Cursor defaults when switching providers instead of carrying another provider model", () => {
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers,
+      selectedProvider: "cursor",
+      threadModelSelection: modelSelection("codex", "gpt-5.4"),
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+
+    expect(state.selectedModel).toBe("composer-2");
+    expect(state.modelOptions).toBeNull();
+  });
+
+  it("uses profiled Cursor model lists when the selected provider is a profile", () => {
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers,
+      selectedProvider: "cursor:metric" as never,
+      threadModelSelection: modelSelection("cursor", "composer-2"),
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+
+    expect(state.selectedModel).toBe("composer-2-fast");
   });
 });
 

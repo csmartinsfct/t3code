@@ -168,6 +168,56 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
       },
     ],
   },
+  {
+    provider: "cursor",
+    displayName: "Cursor",
+    enabled: true,
+    installed: true,
+    version: "2026.05.01-eea359f",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: new Date().toISOString(),
+    models: [
+      {
+        slug: "composer-2",
+        name: "Composer 2",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          supportsPlan: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
+  {
+    provider: "cursor:metric" as never,
+    displayName: "Cursor (metric)",
+    enabled: true,
+    installed: true,
+    version: "2026.05.01-eea359f",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: new Date().toISOString(),
+    models: [
+      {
+        slug: "composer-2-fast",
+        name: "Composer 2 Fast",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          supportsPlan: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
 ];
 
 function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
@@ -261,6 +311,8 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Codex (metric)");
         expect(text).toContain("Claude");
         expect(text).toContain("Claude (metric)");
+        expect(text).toContain("Cursor");
+        expect(text).toContain("Cursor (metric)");
         expect(text).not.toContain("Claude Sonnet 4.6");
       });
     } finally {
@@ -493,6 +545,112 @@ describe("ProviderModelPicker", () => {
       await page.getByRole("menuitemradio", { name: "GPT-5.4" }).click();
 
       expect(mounted.onProviderModelChange).toHaveBeenCalledWith("codex:metric", "gpt-5.4");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps discovered Cursor profiles as distinct provider selections", async () => {
+    const mounted = await mountPicker({
+      provider: "cursor:metric",
+      model: "composer-2-fast",
+      lockedProvider: null,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(page.getByRole("button").element().textContent).toContain("Composer 2 Fast");
+        expect(page.getByRole("button").element().textContent).toContain("metric");
+      });
+
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Cursor (metric)" }).hover();
+      await page.getByRole("menuitemradio", { name: "Composer 2 Fast" }).click();
+
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
+        "cursor:metric",
+        "composer-2-fast",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not keep the static Cursor coming-soon row when server Cursor exists", async () => {
+    const mounted = await mountPicker({
+      provider: "cursor",
+      model: "composer-2",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const cursorMenuItems = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+        ).filter((element) => element.textContent?.includes("Cursor"));
+        expect(cursorMenuItems.length).toBeGreaterThan(0);
+        expect(
+          cursorMenuItems.some((element) => element.textContent?.includes("Coming soon")),
+        ).toBe(false);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surfaces unavailable Cursor status without allowing model selection", async () => {
+    const codexProvider = TEST_PROVIDERS.find((provider) => provider.provider === "codex");
+    if (!codexProvider) {
+      throw new Error("Expected Codex test provider to exist.");
+    }
+    const unavailableCursor: ServerProvider = {
+      provider: "cursor",
+      displayName: "Cursor",
+      enabled: true,
+      installed: false,
+      version: null,
+      status: "error",
+      auth: { status: "unknown" },
+      message: "Cursor CLI not found. Install Cursor CLI or set the binary path in settings.",
+      checkedAt: new Date().toISOString(),
+      models: [
+        {
+          slug: "composer-2",
+          name: "Composer 2",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            supportsPlan: true,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ],
+    };
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: [codexProvider, unavailableCursor],
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Cursor" }).hover();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Not installed");
+        expect(text).toContain("Cursor CLI not found");
+        expect(text).toContain("Composer 2");
+      });
+      const disabledModel = expectMenuRadioItemDisabled("Composer 2");
+      disabledModel.click();
+      expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }
