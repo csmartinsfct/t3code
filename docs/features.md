@@ -304,7 +304,7 @@ A Kanban-style board for visual ticket management. See [multi-layout.md](multi-l
 - **Ticket detail panel** — Click a card to open a drill-down panel with full ticket information, acceptance criteria checkboxes, comments, history, related threads, and label management.
 - **Multi-select** — Select multiple tickets with modifier keys. A selection bar appears with bulk action buttons (archive, orchestrate).
 - **Drop-to-chat** — Drag a ticket card onto the chat area to reference it in a message.
-- **Orchestration controls** — Confirmation dialog for running orchestration on selected tickets, with model selection for implementer and reviewer.
+- **Orchestration controls** — Confirmation page for running orchestration on selected tickets, with model selection for implementer and reviewer plus the shared ticket hover preview for a final content check before starting.
 
 ---
 
