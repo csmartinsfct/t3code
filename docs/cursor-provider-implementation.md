@@ -316,18 +316,18 @@ Deferred:
 
 Files:
 
-- new `apps/server/src/provider/cursor/CursorTurnRunner.ts`
-- new `apps/server/src/provider/cursor/CursorStreamJson.ts`
-- new focused tests beside those files
+- `apps/server/src/provider/cursor/CursorTurnRunner.ts`
+- `apps/server/src/provider/cursor/CursorStreamJson.ts`
+- focused tests beside those files
 
-Responsibilities:
+Implemented in T3CO-397:
 
 - Build argv from pure inputs so tests can pin command construction.
 - Spawn the resolved Cursor launch config with cwd, environment, and stdio
   suitable for NDJSON parsing.
 - Always pass `--print --output-format stream-json`.
-- Pass `--stream-partial-output` if tests prove it improves assistant delta
-  fidelity without changing event semantics.
+- Optionally pass `--stream-partial-output`; the flag is supported locally and
+  covered by args-builder tests.
 - Pass `--resume <sessionId>` after the first chat has been created.
 - Pass `--model <model>` per turn when requested.
 - Pass runtime flags:
@@ -341,6 +341,9 @@ Responsibilities:
 - Resolve completion only after process exit and a successful terminal `result`.
 - Treat non-zero exit, missing terminal result, or result `is_error: true` as a
   failed turn.
+
+Deferred to adapter/process-hardening tickets:
+
 - Clean up the entire process group/tree on interrupt, stop, timeout, and
   process exit.
 
