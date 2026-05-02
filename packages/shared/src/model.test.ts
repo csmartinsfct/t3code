@@ -54,7 +54,7 @@ const claudeCaps: ModelCapabilities = {
 };
 
 describe("makeProviderModelSelection", () => {
-  it("preserves provider profiles for Codex, Claude, and Gemini selections", () => {
+  it("preserves provider profiles for Codex, Claude, Gemini, and Cursor selections", () => {
     expect(makeProviderModelSelection("codex:metric", "gpt-5.4")).toEqual({
       provider: "codex",
       profileId: "metric",
@@ -70,6 +70,11 @@ describe("makeProviderModelSelection", () => {
       profileId: "preview",
       model: "gemini-2.5-pro",
     });
+    expect(makeProviderModelSelection("cursor:metric", "sonnet-4-thinking")).toEqual({
+      provider: "cursor",
+      profileId: "metric",
+      model: "sonnet-4-thinking",
+    });
   });
 });
 
@@ -78,6 +83,8 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
+    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5");
+    expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("sonnet-4-thinking");
   });
 
   it("returns null for empty or missing values", () => {
@@ -94,6 +101,7 @@ describe("model provider inference", () => {
     expect(inferBaseProviderKindFromModelSlug("2.5-pro")).toBe("gemini");
     expect(inferBaseProviderKindFromModelSlug("claude-opus-4-6")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("gpt-5.4")).toBe("codex");
+    expect(inferBaseProviderKindFromModelSlug("cursor-special-model")).toBe("cursor");
   });
 
   it("repairs known provider/model mismatches without carrying stale options", () => {
@@ -109,6 +117,20 @@ describe("model provider inference", () => {
       model: "gemini-2.5-pro",
     });
   });
+
+  it("preserves explicit Cursor selections for ambiguous model slugs", () => {
+    expect(
+      normalizeModelSelectionProvider({
+        provider: "cursor",
+        profileId: "metric",
+        model: "gpt-5",
+      }),
+    ).toEqual({
+      provider: "cursor",
+      profileId: "metric",
+      model: "gpt-5",
+    });
+  });
 });
 
 describe("resolveModelSlug", () => {
@@ -118,6 +140,7 @@ describe("resolveModelSlug", () => {
     expect(resolveModelSlugForProvider("claudeAgent", undefined)).toBe(
       DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
     );
+    expect(resolveModelSlug(undefined, "cursor")).toBe(DEFAULT_MODEL_BY_PROVIDER.cursor);
   });
 
   it("preserves normalized unknown models", () => {

@@ -7,6 +7,7 @@ import {
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type CursorModelOptions,
   type GeminiModelOptions,
   type ModelCapabilities,
   type ModelSelection,
@@ -29,7 +30,8 @@ export function makeProviderModelSelection(
   return {
     provider: base,
     model,
-    ...((base === "codex" || base === "claudeAgent" || base === "gemini") && profileId
+    ...((base === "codex" || base === "claudeAgent" || base === "gemini" || base === "cursor") &&
+    profileId
       ? { profileId }
       : {}),
     ...(options ? { options } : {}),
@@ -165,6 +167,13 @@ export function normalizeGeminiModelOptionsWithCapabilities(
   return modelOptions && Object.keys(modelOptions).length > 0 ? modelOptions : undefined;
 }
 
+export function normalizeCursorModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  modelOptions: CursorModelOptions | null | undefined,
+): CursorModelOptions | undefined {
+  return modelOptions && Object.keys(modelOptions).length > 0 ? modelOptions : undefined;
+}
+
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -217,6 +226,9 @@ export function inferBaseProviderKindFromModelSlug(
   if (lower.startsWith("gemini-") || lower.startsWith("auto-gemini-")) {
     return "gemini";
   }
+  if (lower.startsWith("cursor-")) {
+    return "cursor";
+  }
   if (lower.startsWith("claude-")) {
     return "claudeAgent";
   }
@@ -228,6 +240,13 @@ export function inferBaseProviderKindFromModelSlug(
 }
 
 export function normalizeModelSelectionProvider(selection: ModelSelection): ModelSelection {
+  if (selection.provider === "cursor") {
+    return {
+      ...selection,
+      model: resolveModelSlugForProvider("cursor", selection.model),
+    };
+  }
+
   const inferredProvider = inferBaseProviderKindFromModelSlug(selection.model);
   const provider = inferredProvider ?? selection.provider;
   const model = resolveModelSlugForProvider(provider, selection.model);

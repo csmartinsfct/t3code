@@ -13,6 +13,7 @@ import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 import {
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeCursorModelOptionsWithCapabilities,
   normalizeGeminiModelOptionsWithCapabilities,
 } from "@t3tools/shared/model";
 
@@ -82,6 +83,8 @@ function getProviderStateFromCapabilities(
         return normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
       case "gemini":
         return normalizeGeminiModelOptionsWithCapabilities(caps, providerOptions);
+      case "cursor":
+        return normalizeCursorModelOptionsWithCapabilities(caps, providerOptions);
     }
   })();
 
@@ -185,6 +188,11 @@ const composerProviderRegistry: Record<BaseProviderKind, ProviderRegistryEntry> 
     ),
   },
   gemini: {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: () => null,
+    renderTraitsPicker: () => null,
+  },
+  cursor: {
     getState: (input) => getProviderStateFromCapabilities(input),
     renderTraitsMenuContent: () => null,
     renderTraitsPicker: () => null,

@@ -1,5 +1,10 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
-import { ClaudeModelOptions, CodexModelOptions, GeminiModelOptions } from "./model";
+import {
+  ClaudeModelOptions,
+  CodexModelOptions,
+  CursorModelOptions,
+  GeminiModelOptions,
+} from "./model";
 import {
   OrchestrationPromptId,
   OrchestrationPromptOverrides,
@@ -43,7 +48,7 @@ export const ORCHESTRATION_WS_METHODS = {
   startRun: "orchestration.startRun",
 } as const;
 
-export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent", "gemini"] as const;
+export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent", "gemini", "cursor"] as const;
 export type BaseProviderKind = (typeof BASE_PROVIDER_KINDS)[number];
 export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
 
@@ -56,13 +61,14 @@ export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
  * through schema-validated boundaries.
  */
 export const ProviderKind = Schema.String.check(
-  Schema.isPattern(/^(codex|claudeAgent|gemini)(:[a-zA-Z0-9_-]+)?$/),
+  Schema.isPattern(/^(codex|claudeAgent|gemini|cursor)(:[a-zA-Z0-9_-]+)?$/),
 ) as unknown as typeof BaseProviderKind;
 export type ProviderKind =
   | BaseProviderKind
   | `codex:${string}`
   | `claudeAgent:${string}`
-  | `gemini:${string}`;
+  | `gemini:${string}`
+  | `cursor:${string}`;
 
 /**
  * Safely narrow a full ProviderKind (possibly profiled) for use as a
@@ -96,9 +102,11 @@ export function isValidProviderKind(value: string): value is ProviderKind {
     value === "codex" ||
     value === "claudeAgent" ||
     value === "gemini" ||
+    value === "cursor" ||
     value.startsWith("codex:") ||
     value.startsWith("claudeAgent:") ||
-    value.startsWith("gemini:")
+    value.startsWith("gemini:") ||
+    value.startsWith("cursor:")
   );
 }
 
@@ -142,17 +150,29 @@ export const GeminiModelSelection = Schema.Struct({
 });
 export type GeminiModelSelection = typeof GeminiModelSelection.Type;
 
+export const CursorModelSelection = Schema.Struct({
+  provider: Schema.Literal("cursor"),
+  profileId: Schema.optionalKey(Schema.String),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(CursorModelOptions),
+});
+export type CursorModelSelection = typeof CursorModelSelection.Type;
+
 export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
   GeminiModelSelection,
+  CursorModelSelection,
 ]);
 export type ModelSelection = typeof ModelSelection.Type;
 
 /** Get the full ProviderKind (including profile) from a ModelSelection. */
 export function modelSelectionProviderKind(sel: ModelSelection): ProviderKind {
   if (
-    (sel.provider === "codex" || sel.provider === "claudeAgent" || sel.provider === "gemini") &&
+    (sel.provider === "codex" ||
+      sel.provider === "claudeAgent" ||
+      sel.provider === "gemini" ||
+      sel.provider === "cursor") &&
     "profileId" in sel &&
     sel.profileId
   ) {

@@ -46,6 +46,23 @@ describe("settings defaults", () => {
     );
   });
 
+  it("includes Cursor provider defaults", () => {
+    expect(DEFAULT_SERVER_SETTINGS.providers.cursor).toEqual({
+      enabled: true,
+      binaryPath: "agent",
+      launchCommand: [],
+      homePath: "",
+      configDir: "",
+      dataDir: "",
+      env: {},
+      customModels: [],
+    });
+    expect(DEFAULT_SERVER_SETTINGS.providers.cursorProfiles).toEqual([]);
+    expect(DEFAULT_UNIFIED_SETTINGS.providers.cursor).toEqual(
+      DEFAULT_SERVER_SETTINGS.providers.cursor,
+    );
+  });
+
   it("resolves orchestration prompts and immutable shipped defaults by default", () => {
     expect(DEFAULT_SERVER_SETTINGS.prompts.orchestration).toEqual(
       ORCHESTRATION_PROMPT_SHIPPED_DEFAULTS,
@@ -55,7 +72,7 @@ describe("settings defaults", () => {
     );
   });
 
-  it("accepts Codex and Claude profile ids in model selection patches", () => {
+  it("accepts Codex, Claude, and Cursor profile ids in model selection patches", () => {
     const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
     expect(
@@ -87,6 +104,22 @@ describe("settings defaults", () => {
         provider: "claudeAgent",
         profileId: "metric",
         model: "claude-opus-4-6",
+      },
+    });
+
+    expect(
+      decodePatch({
+        textGenerationModelSelection: {
+          provider: "cursor",
+          profileId: "metric",
+          model: "sonnet-4-thinking",
+        },
+      }),
+    ).toEqual({
+      textGenerationModelSelection: {
+        provider: "cursor",
+        profileId: "metric",
+        model: "sonnet-4-thinking",
       },
     });
   });
@@ -121,6 +154,78 @@ describe("settings defaults", () => {
       orchestrationImplementerModelSelection: {
         provider: "gemini",
         model: "gemini-3.1-pro-preview",
+      },
+    });
+  });
+
+  it("accepts Cursor provider, profile, and model selection patches", () => {
+    const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+    expect(
+      decodePatch({
+        providers: {
+          cursor: {
+            enabled: true,
+            binaryPath: "/opt/bin/agent",
+            launchCommand: ["/opt/bin/cursor-metric"],
+            homePath: "/tmp/cursor",
+            configDir: "/tmp/cursor/.cursor",
+            dataDir: "/tmp/cursor/.cursor",
+            env: { CURSOR_CONFIG_DIR: "/tmp/cursor/.cursor" },
+            customModels: ["cursor-custom"],
+          },
+          cursorProfiles: [
+            {
+              profileId: "metric",
+              displayName: "Cursor (metric)",
+              enabled: true,
+              binaryPath: "agent",
+              launchCommand: ["cursor-metric"],
+              homePath: "/tmp/cursor-metric",
+              configDir: "/tmp/cursor-metric/.cursor",
+              dataDir: "/tmp/cursor-metric/.cursor",
+              env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
+              customModels: ["sonnet-4-thinking"],
+            },
+          ],
+        },
+        orchestrationImplementerModelSelection: {
+          provider: "cursor",
+          profileId: "metric",
+          model: "sonnet-4-thinking",
+        },
+      }),
+    ).toEqual({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "/opt/bin/agent",
+          launchCommand: ["/opt/bin/cursor-metric"],
+          homePath: "/tmp/cursor",
+          configDir: "/tmp/cursor/.cursor",
+          dataDir: "/tmp/cursor/.cursor",
+          env: { CURSOR_CONFIG_DIR: "/tmp/cursor/.cursor" },
+          customModels: ["cursor-custom"],
+        },
+        cursorProfiles: [
+          {
+            profileId: "metric",
+            displayName: "Cursor (metric)",
+            enabled: true,
+            binaryPath: "agent",
+            launchCommand: ["cursor-metric"],
+            homePath: "/tmp/cursor-metric",
+            configDir: "/tmp/cursor-metric/.cursor",
+            dataDir: "/tmp/cursor-metric/.cursor",
+            env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
+            customModels: ["sonnet-4-thinking"],
+          },
+        ],
+      },
+      orchestrationImplementerModelSelection: {
+        provider: "cursor",
+        profileId: "metric",
+        model: "sonnet-4-thinking",
       },
     });
   });

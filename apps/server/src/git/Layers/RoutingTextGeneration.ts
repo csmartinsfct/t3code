@@ -1,7 +1,8 @@
 /**
  * RoutingTextGeneration – Dispatches text generation requests to either the
  * Codex, Claude, or Gemini CLI implementation based on the provider in each
- * request input.
+ * request input. Cursor is a chat provider only until a structured secondary
+ * inference path is implemented.
  *
  * Requests are routed explicitly by provider so a newly supported chat provider
  * cannot silently fall through to Codex for secondary inference.
@@ -53,6 +54,8 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
         return claude;
       case "gemini":
         return gemini;
+      case "cursor":
+        return null;
     }
   };
 

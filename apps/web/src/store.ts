@@ -15,6 +15,7 @@ import {
   type OrchestrationSessionStatus,
   type OrchestrationRunStatus,
   type ModelSelection,
+  isValidProviderKind,
 } from "@t3tools/contracts";
 import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
 import { summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -862,7 +863,7 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex" || providerName === "claudeAgent" || providerName === "gemini") {
+  if (providerName && isValidProviderKind(providerName)) {
     return providerName;
   }
   return "codex";

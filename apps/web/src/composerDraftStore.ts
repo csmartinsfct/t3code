@@ -1,5 +1,6 @@
 import {
   baseProviderKind,
+  BASE_PROVIDER_KINDS,
   type BaseProviderKind,
   CODEX_REASONING_EFFORT_OPTIONS,
   type ClaudeCodeEffort,
@@ -795,7 +796,7 @@ function legacyToModelSelectionByProvider(
   const result: Partial<Record<ProviderKind, ModelSelection>> = {};
   // Add entries from the options bag (for non-active providers)
   if (modelOptions) {
-    for (const provider of ["codex", "claudeAgent", "gemini"] as const) {
+    for (const provider of BASE_PROVIDER_KINDS) {
       const options = modelOptions[provider];
       if (options && Object.keys(options).length > 0) {
         result[provider] = {
@@ -1935,7 +1936,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           const base = existing ?? createEmptyThreadDraft();
           const nextMap = { ...base.modelSelectionByProvider };
-          for (const provider of ["codex", "claudeAgent", "gemini"] as const) {
+          for (const provider of BASE_PROVIDER_KINDS) {
             // Only touch providers explicitly present in the input
             if (!normalizedOpts || !(provider in normalizedOpts)) continue;
             const opts = normalizedOpts[provider];

@@ -5,6 +5,7 @@ import { NonNegativeInt, TrimmedNonEmptyString, TrimmedString } from "./baseSche
 import {
   ClaudeModelOptions,
   CodexModelOptions,
+  CursorModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   GeminiModelOptions,
 } from "./model";
@@ -99,6 +100,20 @@ export const GeminiSettings = Schema.Struct({
 });
 export type GeminiSettings = typeof GeminiSettings.Type;
 
+const StringRecord = Schema.Record(Schema.String, Schema.String);
+
+export const CursorSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("agent"),
+  launchCommand: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+  homePath: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  configDir: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  dataDir: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  env: StringRecord.pipe(Schema.withDecodingDefault(() => ({}))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type CursorSettings = typeof CursorSettings.Type;
+
 export const ClaudeProfileSettings = Schema.Struct({
   profileId: TrimmedNonEmptyString,
   displayName: TrimmedNonEmptyString,
@@ -108,6 +123,20 @@ export const ClaudeProfileSettings = Schema.Struct({
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type ClaudeProfileSettings = typeof ClaudeProfileSettings.Type;
+
+export const CursorProfileSettings = Schema.Struct({
+  profileId: TrimmedNonEmptyString,
+  displayName: TrimmedNonEmptyString,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  binaryPath: makeBinaryPathSetting("agent"),
+  launchCommand: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+  homePath: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  configDir: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  dataDir: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  env: StringRecord.pipe(Schema.withDecodingDefault(() => ({}))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type CursorProfileSettings = typeof CursorProfileSettings.Type;
 
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
@@ -214,8 +243,10 @@ export const ServerSettings = Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     gemini: GeminiSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    cursor: CursorSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     codexProfiles: Schema.Array(CodexProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
     claudeProfiles: Schema.Array(ClaudeProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
+    cursorProfiles: Schema.Array(CursorProfileSettings).pipe(Schema.withDecodingDefault(() => [])),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(() => ({}))),
   dynamicChatUi: DynamicChatUiSettings.pipe(Schema.withDecodingDefault(() => ({}))),
@@ -267,6 +298,7 @@ const ClaudeModelOptionsPatch = Schema.Struct({
 });
 
 const GeminiModelOptionsPatch = GeminiModelOptions;
+const CursorModelOptionsPatch = CursorModelOptions;
 
 const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
@@ -286,6 +318,12 @@ const ModelSelectionPatch = Schema.Union([
     profileId: Schema.optionalKey(TrimmedNonEmptyString),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(GeminiModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("cursor")),
+    profileId: Schema.optionalKey(TrimmedNonEmptyString),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(CursorModelOptionsPatch),
   }),
 ]);
 
@@ -307,6 +345,17 @@ const GeminiSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
   homePath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
+const CursorSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  launchCommand: Schema.optionalKey(Schema.Array(Schema.String)),
+  homePath: Schema.optionalKey(Schema.String),
+  configDir: Schema.optionalKey(Schema.String),
+  dataDir: Schema.optionalKey(Schema.String),
+  env: Schema.optionalKey(StringRecord),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
@@ -334,8 +383,10 @@ export const ServerSettingsPatch = Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       gemini: Schema.optionalKey(GeminiSettingsPatch),
+      cursor: Schema.optionalKey(CursorSettingsPatch),
       codexProfiles: Schema.optionalKey(Schema.Array(CodexProfileSettings)),
       claudeProfiles: Schema.optionalKey(Schema.Array(ClaudeProfileSettings)),
+      cursorProfiles: Schema.optionalKey(Schema.Array(CursorProfileSettings)),
     }),
   ),
   prompts: Schema.optionalKey(

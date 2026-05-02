@@ -1959,6 +1959,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
       gemini: providerStatuses.find((provider) => provider.provider === "gemini")?.models ?? [],
+      cursor: providerStatuses.find((provider) => provider.provider === "cursor")?.models ?? [],
     }),
     [providerStatuses],
   );

@@ -80,13 +80,16 @@ function resetComposerDraftStore() {
 }
 
 function modelSelection(
-  provider: "codex" | "claudeAgent" | "gemini",
+  provider: "codex" | "claudeAgent" | "gemini" | "cursor",
   model: string,
   profileIdOrOptions?: string | ModelSelection["options"],
   options?: ModelSelection["options"],
 ): ModelSelection {
   const profileId =
-    (provider === "codex" || provider === "claudeAgent" || provider === "gemini") &&
+    (provider === "codex" ||
+      provider === "claudeAgent" ||
+      provider === "gemini" ||
+      provider === "cursor") &&
     typeof profileIdOrOptions === "string"
       ? profileIdOrOptions
       : undefined;

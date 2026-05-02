@@ -59,6 +59,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModel
     placeholder: "your-gemini-model-slug",
     example: "gemini-3.1-pro-preview",
   },
+  cursor: {
+    provider: "cursor",
+    title: "Cursor",
+    description: "Save additional Cursor model slugs for the picker and `/model` command.",
+    placeholder: "your-cursor-model-slug",
+    example: "sonnet-4-thinking",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -186,6 +193,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "gemini",
       selectedBaseProvider === "gemini" ? selectedModel : undefined,
+    ).map(({ slug, name }) => ({ slug, name })),
+    cursor: getAppModelOptions(
+      settings,
+      providers,
+      "cursor",
+      selectedBaseProvider === "cursor" ? selectedModel : undefined,
     ).map(({ slug, name }) => ({ slug, name })),
   };
 }

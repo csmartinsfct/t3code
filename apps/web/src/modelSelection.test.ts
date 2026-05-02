@@ -62,6 +62,24 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
       },
     ],
   },
+  {
+    provider: "cursor:metric" as never,
+    displayName: "Cursor (metric)",
+    enabled: true,
+    installed: true,
+    version: "2026.05.01-eea359f",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-04-10T00:00:00.000Z",
+    models: [
+      {
+        slug: "sonnet-4-thinking",
+        name: "Sonnet 4 Thinking",
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
+  },
 ];
 
 describe("resolveAppModelSelectionState", () => {
@@ -82,6 +100,26 @@ describe("resolveAppModelSelectionState", () => {
       provider: "claudeAgent",
       profileId: "metric",
       model: "claude-opus-4-6",
+    });
+  });
+
+  it("preserves Cursor profile ids for profiled providers", () => {
+    const selection = resolveAppModelSelectionState(
+      {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        textGenerationModelSelection: {
+          provider: "cursor",
+          profileId: "metric",
+          model: "sonnet-4-thinking",
+        },
+      },
+      TEST_PROVIDERS,
+    );
+
+    expect(selection).toMatchObject({
+      provider: "cursor",
+      profileId: "metric",
+      model: "sonnet-4-thinking",
     });
   });
 });

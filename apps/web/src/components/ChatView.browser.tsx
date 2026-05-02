@@ -285,7 +285,7 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
-  providerName?: "codex" | "claudeAgent" | "gemini";
+  providerName?: "codex" | "claudeAgent" | "gemini" | "cursor";
 }): OrchestrationReadModel {
   const providerName = options.providerName ?? "codex";
   const modelSelection =
@@ -299,10 +299,15 @@ function createSnapshotForTargetUser(options: {
             provider: "gemini",
             model: "gemini-2.5-pro",
           } as const)
-        : ({
-            provider: "codex",
-            model: "gpt-5",
-          } as const);
+        : providerName === "cursor"
+          ? ({
+              provider: "cursor",
+              model: "gpt-5",
+            } as const)
+          : ({
+              provider: "codex",
+              model: "gpt-5",
+            } as const);
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
   for (let index = 0; index < 22; index += 1) {
