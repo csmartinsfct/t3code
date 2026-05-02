@@ -12,7 +12,7 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
-  type TurnId,
+  TurnId,
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -154,6 +154,14 @@ function isMissingProviderBindingError(cause: Cause.Cause<ProviderServiceError>)
   );
 }
 
+function providerFailureMessage(cause: Cause.Cause<unknown>): string {
+  const error = Cause.squash(cause);
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return Cause.pretty(cause);
+}
+
 function stalePendingRequestDetail(
   requestKind: "approval" | "user-input",
   requestId: string,
@@ -283,6 +291,12 @@ const make = Effect.gen(function* () {
   const setThreadSession = (input: {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
+    readonly completedTurn?: {
+      readonly turnId: TurnId;
+      readonly state: "completed" | "error" | "interrupted";
+      readonly completedAt: string;
+      readonly terminalReason?: string;
+    };
     readonly createdAt: string;
   }) =>
     orchestrationEngine.dispatch({
@@ -290,6 +304,7 @@ const make = Effect.gen(function* () {
       commandId: serverCommandId("provider-session-set"),
       threadId: input.threadId,
       session: input.session,
+      ...(input.completedTurn ? { completedTurn: input.completedTurn } : {}),
       createdAt: input.createdAt,
     });
 
@@ -846,6 +861,21 @@ const make = Effect.gen(function* () {
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
+          const detail = providerFailureMessage(cause);
+          const failedAt = new Date().toISOString();
+          const threadProvider = modelSelectionProviderKind(thread.modelSelection);
+          const requestedProvider =
+            event.payload.modelSelection !== undefined
+              ? modelSelectionProviderKind(event.payload.modelSelection)
+              : undefined;
+          const providerName =
+            thread.session?.providerName ??
+            (requestedProvider !== undefined &&
+            baseProviderKind(requestedProvider) === baseProviderKind(threadProvider)
+              ? requestedProvider
+              : threadProvider);
+          const failedTurnId = TurnId.makeUnsafe(`provider-start-failed-${event.eventId}`);
+
           yield* Effect.logWarning(
             formatTimelineLog("server.provider-reactor", "turn-start-requested.send-failed", {
               threadId: event.payload.threadId,
@@ -853,13 +883,31 @@ const make = Effect.gen(function* () {
               cause: Cause.pretty(cause),
             }),
           );
+          yield* setThreadSession({
+            threadId: event.payload.threadId,
+            session: {
+              threadId: event.payload.threadId,
+              status: "error",
+              providerName,
+              runtimeMode: thread.runtimeMode,
+              activeTurnId: null,
+              lastError: detail,
+              updatedAt: failedAt,
+            },
+            completedTurn: {
+              turnId: failedTurnId,
+              state: "error",
+              completedAt: failedAt,
+            },
+            createdAt: failedAt,
+          });
           yield* appendProviderFailureActivity({
             threadId: event.payload.threadId,
             kind: "provider.turn.start.failed",
             summary: "Provider turn start failed",
             detail: Cause.pretty(cause),
-            turnId: null,
-            createdAt: event.payload.createdAt,
+            turnId: failedTurnId,
+            createdAt: failedAt,
           });
         }),
       ),

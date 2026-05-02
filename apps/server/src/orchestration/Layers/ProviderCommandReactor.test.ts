@@ -368,6 +368,76 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("settles the pending turn when provider session startup fails before a provider turn starts", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    harness.startSession.mockImplementation(
+      () =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "codex",
+            method: "create-chat",
+            detail: "workspace root does not exist",
+          }),
+        ) as never,
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-session-fails"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-session-fails"),
+          role: "user",
+          text: "hello failure",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
+      const thread = readModel.threads.find(
+        (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+      );
+      return thread?.latestTurn?.state === "error" && thread?.session?.status === "error";
+    });
+
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+
+    const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
+    const thread = readModel.threads.find(
+      (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
+    expect(thread?.session).toMatchObject({
+      status: "error",
+      providerName: "codex",
+      activeTurnId: null,
+      lastError: expect.stringContaining("workspace root does not exist"),
+    });
+    expect(thread?.latestTurn).toMatchObject({
+      state: "error",
+      requestedAt: now,
+      startedAt: now,
+      completedAt: expect.any(String),
+    });
+    const failureActivity = thread?.activities.find(
+      (activity: any) => activity.kind === "provider.turn.start.failed",
+    );
+    expect(failureActivity).toMatchObject({
+      turnId: thread?.latestTurn?.turnId,
+      summary: "Provider turn start failed",
+      payload: {
+        detail: expect.stringContaining("workspace root does not exist"),
+      },
+    });
+  });
+
   it("generates a thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -811,15 +881,26 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find(
       (entry: any) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
-    expect(thread?.session).toBeNull();
-    expect(
-      thread?.activities.find((activity: any) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
+    expect(thread?.session).toMatchObject({
+      status: "error",
+      providerName: "codex",
+      activeTurnId: null,
+      lastError: expect.stringContaining("cannot switch to 'claudeAgent'"),
+    });
+    expect(thread?.latestTurn).toMatchObject({
+      state: "error",
+      completedAt: expect.any(String),
+    });
+    const failureActivity = thread?.activities.find(
+      (activity: any) => activity.kind === "provider.turn.start.failed",
+    );
+    expect(failureActivity).toMatchObject({
       summary: "Provider turn start failed",
       payload: {
         detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
       },
     });
+    expect(failureActivity?.turnId).toBe(thread?.latestTurn?.turnId);
   });
 
   it("preserves the active session model when in-session model switching is unsupported", async () => {
