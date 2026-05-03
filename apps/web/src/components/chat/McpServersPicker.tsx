@@ -41,6 +41,7 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
     props.canManageServers && props.onServerAction
       ? liveServers.filter((server) => actionForMcpServer(server) === "approve")
       : [];
+  const isLoading = props.status === "loading" || props.refreshing === true;
   const isInitialLoading = props.status === "loading" && !hasServers;
   const isError = props.status === "error";
 
@@ -73,7 +74,6 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
               isError && "text-amber-500/85 hover:text-amber-400",
             )}
             aria-label="MCP servers"
-            disabled={isInitialLoading}
             title={isInitialLoading ? "Loading MCP status" : "MCP servers"}
           />
         }
@@ -114,8 +114,8 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
                 variant="ghost"
                 size="icon"
                 className="size-6 text-muted-foreground/65 hover:text-foreground"
-                title="Retry MCP status"
-                aria-label="Retry MCP status"
+                title="Refresh MCP status"
+                aria-label="Refresh MCP status"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -166,6 +166,11 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
               {name}
             </div>
           ))
+        ) : isLoading ? (
+          <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-sm">
+            <span>Loading</span>
+            <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
+          </div>
         ) : (
           <div className="px-2 py-1.5 text-muted-foreground text-sm">No MCP servers</div>
         )}
@@ -220,9 +225,9 @@ function McpServerStatusRow(props: {
     | undefined;
 }) {
   const { pendingAction, server } = props;
-  const connected = server.status === "connected";
+  const healthy = isHealthyMcpStatus(server.status);
   const action = props.canManage ? actionForMcpServer(server) : null;
-  const statusLabel = server.status && !connected && action === null ? server.status : null;
+  const statusLabel = server.status && !healthy && action === null ? server.status : null;
   const toolCount =
     typeof server.toolCount === "number" && server.toolCount > 0 ? `${server.toolCount} tools` : "";
   const titleParts = [server.name, server.status, toolCount, server.error].filter(Boolean);
@@ -237,7 +242,7 @@ function McpServerStatusRow(props: {
         aria-hidden="true"
         className={cn(
           "size-1.5 shrink-0 rounded-full",
-          connected ? "bg-emerald-400/80" : needsAttention ? "bg-amber-400/85" : "bg-rose-400/75",
+          healthy ? "bg-emerald-400/80" : needsAttention ? "bg-amber-400/85" : "bg-rose-400/75",
         )}
       />
       <span className="min-w-0 flex-1 truncate">{server.name}</span>
@@ -272,6 +277,11 @@ function McpServerStatusRow(props: {
       ) : null}
     </div>
   );
+}
+
+function isHealthyMcpStatus(status: string | undefined): boolean {
+  const normalized = status?.toLowerCase().trim() ?? "";
+  return normalized === "connected" || normalized === "ready" || normalized === "loaded";
 }
 
 function actionForMcpServer(server: ResolvedMcpServer): ManageMcpServerAction | null {

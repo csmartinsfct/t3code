@@ -48,6 +48,17 @@ function emptyBaseState(retry: () => void): ResolvedMcpServersBaseState {
   };
 }
 
+function loadingBaseState(retry: () => void): ResolvedMcpServersBaseState {
+  return {
+    status: "loading",
+    refreshing: false,
+    serverNames: EMPTY,
+    servers: EMPTY_SERVERS,
+    error: null,
+    retry,
+  };
+}
+
 function withManageState(
   state: ResolvedMcpServersBaseState,
   manageState: Pick<
@@ -109,7 +120,7 @@ export function useMcpServers(input: {
   );
   const [revisionNonce, setRevisionNonce] = useState(0);
   const [plainState, setPlainState] = useState<ResolvedMcpServersBaseState>(() =>
-    emptyBaseState(() => undefined),
+    loadingBaseState(() => undefined),
   );
   const [pendingActionsByServerName, setPendingActionsByServerName] = useState<
     Record<string, ManageMcpServerAction>
@@ -139,13 +150,27 @@ export function useMcpServers(input: {
         [serverName]: action,
       }));
       try {
+        const providerInput = asProviderInput(provider);
         await api.server.manageMcpServer({
-          provider: asProviderInput(provider),
+          provider: providerInput,
           cwd,
           serverName,
           action,
         });
-        retry();
+        const result = await api.server.resolveMcpServers({
+          provider: providerInput,
+          cwd,
+          forceRefresh: true,
+          ...(projectId ? { projectId } : {}),
+        });
+        setPlainState({
+          status: result.status,
+          refreshing: result.refreshing === true,
+          serverNames: result.serverNames.length > 0 ? result.serverNames : EMPTY,
+          servers: result.servers && result.servers.length > 0 ? result.servers : EMPTY_SERVERS,
+          error: result.error ?? null,
+          retry,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setActionError(message);
@@ -158,7 +183,7 @@ export function useMcpServers(input: {
         });
       }
     },
-    [canManageServers, cwd, provider, retry],
+    [canManageServers, cwd, projectId, provider, retry],
   );
 
   useEffect(() => {
@@ -187,6 +212,13 @@ export function useMcpServers(input: {
     const forceRefresh = revisionNonce > 0 && lastForcedRevisionNonce.current !== revisionNonce;
     if (forceRefresh) {
       lastForcedRevisionNonce.current = revisionNonce;
+    }
+    if (!isClaude) {
+      setPlainState((current) =>
+        current.serverNames.length > 0 || current.servers.length > 0
+          ? { ...current, refreshing: true, error: null, retry }
+          : loadingBaseState(retry),
+      );
     }
     api.server
       .resolveMcpServers({

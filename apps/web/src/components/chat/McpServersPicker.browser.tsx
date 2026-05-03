@@ -20,7 +20,7 @@ const TEST_SERVERS: readonly ResolvedMcpServer[] = [
   },
   {
     name: "github-personal",
-    status: "connected",
+    status: "ready",
     scope: "user",
     toolCount: 41,
   },
@@ -83,6 +83,8 @@ describe("McpServersPicker", () => {
     await expect.element(page.getByText("github-personal")).toBeInTheDocument();
     await expect.element(page.getByText("needs-approval")).not.toBeInTheDocument();
     await expect.element(page.getByText("needs approval")).not.toBeInTheDocument();
+    await expect.element(page.getByText("ready")).not.toBeInTheDocument();
+    await expect.element(page.getByText("READY")).not.toBeInTheDocument();
     await expect.element(page.getByText("error")).toBeInTheDocument();
 
     await page.getByRole("button", { name: "Approve all pending Cursor MCP servers" }).click();
@@ -92,5 +94,24 @@ describe("McpServersPicker", () => {
       expect(mounted.onServerAction).toHaveBeenNthCalledWith(1, "playwright", "approve");
       expect(mounted.onServerAction).toHaveBeenNthCalledWith(2, "linear", "approve");
     });
+  });
+
+  it("shows a loading state instead of an empty state while resolving servers", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <McpServersPicker status="loading" serverNames={[]} servers={[]} onRetry={vi.fn()} />,
+      { container: host },
+    );
+
+    try {
+      await page.getByLabelText("MCP servers").click();
+
+      await expect.element(page.getByText("Loading")).toBeInTheDocument();
+      await expect.element(page.getByText("No MCP servers")).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
   });
 });
