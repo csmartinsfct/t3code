@@ -710,7 +710,10 @@ function normalizeModelSelection(
   if (typeof rawModel !== "string") {
     return null;
   }
-  const provider = inferBaseProviderKindFromModelSlug(rawModel) ?? requestedProvider;
+  const provider =
+    requestedProvider === "cursor"
+      ? requestedProvider
+      : (inferBaseProviderKindFromModelSlug(rawModel) ?? requestedProvider);
   const model = normalizeModelSlug(rawModel, provider);
   if (!model) {
     return null;

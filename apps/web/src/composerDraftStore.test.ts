@@ -1201,6 +1201,48 @@ describe("composerDraftStore setModelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.codex,
     ).toEqual(modelSelection("codex", "gpt-5.3-codex"));
   });
+
+  it("keeps Cursor selected when choosing model slugs shared with other providers", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadId, modelSelection("cursor", "auto"));
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      modelSelectionByProvider: {
+        cursor: modelSelection("cursor", "auto"),
+      },
+      activeProvider: "cursor",
+    });
+
+    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-6"));
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      modelSelectionByProvider: {
+        cursor: modelSelection("cursor", "claude-opus-4-6"),
+      },
+      activeProvider: "cursor",
+    });
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.gemini,
+    ).toBeUndefined();
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
+        .claudeAgent,
+    ).toBeUndefined();
+  });
+
+  it("keeps profiled Cursor selected when choosing model slugs shared with other providers", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-6", "metric"));
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      modelSelectionByProvider: {
+        "cursor:metric": modelSelection("cursor", "claude-opus-4-6", "metric"),
+      },
+      activeProvider: "cursor:metric",
+    });
+  });
 });
 
 describe("composerDraftStore sticky composer settings", () => {
