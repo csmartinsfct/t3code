@@ -19,6 +19,72 @@ export interface SelectableModelOption {
   name: string;
 }
 
+export const KNOWN_PROVIDER_MODEL_OPTIONS: Record<
+  BaseProviderKind,
+  ReadonlyArray<SelectableModelOption>
+> = {
+  codex: [
+    { slug: "gpt-5.5", name: "GPT-5.5" },
+    { slug: "gpt-5.4", name: "GPT-5.4" },
+    { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
+    { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+    { slug: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
+    { slug: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
+    { slug: "gpt-5.2", name: "GPT-5.2" },
+  ],
+  claudeAgent: [
+    { slug: "claude-opus-4-7", name: "Claude Opus 4.7" },
+    { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
+    { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  ],
+  gemini: [
+    { slug: "auto-gemini-3", name: "Auto (Gemini 3)" },
+    { slug: "auto-gemini-2.5", name: "Auto (Gemini 2.5)" },
+    { slug: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
+    { slug: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
+    { slug: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash-Lite Preview" },
+    { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { slug: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { slug: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite" },
+  ],
+  cursor: [
+    { slug: "composer-2", name: "Composer 2" },
+    { slug: "composer-1.5", name: "Composer 1.5" },
+    { slug: "auto", name: "Auto" },
+    { slug: "gpt-5.5", name: "GPT-5.5" },
+    { slug: "gpt-5.4", name: "GPT-5.4" },
+    { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
+    { slug: "gpt-5.4-nano", name: "GPT-5.4 Nano" },
+    { slug: "gpt-5.3-codex", name: "Codex 5.3" },
+    { slug: "gpt-5.3-codex-spark", name: "Codex 5.3 Spark" },
+    { slug: "gpt-5.2", name: "GPT-5.2" },
+    { slug: "gpt-5.2-codex", name: "Codex 5.2" },
+    { slug: "gpt-5.1", name: "GPT-5.1" },
+    { slug: "gpt-5.1-codex-max", name: "Codex 5.1 Max" },
+    { slug: "gpt-5.1-codex-mini", name: "Codex 5.1 Mini" },
+    { slug: "gpt-5-mini", name: "GPT-5 Mini" },
+    { slug: "claude-opus-4-7", name: "Opus 4.7" },
+    { slug: "claude-opus-4-6", name: "Opus 4.6" },
+    { slug: "claude-opus-4-5", name: "Opus 4.5" },
+    { slug: "claude-sonnet-4-6", name: "Sonnet 4.6" },
+    { slug: "claude-sonnet-4-5", name: "Sonnet 4.5" },
+    { slug: "claude-sonnet-4", name: "Sonnet 4" },
+    { slug: "claude-haiku-4-5", name: "Haiku 4.5" },
+    { slug: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
+    { slug: "gemini-3-flash", name: "Gemini 3 Flash" },
+    { slug: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { slug: "grok-4-20", name: "Grok 4.20" },
+    { slug: "kimi-k2.5", name: "Kimi K2.5" },
+  ],
+};
+
+export function getKnownProviderModelOptions(
+  provider: ProviderKind,
+): ReadonlyArray<SelectableModelOption> {
+  return KNOWN_PROVIDER_MODEL_OPTIONS[baseProviderKind(provider)];
+}
+
 export function makeProviderModelSelection(
   provider: ProviderKind,
   model: string,
@@ -199,6 +265,31 @@ export function normalizeModelSlug(
     ? aliases[trimmed]
     : undefined;
   return typeof aliased === "string" ? aliased : trimmed;
+}
+
+export function resolveKnownProviderModelName(
+  provider: ProviderKind,
+  model: string | null | undefined,
+): string | null {
+  if (typeof model !== "string") {
+    return null;
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const options = getKnownProviderModelOptions(provider);
+  const direct = options.find(
+    (option) => option.slug === trimmed || option.name.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (direct) {
+    return direct.name;
+  }
+
+  const normalized = normalizeModelSlug(trimmed, provider);
+  return options.find((option) => option.slug === normalized)?.name ?? null;
 }
 
 export function inferBaseProviderKindFromModelSlug(

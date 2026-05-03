@@ -15,6 +15,7 @@ import {
   normalizeCodexModelOptionsWithCapabilities,
   normalizeModelSelectionProvider,
   normalizeModelSlug,
+  resolveKnownProviderModelName,
   resolveApiModelId,
   resolveContextWindow,
   resolveEffort,
@@ -147,6 +148,27 @@ describe("resolveModelSlug", () => {
 
   it("preserves normalized unknown models", () => {
     expect(resolveModelSlug("custom/internal-model", "codex")).toBe("custom/internal-model");
+  });
+});
+
+describe("resolveKnownProviderModelName", () => {
+  it("resolves built-in labels before live provider snapshots are available", () => {
+    expect(resolveKnownProviderModelName("codex", "gpt-5.5")).toBe("GPT-5.5");
+    expect(resolveKnownProviderModelName("claudeAgent", "claude-sonnet-4-6")).toBe(
+      "Claude Sonnet 4.6",
+    );
+    expect(resolveKnownProviderModelName("gemini", "auto")).toBe("Auto (Gemini 3)");
+    expect(resolveKnownProviderModelName("cursor", "composer-2")).toBe("Composer 2");
+  });
+
+  it("uses provider-specific labels for ambiguous slugs", () => {
+    expect(resolveKnownProviderModelName("codex", "gpt-5.3-codex")).toBe("GPT-5.3 Codex");
+    expect(resolveKnownProviderModelName("cursor", "gpt-5.3-codex")).toBe("Codex 5.3");
+    expect(resolveKnownProviderModelName("cursor:metric", "claude-sonnet-4-6")).toBe("Sonnet 4.6");
+  });
+
+  it("returns null for unknown models", () => {
+    expect(resolveKnownProviderModelName("cursor", "some-new-model")).toBeNull();
   });
 });
 

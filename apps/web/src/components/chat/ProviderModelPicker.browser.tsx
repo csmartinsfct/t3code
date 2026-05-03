@@ -1,4 +1,4 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import { type BaseProviderKind, type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -256,6 +256,7 @@ async function mountPicker(props: {
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
+  modelOptionsByProvider?: Record<BaseProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   providerFilter?: (provider: ProviderKind) => boolean;
   triggerVariant?: "ghost" | "outline";
 }) {
@@ -263,12 +264,14 @@ async function mountPicker(props: {
   document.body.append(host);
   const onProviderModelChange = vi.fn();
   const providers = props.providers ?? TEST_PROVIDERS;
-  const modelOptionsByProvider = getCustomModelOptionsByProvider(
-    DEFAULT_UNIFIED_SETTINGS,
-    providers,
-    props.provider,
-    props.model,
-  );
+  const modelOptionsByProvider =
+    props.modelOptionsByProvider ??
+    getCustomModelOptionsByProvider(
+      DEFAULT_UNIFIED_SETTINGS,
+      providers,
+      props.provider,
+      props.model,
+    );
   const screen = await render(
     <ProviderModelPicker
       provider={props.provider}
@@ -295,6 +298,28 @@ async function mountPicker(props: {
 describe("ProviderModelPicker", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("uses known model labels before provider snapshots arrive", async () => {
+    const mounted = await mountPicker({
+      provider: "cursor",
+      model: "composer-2",
+      lockedProvider: null,
+      providers: [],
+      modelOptionsByProvider: {
+        codex: [],
+        claudeAgent: [],
+        gemini: [],
+        cursor: [],
+      },
+    });
+
+    try {
+      expect(page.getByRole("button").element().textContent).toContain("Composer 2");
+      expect(page.getByRole("button").element().textContent).not.toContain("composer-2");
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("shows provider submenus when provider switching is allowed", async () => {

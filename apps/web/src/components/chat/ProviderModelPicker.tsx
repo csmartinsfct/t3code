@@ -5,7 +5,11 @@ import {
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  getKnownProviderModelOptions,
+  resolveKnownProviderModelName,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import {
@@ -132,13 +136,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const unavailableProviderOptions = getUnavailableProviderOptions(props.providers, providerFilter);
   const getPickerModelOptions = (provider: ProviderKind) => {
     const liveModels = props.providers ? getProviderModels(props.providers, provider) : [];
-    return liveModels.length > 0
-      ? liveModels
-      : props.modelOptionsByProvider[baseProviderKind(provider)];
+    if (liveModels.length > 0) {
+      return liveModels;
+    }
+
+    const configuredModels = props.modelOptionsByProvider[baseProviderKind(provider)];
+    return configuredModels.length > 0 ? configuredModels : getKnownProviderModelOptions(provider);
   };
   const selectedProviderOptions = getPickerModelOptions(activeProvider);
   const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
+    selectedProviderOptions.find((option) => option.slug === props.model)?.name ??
+    resolveKnownProviderModelName(activeProvider, props.model) ??
+    props.model;
   const ProviderIcon = getProviderIcon(activeProvider);
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
