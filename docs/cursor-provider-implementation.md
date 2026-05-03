@@ -81,6 +81,8 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
   platform, architecture, shell, and account metadata. Treat account identifiers
   as sensitive in logs.
 - `agent models` returns a line-oriented model list for the current account.
+  T3 normalizes those CLI slugs into ACP-compatible model-family ids before
+  exposing them in the model picker.
 - Official docs use `cursor-agent`; this local install exposes `agent`. T3 must
   keep the binary configurable, with `agent` as the default for this repo.
 
@@ -96,6 +98,13 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
   available model ids, and config options.
 - `session/set_config_option` accepts `{ sessionId, configId: "mode", value:
 "plan" }` and returned updated config options with `currentValue: "plan"`.
+- Cursor ACP mode is stateful, so T3 sends `mode: "plan"` for plan turns and
+  `mode: "agent"` for normal turns before every prompt.
+- ACP model config values can differ from the display slugs returned by the CLI.
+  For example, local testing showed raw `composer-2` rejected while
+  `composer-2[fast=true]` was accepted from the live `sessionInfo` config
+  option list. T3 resolves selected model slugs against the latest ACP
+  `availableModels` and `configOptions` before sending `configId: "model"`.
 - Mode-change responses may only include the `configOptions` array, not the
   top-level `models.availableModels` shape from `session/new`. Resolve selected
   model names from both shapes before sending a follow-up `configId: "model"`
@@ -309,16 +318,18 @@ Implemented in T3CO-396/T3CO-411:
 - Probe installation with `<launch> --version`.
 - Probe auth/account metadata with `<launch> about --format json` when
   available, falling back to `<launch> status` if JSON fails.
-- Probe models with `<launch> models` or `<launch> --list-models`; keep a static
-  built-in model list as fallback.
+- Probe models with `<launch> models` or `<launch> --list-models`; normalize the
+  successful probe into ACP-compatible model ids and keep a static built-in model
+  list only as fallback.
 - Cache status by resolved launch config, not only by binary name.
 - Register each profile as a distinct `ServerProvider` with provider kind
   `cursor:<profileId>`.
 - Avoid exposing raw account emails in provider status labels.
 
-Built-in models should start with `composer-2` as T3's Cursor default, followed
-by locally verified names from `agent models`. Unknown/custom model slugs remain
-supported through settings.
+The picker should start with `composer-2` as T3's Cursor default. When
+`agent models` succeeds, the rest of the list should come from locally verified
+Cursor models normalized to ACP-compatible ids. Unknown/custom model slugs remain
+supported through settings for advanced use.
 
 Deferred:
 
@@ -364,8 +375,9 @@ Recommended lifecycle:
    - Reject if another Cursor turn is active for the same T3 thread.
    - Build a prompt that injects T3 service guidance only when the stored
      `contextPromptHash` is absent or stale.
-   - Apply `session/set_config_option` for selected model and plan mode when
-     needed. Use `configId`, not `optionId`.
+   - Apply `session/set_config_option` for the per-turn mode and selected model
+     before every prompt. Use `configId`, not `optionId`; normalize display
+     slugs to live ACP model option ids when possible.
    - Send `session/prompt` and stream normalized `session/update` notifications
      back to the runtime event queue.
 3. `interruptTurn`

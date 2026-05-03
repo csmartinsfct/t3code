@@ -93,8 +93,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-04-10T00:00:00.000Z",
     models: [
       {
-        slug: "sonnet-4-thinking",
-        name: "Sonnet 4 Thinking",
+        slug: "claude-sonnet-4-6",
+        name: "Sonnet 4.6",
         isCustom: false,
         capabilities: null,
       },
@@ -130,7 +130,7 @@ describe("resolveAppModelSelectionState", () => {
         textGenerationModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "sonnet-4-thinking",
+          model: "claude-sonnet-4-6",
         },
       },
       TEST_PROVIDERS,
@@ -139,7 +139,7 @@ describe("resolveAppModelSelectionState", () => {
     expect(selection).toMatchObject({
       provider: "cursor",
       profileId: "metric",
-      model: "sonnet-4-thinking",
+      model: "claude-sonnet-4-6",
     });
   });
 });

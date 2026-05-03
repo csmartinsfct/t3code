@@ -53,6 +53,7 @@ import {
   buildProviderSessionContextPrompt,
   hashProviderSessionContextPrompt,
 } from "../sessionContextPrompt";
+import { resolveCursorAcpModelId } from "../cursorModelIds";
 
 const PROVIDER = "cursor" as const;
 
@@ -427,18 +428,13 @@ function availableModelsFromSessionInfo(sessionInfo: unknown): ReadonlyArray<{
 }
 
 function resolveAcpModelId(model: string, sessionInfo: unknown): string {
-  const available = availableModelsFromSessionInfo(sessionInfo);
-  return (
-    available.find((candidate) => candidate.modelId === model)?.modelId ??
-    available.find((candidate) => candidate.name === model)?.modelId ??
-    model
-  );
+  return resolveCursorAcpModelId(model, availableModelsFromSessionInfo(sessionInfo));
 }
 
 function cursorModeFromInteractionMode(
   interactionMode: ProviderSendTurnInput["interactionMode"],
-): string | undefined {
-  return interactionMode === "plan" || interactionMode === "plan-accept" ? "plan" : undefined;
+): string {
+  return interactionMode === "plan" || interactionMode === "plan-accept" ? "plan" : "agent";
 }
 
 function userInputQuestionsFromCursorRequest(params: unknown): {
@@ -1173,13 +1169,11 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           Effect.tryPromise({
             try: async () => {
               const mode = cursorModeFromInteractionMode(input.interactionMode);
-              if (mode) {
-                context.latestSessionInfo = await context.connection.setConfigOption({
-                  sessionId: context.providerSessionId,
-                  configId: "mode",
-                  value: mode,
-                });
-              }
+              context.latestSessionInfo = await context.connection.setConfigOption({
+                sessionId: context.providerSessionId,
+                configId: "mode",
+                value: mode,
+              });
               if (selectedModel) {
                 context.latestSessionInfo = await context.connection.setConfigOption({
                   sessionId: context.providerSessionId,

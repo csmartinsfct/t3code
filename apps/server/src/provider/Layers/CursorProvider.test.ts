@@ -94,8 +94,8 @@ Tip: use --model <id> to select a model
 
     expect(models.map((model) => [model.slug, model.name])).toEqual([
       ["auto", "Auto"],
-      ["composer-2-fast", "Composer 2 Fast"],
-      ["sonnet-4-thinking", "Sonnet 4 Thinking"],
+      ["composer-2", "Composer 2"],
+      ["claude-sonnet-4", "Sonnet 4"],
     ]);
   });
 });
@@ -188,6 +188,7 @@ describe("checkCursorProviderStatus", () => {
     expect(provider.auth.status).toBe("authenticated");
     expect(provider.auth.label).toBe("Cursor Pro");
     expect(provider.models[0]?.slug).toBe("composer-2");
+    expect(provider.models.some((model) => model.slug === "composer-2-fast")).toBe(false);
     expect(provider.models.some((model) => model.slug === "custom-cursor-model")).toBe(true);
   });
 
@@ -224,7 +225,8 @@ describe("checkCursorProviderStatus", () => {
     expect(provider.auth.status).toBe("authenticated");
     expect(provider.message).toContain("models unavailable");
     expect(provider.models[0]?.slug).toBe("composer-2");
-    expect(provider.models.some((model) => model.slug === "composer-2-fast")).toBe(true);
+    expect(provider.models.some((model) => model.slug === "composer-1.5")).toBe(true);
+    expect(provider.models.some((model) => model.slug === "composer-2-fast")).toBe(false);
   });
 
   it("falls back to status when about JSON cannot verify auth", async () => {

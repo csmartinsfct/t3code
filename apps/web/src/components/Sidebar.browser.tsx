@@ -246,8 +246,8 @@ describe("Sidebar thread context menu helpers", () => {
           displayName: "Cursor (profile)",
           models: [
             {
-              slug: "composer-2-fast",
-              name: "Composer 2 Fast",
+              slug: "claude-sonnet-4-6",
+              name: "Sonnet 4.6",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [],

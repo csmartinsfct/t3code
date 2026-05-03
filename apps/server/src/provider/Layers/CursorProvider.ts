@@ -28,6 +28,11 @@ import {
   resolveCursorSettingsForProvider,
   type ResolvedCursorProfile,
 } from "../cursorProfileDiscovery";
+import {
+  cursorAcpModelLabel,
+  CURSOR_ACP_BUILT_IN_MODELS,
+  normalizeCursorModelForAcp,
+} from "../cursorModelIds";
 
 const PROVIDER = "cursor" as const;
 
@@ -40,44 +45,14 @@ const CURSOR_MODEL_CAPABILITIES: ModelCapabilities = {
   promptInjectedEffortLevels: [],
 };
 
-const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
-  {
-    slug: "composer-2",
-    name: "Composer 2",
+const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = CURSOR_ACP_BUILT_IN_MODELS.map(
+  (model) => ({
+    slug: model.slug,
+    name: model.name,
     isCustom: false,
     capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "composer-2-fast",
-    name: "Composer 2 Fast",
-    isCustom: false,
-    capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "auto",
-    name: "Auto",
-    isCustom: false,
-    capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "gpt-5",
-    name: "GPT-5",
-    isCustom: false,
-    capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "sonnet-4",
-    name: "Sonnet 4",
-    isCustom: false,
-    capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "sonnet-4-thinking",
-    name: "Sonnet 4 Thinking",
-    isCustom: false,
-    capabilities: CURSOR_MODEL_CAPABILITIES,
-  },
-];
+  }),
+);
 
 interface CursorProviderCheckOptions {
   readonly providerKind?: ProviderKind;
@@ -181,13 +156,15 @@ export function parseCursorModelsOutput(output: string): ReadonlyArray<ServerPro
     const match = trimmed.match(/^([^\s]+)\s+-\s+(.+)$/);
     if (!match) continue;
 
-    const slug = match[1]?.trim();
+    const rawSlug = match[1]?.trim();
     const rawName = match[2]?.trim();
-    if (!slug || !rawName || seen.has(slug)) continue;
+    if (!rawSlug || !rawName) continue;
+    const slug = normalizeCursorModelForAcp(rawSlug);
+    if (seen.has(slug)) continue;
     seen.add(slug);
     models.push({
       slug,
-      name: rawName.replace(/\s*\((?:current|default|current,\s*default)\)\s*$/i, ""),
+      name: cursorAcpModelLabel(slug),
       isCustom: false,
       capabilities: CURSOR_MODEL_CAPABILITIES,
     });
@@ -202,8 +179,12 @@ function mergeCursorModels(
 ): ReadonlyArray<ServerProviderModel> {
   const merged: ServerProviderModel[] = [];
   const seen = new Set<string>();
+  const sourceModels =
+    cliModels.length > 0
+      ? [...BUILT_IN_MODELS.filter((model) => model.slug === "composer-2"), ...cliModels]
+      : BUILT_IN_MODELS;
 
-  for (const model of [...BUILT_IN_MODELS, ...cliModels]) {
+  for (const model of sourceModels) {
     if (seen.has(model.slug)) continue;
     seen.add(model.slug);
     merged.push(model);

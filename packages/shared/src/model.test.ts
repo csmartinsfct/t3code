@@ -70,10 +70,10 @@ describe("makeProviderModelSelection", () => {
       profileId: "preview",
       model: "gemini-2.5-pro",
     });
-    expect(makeProviderModelSelection("cursor:metric", "sonnet-4-thinking")).toEqual({
+    expect(makeProviderModelSelection("cursor:metric", "claude-sonnet-4-6")).toEqual({
       provider: "cursor",
       profileId: "metric",
-      model: "sonnet-4-thinking",
+      model: "claude-sonnet-4-6",
     });
   });
 });
@@ -84,9 +84,9 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
     expect(normalizeModelSlug("composer", "cursor")).toBe("composer-2");
-    expect(normalizeModelSlug("composer-fast", "cursor")).toBe("composer-2-fast");
-    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5");
-    expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("sonnet-4-thinking");
+    expect(normalizeModelSlug("composer-fast", "cursor")).toBe("composer-2");
+    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5.5");
+    expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("claude-sonnet-4-6");
   });
 
   it("returns null for empty or missing values", () => {
@@ -125,12 +125,12 @@ describe("model provider inference", () => {
       normalizeModelSelectionProvider({
         provider: "cursor",
         profileId: "metric",
-        model: "gpt-5",
+        model: "gpt-5.5",
       }),
     ).toEqual({
       provider: "cursor",
       profileId: "metric",
-      model: "gpt-5",
+      model: "gpt-5.5",
     });
   });
 });

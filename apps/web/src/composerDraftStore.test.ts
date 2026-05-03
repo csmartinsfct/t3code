@@ -1359,8 +1359,8 @@ describe("deriveEffectiveComposerModelState", () => {
       checkedAt: "2026-05-03T00:00:00.000Z",
       models: [
         {
-          slug: "composer-2-fast",
-          name: "Composer 2 Fast",
+          slug: "claude-sonnet-4-6",
+          name: "Sonnet 4.6",
           isCustom: false,
           capabilities: null,
         },
@@ -1392,7 +1392,7 @@ describe("deriveEffectiveComposerModelState", () => {
       settings: DEFAULT_UNIFIED_SETTINGS,
     });
 
-    expect(state.selectedModel).toBe("composer-2-fast");
+    expect(state.selectedModel).toBe("claude-sonnet-4-6");
   });
 });
 

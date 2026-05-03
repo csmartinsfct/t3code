@@ -64,7 +64,7 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModel
     title: "Cursor",
     description: "Save additional Cursor model slugs for the picker and `/model` command.",
     placeholder: "your-cursor-model-slug",
-    example: "sonnet-4-thinking",
+    example: "claude-sonnet-4-6",
   },
 };
 

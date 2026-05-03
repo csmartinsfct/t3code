@@ -284,6 +284,77 @@ it.effect("CursorAdapterLive starts and sends turns through Cursor ACP", () => {
   }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
 });
 
+it.effect("CursorAdapterLive resolves picker slugs to Cursor ACP model option ids", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, { calls, responses }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-acp-model-normalize");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Say hello",
+      modelSelection: { provider: "cursor", model: "composer-2-fast" },
+      interactionMode: "default",
+    });
+
+    yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
+
+    const modelCall = calls
+      .filter((call) => call.method === "session/set_config_option")
+      .find((call) => (call.input as { configId?: string }).configId === "model");
+
+    assert.deepInclude(modelCall?.input as Record<string, unknown>, {
+      configId: "model",
+      value: "composer-2[fast=true]",
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive resets Cursor ACP mode to agent after plan turns", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, { calls, responses }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-acp-mode-reset");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({ threadId, input: "Draft a plan", interactionMode: "plan" });
+    yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
+
+    yield* adapter.sendTurn({ threadId, input: "Now act normally", interactionMode: "default" });
+    yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+
+    const modeValues = calls
+      .filter((call) => call.method === "session/set_config_option")
+      .filter((call) => (call.input as { configId?: string }).configId === "mode")
+      .map((call) => (call.input as { value?: string }).value);
+
+    assert.deepEqual(modeValues, ["plan", "agent"]);
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
 it.effect("CursorAdapterLive forwards image attachments to Cursor ACP prompts", () => {
   const calls: Array<{ method: string; input?: unknown }> = [];
   const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];

@@ -156,8 +156,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   install/version/auth/model snapshots before the runtime adapter is enabled.
 - Authentication and model availability are delegated to Cursor CLI probes:
   `agent about --format json`, fallback `agent status`, and `agent models`.
-  Account identifiers are treated as sensitive and are not displayed in provider
-  status labels.
+  Model rows from `agent models` are normalized to ACP-compatible model-family
+  ids before they are shown in T3. Account identifiers are treated as sensitive
+  and are not displayed in provider status labels.
 - **Profiles:** Multiple named profiles remain supported through explicit
   `providers.cursorProfiles` settings, but T3 does not auto-discover
   `~/.cursor-profiles/*`. Cursor profile homes can prompt macOS keychain access
@@ -177,13 +178,14 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Runtime shape: Cursor runs through `agent acp` using newline-delimited
   JSON-RPC over stdio. T3 stores the Cursor ACP `sessionId` as the provider
   resume cursor and resumes with `session/load`.
-- Runtime access: T3 maps plan mode through `session/set_config_option`, sends
-  turns with `session/prompt`, responds to `session/request_permission`, and
-  handles `cursor/create_plan` as native T3 proposed plans with explicit
-  accept/reject/cancel approval responses back to Cursor ACP. Rejected Cursor
-  plans are retained with `rejected` status, cancelled Cursor plans are retained
-  with `cancelled` status, and neither terminal status is treated as a
-  `Plan Ready` follow-up.
+- Runtime access: T3 sets Cursor ACP mode before every turn (`plan` for plan
+  turns, `agent` for normal turns), resolves the selected model against live ACP
+  config option ids, sends turns with `session/prompt`, responds to
+  `session/request_permission`, and handles `cursor/create_plan` as native T3
+  proposed plans with explicit accept/reject/cancel approval responses back to
+  Cursor ACP. Rejected Cursor plans are retained with `rejected` status,
+  cancelled Cursor plans are retained with `cancelled` status, and neither
+  terminal status is treated as a `Plan Ready` follow-up.
 - Attachments: T3 sends image attachments to Cursor ACP as
   `ContentBlock.image` payloads when the CLI advertises
   `promptCapabilities.image: true`. Embedded arbitrary file/resource attachment

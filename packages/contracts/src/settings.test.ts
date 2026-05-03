@@ -112,14 +112,14 @@ describe("settings defaults", () => {
         textGenerationModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "sonnet-4-thinking",
+          model: "claude-sonnet-4-6",
         },
       }),
     ).toEqual({
       textGenerationModelSelection: {
         provider: "cursor",
         profileId: "metric",
-        model: "sonnet-4-thinking",
+        model: "claude-sonnet-4-6",
       },
     });
   });
@@ -185,14 +185,14 @@ describe("settings defaults", () => {
               configDir: "/tmp/cursor-metric/.cursor",
               dataDir: "/tmp/cursor-metric/.cursor",
               env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
-              customModels: ["sonnet-4-thinking"],
+              customModels: ["claude-sonnet-4-6"],
             },
           ],
         },
         orchestrationImplementerModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "sonnet-4-thinking",
+          model: "claude-sonnet-4-6",
         },
       }),
     ).toEqual({
@@ -218,14 +218,14 @@ describe("settings defaults", () => {
             configDir: "/tmp/cursor-metric/.cursor",
             dataDir: "/tmp/cursor-metric/.cursor",
             env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
-            customModels: ["sonnet-4-thinking"],
+            customModels: ["claude-sonnet-4-6"],
           },
         ],
       },
       orchestrationImplementerModelSelection: {
         provider: "cursor",
         profileId: "metric",
-        model: "sonnet-4-thinking",
+        model: "claude-sonnet-4-6",
       },
     });
   });
