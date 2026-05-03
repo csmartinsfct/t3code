@@ -64,8 +64,9 @@ References:
   planning, or user input.
 - Do not rely on shell aliases or Bash functions as the only production profile
   mechanism.
-- Do not implement rollback, fork, rich attachments, or Cursor-native MCP tool
-  selection until each behavior is verified with the local CLI.
+- Do not implement rollback, fork, embedded file/resource attachment payloads,
+  or Cursor-native MCP tool selection until each behavior is verified with the
+  local CLI.
 
 ## Verified CLI Findings
 
@@ -130,7 +131,7 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
 - Stopping a Cursor session closes the ACP child process after settling the T3
   turn state.
 - If future Cursor ACP builds expose stronger cancellation/kill acknowledgements,
-  wire those through before adding process-tree-specific cleanup again.
+  wire those through before adding lower-level child-process cleanup.
 
 ### Multiple Profiles
 
@@ -301,10 +302,10 @@ Files:
 - `apps/server/src/provider/Layers/ProviderRegistry.ts`
 - `apps/server/src/serverSettings.ts`
 
-Implemented in T3CO-396:
+Implemented in T3CO-396/T3CO-411:
 
-- Resolve a launch configuration for `cursor` and every configured/discovered
-  Cursor profile.
+- Resolve a launch configuration for `cursor` and every explicitly configured
+  Cursor profile. Do not auto-discover `~/.cursor-profiles/*`.
 - Probe installation with `<launch> --version`.
 - Probe auth/account metadata with `<launch> about --format json` when
   available, falling back to `<launch> status` if JSON fails.
@@ -557,17 +558,21 @@ Files:
 - `apps/web/src/components/ChatView.tsx`
 - settings panels and fixtures that enumerate provider settings
 
-Required behavior:
+Shipped behavior:
 
-- Show `cursor` and each enabled `cursor:<profileId>` as distinct provider
-  entries.
-- Display profile labels in selected model buttons, e.g. `Cursor / metric`.
-- Persist `profileId` in composer drafts, tickets, and restored thread state.
+- Show the base `cursor` provider in normal chat provider/model menus when it is
+  ready. Keep `cursor:<profileId>` providers internal/advanced during the
+  guarded rollout so profile probes do not trigger unexpected keychain prompts.
+- Preserve `profileId` in contracts, settings, provider snapshots, runtime
+  bindings, logs, composer drafts, tickets, and restored thread state even when
+  visible menus hide Cursor profiles.
+- Hide Cursor and Cursor profiles from secondary-inference selectors such as
+  "Text generation model" and "Run inference model".
 - Hide unsupported traits rather than showing fake reasoning/thinking controls.
 - Allow plan/ask controls only if they map cleanly to existing interaction mode
   UI.
-- Keep profile entries selectable even when the default `cursor` provider is
-  disabled, if the profile itself is enabled.
+- Keep profile runtime support independent from the base `cursor` provider so
+  explicit internal profile tests can still validate exact-provider identity.
 
 ### Observability
 
@@ -595,6 +600,28 @@ raw `cursor.acp.notification`, `cursor.acp.request`, and `cursor.acp.response`
 payloads where useful.
 
 Never log raw API keys, tokens, full account emails, or full prompt contents.
+
+## Operator Notes
+
+- Use the regular Cursor profile for day-to-day dogfooding. Avoid enabling
+  explicit Cursor profiles unless the profile launch command/home is already
+  known to be quiet; macOS keychain prompts can appear during background status
+  probes and may not accept the user's normal login password if the profile home
+  owns a separate keychain.
+- T3 never creates Cursor profile homes, keychains, `HOME`, `CURSOR_CONFIG_DIR`,
+  or `CURSOR_DATA_DIR` values. Profile setup is external and explicit.
+- Cursor project tools are delivered by prepending T3 REST service instructions
+  to the first ACP prompt for the session. T3 does not write MCP servers into
+  Cursor config for this milestone.
+- For a stuck or suspicious session, inspect the provider lifecycle log first:
+  `~/.t3/<env>/logs/provider/<threadId>.lifecycle.log`, then the raw provider
+  log at `~/.t3/<env>/logs/provider/<threadId>.log`.
+- Common recoveries: send another message to resume a stopped session via
+  `session/load`; stop the thread to close the ACP child; disable Cursor or a
+  misconfigured profile in settings if status probes are noisy.
+- Fork with full Cursor session cloning is intentionally unsupported. A fork can
+  preserve visible T3 transcript context, but Cursor ACP does not expose a
+  verified provider-native fork primitive in T3 yet.
 
 ## Implementation Order
 
