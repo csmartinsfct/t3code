@@ -725,6 +725,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
             ...(nextMetadata !== undefined ? { metadata: nextMetadata } : {}),
             isStreaming: event.payload.streaming,
+            sequence: previousMessage?.sequence ?? event.sequence,
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
           });

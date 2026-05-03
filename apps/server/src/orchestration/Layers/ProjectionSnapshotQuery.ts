@@ -473,6 +473,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           projection_thread_messages.attachments_json AS "attachments",
           projection_thread_messages.metadata_json AS "metadata",
           projection_thread_messages.is_streaming AS "isStreaming",
+          projection_thread_messages.sequence,
           projection_thread_messages.created_at AS "createdAt",
           projection_thread_messages.updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -482,6 +483,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ORDER BY
           projection_thread_messages.thread_id ASC,
           projection_thread_messages.created_at ASC,
+          CASE WHEN projection_thread_messages.sequence IS NULL THEN 1 ELSE 0 END ASC,
+          projection_thread_messages.sequence ASC,
           projection_thread_messages.message_id ASC
       `,
   });
@@ -500,11 +503,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           attachments_json AS "attachments",
           metadata_json AS "metadata",
           is_streaming AS "isStreaming",
+          sequence,
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
         WHERE thread_id = ${threadId}
-        ORDER BY created_at ASC, message_id ASC
+        ORDER BY
+          created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          message_id ASC
       `,
   });
 

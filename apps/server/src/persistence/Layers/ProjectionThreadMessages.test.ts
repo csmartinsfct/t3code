@@ -11,6 +11,54 @@ const layer = it.layer(
 );
 
 layer("ProjectionThreadMessageRepository", (it) => {
+  it.effect("uses projection sequence to order messages with identical timestamps", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProjectionThreadMessageRepository;
+      const threadId = ThreadId.makeUnsafe("thread-sequence-order");
+      const createdAt = "2026-02-28T19:00:00.000Z";
+
+      yield* repository.upsert({
+        messageId: MessageId.makeUnsafe("message-c"),
+        threadId,
+        turnId: null,
+        role: "assistant",
+        text: "third",
+        isStreaming: false,
+        sequence: 30,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      yield* repository.upsert({
+        messageId: MessageId.makeUnsafe("message-a"),
+        threadId,
+        turnId: null,
+        role: "user",
+        text: "first",
+        isStreaming: false,
+        sequence: 10,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      yield* repository.upsert({
+        messageId: MessageId.makeUnsafe("message-b"),
+        threadId,
+        turnId: null,
+        role: "assistant",
+        text: "second",
+        isStreaming: false,
+        sequence: 20,
+        createdAt,
+        updatedAt: createdAt,
+      });
+
+      const rows = yield* repository.listByThreadId({ threadId });
+      assert.deepEqual(
+        rows.map((row) => row.text),
+        ["first", "second", "third"],
+      );
+    }),
+  );
+
   it.effect("preserves existing attachments when upsert omits attachments", () =>
     Effect.gen(function* () {
       const repository = yield* ProjectionThreadMessageRepository;

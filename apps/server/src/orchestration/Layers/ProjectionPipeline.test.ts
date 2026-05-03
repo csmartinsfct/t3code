@@ -168,6 +168,116 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }
     }),
   );
+
+  it.effect("stores event sequence for deterministic equal-timestamp message ordering", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-03-01T00:00:00.000Z";
+      const threadId = ThreadId.makeUnsafe("thread-equal-timestamps");
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-equal-project"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-equal"),
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-equal-project"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-equal-project"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-equal"),
+          title: "Equal Timestamp Project",
+          workspaceRoot: "/tmp/project-equal",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-equal-thread"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-equal-thread"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-equal-thread"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.makeUnsafe("project-equal"),
+          title: "Equal Timestamp Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      for (const [index, messageId, text, role] of [
+        [1, "message-c", "first copied message", "user"],
+        [2, "message-a", "second copied message", "assistant"],
+        [3, "message-b", "third copied message", "user"],
+      ] as const) {
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.makeUnsafe(`evt-equal-message-${index}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe(`cmd-equal-message-${index}`),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe(`cmd-equal-message-${index}`),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: MessageId.makeUnsafe(messageId),
+            role,
+            text,
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+
+      yield* projectionPipeline.bootstrap;
+
+      const messageRows = yield* sql<{
+        readonly text: string;
+        readonly sequence: number | null;
+      }>`
+        SELECT text, sequence
+        FROM projection_thread_messages
+        WHERE thread_id = ${threadId}
+        ORDER BY
+          created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          message_id ASC
+      `;
+      assert.deepEqual(
+        messageRows.map((row) => row.text),
+        ["first copied message", "second copied message", "third copied message"],
+      );
+      assert.deepEqual(
+        messageRows.map((row) => row.sequence !== null),
+        [true, true, true],
+      );
+      assert.ok(messageRows[0]!.sequence! < messageRows[1]!.sequence!);
+      assert.ok(messageRows[1]!.sequence! < messageRows[2]!.sequence!);
+    }),
+  );
 });
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-missing-thread-message-")))(

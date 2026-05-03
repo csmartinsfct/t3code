@@ -14,6 +14,7 @@ import {
   ThreadId,
   TurnId,
   IsoDateTime,
+  NonNegativeInt,
 } from "@t3tools/contracts";
 import { Schema, ServiceMap } from "effect";
 import type { Option } from "effect";
@@ -30,6 +31,7 @@ export const ProjectionThreadMessage = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   metadata: Schema.optionalKey(OrchestrationMessageMetadata),
   isStreaming: Schema.Boolean,
+  sequence: Schema.optional(Schema.NullOr(NonNegativeInt)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
