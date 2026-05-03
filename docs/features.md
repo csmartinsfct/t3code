@@ -190,6 +190,10 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   contents remain unsupported for Cursor because the installed CLI currently
   reports `embeddedContext: false`; users can reference workspace files by path
   in prompt text.
+- Secondary inference: Cursor is chat-only for this milestone. Settings hide
+  Cursor from text-generation and managed-run inference model selectors, and
+  server-side secondary inference rejects direct Cursor requests with a typed
+  unsupported-provider error instead of falling through to another provider.
 - MCP discovery: uses Cursor CLI `agent mcp list` from the project cwd so the
   composer can show configured servers and approval/status text. If the CLI
   probe fails, T3 falls back to parsing user-level `.cursor/mcp.json` and
@@ -579,6 +583,9 @@ The configured text generation model can auto-generate:
 - Branch names (from ticket context).
 - Commit messages (from staged changes).
 - PR titles and descriptions (from diff context).
+
+Cursor is not offered for these secondary text-generation workflows until T3
+has a verified schema-constrained Cursor runner.
 
 **User interaction:**
 

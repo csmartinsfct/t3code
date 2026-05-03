@@ -50,8 +50,11 @@ import {
 import {
   MAX_CUSTOM_MODEL_LENGTH,
   getCustomModelOptionsByProvider,
+  getSecondaryInferenceProviders,
+  isSecondaryInferenceProvider,
   makeAppModelSelection,
   resolveAppModelSelectionState,
+  resolveSecondaryInferenceModelSelectionState,
 } from "../../modelSelection";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
@@ -661,7 +664,11 @@ export function GeneralSettingsPanel() {
     return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
   })();
 
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
+  const secondaryInferenceProviders = getSecondaryInferenceProviders(serverProviders);
+  const textGenerationModelSelection = resolveSecondaryInferenceModelSelectionState(
+    settings,
+    serverProviders,
+  );
   const textGenProvider = modelSelectionProviderKind(textGenerationModelSelection);
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
@@ -675,7 +682,7 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  const managedRunInferenceModelSelection = resolveAppModelSelectionState(
+  const managedRunInferenceModelSelection = resolveSecondaryInferenceModelSelectionState(
     {
       ...settings,
       textGenerationModelSelection: settings.managedRunInferenceModelSelection,
@@ -1226,7 +1233,8 @@ export function GeneralSettingsPanel() {
                 provider={textGenProvider}
                 model={textGenModel}
                 lockedProvider={null}
-                providers={serverProviders}
+                providers={secondaryInferenceProviders}
+                providerFilter={isSecondaryInferenceProvider}
                 modelOptionsByProvider={gitModelOptionsByProvider}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
@@ -1237,7 +1245,7 @@ export function GeneralSettingsPanel() {
                         ...settings,
                         textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
-                      serverProviders,
+                      secondaryInferenceProviders,
                     ),
                   });
                 }}
@@ -1257,7 +1265,7 @@ export function GeneralSettingsPanel() {
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
+                    textGenerationModelSelection: resolveSecondaryInferenceModelSelectionState(
                       {
                         ...settings,
                         textGenerationModelSelection: makeAppModelSelection(
@@ -1297,7 +1305,8 @@ export function GeneralSettingsPanel() {
                 provider={managedRunInferenceProvider}
                 model={managedRunInferenceModel}
                 lockedProvider={null}
-                providers={serverProviders}
+                providers={secondaryInferenceProviders}
+                providerFilter={isSecondaryInferenceProvider}
                 modelOptionsByProvider={managedRunInferenceOptionsByProvider}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
@@ -1308,7 +1317,7 @@ export function GeneralSettingsPanel() {
                         ...settings,
                         textGenerationModelSelection: makeAppModelSelection(provider, model),
                       },
-                      serverProviders,
+                      secondaryInferenceProviders,
                     ),
                   });
                 }}
@@ -1329,7 +1338,7 @@ export function GeneralSettingsPanel() {
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
-                    managedRunInferenceModelSelection: resolveAppModelSelectionState(
+                    managedRunInferenceModelSelection: resolveSecondaryInferenceModelSelectionState(
                       {
                         ...settings,
                         textGenerationModelSelection: makeAppModelSelection(

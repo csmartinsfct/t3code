@@ -13,7 +13,7 @@ import {
   resolveSelectableModel,
 } from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, UnifiedSettings } from "@t3tools/contracts/settings";
 import {
   getDefaultServerModel,
   getProviderModels,
@@ -69,6 +69,16 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<BaseProviderKind, ProviderCustomModel
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
+
+export function isSecondaryInferenceProvider(provider: ProviderKind): boolean {
+  return baseProviderKind(provider) !== "cursor";
+}
+
+export function getSecondaryInferenceProviders(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<ServerProvider> {
+  return providers.filter((provider) => isSecondaryInferenceProvider(provider.provider));
+}
 
 export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
@@ -237,4 +247,23 @@ export function resolveAppModelSelectionState(
   });
 
   return makeAppModelSelection(provider, model, modelOptionsForDispatch);
+}
+
+export function resolveSecondaryInferenceModelSelectionState(
+  settings: UnifiedSettings,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const selection = settings.textGenerationModelSelection;
+  const secondarySettings =
+    selection && baseProviderKind(modelSelectionProviderKind(selection)) === "cursor"
+      ? {
+          ...settings,
+          textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+        }
+      : settings;
+
+  return resolveAppModelSelectionState(
+    secondarySettings,
+    getSecondaryInferenceProviders(providers),
+  );
 }

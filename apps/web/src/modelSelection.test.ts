@@ -3,8 +3,10 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 
 import {
+  getSecondaryInferenceProviders,
   getCustomModelOptionsByProvider,
   MODEL_PROVIDER_SETTINGS,
+  resolveSecondaryInferenceModelSelectionState,
   resolveAppModelSelectionState,
 } from "./modelSelection";
 
@@ -57,6 +59,24 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
       {
         slug: "claude-opus-4-6",
         name: "Claude Opus 4.6",
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
+  },
+  {
+    provider: "cursor",
+    displayName: "Cursor",
+    enabled: true,
+    installed: true,
+    version: "2026.05.01-eea359f",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-04-10T00:00:00.000Z",
+    models: [
+      {
+        slug: "composer-2",
+        name: "Composer 2",
         isCustom: false,
         capabilities: null,
       },
@@ -120,6 +140,52 @@ describe("resolveAppModelSelectionState", () => {
       provider: "cursor",
       profileId: "metric",
       model: "sonnet-4-thinking",
+    });
+  });
+});
+
+describe("secondary inference model selection", () => {
+  it("excludes Cursor base and profile providers", () => {
+    expect(
+      getSecondaryInferenceProviders(TEST_PROVIDERS).map((provider) => provider.provider),
+    ).toEqual(["codex", "claudeAgent", "claudeAgent:metric"]);
+  });
+
+  it("falls back from Cursor to a structured-output provider", () => {
+    const selection = resolveSecondaryInferenceModelSelectionState(
+      {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        textGenerationModelSelection: {
+          provider: "cursor",
+          model: "composer-2",
+        },
+      },
+      TEST_PROVIDERS,
+    );
+
+    expect(selection).toMatchObject({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    });
+  });
+
+  it("preserves non-Cursor selections", () => {
+    const selection = resolveSecondaryInferenceModelSelectionState(
+      {
+        ...DEFAULT_UNIFIED_SETTINGS,
+        textGenerationModelSelection: {
+          provider: "claudeAgent",
+          profileId: "metric",
+          model: "claude-opus-4-6",
+        },
+      },
+      TEST_PROVIDERS,
+    );
+
+    expect(selection).toMatchObject({
+      provider: "claudeAgent",
+      profileId: "metric",
+      model: "claude-opus-4-6",
     });
   });
 });

@@ -256,6 +256,7 @@ async function mountPicker(props: {
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
+  providerFilter?: (provider: ProviderKind) => boolean;
   triggerVariant?: "ghost" | "outline";
 }) {
   const host = document.createElement("div");
@@ -274,6 +275,7 @@ async function mountPicker(props: {
       model={props.model}
       lockedProvider={props.lockedProvider}
       providers={providers}
+      {...(props.providerFilter ? { providerFilter: props.providerFilter } : {})}
       modelOptionsByProvider={modelOptionsByProvider}
       triggerVariant={props.triggerVariant}
       onProviderModelChange={onProviderModelChange}
@@ -314,6 +316,29 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Cursor");
         expect(text).not.toContain("Cursor (metric)");
         expect(text).not.toContain("Claude Sonnet 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("can hide providers from scoped selectors", async () => {
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providerFilter: (provider) => !provider.startsWith("cursor"),
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Codex");
+        expect(text).toContain("Claude");
+        expect(text).not.toContain("Cursor");
+        expect(text).not.toContain("Cursor (metric)");
       });
     } finally {
       await mounted.cleanup();

@@ -521,17 +521,28 @@ Files:
 - `apps/server/src/llm/structuredOutput.ts`
 - `apps/server/src/managedRuns/Layers/Inference.ts`
 
-Cursor should not become the default secondary inference provider in the first
-milestone. Cursor ACP is session-oriented and is not currently wired as a
-schema-constrained structured-output transport.
+Cursor is intentionally excluded from secondary inference in this milestone.
+Cursor ACP is session-oriented and is not currently wired as a schema-constrained
+structured-output transport.
 
-First milestone:
+Implemented behavior:
 
-- Add Cursor model-selection support where contracts require it.
-- Route Cursor secondary inference to an explicit unsupported error unless a
-  caller opts into plain text generation.
-- Do not use Cursor for structured output until a schema-constrained flow is
-  implemented and tested.
+- Settings model pickers for "Text generation model" and "Run inference model"
+  hide Cursor and Cursor profiles. These pickers only show Codex, Claude, and
+  Gemini because they are the providers wired into T3 secondary inference.
+- `RoutingTextGeneration` has an explicit Cursor branch that returns a typed
+  `TextGenerationError` for commit messages, PR content, branch names, thread
+  titles, and system prompt enhancement instead of falling through to another
+  provider.
+- Cursor chat defaults and aliases still use `composer-2` for provider/runtime
+  conversations. There is no Cursor secondary-inference default model; if a
+  stored setting still references Cursor, the web settings UI resolves it back
+  to the normal Codex secondary default and the server rejects any direct Cursor
+  request explicitly.
+- Changelog generation and other schema-bound structured-output flows continue
+  to use the existing Codex/Claude/Gemini secondary inference paths. Cursor can
+  be added later only after a JSON/schema-constrained runner is implemented and
+  malformed-output parsing is tested.
 
 ### Web UI
 

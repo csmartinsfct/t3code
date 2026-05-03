@@ -55,11 +55,12 @@ function getProviderIcon(kind: ProviderPickerKind): Icon {
 
 export function getAvailableProviderOptions(
   serverProviders?: ReadonlyArray<ServerProvider>,
+  providerFilter: (provider: ProviderKind) => boolean = () => true,
 ): Array<ProviderOption & { available: true; value: ProviderKind }> {
   const options = serverProviders?.length
     ? buildProviderOptions(serverProviders)
     : PROVIDER_OPTIONS;
-  return options.filter(isAvailableProviderOption);
+  return options.filter(isAvailableProviderOption).filter((option) => providerFilter(option.value));
 }
 
 /** @deprecated Use getAvailableProviderOptions with server providers instead */
@@ -70,11 +71,14 @@ const COMING_SOON_PROVIDER_OPTIONS = [
 
 function getUnavailableProviderOptions(
   serverProviders?: ReadonlyArray<ServerProvider>,
+  providerFilter: (provider: ProviderKind) => boolean = () => true,
 ): Array<ProviderOption> {
   const options = serverProviders?.length
     ? buildProviderOptions(serverProviders)
     : PROVIDER_OPTIONS;
-  return options.filter((option) => !option.available);
+  return options
+    .filter((option) => !option.available)
+    .filter((option) => providerFilter(option.value as ProviderKind));
 }
 
 function providerIconClassName(
@@ -117,13 +121,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
+  providerFilter?: (provider: ProviderKind) => boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
-  const unavailableProviderOptions = getUnavailableProviderOptions(props.providers);
+  const providerFilter = props.providerFilter ?? (() => true);
+  const unavailableProviderOptions = getUnavailableProviderOptions(props.providers, providerFilter);
   const getPickerModelOptions = (provider: ProviderKind) => {
     const liveModels = props.providers ? getProviderModels(props.providers, provider) : [];
     return liveModels.length > 0
@@ -250,7 +256,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           </MenuGroup>
         ) : (
           <>
-            {getAvailableProviderOptions(props.providers).map((option) => {
+            {getAvailableProviderOptions(props.providers, providerFilter).map((option) => {
               const OptionIcon = getProviderIcon(option.value);
               const liveProvider = props.providers
                 ? getProviderSnapshot(props.providers, option.value)

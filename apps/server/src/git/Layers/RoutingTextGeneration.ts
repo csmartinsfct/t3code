@@ -41,19 +41,19 @@ class GeminiTextGen extends ServiceMap.Service<GeminiTextGen, TextGenerationShap
 // Routing implementation
 // ---------------------------------------------------------------------------
 
-const makeRoutingTextGeneration = Effect.gen(function* () {
-  const codex = yield* CodexTextGen;
-  const claude = yield* ClaudeTextGen;
-  const gemini = yield* GeminiTextGen;
-
+export function makeRoutingTextGenerationForProviders(providers: {
+  readonly codex: TextGenerationShape;
+  readonly claude: TextGenerationShape;
+  readonly gemini: TextGenerationShape;
+}): TextGenerationShape {
   const route = (provider?: TextGenerationProvider): TextGenerationShape | null => {
     switch (provider ? baseProviderKind(provider) : "codex") {
       case "codex":
-        return codex;
+        return providers.codex;
       case "claudeAgent":
-        return claude;
+        return providers.claude;
       case "gemini":
-        return gemini;
+        return providers.gemini;
       case "cursor":
         return null;
     }
@@ -101,6 +101,14 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
         }),
       ),
   } satisfies TextGenerationShape;
+}
+
+const makeRoutingTextGeneration = Effect.gen(function* () {
+  const codex = yield* CodexTextGen;
+  const claude = yield* ClaudeTextGen;
+  const gemini = yield* GeminiTextGen;
+
+  return makeRoutingTextGenerationForProviders({ codex, claude, gemini });
 });
 
 const InternalCodexLayer = Layer.effect(
