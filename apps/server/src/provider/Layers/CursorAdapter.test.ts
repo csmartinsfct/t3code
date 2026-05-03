@@ -1,6 +1,8 @@
 import { it, assert, vi } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -99,6 +101,7 @@ function makeCursorTestLayer(
     Layer.provideMerge(serverConfigTestLayer),
     Layer.provideMerge(managedRunServiceTestLayer),
     Layer.provideMerge(projectionSnapshotQueryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
   );
 }
 
@@ -145,6 +148,7 @@ function makeFakeConnection(
   hooks: {
     readonly prompt?: () => Promise<unknown> | unknown;
     readonly sessionId?: string;
+    readonly initializeResult?: unknown;
     readonly calls: Array<{ method: string; input?: unknown }>;
     readonly responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }>;
   },
@@ -154,7 +158,13 @@ function makeFakeConnection(
     childPid: 123,
     initialize: async () => {
       hooks.calls.push({ method: "initialize" });
-      return {};
+      return (
+        hooks.initializeResult ?? {
+          agentCapabilities: {
+            promptCapabilities: { audio: false, embeddedContext: false, image: true },
+          },
+        }
+      );
     },
     authenticate: async () => {
       hooks.calls.push({ method: "authenticate" });
@@ -274,20 +284,96 @@ it.effect("CursorAdapterLive starts and sends turns through Cursor ACP", () => {
   }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
 });
 
-it.effect("CursorAdapterLive rejects image attachments before starting Cursor turns", () => {
+it.effect("CursorAdapterLive forwards image attachments to Cursor ACP prompts", () => {
   const calls: Array<{ method: string; input?: unknown }> = [];
   const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
   const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
     makeFakeConnection(options, { calls, responses }),
   );
+  const threadId = ThreadId.makeUnsafe("thread-cursor-image");
+  const attachmentId = "thread-cursor-image-00000000-0000-4000-8000-000000000001";
 
   return Effect.gen(function* () {
+    yield* Effect.promise(async () => {
+      await mkdir("/tmp/t3/dev/attachments", { recursive: true });
+      await writeFile(
+        "/tmp/t3/dev/attachments/thread-cursor-image-00000000-0000-4000-8000-000000000001.png",
+        Buffer.from([1, 2, 3, 4]),
+      );
+    });
+
     const adapter = yield* CursorAdapter;
-    for (const provider of ["cursor", "cursor:metric"] as const) {
-      const threadId = ThreadId.makeUnsafe(`thread-${provider.replace(":", "-")}-attachment`);
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Please inspect this screenshot.",
+      attachments: [
+        {
+          type: "image",
+          id: attachmentId,
+          name: "screenshot.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        },
+      ],
+      interactionMode: "default",
+    });
+
+    yield* Stream.take(adapter.streamEvents, 9).pipe(Stream.runCollect);
+
+    const promptInput = calls.find((call) => call.method === "session/prompt")?.input as
+      | {
+          readonly text?: string;
+          readonly images?: ReadonlyArray<{ data: string; mimeType: string; uri?: string }>;
+        }
+      | undefined;
+
+    assert.equal(promptInput?.text, "Please inspect this screenshot.");
+    assert.equal(promptInput?.images?.length, 1);
+    assert.equal(promptInput?.images?.[0]?.mimeType, "image/png");
+    assert.equal(promptInput?.images?.[0]?.data, Buffer.from([1, 2, 3, 4]).toString("base64"));
+    assert.equal(promptInput?.images?.[0]?.uri, `t3://attachment/${attachmentId}`);
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect(
+  "CursorAdapterLive rejects image attachments when Cursor ACP does not advertise support",
+  () => {
+    const calls: Array<{ method: string; input?: unknown }> = [];
+    const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+    const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+      makeFakeConnection(options, {
+        calls,
+        responses,
+        initializeResult: {
+          agentCapabilities: {
+            promptCapabilities: { audio: false, embeddedContext: false, image: false },
+          },
+        },
+      }),
+    );
+    const threadId = ThreadId.makeUnsafe("thread-cursor-image-unsupported");
+    const attachmentId = "thread-cursor-image-unsupported-00000000-0000-4000-8000-000000000001";
+
+    return Effect.gen(function* () {
+      yield* Effect.promise(async () => {
+        await mkdir("/tmp/t3/dev/attachments", { recursive: true });
+        await writeFile(
+          "/tmp/t3/dev/attachments/thread-cursor-image-unsupported-00000000-0000-4000-8000-000000000001.png",
+          Buffer.from([1, 2, 3, 4]),
+        );
+      });
+
+      const adapter = yield* CursorAdapter;
       yield* adapter.startSession({
         threadId,
-        provider: provider as never,
+        provider: "cursor",
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -299,10 +385,10 @@ it.effect("CursorAdapterLive rejects image attachments before starting Cursor tu
           attachments: [
             {
               type: "image",
-              id: "cursor-attachment-1",
+              id: attachmentId,
               name: "screenshot.png",
               mimeType: "image/png",
-              sizeBytes: 128,
+              sizeBytes: 4,
             },
           ],
           interactionMode: "default",
@@ -317,38 +403,13 @@ it.effect("CursorAdapterLive rejects image attachments before starting Cursor tu
           provider: "cursor",
           operation: "sendTurn",
           issue:
-            "Cursor ACP image attachments are not supported in T3 Code yet. Cursor currently advertises image prompt capability, but T3 has not verified a stable non-interactive payload contract. Remove attachments or reference files in the prompt text.",
+            "Cursor ACP did not advertise image prompt capability, so image attachments cannot be sent.",
         }),
       );
-    }
-
-    assert.equal(calls.filter((call) => call.method === "session/prompt").length, 0);
-  }).pipe(
-    Effect.provide(
-      makeCursorTestLayer(
-        { createConnection },
-        {
-          providers: {
-            cursorProfiles: [
-              {
-                profileId: "metric",
-                displayName: "Cursor Metric",
-                enabled: true,
-                binaryPath: "agent",
-                launchCommand: [],
-                homePath: "",
-                configDir: "",
-                dataDir: "",
-                env: {},
-                customModels: [],
-              },
-            ],
-          },
-        },
-      ),
-    ),
-  );
-});
+      assert.equal(calls.filter((call) => call.method === "session/prompt").length, 0);
+    }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+  },
+);
 
 it.effect("CursorAdapterLive captures Cursor ACP create_plan requests as proposed plans", () => {
   const calls: Array<{ method: string; input?: unknown }> = [];

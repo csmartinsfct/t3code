@@ -36,6 +36,10 @@ The same scenarios can be forced for every prompt with
 `T3_CURSOR_ACP_HARNESS_SCENARIO=ask-question`, `file-approval`, or
 `command-approval`.
 
+The harness initialize response mirrors the installed Cursor CLI capabilities
+that T3 depends on for this milestone: `loadSession: true`, MCP HTTP/SSE
+support, and `promptCapabilities.image: true` with `embeddedContext: false`.
+
 ## Expected Results
 
 For `T3_CURSOR_HARNESS_ASK_QUESTION`, the timeline should show a pending user

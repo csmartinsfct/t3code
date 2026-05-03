@@ -484,9 +484,10 @@ Files:
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
 - `apps/server/src/provider/Layers/CursorAdapter.test.ts`
 
-Current milestone supports text prompts and path references only. T3 chat
-attachments are currently image-only at the contract layer, and Cursor image
-attachments are rejected before a provider turn starts.
+Current milestone supports text prompts, image attachments, and path references.
+T3 chat attachments are currently image-only at the contract layer; Cursor image
+attachments are encoded as ACP `ContentBlock.image` entries when Cursor
+advertises image prompt support.
 
 Probe and protocol notes:
 
@@ -495,16 +496,21 @@ Probe and protocol notes:
 - ACP schema says `session/prompt.prompt` accepts `ContentBlock[]`; text and
   resource links are baseline, while image blocks require the agent image prompt
   capability.
-- T3 does not yet send native Cursor image blocks because the stable
-  non-interactive Cursor image payload shape, data-size limits, and UI behavior
-  have not been verified against the installed CLI.
+- The installed CLI currently advertises `embeddedContext: false`, so T3 does
+  not embed arbitrary file/resource attachment contents for Cursor. Users should
+  reference workspace files by path in prompt text.
 
 Implemented behavior:
 
-- Any T3 image attachment for `cursor` or `cursor:<profileId>` fails with a
-  provider validation error before `session/prompt` is called.
-- Users should reference workspace files by path in prompt text for Cursor until
-  native ACP image payload support is verified and wired.
+- T3 resolves image attachments from the attachment store, base64-encodes the
+  bytes, and sends `{ type: "image", data, mimeType, uri }` blocks alongside the
+  text prompt.
+- If a Cursor ACP process does not advertise `promptCapabilities.image: true`,
+  image attachments fail with a provider validation error before
+  `session/prompt` is called.
+- Embedded file/resource attachment payloads remain unsupported for Cursor until
+  Cursor advertises `promptCapabilities.embeddedContext: true` and T3 verifies
+  the expected behavior.
 - Existing Codex, Claude, and Gemini attachment paths are unchanged.
 
 ### Secondary Inference And Structured Output

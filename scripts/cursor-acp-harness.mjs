@@ -191,7 +191,11 @@ async function handleRequest(message) {
       respond(message.id, {
         protocolVersion: 1,
         authMethods: [{ id: "cursor_login", name: "Cursor Login" }],
-        capabilities: {},
+        agentCapabilities: {
+          loadSession: true,
+          mcpCapabilities: { http: true, sse: true },
+          promptCapabilities: { audio: false, embeddedContext: false, image: true },
+        },
       });
       return;
     case "authenticate":

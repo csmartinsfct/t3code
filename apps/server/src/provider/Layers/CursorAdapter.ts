@@ -3,6 +3,7 @@ import {
   ApprovalRequestId,
   asProviderInput,
   baseProviderKind,
+  type ChatAttachment,
   EventId,
   ProviderItemId,
   RuntimeItemId,
@@ -22,8 +23,9 @@ import {
   type RuntimeContentStreamKind,
   type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Queue, Stream } from "effect";
 
+import { resolveAttachmentPath } from "../../attachmentStore";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ServerConfig } from "../../config";
@@ -41,6 +43,7 @@ import {
   createCursorAcpConnection,
   type CursorAcpConnection,
   type CursorAcpConnectionOptions,
+  type CursorAcpImageContent,
   type CursorAcpIncomingNotification,
   type CursorAcpIncomingRequest,
   type JsonRpcId,
@@ -52,8 +55,6 @@ import {
 } from "../sessionContextPrompt";
 
 const PROVIDER = "cursor" as const;
-const CURSOR_ATTACHMENT_ERROR =
-  "Cursor ACP image attachments are not supported in T3 Code yet. Cursor currently advertises image prompt capability, but T3 has not verified a stable non-interactive payload contract. Remove attachments or reference files in the prompt text.";
 
 interface CursorResumeCursor {
   readonly version: 1;
@@ -95,6 +96,7 @@ interface CursorSessionContext {
   readonly connection: CursorAcpConnection;
   providerSessionId: string;
   latestSessionInfo: unknown;
+  readonly supportsImagePrompt: boolean;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   readonly toolCalls: Map<string, { readonly itemType: CanonicalItemType; readonly title: string }>;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingCursorApprovalRequest>;
@@ -166,6 +168,14 @@ function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: stri
 
 function resumeCursorRequestsFork(cursor: unknown): boolean {
   return isRecord(cursor) && cursor.fork === true;
+}
+
+function cursorSupportsImagePrompt(initializeResult: unknown): boolean {
+  if (!isRecord(initializeResult)) return false;
+  const agentCapabilities = initializeResult.agentCapabilities;
+  if (!isRecord(agentCapabilities)) return false;
+  const promptCapabilities = agentCapabilities.promptCapabilities;
+  return isRecord(promptCapabilities) && promptCapabilities.image === true;
 }
 
 function makeResumeCursor(input: {
@@ -505,6 +515,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const managedRunService = yield* ManagedRunService;
       const serverConfig = yield* ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
       const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, CursorSessionContext>();
       const createConnection = options?.createConnection ?? createCursorAcpConnection;
@@ -870,6 +881,62 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         });
       };
 
+      const loadCursorImages = (
+        context: CursorSessionContext,
+        attachments: ReadonlyArray<ChatAttachment> | undefined,
+      ) =>
+        Effect.gen(function* () {
+          if (!attachments || attachments.length === 0) return [] as Array<CursorAcpImageContent>;
+          if (!context.supportsImagePrompt) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue:
+                "Cursor ACP did not advertise image prompt capability, so image attachments cannot be sent.",
+            });
+          }
+
+          const images: Array<CursorAcpImageContent> = [];
+          for (const attachment of attachments) {
+            const resolvedPath = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment,
+            });
+            if (!resolvedPath) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Cursor could not resolve attachment ${attachment.name}.`,
+              });
+            }
+            const exists = yield* fs.exists(resolvedPath).pipe(Effect.orElseSucceed(() => false));
+            if (!exists) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: `Cursor attachment file is missing: ${attachment.name}.`,
+              });
+            }
+            const bytes = yield* fs.readFile(resolvedPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "attachment/read",
+                    detail: toMessage(cause, `Failed to read attachment ${attachment.name}.`),
+                    cause,
+                  }),
+              ),
+            );
+            images.push({
+              data: Buffer.from(bytes).toString("base64"),
+              mimeType: attachment.mimeType.toLowerCase(),
+              uri: `t3://attachment/${attachment.id}`,
+            });
+          }
+          return images;
+        });
+
       const startSession: CursorAdapterShape["startSession"] = Effect.fn("startCursorSession")(
         function* (input: ProviderSessionStartInput) {
           const requestedProvider = input.provider ?? PROVIDER;
@@ -965,13 +1032,14 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           const existingSessionId = extractCursorSessionId(input.resumeCursor);
           const sessionResult = yield* Effect.tryPromise({
             try: async () => {
-              await connection.initialize();
+              const initializeResult = await connection.initialize();
               await connection.authenticate();
               if (existingSessionId) {
                 const loaded = await connection.loadSession({ sessionId: existingSessionId, cwd });
-                return { sessionId: existingSessionId, result: loaded };
+                return { sessionId: existingSessionId, result: loaded, initializeResult };
               }
-              return await connection.newSession({ cwd });
+              const created = await connection.newSession({ cwd });
+              return { ...created, initializeResult };
             },
             catch: (cause) =>
               new ProviderAdapterRequestError({
@@ -1008,6 +1076,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             connection,
             providerSessionId,
             latestSessionInfo: sessionResult.result,
+            supportsImagePrompt: cursorSupportsImagePrompt(sessionResult.initializeResult),
             turns: [],
             toolCalls: new Map(),
             pendingApprovals: new Map(),
@@ -1051,19 +1120,13 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             issue: "Cursor session already has an active turn.",
           });
         }
-        if (input.attachments && input.attachments.length > 0) {
+        const images = yield* loadCursorImages(context, input.attachments);
+        const text = trimOrUndefined(input.input) ?? "";
+        if (!text && images.length === 0) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",
-            issue: CURSOR_ATTACHMENT_ERROR,
-          });
-        }
-        const text = trimOrUndefined(input.input);
-        if (!text) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: "Cursor turns require text input.",
+            issue: "Cursor turns require text input or at least one supported image attachment.",
           });
         }
 
@@ -1126,7 +1189,8 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               }
               return await context.connection.prompt({
                 sessionId: context.providerSessionId,
-                text: promptInput.prompt,
+                ...(promptInput.prompt ? { text: promptInput.prompt } : {}),
+                ...(images.length > 0 ? { images } : {}),
               });
             },
             catch: (cause) =>

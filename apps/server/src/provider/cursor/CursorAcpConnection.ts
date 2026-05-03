@@ -48,6 +48,12 @@ export interface CursorAcpIncomingNotification {
   readonly params?: unknown;
 }
 
+export interface CursorAcpImageContent {
+  readonly data: string;
+  readonly mimeType: string;
+  readonly uri?: string;
+}
+
 export interface CursorAcpConnection {
   readonly childPid: number | undefined;
   initialize: () => Promise<unknown>;
@@ -66,7 +72,11 @@ export interface CursorAcpConnection {
     configId: string;
     value: string;
   }) => Promise<unknown>;
-  prompt: (input: { sessionId: string; text: string }) => Promise<unknown>;
+  prompt: (input: {
+    sessionId: string;
+    text?: string;
+    images?: ReadonlyArray<CursorAcpImageContent>;
+  }) => Promise<unknown>;
   respond: (input: { id: JsonRpcId; result?: unknown; error?: JsonRpcError }) => void;
   cancel: (sessionId: string) => Promise<void>;
   close: () => void;
@@ -351,7 +361,20 @@ export function createCursorAcpConnection(
         "session/prompt",
         {
           sessionId: input.sessionId,
-          prompt: [{ type: "text", text: input.text }],
+          prompt: [
+            ...(input.text?.trim() ? [{ type: "text", text: input.text }] : []),
+            ...(input.images ?? []).map((image) => {
+              const block: Record<string, unknown> = {
+                type: "image",
+                data: image.data,
+                mimeType: image.mimeType,
+              };
+              if (image.uri) {
+                block.uri = image.uri;
+              }
+              return block;
+            }),
+          ],
         },
         promptRequestTimeoutMs,
       ),
