@@ -276,6 +276,127 @@ it.effect("CursorAdapterLive skips duplicate final Cursor assistant snapshots", 
   }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
 });
 
+it.effect("CursorAdapterLive deduplicates assistant snapshots across tool phases", () => {
+  const createChat = vi.fn(() => Effect.succeed("cursor-session-tool-dedup"));
+  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
+    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-tool-dedup", "");
+    return Effect.succeed({
+      ...base,
+      events: [
+        {
+          type: "assistant" as const,
+          text: "Creating",
+          raw: {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "Creating" }] },
+          },
+        },
+        {
+          type: "assistant" as const,
+          text: " docs/cursor-smoke.md.\n\n",
+          raw: {
+            type: "assistant",
+            message: { content: [{ type: "text", text: " docs/cursor-smoke.md.\n\n" }] },
+          },
+        },
+        {
+          type: "assistant" as const,
+          text: "Creating docs/cursor-smoke.md.\n\n",
+          raw: {
+            type: "assistant",
+            message: {
+              content: [{ type: "text", text: "Creating docs/cursor-smoke.md.\n\n" }],
+            },
+          },
+        },
+        {
+          type: "tool_call" as const,
+          subtype: "started",
+          callId: "tool-edit-1",
+          toolCall: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
+          raw: {
+            type: "tool_call",
+            subtype: "started",
+            call_id: "tool-edit-1",
+            tool_call: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
+          },
+        },
+        {
+          type: "tool_call" as const,
+          subtype: "completed",
+          callId: "tool-edit-1",
+          toolCall: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
+          raw: {
+            type: "tool_call",
+            subtype: "completed",
+            call_id: "tool-edit-1",
+            tool_call: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
+          },
+        },
+        {
+          type: "assistant" as const,
+          text: "**Summary",
+          raw: {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "**Summary" }] },
+          },
+        },
+        {
+          type: "assistant" as const,
+          text: ":** Added the smoke file.",
+          raw: {
+            type: "assistant",
+            message: { content: [{ type: "text", text: ":** Added the smoke file." }] },
+          },
+        },
+        {
+          type: "assistant" as const,
+          text: "**Summary:** Added the smoke file.",
+          raw: {
+            type: "assistant",
+            message: {
+              content: [{ type: "text", text: "**Summary:** Added the smoke file." }],
+            },
+          },
+        },
+        base.result,
+      ],
+    } satisfies CursorTurnRunResult);
+  });
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-tool-dedup");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Create a smoke file.",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 16).pipe(Stream.runCollect);
+    const assistantText = Array.from(events)
+      .flatMap((event) =>
+        event.type === "content.delta" && event.payload.streamKind === "assistant_text"
+          ? [event.payload.delta]
+          : [],
+      )
+      .join("");
+
+    assert.equal(
+      assistantText,
+      "Creating docs/cursor-smoke.md.\n\n**Summary:** Added the smoke file.",
+    );
+  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+});
+
 it.effect("CursorAdapterLive maps Cursor tool calls into item lifecycle events", () => {
   const createChat = vi.fn(() => Effect.succeed("cursor-session-tools"));
   const runTurn = vi.fn((input: CursorTurnCommandInput) => {

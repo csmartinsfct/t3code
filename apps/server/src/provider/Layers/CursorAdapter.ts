@@ -73,7 +73,9 @@ interface CursorTurnState {
   fiber: Fiber.Fiber<void, never> | undefined;
   assistantStarted: boolean;
   assistantText: string;
+  assistantSegmentText: string;
   reasoningText: string;
+  reasoningSegmentText: string;
   completed: boolean;
   cancelRequested: boolean;
 }
@@ -270,25 +272,25 @@ function appendSessionContextPrompt(
 }
 
 function resolveCursorTextDelta(
-  emittedText: string,
+  segmentText: string,
   incomingText: string,
 ): { readonly delta: string; readonly nextText: string } | null {
   if (!incomingText) return null;
 
-  if (incomingText === emittedText || emittedText.startsWith(incomingText)) {
-    return { delta: "", nextText: emittedText };
+  if (incomingText === segmentText || segmentText.startsWith(incomingText)) {
+    return { delta: "", nextText: segmentText };
   }
 
-  if (incomingText.startsWith(emittedText)) {
+  if (incomingText.startsWith(segmentText)) {
     return {
-      delta: incomingText.slice(emittedText.length),
+      delta: incomingText.slice(segmentText.length),
       nextText: incomingText,
     };
   }
 
   return {
     delta: incomingText,
-    nextText: `${emittedText}${incomingText}`,
+    nextText: `${segmentText}${incomingText}`,
   };
 }
 
@@ -648,10 +650,11 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         if (!turn) return;
         for (const event of result.events) {
           if (event.type === "assistant" && "text" in event && event.text) {
-            const resolved = resolveCursorTextDelta(turn.assistantText, event.text);
+            const resolved = resolveCursorTextDelta(turn.assistantSegmentText, event.text);
             if (!resolved) continue;
-            turn.assistantText = resolved.nextText;
+            turn.assistantSegmentText = resolved.nextText;
             if (!resolved.delta) continue;
+            turn.assistantText += resolved.delta;
             ensureAssistantItemStarted(context, turn);
             turn.items.push({
               type: "assistant_text",
@@ -665,10 +668,11 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               payload: { streamKind: "assistant_text", delta: resolved.delta },
             });
           } else if (event.type === "thinking" && "text" in event && event.text) {
-            const resolved = resolveCursorTextDelta(turn.reasoningText, event.text);
+            const resolved = resolveCursorTextDelta(turn.reasoningSegmentText, event.text);
             if (!resolved) continue;
-            turn.reasoningText = resolved.nextText;
+            turn.reasoningSegmentText = resolved.nextText;
             if (!resolved.delta) continue;
+            turn.reasoningText += resolved.delta;
             ensureAssistantItemStarted(context, turn);
             turn.items.push({
               type: "reasoning_text",
@@ -691,6 +695,8 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               },
             });
           } else if (isCursorToolCallEvent(event)) {
+            turn.assistantSegmentText = "";
+            turn.reasoningSegmentText = "";
             const toolName = extractCursorToolName(event.toolCall, event.callId);
             const itemType = classifyCursorToolItemType(toolName);
             const args = extractCursorToolArgs(event.toolCall);
@@ -945,7 +951,9 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           fiber: undefined,
           assistantStarted: false,
           assistantText: "",
+          assistantSegmentText: "",
           reasoningText: "",
+          reasoningSegmentText: "",
           completed: false,
           cancelRequested: false,
         };
