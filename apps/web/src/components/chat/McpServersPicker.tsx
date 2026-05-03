@@ -222,7 +222,7 @@ function McpServerStatusRow(props: {
   const { pendingAction, server } = props;
   const connected = server.status === "connected";
   const action = props.canManage ? actionForMcpServer(server) : null;
-  const statusLabel = server.status && !connected ? server.status : null;
+  const statusLabel = server.status && !connected && action === null ? server.status : null;
   const toolCount =
     typeof server.toolCount === "number" && server.toolCount > 0 ? `${server.toolCount} tools` : "";
   const titleParts = [server.name, server.status, toolCount, server.error].filter(Boolean);

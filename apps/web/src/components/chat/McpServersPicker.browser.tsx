@@ -24,6 +24,12 @@ const TEST_SERVERS: readonly ResolvedMcpServer[] = [
     scope: "user",
     toolCount: 41,
   },
+  {
+    name: "figma",
+    status: "error",
+    scope: "user",
+    error: "command failed",
+  },
 ];
 
 async function mountPicker(props?: {
@@ -75,6 +81,9 @@ describe("McpServersPicker", () => {
     await expect.element(page.getByText("playwright")).toBeInTheDocument();
     await expect.element(page.getByText("linear")).toBeInTheDocument();
     await expect.element(page.getByText("github-personal")).toBeInTheDocument();
+    await expect.element(page.getByText("needs-approval")).not.toBeInTheDocument();
+    await expect.element(page.getByText("needs approval")).not.toBeInTheDocument();
+    await expect.element(page.getByText("error")).toBeInTheDocument();
 
     await page.getByRole("button", { name: "Approve all pending Cursor MCP servers" }).click();
 
