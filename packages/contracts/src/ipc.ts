@@ -46,6 +46,8 @@ import type {
   ServerUpsertKeybindingResult,
   ResolveMcpServersInput,
   ResolveMcpServersResult,
+  ManageMcpServerInput,
+  ManageMcpServerResult,
   ResolveCodexProjectTrustInput,
   ResolveCodexProjectTrustResult,
   ResolveSkillsInput,
@@ -351,6 +353,7 @@ export interface NativeApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     resolveMcpServers: (input: ResolveMcpServersInput) => Promise<ResolveMcpServersResult>;
+    manageMcpServer: (input: ManageMcpServerInput) => Promise<ManageMcpServerResult>;
     resolveCodexProjectTrust: (
       input: ResolveCodexProjectTrustInput,
     ) => Promise<ResolveCodexProjectTrustResult>;

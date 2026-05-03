@@ -1,6 +1,13 @@
 import { memo, useState } from "react";
-import { PlugIcon, RefreshCwIcon } from "lucide-react";
-import type { ResolvedMcpServer } from "@t3tools/contracts";
+import {
+  CheckCheckIcon,
+  CheckIcon,
+  LoaderCircleIcon,
+  LogInIcon,
+  PlugIcon,
+  RefreshCwIcon,
+} from "lucide-react";
+import type { ManageMcpServerAction, ResolvedMcpServer } from "@t3tools/contracts";
 
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -17,15 +24,40 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
   servers?: readonly ResolvedMcpServer[];
   error?: string | null;
   compact?: boolean;
+  canManageServers?: boolean;
+  pendingActionsByServerName?: Readonly<Record<string, ManageMcpServerAction>>;
+  actionError?: string | null;
   onRetry?: () => void;
+  onServerAction?: (serverName: string, action: ManageMcpServerAction) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [approvingAll, setApprovingAll] = useState(false);
   const liveServers = props.servers ?? [];
   const hasLiveServers = liveServers.length > 0;
   const hasServers = props.serverNames.length > 0 || hasLiveServers;
   const groupedServers = groupMcpServersByScope(liveServers);
+  const pendingActionsByServerName = props.pendingActionsByServerName ?? {};
+  const approvalCandidates =
+    props.canManageServers && props.onServerAction
+      ? liveServers.filter((server) => actionForMcpServer(server) === "approve")
+      : [];
   const isInitialLoading = props.status === "loading" && !hasServers;
   const isError = props.status === "error";
+
+  const approveAll = async () => {
+    if (!props.onServerAction || approvalCandidates.length === 0) return;
+    setApprovingAll(true);
+    try {
+      for (const server of approvalCandidates) {
+        if (pendingActionsByServerName[server.name]) continue;
+        await props.onServerAction(server.name, "approve");
+      }
+    } catch {
+      // The hook owns the visible error state; keep this click handler quiet.
+    } finally {
+      setApprovingAll(false);
+    }
+  };
 
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -52,27 +84,57 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
       <MenuPopup align="start">
         <div className="flex items-center justify-between gap-3 px-2 py-1.5">
           <div className="font-medium text-muted-foreground text-xs">MCP Servers</div>
-          {props.onRetry ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground/65 hover:text-foreground"
-              title="Retry MCP status"
-              aria-label="Retry MCP status"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                props.onRetry?.();
-              }}
-            >
-              <RefreshCwIcon
-                aria-hidden="true"
-                className={cn("size-3.5", props.refreshing && "animate-spin opacity-70")}
-              />
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-1">
+            {approvalCandidates.length > 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="h-6 gap-1 px-1.5 text-muted-foreground/85 hover:text-foreground"
+                title="Approve all pending Cursor MCP servers"
+                aria-label="Approve all pending Cursor MCP servers"
+                disabled={approvingAll}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void approveAll();
+                }}
+              >
+                {approvingAll ? (
+                  <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
+                ) : (
+                  <CheckCheckIcon aria-hidden="true" className="size-3" />
+                )}
+                <span>Approve all</span>
+              </Button>
+            ) : null}
+            {props.onRetry ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-6 text-muted-foreground/65 hover:text-foreground"
+                title="Retry MCP status"
+                aria-label="Retry MCP status"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  props.onRetry?.();
+                }}
+              >
+                <RefreshCwIcon
+                  aria-hidden="true"
+                  className={cn("size-3.5", props.refreshing && "animate-spin opacity-70")}
+                />
+              </Button>
+            ) : null}
+          </div>
         </div>
+        {props.actionError ? (
+          <div className="max-w-[22rem] px-2 pb-1.5 text-amber-500/90 text-xs">
+            {props.actionError}
+          </div>
+        ) : null}
         {isError ? (
           <div className="max-w-[22rem] px-2 py-1.5 text-amber-500/90 text-sm">
             {props.error?.trim() || "Unable to load MCP status."}
@@ -86,7 +148,13 @@ export const McpServersPicker = memo(function McpServersPicker(props: {
                 </div>
                 <div className="space-y-0.5">
                   {group.servers.map((server) => (
-                    <McpServerStatusRow key={`${group.scope}:${server.name}`} server={server} />
+                    <McpServerStatusRow
+                      key={`${group.scope}:${server.name}`}
+                      server={server}
+                      canManage={props.canManageServers === true}
+                      pendingAction={pendingActionsByServerName[server.name]}
+                      onServerAction={props.onServerAction}
+                    />
                   ))}
                 </div>
               </div>
@@ -143,13 +211,22 @@ function scopeRank(scope: string): number {
   }
 }
 
-function McpServerStatusRow(props: { server: ResolvedMcpServer }) {
-  const { server } = props;
+function McpServerStatusRow(props: {
+  server: ResolvedMcpServer;
+  canManage: boolean;
+  pendingAction: ManageMcpServerAction | undefined;
+  onServerAction:
+    | ((serverName: string, action: ManageMcpServerAction) => Promise<void>)
+    | undefined;
+}) {
+  const { pendingAction, server } = props;
   const connected = server.status === "connected";
+  const action = props.canManage ? actionForMcpServer(server) : null;
   const statusLabel = server.status && !connected ? server.status : null;
   const toolCount =
     typeof server.toolCount === "number" && server.toolCount > 0 ? `${server.toolCount} tools` : "";
   const titleParts = [server.name, server.status, toolCount, server.error].filter(Boolean);
+  const needsAttention = action !== null || pendingAction !== undefined;
 
   return (
     <div
@@ -160,15 +237,66 @@ function McpServerStatusRow(props: { server: ResolvedMcpServer }) {
         aria-hidden="true"
         className={cn(
           "size-1.5 shrink-0 rounded-full",
-          connected ? "bg-emerald-400/80" : "bg-rose-400/75",
+          connected ? "bg-emerald-400/80" : needsAttention ? "bg-amber-400/85" : "bg-rose-400/75",
         )}
       />
       <span className="min-w-0 flex-1 truncate">{server.name}</span>
       {statusLabel ? (
-        <span className="shrink-0 rounded-sm bg-muted/45 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground/75">
+        <span className="max-w-32 shrink truncate rounded-sm bg-muted/45 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground/75">
           {statusLabel}
         </span>
       ) : null}
+      {action ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="h-6 gap-1 px-1.5"
+          disabled={pendingAction !== undefined || props.onServerAction === undefined}
+          title={action === "login" ? `Log in to ${server.name}` : `Approve ${server.name}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void props.onServerAction?.(server.name, action).catch(() => undefined);
+          }}
+        >
+          {pendingAction ? (
+            <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
+          ) : action === "login" ? (
+            <LogInIcon aria-hidden="true" className="size-3" />
+          ) : (
+            <CheckIcon aria-hidden="true" className="size-3" />
+          )}
+          <span>{action === "login" ? "Login" : "Approve"}</span>
+        </Button>
+      ) : null}
     </div>
   );
+}
+
+function actionForMcpServer(server: ResolvedMcpServer): ManageMcpServerAction | null {
+  const status = server.status?.toLowerCase() ?? "";
+  const error = server.error?.toLowerCase() ?? "";
+  const searchable = `${status} ${error}`;
+  if (
+    searchable.includes("needs-auth") ||
+    searchable.includes("needs auth") ||
+    searchable.includes("needs-login") ||
+    searchable.includes("needs login") ||
+    searchable.includes("login required") ||
+    searchable.includes("not authenticated") ||
+    searchable.includes("unauthenticated") ||
+    searchable.includes("oauth")
+  ) {
+    return "login";
+  }
+  if (
+    searchable.includes("needs-approval") ||
+    searchable.includes("needs approval") ||
+    searchable.includes("approval required") ||
+    searchable.includes("not approved")
+  ) {
+    return "approve";
+  }
+  return null;
 }

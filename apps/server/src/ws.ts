@@ -31,6 +31,7 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ManageMcpServerError,
   ResolveCodexProjectTrustError,
   ResolveMcpServersError,
   ResolveMcpServersResult,
@@ -100,7 +101,7 @@ import {
   resolveCodexHomePathForProvider,
 } from "./provider/codexProfileDiscovery";
 import { resolveCursorSettingsForProvider } from "./provider/cursorProfileDiscovery";
-import { probeCursorMcpServers } from "./provider/cursorMcpProbe";
+import { probeCursorMcpServers, runCursorMcpAction } from "./provider/cursorMcpProbe";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -921,6 +922,50 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                 new ResolveMcpServersError({
                   message: `Failed to resolve MCP servers: ${String(cause)}`,
                 }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverManageMcpServer]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverManageMcpServer,
+          Effect.gen(function* () {
+            if (baseProviderKind(input.provider) !== "cursor") {
+              return yield* new ManageMcpServerError({
+                message: "MCP server actions are currently supported for Cursor only.",
+              });
+            }
+
+            const settings = yield* serverSettings.getSettings;
+            const cursorSettings = resolveCursorSettingsForProvider(settings, input.provider);
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                runCursorMcpAction({
+                  settings: cursorSettings,
+                  ...(input.cwd ? { cwd: input.cwd } : {}),
+                  action: input.action,
+                  identifier: input.serverName,
+                }),
+              catch: (cause) =>
+                new ManageMcpServerError({
+                  message: cause instanceof Error ? cause.message : String(cause),
+                }),
+            });
+
+            return {
+              provider: input.provider,
+              serverName: input.serverName,
+              action: input.action,
+              ...(result.stdout.trim() ? { stdout: result.stdout } : {}),
+              ...(result.stderr.trim() ? { stderr: result.stderr } : {}),
+            };
+          }).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(ManageMcpServerError)(cause)
+                ? cause
+                : new ManageMcpServerError({
+                    message: `Failed to manage MCP server: ${String(cause)}`,
+                  }),
             ),
           ),
           { "rpc.aggregate": "server" },

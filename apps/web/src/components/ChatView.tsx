@@ -5732,7 +5732,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   servers={mcpServers.servers}
                                   error={mcpServers.error}
                                   compact
+                                  canManageServers={mcpServers.canManageServers}
+                                  pendingActionsByServerName={mcpServers.pendingActionsByServerName}
+                                  actionError={mcpServers.actionError}
                                   onRetry={mcpServers.retry}
+                                  onServerAction={mcpServers.manageServer}
                                 />
                                 <SkillsPicker
                                   skills={availableSkills}
@@ -5821,7 +5825,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   serverNames={mcpServers.serverNames}
                                   servers={mcpServers.servers}
                                   error={mcpServers.error}
+                                  canManageServers={mcpServers.canManageServers}
+                                  pendingActionsByServerName={mcpServers.pendingActionsByServerName}
+                                  actionError={mcpServers.actionError}
                                   onRetry={mcpServers.retry}
+                                  onServerAction={mcpServers.manageServer}
                                 />
                                 <SkillsPicker
                                   skills={availableSkills}

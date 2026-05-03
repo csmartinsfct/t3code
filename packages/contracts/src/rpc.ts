@@ -190,6 +190,9 @@ import {
   ResolveMcpServersInput,
   ResolveMcpServersResult,
   ResolveMcpServersError,
+  ManageMcpServerInput,
+  ManageMcpServerResult,
+  ManageMcpServerError,
   ResolveCodexProjectTrustInput,
   ResolveCodexProjectTrustResult,
   ResolveCodexProjectTrustError,
@@ -261,6 +264,7 @@ export const WS_METHODS = {
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverResolveMcpServers: "server.resolveMcpServers",
+  serverManageMcpServer: "server.manageMcpServer",
   serverResolveCodexProjectTrust: "server.resolveCodexProjectTrust",
   serverTrustCodexProject: "server.trustCodexProject",
   serverResolveSkills: "server.resolveSkills",
@@ -364,6 +368,12 @@ export const WsServerResolveMcpServersRpc = Rpc.make(WS_METHODS.serverResolveMcp
   payload: ResolveMcpServersInput,
   success: ResolveMcpServersResult,
   error: ResolveMcpServersError,
+});
+
+export const WsServerManageMcpServerRpc = Rpc.make(WS_METHODS.serverManageMcpServer, {
+  payload: ManageMcpServerInput,
+  success: ManageMcpServerResult,
+  error: ManageMcpServerError,
 });
 
 export const WsServerResolveCodexProjectTrustRpc = Rpc.make(
@@ -1101,6 +1111,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerResolveMcpServersRpc,
+  WsServerManageMcpServerRpc,
   WsServerResolveCodexProjectTrustRpc,
   WsServerTrustCodexProjectRpc,
   WsServerResolveSkillsRpc,

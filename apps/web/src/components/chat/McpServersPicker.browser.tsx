@@ -1,0 +1,87 @@
+import "../../index.css";
+
+import type { ManageMcpServerAction, ResolvedMcpServer } from "@t3tools/contracts";
+import { page } from "vitest/browser";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render } from "vitest-browser-react";
+
+import { McpServersPicker } from "./McpServersPicker";
+
+const TEST_SERVERS: readonly ResolvedMcpServer[] = [
+  {
+    name: "playwright",
+    status: "needs-approval",
+    scope: "project",
+  },
+  {
+    name: "linear",
+    status: "needs approval",
+    scope: "project",
+  },
+  {
+    name: "github-personal",
+    status: "connected",
+    scope: "user",
+    toolCount: 41,
+  },
+];
+
+async function mountPicker(props?: {
+  onServerAction?: (serverName: string, action: ManageMcpServerAction) => Promise<void>;
+}) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const onRetry = vi.fn();
+  const onServerAction =
+    props?.onServerAction ??
+    vi.fn(async (_serverName: string, _action: ManageMcpServerAction) => {});
+  const screen = await render(
+    <McpServersPicker
+      status="ready"
+      serverNames={TEST_SERVERS.map((server) => server.name)}
+      servers={TEST_SERVERS}
+      canManageServers
+      onRetry={onRetry}
+      onServerAction={onServerAction}
+    />,
+    { container: host },
+  );
+
+  const cleanup = async () => {
+    await screen.unmount();
+    host.remove();
+  };
+
+  return {
+    [Symbol.asyncDispose]: cleanup,
+    cleanup,
+    onRetry,
+    onServerAction,
+  };
+}
+
+describe("McpServersPicker", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("shows Cursor approval actions and approves every pending server", async () => {
+    await using mounted = await mountPicker();
+
+    await page.getByLabelText("MCP servers").click();
+
+    await expect.element(page.getByText("MCP Servers")).toBeInTheDocument();
+    await expect.element(page.getByText("Approve all")).toBeInTheDocument();
+    await expect.element(page.getByText("playwright")).toBeInTheDocument();
+    await expect.element(page.getByText("linear")).toBeInTheDocument();
+    await expect.element(page.getByText("github-personal")).toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Approve all pending Cursor MCP servers" }).click();
+
+    await vi.waitFor(() => {
+      expect(mounted.onServerAction).toHaveBeenCalledTimes(2);
+      expect(mounted.onServerAction).toHaveBeenNthCalledWith(1, "playwright", "approve");
+      expect(mounted.onServerAction).toHaveBeenNthCalledWith(2, "linear", "approve");
+    });
+  });
+});

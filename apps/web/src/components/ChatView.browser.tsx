@@ -302,7 +302,7 @@ function createSnapshotForTargetUser(options: {
         : providerName === "cursor"
           ? ({
               provider: "cursor",
-              model: "gpt-5",
+              model: "composer-2",
             } as const)
           : ({
               provider: "codex",
@@ -636,6 +636,7 @@ function materializeThreadInStore(threadId: ThreadId): void {
 
 function installTestNativeApi(input?: {
   resolveMcpServers?: NativeApi["server"]["resolveMcpServers"];
+  manageMcpServer?: NativeApi["server"]["manageMcpServer"];
   resolveSkills?: () => Promise<{ skills: readonly SkillEntry[] }>;
   confirm?: (message: string) => boolean | Promise<boolean>;
   managedRunsOnEvent?: NativeApi["managedRuns"]["onEvent"];
@@ -682,6 +683,13 @@ function installTestNativeApi(input?: {
       resolveMcpServers:
         input?.resolveMcpServers ??
         (async () => ({ status: "ready", serverNames: resolvedMcpServerNames })),
+      manageMcpServer:
+        input?.manageMcpServer ??
+        (async (payload) => ({
+          provider: payload.provider,
+          serverName: payload.serverName,
+          action: payload.action,
+        })),
       resolveSkills: input?.resolveSkills ?? (async () => ({ skills: [] })),
     },
   };

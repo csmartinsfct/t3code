@@ -248,6 +248,7 @@ export interface WsRpcClient {
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
     readonly resolveMcpServers: RpcUnaryMethod<typeof WS_METHODS.serverResolveMcpServers>;
+    readonly manageMcpServer: RpcUnaryMethod<typeof WS_METHODS.serverManageMcpServer>;
     readonly resolveCodexProjectTrust: RpcUnaryMethod<
       typeof WS_METHODS.serverResolveCodexProjectTrust
     >;
@@ -521,6 +522,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
       resolveMcpServers: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveMcpServers](input)),
+      manageMcpServer: (input) =>
+        transport.request((client) => client[WS_METHODS.serverManageMcpServer](input)),
       resolveCodexProjectTrust: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveCodexProjectTrust](input)),
       trustCodexProject: (input) =>

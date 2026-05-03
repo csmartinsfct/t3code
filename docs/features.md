@@ -200,7 +200,11 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   composer can show configured servers and approval/status text. If the CLI
   probe fails, T3 falls back to parsing user-level `.cursor/mcp.json` and
   project-local `.cursor/mcp.json`. Cursor ACP does not use MCP servers
-  configured through the Cursor dashboard.
+  configured through the Cursor dashboard. Cursor rows that report approval or
+  auth/login-required states expose inline composer actions; T3 runs
+  `agent mcp enable <identifier>` or `agent mcp login <identifier>` with
+  per-server pending UI, supports approving all visible approval-blocked
+  servers, and refreshes MCP status after successful actions.
 - See [Cursor Provider Implementation Specification](cursor-provider-implementation.md)
   for rollout risks, profile requirements, ACP event mapping, and deferred
   capabilities.
@@ -244,8 +248,10 @@ Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and
 
 - `provider.startSession` / `provider.sendTurn` / `provider.interruptTurn` — Session lifecycle.
 - `server.refreshProviders` — Re-scan provider statuses.
-- `server.resolveMcpServers` — Get project-scoped MCP status for Claude or
-  name-only MCP discovery for Codex/Gemini.
+- `server.resolveMcpServers` — Get project-scoped MCP status for Claude,
+  provider config discovery for Codex/Gemini, and Cursor CLI MCP status.
+- `server.manageMcpServer` — Run provider-specific MCP management actions.
+  Cursor currently supports approve and login through `agent mcp`.
 
 ---
 

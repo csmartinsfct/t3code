@@ -32,7 +32,10 @@ The chat composer's MCP picker reflects provider-side MCP availability:
 - Cursor: Cursor CLI `agent mcp list` from the project cwd, backed by
   user-level `<CURSOR_CONFIG_DIR>/mcp.json` (default `~/.cursor/mcp.json`) plus
   project-local `.cursor/mcp.json`. ACP mode does not use Cursor
-  dashboard-configured MCP servers.
+  dashboard-configured MCP servers. When Cursor reports a server as needing
+  approval or login, the composer exposes inline actions that call
+  `agent mcp enable <identifier>` or `agent mcp login <identifier>` with the
+  same resolved Cursor launch settings, then refreshes the visible status.
 
 Codex profiles use profile-scoped homes. The base provider reads `~/.codex/config.toml`
 unless `providers.codex.homePath` or `CODEX_HOME` overrides it; discovered profiles

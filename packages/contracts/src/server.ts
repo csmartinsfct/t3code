@@ -354,6 +354,42 @@ export class ResolveMcpServersError extends Schema.TaggedErrorClass<ResolveMcpSe
   { message: TrimmedNonEmptyString },
 ) {}
 
+export const ManageMcpServerAction = Schema.Literals(["approve", "login", "disable"]);
+export type ManageMcpServerAction = typeof ManageMcpServerAction.Type;
+
+export const ManageMcpServerInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  serverName: TrimmedNonEmptyString,
+  action: ManageMcpServerAction,
+});
+export interface ManageMcpServerInput {
+  readonly provider: ProviderKindType;
+  readonly cwd?: string;
+  readonly serverName: string;
+  readonly action: ManageMcpServerAction;
+}
+
+export const ManageMcpServerResult = Schema.Struct({
+  provider: ProviderKind,
+  serverName: TrimmedNonEmptyString,
+  action: ManageMcpServerAction,
+  stdout: Schema.optional(Schema.String),
+  stderr: Schema.optional(Schema.String),
+});
+export interface ManageMcpServerResult {
+  readonly provider: ProviderKindType;
+  readonly serverName: string;
+  readonly action: ManageMcpServerAction;
+  readonly stdout?: string;
+  readonly stderr?: string;
+}
+
+export class ManageMcpServerError extends Schema.TaggedErrorClass<ManageMcpServerError>()(
+  "ManageMcpServerError",
+  { message: TrimmedNonEmptyString },
+) {}
+
 export const ResolveCodexProjectTrustInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
 });

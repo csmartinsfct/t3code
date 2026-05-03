@@ -134,6 +134,7 @@ const rpcClientMock = {
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
     resolveMcpServers: vi.fn(),
+    manageMcpServer: vi.fn(),
     resolveCodexProjectTrust: vi.fn(),
     trustCodexProject: vi.fn(),
     resolveSkills: vi.fn(),

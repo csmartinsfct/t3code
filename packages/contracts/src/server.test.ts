@@ -2,6 +2,8 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  ManageMcpServerInput,
+  ManageMcpServerResult,
   ResolveMcpServersInput,
   ResolveMcpServersResult,
   ServerConfigStreamMcpStatusUpdatedEvent,
@@ -88,6 +90,42 @@ describe("ResolveMcpServersResult", () => {
       status: "error",
       serverNames: [],
       error: "Unable to load MCP status.",
+    });
+  });
+});
+
+describe("ManageMcpServerInput", () => {
+  it("decodes Cursor MCP management requests", () => {
+    expect(
+      decodeSync(ManageMcpServerInput, {
+        provider: "cursor",
+        cwd: "/tmp/project",
+        serverName: "playwright",
+        action: "approve",
+      }),
+    ).toEqual({
+      provider: "cursor",
+      cwd: "/tmp/project",
+      serverName: "playwright",
+      action: "approve",
+    });
+  });
+});
+
+describe("ManageMcpServerResult", () => {
+  it("decodes successful MCP management results", () => {
+    expect(
+      decodeSync(ManageMcpServerResult, {
+        provider: "cursor",
+        serverName: "playwright",
+        action: "login",
+        stdout: "ok",
+      }),
+    ).toEqual({
+      provider: "cursor",
+      serverName: "playwright",
+      action: "login",
+      stdout: "ok",
     });
   });
 });

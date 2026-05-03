@@ -4,8 +4,19 @@ import { runProcess } from "../processRunner.ts";
 import { buildCursorAcpEnv } from "./cursor/CursorAcpConnection.ts";
 
 const CURSOR_MCP_LIST_TIMEOUT_MS = 10_000;
+const CURSOR_MCP_ACTION_TIMEOUT_MS = 180_000;
+const CURSOR_MCP_ACTION_BY_T3_ACTION = {
+  approve: "enable",
+  login: "login",
+  disable: "disable",
+} as const;
 
-export function buildCursorMcpCommand(settings: CursorSettings): {
+export type CursorMcpAction = keyof typeof CURSOR_MCP_ACTION_BY_T3_ACTION;
+
+function buildCursorMcpCommand(
+  settings: CursorSettings,
+  args: ReadonlyArray<string>,
+): {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
 } {
@@ -13,10 +24,28 @@ export function buildCursorMcpCommand(settings: CursorSettings): {
   if (launchCommand.length > 0) {
     return {
       command: launchCommand[0] ?? settings.binaryPath,
-      args: [...launchCommand.slice(1), "mcp", "list"],
+      args: [...launchCommand.slice(1), "mcp", ...args],
     };
   }
-  return { command: settings.binaryPath, args: ["mcp", "list"] };
+  return { command: settings.binaryPath, args: ["mcp", ...args] };
+}
+
+export function buildCursorMcpListCommand(settings: CursorSettings): {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+} {
+  return buildCursorMcpCommand(settings, ["list"]);
+}
+
+export function buildCursorMcpActionCommand(
+  settings: CursorSettings,
+  action: CursorMcpAction,
+  identifier: string,
+): {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+} {
+  return buildCursorMcpCommand(settings, [CURSOR_MCP_ACTION_BY_T3_ACTION[action], identifier]);
 }
 
 export function parseCursorMcpListOutput(output: string): ReadonlyArray<ResolvedMcpServer> {
@@ -49,7 +78,7 @@ export async function probeCursorMcpServers(input: {
   readonly cwd?: string;
   readonly timeoutMs?: number;
 }): Promise<ReadonlyArray<ResolvedMcpServer>> {
-  const command = buildCursorMcpCommand(input.settings);
+  const command = buildCursorMcpListCommand(input.settings);
   const result = await runProcess(command.command, command.args, {
     cwd: input.cwd,
     env: buildCursorAcpEnv(input.settings),
@@ -58,4 +87,22 @@ export async function probeCursorMcpServers(input: {
   });
 
   return parseCursorMcpListOutput(result.stdout);
+}
+
+export async function runCursorMcpAction(input: {
+  readonly settings: CursorSettings;
+  readonly cwd?: string;
+  readonly action: CursorMcpAction;
+  readonly identifier: string;
+  readonly timeoutMs?: number;
+}): Promise<{ readonly stdout: string; readonly stderr: string }> {
+  const command = buildCursorMcpActionCommand(input.settings, input.action, input.identifier);
+  const result = await runProcess(command.command, command.args, {
+    cwd: input.cwd,
+    env: buildCursorAcpEnv(input.settings),
+    timeoutMs: input.timeoutMs ?? CURSOR_MCP_ACTION_TIMEOUT_MS,
+    maxBufferBytes: 512 * 1024,
+  });
+
+  return { stdout: result.stdout, stderr: result.stderr };
 }

@@ -1,6 +1,7 @@
 import {
   asProviderInput,
   baseProviderKind,
+  type ManageMcpServerAction,
   type ProjectId,
   type ProviderKind,
   type ResolvedMcpProviderSnapshot,
@@ -18,8 +19,9 @@ import {
 
 const EMPTY: readonly string[] = [];
 const EMPTY_SERVERS: readonly ResolvedMcpServer[] = [];
+const EMPTY_PENDING_ACTIONS: Readonly<Record<string, ManageMcpServerAction>> = {};
 
-export interface ResolvedMcpServersState {
+interface ResolvedMcpServersBaseState {
   readonly status: "loading" | "ready" | "error";
   readonly refreshing: boolean;
   readonly serverNames: readonly string[];
@@ -28,7 +30,14 @@ export interface ResolvedMcpServersState {
   readonly retry: () => void;
 }
 
-function emptyState(retry: () => void): ResolvedMcpServersState {
+export interface ResolvedMcpServersState extends ResolvedMcpServersBaseState {
+  readonly canManageServers: boolean;
+  readonly pendingActionsByServerName: Readonly<Record<string, ManageMcpServerAction>>;
+  readonly actionError: string | null;
+  readonly manageServer: (serverName: string, action: ManageMcpServerAction) => Promise<void>;
+}
+
+function emptyBaseState(retry: () => void): ResolvedMcpServersBaseState {
   return {
     status: "ready",
     refreshing: false,
@@ -36,6 +45,19 @@ function emptyState(retry: () => void): ResolvedMcpServersState {
     servers: EMPTY_SERVERS,
     error: null,
     retry,
+  };
+}
+
+function withManageState(
+  state: ResolvedMcpServersBaseState,
+  manageState: Pick<
+    ResolvedMcpServersState,
+    "canManageServers" | "pendingActionsByServerName" | "actionError" | "manageServer"
+  >,
+): ResolvedMcpServersState {
+  return {
+    ...state,
+    ...manageState,
   };
 }
 
@@ -68,8 +90,8 @@ function selectedClaudeSnapshot(input: {
 /**
  * Resolve MCP servers for the current provider/project.
  *
- * Claude is backed by a shared project-scoped live SDK status cache; Codex and
- * Gemini continue to use their filesystem/config readers.
+ * Claude is backed by a shared project-scoped live SDK status cache; other
+ * providers resolve through their CLI/config readers.
  */
 export function useMcpServers(input: {
   readonly provider: ProviderKind | undefined;
@@ -79,15 +101,20 @@ export function useMcpServers(input: {
 }): ResolvedMcpServersState {
   const { provider, projectId, cwd, refreshKey } = input;
   const isClaude = provider ? baseProviderKind(provider) === "claudeAgent" : false;
+  const canManageServers = provider ? baseProviderKind(provider) === "cursor" : false;
   const snapshot = useMcpStatusSnapshot(
     isClaude ? projectId : undefined,
     isClaude ? cwd : undefined,
     isClaude ? provider : undefined,
   );
   const [revisionNonce, setRevisionNonce] = useState(0);
-  const [plainState, setPlainState] = useState<ResolvedMcpServersState>(() =>
-    emptyState(() => undefined),
+  const [plainState, setPlainState] = useState<ResolvedMcpServersBaseState>(() =>
+    emptyBaseState(() => undefined),
   );
+  const [pendingActionsByServerName, setPendingActionsByServerName] = useState<
+    Record<string, ManageMcpServerAction>
+  >({});
+  const [actionError, setActionError] = useState<string | null>(null);
   const lastForcedRevisionNonce = useRef(0);
   const revision = useMcpConfigRevision();
   const statusInvalidationRevision = useMcpStatusInvalidationRevision();
@@ -96,9 +123,47 @@ export function useMcpServers(input: {
     setRevisionNonce((value) => value + 1);
   }, []);
 
+  const manageServer = useCallback(
+    async (serverName: string, action: ManageMcpServerAction): Promise<void> => {
+      if (!provider || !cwd || !canManageServers) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+
+      setActionError(null);
+      setPendingActionsByServerName((current) => ({
+        ...current,
+        [serverName]: action,
+      }));
+      try {
+        await api.server.manageMcpServer({
+          provider: asProviderInput(provider),
+          cwd,
+          serverName,
+          action,
+        });
+        retry();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setActionError(message);
+        throw error;
+      } finally {
+        setPendingActionsByServerName((current) => {
+          const next = { ...current };
+          delete next[serverName];
+          return Object.keys(next).length > 0 ? next : {};
+        });
+      }
+    },
+    [canManageServers, cwd, provider, retry],
+  );
+
   useEffect(() => {
     if (!provider || !cwd) {
-      setPlainState(emptyState(retry));
+      setPlainState(emptyBaseState(retry));
       return;
     }
     if (isClaude && !projectId) {
@@ -114,7 +179,7 @@ export function useMcpServers(input: {
     }
     const api = readNativeApi();
     if (!api) {
-      setPlainState(emptyState(retry));
+      setPlainState(emptyBaseState(retry));
       return;
     }
 
@@ -194,32 +259,51 @@ export function useMcpServers(input: {
     retry,
   ]);
 
+  const manageState = useMemo(
+    () => ({
+      canManageServers,
+      pendingActionsByServerName:
+        Object.keys(pendingActionsByServerName).length > 0
+          ? pendingActionsByServerName
+          : EMPTY_PENDING_ACTIONS,
+      actionError,
+      manageServer,
+    }),
+    [actionError, canManageServers, manageServer, pendingActionsByServerName],
+  );
+
   return useMemo(() => {
     if (!isClaude) {
-      return plainState;
+      return withManageState(plainState, manageState);
     }
     if (!provider || !projectId || !cwd) {
-      return emptyState(retry);
+      return withManageState(emptyBaseState(retry), manageState);
     }
     if (!snapshot) {
-      return {
-        status: "loading",
-        refreshing: false,
-        serverNames: EMPTY,
-        servers: EMPTY_SERVERS,
-        error: null,
-        retry,
-      };
+      return withManageState(
+        {
+          status: "loading",
+          refreshing: false,
+          serverNames: EMPTY,
+          servers: EMPTY_SERVERS,
+          error: null,
+          retry,
+        },
+        manageState,
+      );
     }
-    return {
-      status: snapshot.status,
-      refreshing: snapshot.refreshing === true,
-      serverNames: snapshot.serverNames.length > 0 ? snapshot.serverNames : EMPTY,
-      servers: snapshot.servers && snapshot.servers.length > 0 ? snapshot.servers : EMPTY_SERVERS,
-      error: snapshot.error ?? null,
-      retry,
-    };
-  }, [isClaude, plainState, provider, projectId, cwd, retry, snapshot]);
+    return withManageState(
+      {
+        status: snapshot.status,
+        refreshing: snapshot.refreshing === true,
+        serverNames: snapshot.serverNames.length > 0 ? snapshot.serverNames : EMPTY,
+        servers: snapshot.servers && snapshot.servers.length > 0 ? snapshot.servers : EMPTY_SERVERS,
+        error: snapshot.error ?? null,
+        retry,
+      },
+      manageState,
+    );
+  }, [isClaude, plainState, manageState, provider, projectId, cwd, retry, snapshot]);
 }
 
 export function useMcpServerNames(
