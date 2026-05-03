@@ -1,5 +1,10 @@
 import type { CursorSettings, ResolvedMcpServer } from "@t3tools/contracts";
 
+import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+
 import { runProcess } from "../processRunner.ts";
 import { buildCursorAcpEnv } from "./cursor/CursorAcpConnection.ts";
 
@@ -104,5 +109,97 @@ export async function runCursorMcpAction(input: {
     maxBufferBytes: 512 * 1024,
   });
 
+  if (input.action === "approve" && input.cwd) {
+    await approveCursorMcpServerForProject(input.settings, input.cwd, input.identifier);
+  }
+
   return { stdout: result.stdout, stderr: result.stderr };
+}
+
+export function cursorProjectSlug(cwd: string): string {
+  return path
+    .resolve(cwd)
+    .replace(/[^a-zA-Z0-9]/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+}
+
+export function cursorMcpApprovalKey(input: {
+  readonly cwd: string;
+  readonly serverName: string;
+  readonly serverConfig: unknown;
+}): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ path: path.resolve(input.cwd), server: input.serverConfig }))
+    .digest("hex")
+    .slice(0, 16);
+  return `${input.serverName}-${digest}`;
+}
+
+async function approveCursorMcpServerForProject(
+  settings: CursorSettings,
+  cwd: string,
+  serverName: string,
+): Promise<void> {
+  const cursorConfigDir = settings.configDir.trim() || path.join(os.homedir(), ".cursor");
+  const serverConfig = await readCursorMcpServerConfig(cursorConfigDir, cwd, serverName);
+  if (serverConfig === undefined) {
+    return;
+  }
+
+  const projectDir = path.join(cursorConfigDir, "projects", cursorProjectSlug(cwd));
+  const approvalPath = path.join(projectDir, "mcp-approvals.json");
+  const approvalKey = cursorMcpApprovalKey({ cwd, serverName, serverConfig });
+  const approvals = await readApprovalList(approvalPath);
+  if (approvals.includes(approvalKey)) {
+    return;
+  }
+
+  await fs.mkdir(projectDir, { recursive: true });
+  await fs.writeFile(approvalPath, `${JSON.stringify([...approvals, approvalKey], null, 2)}\n`);
+}
+
+async function readCursorMcpServerConfig(
+  cursorConfigDir: string,
+  cwd: string,
+  serverName: string,
+): Promise<unknown> {
+  const configPaths = [
+    path.join(path.resolve(cwd), ".cursor", "mcp.json"),
+    path.join(cursorConfigDir, "mcp.json"),
+  ];
+
+  for (const configPath of configPaths) {
+    const config = await readJsonObject(configPath);
+    const servers = isRecord(config?.mcpServers) ? config.mcpServers : undefined;
+    if (servers && serverName in servers) {
+      return servers[serverName];
+    }
+  }
+
+  return undefined;
+}
+
+async function readApprovalList(filePath: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
+async function readJsonObject(filePath: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

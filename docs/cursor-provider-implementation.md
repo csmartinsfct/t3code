@@ -474,12 +474,19 @@ First milestone:
 - The server-visible MCP menu probes `agent mcp list` first so T3 can surface
   Cursor's own status text, including approval-required states such as `not
 loaded (needs approval)`.
+- Cursor CLI can list a server's tools with `agent mcp list-tools <identifier>`
+  while the active Cursor agent still reports the same MCP as needing approval.
+  T3 therefore treats `agent mcp list` as the source of truth for the visible
+  approval state.
 - The same menu can run Cursor MCP management commands for visible blocked
   states: `agent mcp enable <identifier>` for approval and
   `agent mcp login <identifier>` for auth/login. T3 invokes these through
   argv-based child processes using the same resolved Cursor launch settings as
-  discovery, shows per-server pending state in the composer, and forces MCP
-  status refresh after each successful action.
+  discovery. For approval actions, T3 also writes Cursor's project-scoped
+  `mcp-approvals.json` entry for the selected workspace because the documented
+  `agent mcp enable` command can return success without updating the current
+  worktree's approval file. The composer shows per-server pending state and
+  forces MCP status refresh after each successful action.
 - If the CLI probe fails, T3 falls back to parsing user-level
   `<CURSOR_CONFIG_DIR>/mcp.json` (default `~/.cursor/mcp.json`) and
   project-local `.cursor/mcp.json`.
