@@ -137,6 +137,7 @@ apps/server/src/ticketing/http.ts                       # Ticketing REST route +
 apps/server/src/provider/Layers/CodexAdapter.ts         # Codex injection (REST via curl)
 apps/server/src/provider/Layers/ClaudeAdapter.ts        # Claude injection (REST via curl)
 apps/server/src/provider/Layers/GeminiAdapter.ts        # Gemini injection (ACP embedded-context)
+apps/server/src/provider/Layers/CursorAdapter.ts        # Cursor injection (first ACP prompt)
 ```
 
 ---
@@ -148,7 +149,7 @@ To add a new REST API service:
 1. Create the REST HTTP endpoint (e.g. `/api/new-service`)
 2. Add the service to the table in `buildRestEndpointSystemPrompt` (in `apps/server/src/provider/restEndpointSystemPrompt.ts`)
 3. If the service has its own admin prompt document, add it to `AdminPromptSettings` and include it in `buildT3ServiceInjectionPrompt`
-4. No adapter changes required — the shared helper handles all three providers
+4. No adapter changes required — the shared helper handles every supported provider
 
 If a service should stay HTTP-only and not be advertised to models, simply do not add it to the table.
 

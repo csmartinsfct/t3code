@@ -13,7 +13,7 @@ The system has four main moving parts:
 
 ```
 ┌───────────────────────────────────────────────┐
-│  AI Provider (Codex / Claude / Gemini)        │
+│  AI Provider (all supported providers)        │
 │  Injected guidance tells it to use T3 tools   │
 └──────────────┬────────────────────────────────┘
                │ POST /api/managed-runs

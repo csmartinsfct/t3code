@@ -14,7 +14,7 @@ The system has five main moving parts:
 
 ```
 ┌───────────────────────────────────────────────┐
-│  AI Provider (Codex / Claude / Gemini)        │
+│  AI Provider (all supported providers)        │
 │  Injected guidance tells it to use T3 tools   │
 └──────────────┬────────────────────────────────┘
                │ POST /api/scheduled-tasks
@@ -203,6 +203,7 @@ When a provider session starts and the thread belongs to a project:
 - **Claude adapter** (`apps/server/src/provider/Layers/ClaudeAdapter.ts`): Adds `t3_scheduled_tasks` to `mcpServers` config alongside `t3_managed_runs`, auto-allows `mcp__t3_scheduled_tasks__*` tools, appends system prompt.
 - **Codex adapter** (`apps/server/src/provider/Layers/CodexAdapter.ts`): Sets `mcp_servers.t3_scheduled_tasks.url` and `http_headers.Authorization` via config overrides, appends system prompt.
 - **Gemini adapter** (`apps/server/src/provider/Layers/GeminiAdapter.ts`): Exposes scheduled tasks through the shared `t3-code` stdio MCP bridge and embedded service context.
+- **Cursor adapter** (`apps/server/src/provider/Layers/CursorAdapter.ts`): Exposes scheduled tasks through the same REST endpoint table prepended to the first ACP prompt for the session.
 
 ---
 
@@ -210,7 +211,7 @@ When a provider session starts and the thread belongs to a project:
 
 `apps/server/src/scheduledTasks/systemPrompt.ts`
 
-Injected into Codex, Claude, and Gemini sessions alongside the managed runs guidance. Instructs the model to use `propose_scheduled_task` for user-reviewed creation and `create_scheduled_task` for direct creation.
+Injected into Codex, Claude, Gemini, and Cursor sessions alongside the managed runs guidance. Instructs the model to use `propose_scheduled_task` for user-reviewed creation and `create_scheduled_task` for direct creation.
 
 ---
 

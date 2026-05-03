@@ -31,8 +31,9 @@ prompts) to every provider the same way: the session-start injection includes a
 REST endpoint table and a short-lived Bearer token via
 `buildT3ServiceInjectionPrompt`. Gemini receives this as an ACP embedded-context
 resource on the first user turn; Codex receives it through
-`appendDeveloperInstructions`; Claude receives it through `systemPrompt.append`.
-All three providers call the endpoints with their native shell/bash tool.
+`appendDeveloperInstructions`; Claude receives it through `systemPrompt.append`;
+Cursor receives it through its first ACP prompt. All supported providers call
+the endpoints with their native shell/bash tool.
 
 User-configured MCP servers discovered in `<GEMINI_CLI_HOME>/settings.json` and
 `<cwd>/.gemini/settings.json` are still surfaced in the composer MCP menu and

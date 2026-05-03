@@ -279,11 +279,12 @@ If you consider emitting something outside this list, either wire a consumer in 
 
 File: `apps/server/src/provider/sessionContextPrompt.ts`.
 
-All three providers reach T3's project services (managed runs, scheduled tasks, ticketing, prompts) the same way: through a shared `buildT3ServiceInjectionPrompt` string. Your adapter delivers it via the provider's native "put this in front of the model" mechanism:
+All supported providers reach T3's project services (managed runs, scheduled tasks, ticketing, prompts) the same way: through a shared `buildT3ServiceInjectionPrompt` string. Your adapter delivers it via the provider's native "put this in front of the model" mechanism:
 
 - Codex: `appendDeveloperInstructions` at session start.
 - Claude: `systemPrompt.append` at session start.
 - Gemini: ACP embedded-context resource on the first user prompt (ACP `session/new`/`session/load` don't accept a system-prompt field).
+- Cursor: prepend to the first ACP `session/prompt` text for the session, guarded by a resume-cursor context hash.
 
 Whatever the mechanism, call `buildProviderSessionContextPrompt` with `threadId`, project title, workspace root, worktree, system prompt, and — if `serverConfig.port > 0` and there's a checkpoint context — a `serviceContext` containing the MCP token and admin prompts. Hash the returned string with `hashProviderSessionContextPrompt` and stash it on the resume cursor so unchanged prompts aren't re-injected on the next session start.
 

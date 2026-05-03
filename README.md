@@ -1,16 +1,17 @@
 # T3 Code
 
-T3 Code is a minimal web GUI for coding agents, including Codex, Claude, and Gemini.
+T3 Code is a minimal web GUI for coding agents, including Codex, Claude, Gemini, and Cursor.
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex, Claude, and Gemini.
+> T3 Code currently supports Codex, Claude, Gemini, and Cursor.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://github.com/openai/codex) and run `codex login`
 > - Claude: install Claude Code and run `claude auth login`
 > - Gemini: install Gemini CLI and run `gemini auth` or set `GEMINI_API_KEY`
+> - Cursor: install Cursor CLI and run `agent login`
 
 ### Run without installing
 
