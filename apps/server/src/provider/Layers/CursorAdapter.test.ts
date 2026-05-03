@@ -1,6 +1,8 @@
 import { it, assert, vi } from "@effect/vitest";
 import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ServerConfig, type ServerConfigShape } from "../../config";
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
@@ -16,6 +18,9 @@ import type {
   JsonRpcId,
 } from "../cursor/CursorAcpConnection";
 import { makeCursorAdapterLive, type CursorAdapterLiveOptions } from "./CursorAdapter";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
+const harnessPath = path.join(repoRoot, "scripts/cursor-acp-harness.mjs");
 
 const serverConfigTestLayer = Layer.succeed(ServerConfig, {
   logLevel: "Error",
@@ -84,9 +89,12 @@ const projectionSnapshotQueryTestLayer = Layer.succeed(ProjectionSnapshotQuery, 
     Effect.succeed(Option.none<ProjectionThreadCheckpointContext>()),
 });
 
-function makeCursorTestLayer(options: CursorAdapterLiveOptions) {
+function makeCursorTestLayer(
+  options: CursorAdapterLiveOptions,
+  settingsOverrides: Parameters<typeof ServerSettingsService.layerTest>[0] = {},
+) {
   return makeCursorAdapterLive(options).pipe(
-    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(ServerSettingsService.layerTest(settingsOverrides)),
     Layer.provideMerge(serverConfigTestLayer),
     Layer.provideMerge(managedRunServiceTestLayer),
     Layer.provideMerge(projectionSnapshotQueryTestLayer),
@@ -623,7 +631,7 @@ it.effect("CursorAdapterLive answers Cursor ACP ask_question requests with optio
     });
     yield* adapter.sendTurn({ threadId, input: "Ask me", interactionMode: "default" });
 
-    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const events = yield* Stream.take(adapter.streamEvents, 6).pipe(Stream.runCollect);
     const request = Array.from(events).find((event) => event.type === "user-input.requested");
     assert.ok(request);
     assert.deepInclude(request?.payload as Record<string, unknown>, {
@@ -653,6 +661,110 @@ it.effect("CursorAdapterLive answers Cursor ACP ask_question requests with optio
     });
   }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
 });
+
+it.effect("CursorAdapterLive drives deterministic Cursor ACP harness ask_question over stdio", () =>
+  Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-harness-question");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: repoRoot,
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "T3_CURSOR_HARNESS_ASK_QUESTION",
+      interactionMode: "default",
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 6).pipe(Stream.runCollect);
+    const request = Array.from(events).find((event) => event.type === "user-input.requested");
+    assert.ok(request);
+    assert.deepInclude(request?.payload as Record<string, unknown>, {
+      questions: [
+        {
+          id: "next_step",
+          header: "Harness input",
+          question: "Which path should the harness take?",
+          options: [
+            { label: "Continue", description: "Continue" },
+            { label: "Stop", description: "Stop" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+
+    yield* adapter.respondToUserInput(threadId, ApprovalRequestId.makeUnsafe(request!.requestId!), {
+      next_step: "Continue",
+    });
+    yield* adapter.stopSession(threadId);
+  }).pipe(
+    Effect.provide(
+      makeCursorTestLayer(
+        {},
+        {
+          providers: {
+            cursor: {
+              enabled: true,
+              launchCommand: [process.execPath, harnessPath],
+            },
+          },
+        },
+      ),
+    ),
+  ),
+);
+
+it.effect(
+  "CursorAdapterLive drives deterministic Cursor ACP harness file approvals over stdio",
+  () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const fileThreadId = ThreadId.makeUnsafe("thread-cursor-harness-file");
+      yield* adapter.startSession({
+        threadId: fileThreadId,
+        provider: "cursor",
+        cwd: repoRoot,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: fileThreadId,
+        input: "T3_CURSOR_HARNESS_FILE_APPROVAL",
+        interactionMode: "default",
+      });
+
+      const fileEvents = yield* Stream.take(adapter.streamEvents, 6).pipe(Stream.runCollect);
+      const fileRequest = Array.from(fileEvents).find((event) => event.type === "request.opened");
+      assert.ok(fileRequest);
+      assert.deepInclude(fileRequest?.payload as Record<string, unknown>, {
+        requestType: "file_change_approval",
+        detail: "Edit File\nHarness file edit approval for docs/cursor-acp-harness.md",
+      });
+
+      yield* adapter.respondToRequest(
+        fileThreadId,
+        ApprovalRequestId.makeUnsafe(fileRequest!.requestId!),
+        "accept",
+      );
+      yield* adapter.stopSession(fileThreadId);
+    }).pipe(
+      Effect.provide(
+        makeCursorTestLayer(
+          {},
+          {
+            providers: {
+              cursor: {
+                enabled: true,
+                launchCommand: [process.execPath, harnessPath],
+              },
+            },
+          },
+        ),
+      ),
+    ),
+);
 
 it.effect("CursorAdapterLive resumes Cursor ACP sessions with session/load", () => {
   const calls: Array<{ method: string; input?: unknown }> = [];

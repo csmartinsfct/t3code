@@ -108,6 +108,10 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
 - The official docs describe `session/request_permission` for tool approvals and
   Cursor extension methods including `cursor/ask_question`, `cursor/create_plan`,
   `cursor/update_todos`, `cursor/task`, and `cursor/generate_image`.
+- `scripts/cursor-acp-harness.mjs` is the deterministic local ACP shim for
+  approval and user-input UI testing when the live model cannot be forced to
+  emit a specific client request. See
+  [Cursor ACP Harness](cursor-acp-harness.md).
 - Known local nuance: `session/set_config_option` uses `configId`, not
   `optionId`; sending `optionId` returned a schema error.
 
@@ -594,6 +598,8 @@ Required automated tests:
   configured Cursor profile providers
 - status probes use profile launch config and do not inherit ambient HOME
 - ACP command/env construction for default and profile launches
+- real stdio round-trip coverage using `scripts/cursor-acp-harness.mjs` for
+  deterministic `cursor/ask_question` and file-change permission requests
 - ACP adapter fixtures for assistant deltas, tool calls, thinking, plan
   proposals, permission requests, user-input requests, successful prompt
   completion, session load, and process errors
@@ -616,6 +622,10 @@ agent mcp list-tools <server-id>
 # bash -lc 'cursor-metric about --format json'
 # bash -lc 'cursor-metric acp'
 ```
+
+For approval and user-input UI paths, use
+[Cursor ACP Harness](cursor-acp-harness.md) instead of trying to coerce the live
+model into emitting `cursor/ask_question` or a file-edit permission.
 
 Before marking each implementation ticket complete, run:
 
