@@ -170,6 +170,7 @@ function mapProposedPlan(proposedPlan: OrchestrationProposedPlan): Thread["propo
     id: proposedPlan.id,
     turnId: proposedPlan.turnId,
     planMarkdown: proposedPlan.planMarkdown,
+    status: proposedPlan.status,
     implementedAt: proposedPlan.implementedAt,
     implementationThreadId: proposedPlan.implementationThreadId,
     createdAt: proposedPlan.createdAt,

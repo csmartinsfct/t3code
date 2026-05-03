@@ -29,6 +29,10 @@ The chat composer's MCP picker reflects provider-side MCP availability:
   triggering model inference.
 - Gemini: user-level `<GEMINI_CLI_HOME>/settings.json` (default
   `~/.gemini/settings.json`) plus project-local `.gemini/settings.json`
+- Cursor: Cursor CLI `agent mcp list` from the project cwd, backed by
+  user-level `<CURSOR_CONFIG_DIR>/mcp.json` (default `~/.cursor/mcp.json`) plus
+  project-local `.cursor/mcp.json`. ACP mode does not use Cursor
+  dashboard-configured MCP servers.
 
 Codex profiles use profile-scoped homes. The base provider reads `~/.codex/config.toml`
 unless `providers.codex.homePath` or `CODEX_HOME` overrides it; discovered profiles
@@ -43,13 +47,16 @@ sessions, so repo-local MCP config works without any manual terminal setup.
 
 ## Delivery Path: REST via Shell
 
-Every supported provider (Codex, Claude, Gemini) reaches T3 services through the same prompt-injected REST path. The shared builder `buildT3ServiceInjectionPrompt` (in `apps/server/src/provider/sessionContextPrompt.ts`) assembles the environment header, the REST endpoint table, the per-session Bearer token, and the admin prompt documents. Each adapter hands this identical string to its CLI:
+Every supported provider (Codex, Claude, Gemini, Cursor) reaches T3 services through the same prompt-injected REST path. The shared builder `buildT3ServiceInjectionPrompt` (in `apps/server/src/provider/sessionContextPrompt.ts`) assembles the environment header, the REST endpoint table, the per-session Bearer token, and the admin prompt documents. Each adapter hands this identical string to its CLI:
 
 - **Codex**: appended through `appendDeveloperInstructions` at session start.
 - **Claude**: appended through `systemPrompt.append` at session start.
 - **Gemini**: sent as an ACP embedded-context resource on the first user turn (ACP `session/new` and `session/load` do not accept a system-prompt field). The session-context hash is stored on the resume cursor so the prompt is only re-injected when it actually changes between process runs.
+- **Cursor**: prepended to the first ACP `session/prompt` text for the session.
+  The session-context hash is stored on the Cursor resume cursor so unchanged
+  service instructions are not re-injected after process restarts.
 
-The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files and surfaced in the composer MCP menu.
+The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files or status commands and surfaced in the composer MCP menu.
 
 Browser automation has two host implementations behind that same REST endpoint. Agents do not choose between them per call. `BrowserHostResolver` checks the project state: Playwright serves headless/server contexts and projects without native browser history; Electron serves projects whose embedded browser was mounted and persisted in `browser/<projectId>/host.json`. This keeps the prompt/tool contract stable while letting desktop agents act in the exact tab the user can see.
 
@@ -87,6 +94,7 @@ Thread start (with active project)
    - Codex: appendDeveloperInstructions
    - Claude: systemPrompt.append
    - Gemini: ACP embedded-context resource on the first prompt
+   - Cursor: first ACP prompt text, guarded by a resume-cursor context hash
 ```
 
 ### Token Lifecycle

@@ -1,7 +1,8 @@
 /**
  * MCP config file reader.
  *
- * Reads MCP server names from Claude, Codex, and Gemini configuration files on disk.
+ * Reads MCP server names from Claude, Codex, Gemini, and Cursor configuration
+ * files on disk.
  * Pure file-system reads — no runtime sessions required.
  *
  * @module mcpConfigReader
@@ -140,6 +141,34 @@ export const resolveGeminiMcpServerNames = Effect.fn("resolveGeminiMcpServerName
     .toSorted();
 });
 
+// ---------------------------------------------------------------------------
+// Cursor MCP resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve MCP server names from Cursor CLI settings.
+ *
+ * Cursor ACP uses MCP servers from user-level `<cursorConfigDir>/mcp.json` and
+ * project-local `<cwd>/.cursor/mcp.json`. Dashboard-configured MCP servers are
+ * not available to ACP sessions.
+ */
+export const resolveCursorMcpServerNames = Effect.fn("resolveCursorMcpServerNames")(function* (
+  cursorConfigDir: string,
+  cwd?: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const names = new Set<string>();
+
+  for (const configPath of resolveCursorMcpConfigPaths(cursorConfigDir, cwd)) {
+    const config = yield* readJsonFile(fileSystem, configPath);
+    if (config === undefined) continue;
+
+    collectMcpServerKeys(config, "mcpServers", names);
+  }
+
+  return [...names].toSorted();
+});
+
 /**
  * Resolve whether Codex trusts the exact project cwd.
  *
@@ -214,6 +243,19 @@ export function resolveGeminiSettingsPaths(geminiHome: string, cwd?: string): re
 
   if (cwd) {
     configPaths.add(path.join(cwd, ".gemini", "settings.json"));
+  }
+
+  return [...configPaths];
+}
+
+export function resolveCursorMcpConfigPaths(
+  cursorConfigDir: string,
+  cwd?: string,
+): readonly string[] {
+  const configPaths = new Set<string>([path.join(cursorConfigDir, "mcp.json")]);
+
+  if (cwd) {
+    configPaths.add(path.join(cwd, ".cursor", "mcp.json"));
   }
 
   return [...configPaths];

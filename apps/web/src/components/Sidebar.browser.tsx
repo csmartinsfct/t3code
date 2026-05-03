@@ -222,6 +222,44 @@ describe("Sidebar thread context menu helpers", () => {
             },
           ],
         }),
+        createProvider({
+          provider: "cursor",
+          displayName: "Cursor",
+          models: [
+            {
+              slug: "composer-2",
+              name: "Composer 2",
+              isCustom: false,
+              capabilities: {
+                reasoningEffortLevels: [],
+                supportsFastMode: false,
+                supportsThinkingToggle: false,
+                supportsPlan: true,
+                contextWindowOptions: [],
+                promptInjectedEffortLevels: [],
+              },
+            },
+          ],
+        }),
+        createProvider({
+          provider: "cursor:profile",
+          displayName: "Cursor (profile)",
+          models: [
+            {
+              slug: "composer-2-fast",
+              name: "Composer 2 Fast",
+              isCustom: false,
+              capabilities: {
+                reasoningEffortLevels: [],
+                supportsFastMode: false,
+                supportsThinkingToggle: false,
+                supportsPlan: true,
+                contextWindowOptions: [],
+                promptInjectedEffortLevels: [],
+              },
+            },
+          ],
+        }),
       ],
       projects: [
         { id: "project-1" as ProjectId, name: "Alpha" },
@@ -243,6 +281,10 @@ describe("Sidebar thread context menu helpers", () => {
       {
         id: "fork::gemini::gemini-2.5-pro",
         label: "Gemini — Gemini 2.5 Pro",
+      },
+      {
+        id: "fork::cursor::composer-2",
+        label: "Cursor — Composer 2",
       },
     ]);
     expect(moveItem?.disabled).toBe(false);

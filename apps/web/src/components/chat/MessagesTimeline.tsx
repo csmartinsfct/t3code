@@ -34,6 +34,7 @@ import {
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  ListChecksIcon,
   Loader2Icon,
   PackageIcon,
   type LucideIcon,
@@ -676,6 +677,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <div className="min-w-0 px-1 py-0.5">
           <ProposedPlanCard
             planMarkdown={row.proposedPlan.planMarkdown}
+            status={row.proposedPlan.status}
             cwd={markdownCwd}
             workspaceRoot={workspaceRoot}
             {...(onOpenTicketLink ? { onOpenTicketLink } : {})}
@@ -942,6 +944,7 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;
+  if (workEntry.requestKind === "plan") return ListChecksIcon;
   if (workEntry.requestKind === "tool") return WrenchIcon;
 
   if (workEntry.itemType === "command_execution" || workEntry.command) {

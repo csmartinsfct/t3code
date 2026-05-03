@@ -478,11 +478,16 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  const areProviderSettingsDirty = PROVIDER_SETTINGS.some((providerSettings) => {
-    const currentSettings = settings.providers[providerSettings.provider];
-    const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
-    return !Equal.equals(currentSettings, defaultSettings);
-  });
+  const areProviderSettingsDirty =
+    PROVIDER_SETTINGS.some((providerSettings) => {
+      const currentSettings = settings.providers[providerSettings.provider];
+      const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
+      return !Equal.equals(currentSettings, defaultSettings);
+    }) ||
+    !Equal.equals(
+      settings.providers.cursorProfiles,
+      DEFAULT_UNIFIED_SETTINGS.providers.cursorProfiles,
+    );
 
   const changedSettingLabels = useMemo(
     () => [
@@ -595,6 +600,19 @@ export function GeneralSettingsPanel() {
       settings.providers.cursor.dataDir !== DEFAULT_UNIFIED_SETTINGS.providers.cursor.dataDir ||
       !Equal.equals(settings.providers.cursor.env, DEFAULT_UNIFIED_SETTINGS.providers.cursor.env) ||
       settings.providers.cursor.customModels.length > 0,
+    ),
+    ...Object.fromEntries(
+      settings.providers.cursorProfiles.map((profile) => [
+        `cursor:${profile.profileId}`,
+        Boolean(
+          profile.launchCommand.length > 0 ||
+          profile.homePath ||
+          profile.configDir ||
+          profile.dataDir ||
+          Object.keys(profile.env).length > 0 ||
+          profile.customModels.length > 0,
+        ),
+      ]),
     ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
@@ -882,13 +900,7 @@ export function GeneralSettingsPanel() {
           _profileProviderKind: sp.provider as ProviderKind,
         });
       } else if (kind.startsWith("cursor:")) {
-        base.push({
-          provider: "cursor" as BaseProviderKind,
-          title: sp.displayName ?? sp.provider,
-          binaryPlaceholder: "Cursor agent binary path",
-          binaryDescription: "Path to the Cursor Agent CLI binary",
-          _profileProviderKind: sp.provider as ProviderKind,
-        });
+        continue;
       }
     }
     return base;

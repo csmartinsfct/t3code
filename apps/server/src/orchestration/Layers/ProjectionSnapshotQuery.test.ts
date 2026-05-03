@@ -391,6 +391,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               id: "plan-1",
               turnId: asTurnId("turn-1"),
               planMarkdown: "# Ship it",
+              status: "ready",
               implementedAt: "2026-02-24T00:00:05.500Z",
               implementationThreadId: ThreadId.makeUnsafe("thread-2"),
               createdAt: "2026-02-24T00:00:05.000Z",

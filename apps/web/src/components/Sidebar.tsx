@@ -159,6 +159,7 @@ import { useOrchestrationRunStatusSync } from "../hooks/useOrchestrationRunStatu
 import { openInPreferredEditor, resolvePreferredEditor } from "../editorPreferences";
 import { projectScriptCwd } from "../projectScripts";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
+import { isUserVisibleProvider } from "../providerVisibility";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -206,7 +207,10 @@ export function buildThreadContextMenuItems(input: {
   readonly canOpenInEditor?: boolean;
 }): ReadonlyArray<ContextMenuItem<string>> {
   const forkChildren = input.serverProviders
-    .filter((provider) => provider.enabled && provider.status === "ready")
+    .filter(
+      (provider) =>
+        isUserVisibleProvider(provider) && provider.enabled && provider.status === "ready",
+    )
     .flatMap((provider) =>
       provider.models.map((model) => ({
         id: `fork::${provider.provider}::${model.slug}`,

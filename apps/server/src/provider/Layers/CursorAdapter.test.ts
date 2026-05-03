@@ -1,6 +1,5 @@
 import { it, assert, vi } from "@effect/vitest";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ApprovalRequestId, ProviderItemId, ThreadId } from "@t3tools/contracts";
+import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
 
 import { ServerConfig, type ServerConfigShape } from "../../config";
@@ -10,13 +9,12 @@ import {
   type ProjectionThreadCheckpointContext,
 } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ServerSettingsService } from "../../serverSettings";
-import { ProviderAdapterRequestError, type ProviderAdapterError } from "../Errors";
-import { CursorAdapter, type CursorAdapterShape } from "../Services/CursorAdapter";
+import { CursorAdapter } from "../Services/CursorAdapter";
 import type {
-  LifecycleEntry,
-  ProviderLifecycleLoggerShape,
-} from "../Services/ProviderLifecycleLogger";
-import type { CursorTurnCommandInput, CursorTurnRunResult } from "../cursor/CursorTurnRunner";
+  CursorAcpConnection,
+  CursorAcpConnectionOptions,
+  JsonRpcId,
+} from "../cursor/CursorAcpConnection";
 import { makeCursorAdapterLive, type CursorAdapterLiveOptions } from "./CursorAdapter";
 
 const serverConfigTestLayer = Layer.succeed(ServerConfig, {
@@ -71,153 +69,166 @@ const managedRunServiceTestLayer = Layer.succeed(ManagedRunService, {
   resolveContextForToken: () => Effect.succeed(null),
 });
 
-function makeProjectionSnapshotQueryTestLayer(
-  context: ProjectionThreadCheckpointContext | null = null,
-) {
-  return Layer.succeed(ProjectionSnapshotQuery, {
-    getSnapshot: () => Effect.die(new Error("not mocked")),
-    getStartupSnapshot: () => Effect.die(new Error("not mocked")),
-    listProjects: () => Effect.die(new Error("not mocked")),
-    getThreadContent: () => Effect.die(new Error("not mocked")),
-    getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-    getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-    getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-    getProjectById: () => Effect.succeed(Option.none()),
-    getThreadById: () => Effect.succeed(Option.none()),
-    hasThreadUserMessages: () => Effect.succeed(Option.none()),
-    getThreadCheckpointContext: () =>
-      context === null ? Effect.succeed(Option.none()) : Effect.succeed(Option.some(context)),
-  });
-}
+const projectionSnapshotQueryTestLayer = Layer.succeed(ProjectionSnapshotQuery, {
+  getSnapshot: () => Effect.die(new Error("not mocked")),
+  getStartupSnapshot: () => Effect.die(new Error("not mocked")),
+  listProjects: () => Effect.die(new Error("not mocked")),
+  getThreadContent: () => Effect.die(new Error("not mocked")),
+  getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+  getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+  getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+  getProjectById: () => Effect.succeed(Option.none()),
+  getThreadById: () => Effect.succeed(Option.none()),
+  hasThreadUserMessages: () => Effect.succeed(Option.none()),
+  getThreadCheckpointContext: () =>
+    Effect.succeed(Option.none<ProjectionThreadCheckpointContext>()),
+});
 
-function makeCursorTestLayer(
-  options: CursorAdapterLiveOptions,
-  context: ProjectionThreadCheckpointContext | null = null,
-) {
+function makeCursorTestLayer(options: CursorAdapterLiveOptions) {
   return makeCursorAdapterLive(options).pipe(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(serverConfigTestLayer),
     Layer.provideMerge(managedRunServiceTestLayer),
-    Layer.provideMerge(makeProjectionSnapshotQueryTestLayer(context)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(projectionSnapshotQueryTestLayer),
   );
 }
 
-function makeCheckpointContext(
-  threadId: ThreadId = ThreadId.makeUnsafe("thread-cursor-context"),
-): ProjectionThreadCheckpointContext {
+function sessionInfo(sessionId = "cursor-session-1") {
   return {
-    threadId,
-    projectId: "project-cursor" as ProjectionThreadCheckpointContext["projectId"],
-    projectTitle: "Cursor Project",
-    workspaceRoot: "/workspace/cursor",
-    worktreePath: "/workspace/cursor-worktree",
-    systemPrompt: "Always follow the Cursor project prompt.",
-    checkpoints: [],
+    sessionId,
+    modes: { currentModeId: "agent", availableModes: [{ id: "agent" }, { id: "plan" }] },
+    models: {
+      currentModelId: "composer-2[fast=true]",
+      availableModels: [{ modelId: "composer-2[fast=true]", name: "composer-2" }],
+    },
+    configOptions: [],
   };
 }
 
-function makeCursorRunResult(
-  sessionId = "cursor-session-1",
-  text = "Hello from Cursor",
-): CursorTurnRunResult {
-  const result = {
-    type: "result" as const,
-    subtype: "success",
-    isError: false,
-    sessionId,
-    requestId: "cursor-request-1",
-    usage: {
-      inputTokens: 10,
-      outputTokens: 5,
-      cacheReadTokens: 2,
-    },
-    raw: {
-      type: "result",
-      subtype: "success",
-      session_id: sessionId,
-      request_id: "cursor-request-1",
-    },
-  };
+function configOptionsOnlySessionInfo() {
   return {
-    events: [
+    configOptions: [
       {
-        type: "assistant",
-        text,
-        raw: {
-          type: "assistant",
-          message: { content: [{ type: "text", text }] },
-        },
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        type: "select",
+        currentValue: "plan",
+        options: [
+          { value: "agent", name: "Agent" },
+          { value: "plan", name: "Plan" },
+        ],
       },
-      result,
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "composer-2[fast=true]",
+        options: [{ value: "composer-2[fast=true]", name: "composer-2" }],
+      },
     ],
-    result,
-    sessionId,
-    requestId: "cursor-request-1",
-    usage: result.usage,
-    exitCode: 0,
-    stderr: "",
   };
 }
 
-function makeCursorRunResultWithAssistantEvents(
-  sessionId: string,
-  assistantTexts: ReadonlyArray<string>,
-): CursorTurnRunResult {
-  const base = makeCursorRunResult(sessionId, "");
-  const assistantEvents = assistantTexts.map((text) => ({
-    type: "assistant" as const,
-    text,
-    raw: {
-      type: "assistant",
-      message: { content: [{ type: "text", text }] },
-    },
-  }));
+function makeFakeConnection(
+  options: CursorAcpConnectionOptions,
+  hooks: {
+    readonly prompt?: () => Promise<unknown> | unknown;
+    readonly sessionId?: string;
+    readonly calls: Array<{ method: string; input?: unknown }>;
+    readonly responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }>;
+  },
+): CursorAcpConnection {
+  const sessionId = hooks.sessionId ?? "cursor-session-1";
   return {
-    ...base,
-    events: [...assistantEvents, base.result],
+    childPid: 123,
+    initialize: async () => {
+      hooks.calls.push({ method: "initialize" });
+      return {};
+    },
+    authenticate: async () => {
+      hooks.calls.push({ method: "authenticate" });
+      return {};
+    },
+    newSession: async (input) => {
+      hooks.calls.push({ method: "session/new", input });
+      return { sessionId, result: sessionInfo(sessionId) };
+    },
+    loadSession: async (input) => {
+      hooks.calls.push({ method: "session/load", input });
+      return sessionInfo(input.sessionId);
+    },
+    setConfigOption: async (input) => {
+      hooks.calls.push({ method: "session/set_config_option", input });
+      if (input.configId === "mode") {
+        return configOptionsOnlySessionInfo();
+      }
+      return sessionInfo(sessionId);
+    },
+    prompt: async (input) => {
+      hooks.calls.push({ method: "session/prompt", input });
+      if (hooks.prompt) return await hooks.prompt();
+      options.onNotification?.({
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "hello" },
+          },
+        },
+      });
+      return { stopReason: "end_turn" };
+    },
+    respond: (input) => {
+      hooks.responses.push(input);
+    },
+    cancel: async (id) => {
+      hooks.calls.push({ method: "session/cancel", input: id });
+    },
+    close: () => {
+      hooks.calls.push({ method: "close" });
+    },
   };
 }
 
-it.effect("CursorAdapterLive starts a Cursor session and sends a text turn", () => {
-  const runInputs: CursorTurnCommandInput[] = [];
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-1"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-    runInputs.push(input);
-    return Effect.succeed(makeCursorRunResult(input.resumeSessionId));
-  });
+it.effect("CursorAdapterLive starts and sends turns through Cursor ACP", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, { calls, responses }),
+  );
 
   return Effect.gen(function* () {
     const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor");
+    const threadId = ThreadId.makeUnsafe("thread-cursor-acp");
 
     const session = yield* adapter.startSession({
       threadId,
       provider: "cursor",
       cwd: "/tmp/project",
-      modelSelection: { provider: "cursor", model: "auto" },
+      modelSelection: { provider: "cursor", model: "composer-2" },
       runtimeMode: "full-access",
     });
 
-    assert.equal(session.provider, "cursor");
     assert.deepInclude(session.resumeCursor as Record<string, unknown>, {
       sessionId: "cursor-session-1",
       provider: "cursor",
       cwd: "/tmp/project",
-      model: "auto",
-      contextPromptInjected: true,
+      model: "composer-2",
     });
 
-    const turn = yield* adapter.sendTurn({
+    yield* adapter.sendTurn({
       threadId,
       input: "Say hello",
-      modelSelection: { provider: "cursor", model: "auto" },
+      modelSelection: { provider: "cursor", model: "composer-2" },
+      interactionMode: "plan",
     });
-    const events = yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
+
+    const events = yield* Stream.take(adapter.streamEvents, 9).pipe(Stream.runCollect);
     const eventTypes = Array.from(events).map((event) => event.type);
 
-    assert.equal(turn.threadId, threadId);
-    assert.ok(turn.turnId.startsWith("cursor-turn-"));
     assert.deepEqual(eventTypes, [
       "session.started",
       "thread.started",
@@ -226,658 +237,442 @@ it.effect("CursorAdapterLive starts a Cursor session and sends a text turn", () 
       "turn.started",
       "item.started",
       "content.delta",
-      "thread.token-usage.updated",
       "item.completed",
       "turn.completed",
-      "session.state.changed",
     ]);
-    assert.equal(runInputs[0]?.resumeSessionId, "cursor-session-1");
-    assert.equal(runInputs[0]?.runtimeMode, "full-access");
-    assert.equal(runInputs[0]?.model, "auto");
-    assert.equal(runInputs[0]?.streamPartialOutput, true);
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-});
-
-it.effect("CursorAdapterLive skips duplicate final Cursor assistant snapshots", () => {
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-dedup"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) =>
-    Effect.succeed(
-      makeCursorRunResultWithAssistantEvents(input.resumeSessionId ?? "cursor-session-dedup", [
-        "stored",
-        " cursor-orchid-9137",
-        "stored cursor-orchid-9137",
-      ]),
-    ),
-  );
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor-dedup");
-
-    yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/tmp/project",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-      runtimeMode: "full-access",
-    });
-    yield* adapter.sendTurn({
-      threadId,
-      input: "Remember the nonce.",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-    });
-
-    const events = yield* Stream.take(adapter.streamEvents, 12).pipe(Stream.runCollect);
-    const assistantDeltas = Array.from(events)
-      .filter((event) => event.type === "content.delta")
-      .map((event) => event.payload.delta);
-
-    assert.deepEqual(assistantDeltas, ["stored", " cursor-orchid-9137"]);
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-});
-
-it.effect("CursorAdapterLive deduplicates assistant snapshots across tool phases", () => {
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-tool-dedup"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-tool-dedup", "");
-    return Effect.succeed({
-      ...base,
-      events: [
-        {
-          type: "assistant" as const,
-          text: "Creating",
-          raw: {
-            type: "assistant",
-            message: { content: [{ type: "text", text: "Creating" }] },
-          },
-        },
-        {
-          type: "assistant" as const,
-          text: " docs/cursor-smoke.md.\n\n",
-          raw: {
-            type: "assistant",
-            message: { content: [{ type: "text", text: " docs/cursor-smoke.md.\n\n" }] },
-          },
-        },
-        {
-          type: "assistant" as const,
-          text: "Creating docs/cursor-smoke.md.\n\n",
-          raw: {
-            type: "assistant",
-            message: {
-              content: [{ type: "text", text: "Creating docs/cursor-smoke.md.\n\n" }],
-            },
-          },
-        },
-        {
-          type: "tool_call" as const,
-          subtype: "started",
-          callId: "tool-edit-1",
-          toolCall: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
-          raw: {
-            type: "tool_call",
-            subtype: "started",
-            call_id: "tool-edit-1",
-            tool_call: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
-          },
-        },
-        {
-          type: "tool_call" as const,
-          subtype: "completed",
-          callId: "tool-edit-1",
-          toolCall: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
-          raw: {
-            type: "tool_call",
-            subtype: "completed",
-            call_id: "tool-edit-1",
-            tool_call: { editToolCall: { args: { target_file: "docs/cursor-smoke.md" } } },
-          },
-        },
-        {
-          type: "assistant" as const,
-          text: "**Summary",
-          raw: {
-            type: "assistant",
-            message: { content: [{ type: "text", text: "**Summary" }] },
-          },
-        },
-        {
-          type: "assistant" as const,
-          text: ":** Added the smoke file.",
-          raw: {
-            type: "assistant",
-            message: { content: [{ type: "text", text: ":** Added the smoke file." }] },
-          },
-        },
-        {
-          type: "assistant" as const,
-          text: "**Summary:** Added the smoke file.",
-          raw: {
-            type: "assistant",
-            message: {
-              content: [{ type: "text", text: "**Summary:** Added the smoke file." }],
-            },
-          },
-        },
-        base.result,
-      ],
-    } satisfies CursorTurnRunResult);
-  });
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor-tool-dedup");
-
-    yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/tmp/project",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-      runtimeMode: "full-access",
-    });
-    yield* adapter.sendTurn({
-      threadId,
-      input: "Create a smoke file.",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-    });
-
-    const events = yield* Stream.take(adapter.streamEvents, 16).pipe(Stream.runCollect);
-    const assistantText = Array.from(events)
-      .flatMap((event) =>
-        event.type === "content.delta" && event.payload.streamKind === "assistant_text"
-          ? [event.payload.delta]
-          : [],
-      )
-      .join("");
-
-    assert.equal(
-      assistantText,
-      "Creating docs/cursor-smoke.md.\n\n**Summary:** Added the smoke file.",
+    assert.ok(calls.some((call) => call.method === "session/new"));
+    assert.deepInclude(
+      calls.find((call) => call.method === "session/set_config_option")?.input as Record<
+        string,
+        unknown
+      >,
+      {
+        configId: "mode",
+        value: "plan",
+      },
     );
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+    assert.deepInclude(
+      calls.filter((call) => call.method === "session/set_config_option")[1]?.input as Record<
+        string,
+        unknown
+      >,
+      {
+        configId: "model",
+        value: "composer-2[fast=true]",
+      },
+    );
+    assert.ok(createConnection.mock.calls[0]?.[0].settings.binaryPath === "agent");
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
 });
 
-it.effect("CursorAdapterLive maps Cursor tool calls into item lifecycle events", () => {
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-tools"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-tools", "");
-    return Effect.succeed({
-      ...base,
-      events: [
-        {
-          type: "tool_call" as const,
-          subtype: "started",
-          callId: "tool-1",
-          toolCall: { shellToolCall: { args: { command: "git status --short" } } },
-          raw: {
-            type: "tool_call",
-            subtype: "started",
-            call_id: "tool-1",
-            tool_call: { shellToolCall: { args: { command: "git status --short" } } },
-          },
-        },
-        {
-          type: "tool_call" as const,
-          subtype: "completed",
-          callId: "tool-1",
-          toolCall: { shellToolCall: { args: { command: "git status --short" } } },
-          raw: {
-            type: "tool_call",
-            subtype: "completed",
-            call_id: "tool-1",
-            tool_call: { shellToolCall: { args: { command: "git status --short" } } },
-          },
-        },
-        base.result,
-      ],
-    } satisfies CursorTurnRunResult);
-  });
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor-tools");
-
-    yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/tmp/project",
-      runtimeMode: "full-access",
-    });
-    yield* adapter.sendTurn({ threadId, input: "Run git status." });
-
-    const events = yield* Stream.take(adapter.streamEvents, 10).pipe(Stream.runCollect);
-    const toolEvents = Array.from(events).filter(
-      (event) => event.type === "item.started" || event.type === "item.completed",
-    );
-
-    assert.equal(toolEvents.length, 2);
-    assert.deepEqual(
-      toolEvents.map((event) => event.type),
-      ["item.started", "item.completed"],
-    );
-    assert.deepInclude(toolEvents[0]?.payload ?? {}, {
-      itemType: "command_execution",
-      status: "inProgress",
-      title: "Shell",
-      detail: "Shell: git status --short",
-    });
-    assert.deepInclude(toolEvents[1]?.payload ?? {}, {
-      itemType: "command_execution",
-      status: "completed",
-      title: "Shell",
-    });
-    assert.equal(String(toolEvents[0]?.itemId), String(toolEvents[1]?.itemId));
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-});
-
-it.effect("CursorAdapterLive captures Cursor createPlan interactions as proposed plans", () => {
-  const runInputs: CursorTurnCommandInput[] = [];
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-plan"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-    runInputs.push(input);
-    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-plan", "");
-    const planMarkdown = "# Add cursor-plan doc\n\n- Create `docs/cursor-plan.md`.";
-    const planArgs = {
-      name: "Add cursor-plan doc",
-      overview: "Add a minimal docs file.",
-      plan: planMarkdown,
-      todos: [
-        {
-          id: "add-doc",
-          content: "Create docs/cursor-plan.md",
-          status: "TODO_STATUS_PENDING",
-        },
-      ],
-      phases: [],
-    };
-    return Effect.succeed({
-      ...base,
-      events: [
-        {
-          type: "tool_call" as const,
-          subtype: "started",
-          callId: "tool-plan-1",
-          toolCall: { createPlanToolCall: { args: planArgs } },
-          raw: {
-            type: "tool_call",
-            subtype: "started",
-            call_id: "tool-plan-1",
-            tool_call: { createPlanToolCall: { args: planArgs } },
-          },
-        },
-        {
-          type: "interaction_query" as const,
-          subtype: "request",
-          queryType: "createPlanRequestQuery",
-          query: {
-            id: 0,
-            createPlanRequestQuery: {
-              args: planArgs,
-              toolCallId: "tool-plan-1",
-            },
-          },
-          raw: {
-            type: "interaction_query",
-            subtype: "request",
-            query_type: "createPlanRequestQuery",
-            query: {
-              id: 0,
-              createPlanRequestQuery: {
-                args: planArgs,
-                toolCallId: "tool-plan-1",
-              },
-            },
-          },
-        },
-        {
-          type: "interaction_query" as const,
-          subtype: "response",
-          queryType: "createPlanRequestQuery",
-          response: { id: 0, createPlanRequestResponse: { result: { success: {} } } },
-          raw: {
-            type: "interaction_query",
-            subtype: "response",
-            query_type: "createPlanRequestQuery",
-            response: { id: 0, createPlanRequestResponse: { result: { success: {} } } },
-          },
-        },
-        {
-          type: "tool_call" as const,
-          subtype: "completed",
-          callId: "tool-plan-1",
-          toolCall: {
-            createPlanToolCall: {
-              args: planArgs,
-              result: { success: {}, planUri: "" },
-            },
-          },
-          raw: {
-            type: "tool_call",
-            subtype: "completed",
-            call_id: "tool-plan-1",
-            tool_call: {
-              createPlanToolCall: {
-                args: planArgs,
-                result: { success: {}, planUri: "" },
-              },
-            },
-          },
-        },
-        base.result,
-      ],
-    } satisfies CursorTurnRunResult);
-  });
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor-plan");
-
-    yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/tmp/project",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-      runtimeMode: "full-access",
-    });
-    yield* adapter.sendTurn({
-      threadId,
-      input: "Plan a docs change.",
-      modelSelection: { provider: "cursor", model: "composer-2" },
-      interactionMode: "plan-accept",
-    });
-
-    const events = yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
-    const proposedEvents = Array.from(events).filter(
-      (event) => event.type === "turn.proposed.completed",
-    );
-    const toolEvents = Array.from(events).filter(
-      (event) => event.type === "item.started" || event.type === "item.completed",
-    );
-
-    assert.equal(runInputs[0]?.headlessMode, "plan");
-    assert.equal(proposedEvents.length, 1);
-    assert.equal(proposedEvents[0]?.type, "turn.proposed.completed");
-    if (proposedEvents[0]?.type === "turn.proposed.completed") {
-      assert.equal(
-        proposedEvents[0].payload.planMarkdown,
-        "# Add cursor-plan doc\n\n- Create `docs/cursor-plan.md`.",
-      );
-      assert.deepEqual(proposedEvents[0].providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-plan-1"),
-      });
-    }
-    assert.deepInclude(toolEvents[0]?.payload ?? {}, {
-      itemType: "plan",
-      status: "inProgress",
-      title: "Create Plan",
-      detail: "Create Plan: Add cursor-plan doc",
-    });
-    assert.deepInclude(toolEvents[1]?.payload ?? {}, {
-      itemType: "plan",
-      status: "completed",
-      title: "Create Plan",
-    });
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-});
-
-it.effect("CursorAdapterLive injects T3 context only on the first matching prompt", () => {
-  const runInputs: CursorTurnCommandInput[] = [];
-  const threadId = ThreadId.makeUnsafe("thread-cursor-context");
-  const checkpointContext = makeCheckpointContext(threadId);
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-context"));
-  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-    runInputs.push(input);
-    return Effect.succeed(makeCursorRunResult(input.resumeSessionId));
-  });
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-
-    const session = yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/workspace/cursor-worktree",
-      runtimeMode: "full-access",
-    });
-    const startCursor = session.resumeCursor as {
-      contextPromptHash?: string;
-      contextPromptInjected?: boolean;
-    };
-    assert.equal(typeof startCursor.contextPromptHash, "string");
-    assert.equal(startCursor.contextPromptInjected, false);
-
-    const firstTurn = yield* adapter.sendTurn({
-      threadId,
-      input: "Inspect the project.",
-    });
-    yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
-
-    const firstCursor = firstTurn.resumeCursor as { contextPromptInjected?: boolean };
-    assert.equal(firstCursor.contextPromptInjected, true);
-    assert.match(runInputs[0]?.prompt ?? "", /## T3 Project Context/);
-    assert.match(runInputs[0]?.prompt ?? "", /Cursor Project/);
-    assert.match(runInputs[0]?.prompt ?? "", /Authorization: Bearer test-token/);
-    assert.match(runInputs[0]?.prompt ?? "", /Always follow the Cursor project prompt\./);
-    assert.match(runInputs[0]?.prompt ?? "", /Inspect the project\./);
-
-    yield* adapter.sendTurn({
-      threadId,
-      input: "Continue.",
-    });
-    yield* Stream.take(adapter.streamEvents, 8).pipe(Stream.runCollect);
-
-    assert.equal(runInputs[1]?.prompt, "Continue.");
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn }, checkpointContext)));
-});
-
-it.effect(
-  "CursorAdapterLive reuses a matching resume cursor without creating or reinjecting",
-  () => {
-    const runInputs: CursorTurnCommandInput[] = [];
-    const threadId = ThreadId.makeUnsafe("thread-cursor-resume");
-    const checkpointContext = makeCheckpointContext(threadId);
-    const createChat = vi.fn(() => Effect.succeed("cursor-session-original"));
-    const runTurn = vi.fn((input: CursorTurnCommandInput) => {
-      runInputs.push(input);
-      return Effect.succeed(makeCursorRunResult(input.resumeSessionId));
-    });
-
-    return Effect.gen(function* () {
-      const adapter = yield* CursorAdapter;
-
-      const initialSession = yield* adapter.startSession({
-        threadId,
-        provider: "cursor",
-        cwd: "/workspace/cursor-worktree",
-        runtimeMode: "full-access",
-      });
-      const initialCursor = initialSession.resumeCursor as { contextPromptHash?: string };
-      yield* adapter.stopSession(threadId);
-
-      yield* adapter.startSession({
-        threadId,
-        provider: "cursor",
-        cwd: "/workspace/cursor-worktree",
-        runtimeMode: "full-access",
-        resumeCursor: {
-          sessionId: "cursor-session-resumed",
-          provider: "cursor",
-          cwd: "/workspace/cursor-worktree",
-          contextPromptHash: initialCursor.contextPromptHash,
-          contextPromptInjected: true,
-        },
-      });
-      yield* adapter.sendTurn({ threadId, input: "Continue." });
-      yield* Stream.take(adapter.streamEvents, 14).pipe(Stream.runCollect);
-
-      assert.equal(createChat.mock.calls.length, 1);
-      assert.equal(runInputs[0]?.resumeSessionId, "cursor-session-resumed");
-      assert.equal(runInputs[0]?.prompt, "Continue.");
-    }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn }, checkpointContext)));
-  },
-);
-
-it.effect("CursorAdapterLive rejects concurrent turns and recovers after runner failure", () => {
-  let calls = 0;
-  let adapterRef: CursorAdapterShape | undefined;
-  let nestedFailureTag: string | undefined;
-  const threadId = ThreadId.makeUnsafe("thread-cursor-concurrent");
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-active"));
-  const runTurnImpl = (
-    input: CursorTurnCommandInput,
-  ): Effect.Effect<CursorTurnRunResult, ProviderAdapterError> => {
-    calls += 1;
-    if (calls === 1) {
-      return Effect.gen(function* () {
-        const failure = yield* adapterRef!
-          .sendTurn({
-            threadId,
-            input: "Nested concurrent turn.",
-          })
-          .pipe(
-            Effect.flip,
-            Effect.catch((unexpected) =>
-              Effect.die(new Error(`Expected nested sendTurn to fail, got ${unexpected.turnId}`)),
-            ),
-          );
-        nestedFailureTag = failure._tag;
-        return makeCursorRunResult(input.resumeSessionId);
-      });
-    }
-    if (calls === 2) {
-      return Effect.gen(function* () {
-        return yield* new ProviderAdapterRequestError({
-          provider: "cursor",
-          method: "sendTurn",
-          detail: "boom",
+it.effect("CursorAdapterLive captures Cursor ACP create_plan requests as proposed plans", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onRequest?.({
+          id: 42,
+          method: "cursor/create_plan",
+          params: { toolCallId: "tool-plan-1", plan: "# Plan\n\nDo the thing." },
         });
-      });
-    }
-    return Effect.succeed(makeCursorRunResult(input.resumeSessionId));
-  };
-  const runTurn = vi.fn(runTurnImpl);
-
-  return Effect.gen(function* () {
-    const adapter = yield* CursorAdapter;
-    adapterRef = adapter;
-
-    yield* adapter.startSession({
-      threadId,
-      provider: "cursor",
-      cwd: "/tmp/project",
-      runtimeMode: "full-access",
-    });
-    yield* adapter.sendTurn({ threadId, input: "First." });
-    yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
-    assert.equal(nestedFailureTag, "ProviderAdapterValidationError");
-
-    yield* adapter.sendTurn({ threadId, input: "Fail once." });
-    yield* Stream.take(adapter.streamEvents, 5).pipe(Stream.runCollect);
-
-    const recovered = yield* adapter.sendTurn({ threadId, input: "Recover." });
-    yield* Stream.take(adapter.streamEvents, 8).pipe(Stream.runCollect);
-
-    assert.ok(recovered.turnId.startsWith("cursor-turn-"));
-    assert.equal(calls, 3);
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-});
-
-it.effect("CursorAdapterLive writes lifecycle entries while interrupting active turns", () => {
-  const lifecycleEntries: Array<{ threadId: ThreadId | null; entry: LifecycleEntry }> = [];
-  const lifecycleLogger: ProviderLifecycleLoggerShape = {
-    log: (threadId, entry) =>
-      Effect.sync(() => {
-        lifecycleEntries.push({ threadId, entry });
-      }),
-    close: () => Effect.void,
-  };
-  const createChat = vi.fn(() => Effect.succeed("cursor-session-lifecycle"));
-  const runTurn = vi.fn(
-    () => Effect.never as Effect.Effect<CursorTurnRunResult, ProviderAdapterError>,
+        return { stopReason: "end_turn" };
+      },
+    }),
   );
 
   return Effect.gen(function* () {
     const adapter = yield* CursorAdapter;
-    const threadId = ThreadId.makeUnsafe("thread-cursor-lifecycle");
-
+    const threadId = ThreadId.makeUnsafe("thread-cursor-plan-acp");
     yield* adapter.startSession({
       threadId,
       provider: "cursor",
       cwd: "/tmp/project",
       runtimeMode: "full-access",
     });
-    const turn = yield* adapter.sendTurn({ threadId, input: "Keep working." });
-    yield* adapter.interruptTurn(threadId, turn.turnId);
+    yield* adapter.sendTurn({ threadId, input: "Plan only", interactionMode: "plan" });
 
-    const events = lifecycleEntries.map((entry) => entry.entry.event);
-    assert.deepEqual(events, ["cursor.turn.interrupt.requested", "cursor.turn.interrupt.finished"]);
-    assert.equal(lifecycleEntries[0]?.threadId, threadId);
-    assert.deepInclude(lifecycleEntries[0]?.entry.details ?? {}, {
-      cleanupRunner: "CursorTurnRunner",
-      graceMs: 2000,
-      adapterWaitMs: 5000,
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const proposed = Array.from(events).find((event) => event.type === "turn.proposed.completed");
+    const request = Array.from(events).find((event) => event.type === "request.opened");
+
+    assert.ok(proposed);
+    assert.deepEqual(proposed?.payload, { planMarkdown: "# Plan\n\nDo the thing." });
+    assert.ok(request);
+    assert.deepInclude(request?.payload as Record<string, unknown>, {
+      requestType: "plan_approval",
+      detail: "Review Cursor's proposed plan to continue this turn.",
     });
-  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn, lifecycleLogger })));
-});
+    assert.deepEqual(responses, []);
 
-it.effect(
-  "CursorAdapterLive fails unsupported Cursor interaction and fork features clearly",
-  () => {
-    const createChat = vi.fn(() => Effect.succeed("cursor-session-unsupported"));
-    const runTurn = vi.fn((input: CursorTurnCommandInput) =>
-      Effect.succeed(makeCursorRunResult(input.resumeSessionId)),
+    yield* adapter.respondToRequest(
+      threadId,
+      ApprovalRequestId.makeUnsafe(request!.requestId!),
+      "accept",
     );
 
-    return Effect.gen(function* () {
-      const adapter = yield* CursorAdapter;
-      const threadId = ThreadId.makeUnsafe("thread-cursor-unsupported");
+    assert.deepEqual(responses[0]?.result, { outcome: { outcome: "accepted" } });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
 
-      yield* adapter.startSession({
-        threadId,
-        provider: "cursor",
-        cwd: "/tmp/project",
-        runtimeMode: "full-access",
-      });
+it.effect("CursorAdapterLive rejects Cursor ACP create_plan requests on decline", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onRequest?.({
+          id: 43,
+          method: "cursor/create_plan",
+          params: { toolCallId: "tool-plan-2", plan: "# Plan\n\nDo not do the thing." },
+        });
+        return { stopReason: "end_turn" };
+      },
+    }),
+  );
 
-      const approvalFailure = yield* Effect.flip(
-        adapter.respondToRequest(threadId, ApprovalRequestId.makeUnsafe("req-1"), "accept"),
-      );
-      if (approvalFailure._tag !== "ProviderAdapterRequestError") {
-        assert.fail(`Expected ProviderAdapterRequestError, got ${approvalFailure._tag}`);
-      }
-      assert.match(approvalFailure.detail, /interaction round trips are not supported/);
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-plan-reject-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Plan only", interactionMode: "plan" });
 
-      const userInputFailure = yield* Effect.flip(
-        adapter.respondToUserInput(threadId, ApprovalRequestId.makeUnsafe("req-2"), {}),
-      );
-      if (userInputFailure._tag !== "ProviderAdapterRequestError") {
-        assert.fail(`Expected ProviderAdapterRequestError, got ${userInputFailure._tag}`);
-      }
-      assert.match(userInputFailure.detail, /interaction round trips are not supported/);
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const request = Array.from(events).find((event) => event.type === "request.opened");
+    assert.ok(request);
 
-      const rollbackFailure = yield* Effect.flip(adapter.rollbackThread(threadId, 1));
-      if (rollbackFailure._tag !== "ProviderAdapterRequestError") {
-        assert.fail(`Expected ProviderAdapterRequestError, got ${rollbackFailure._tag}`);
-      }
-      assert.match(rollbackFailure.detail, /rollback or rewind/);
+    yield* adapter.respondToRequest(
+      threadId,
+      ApprovalRequestId.makeUnsafe(request!.requestId!),
+      "decline",
+    );
 
-      const forkFailure = yield* Effect.flip(
-        adapter.startSession({
-          threadId: ThreadId.makeUnsafe("thread-cursor-fork"),
-          provider: "cursor",
-          cwd: "/tmp/project",
-          runtimeMode: "full-access",
-          resumeCursor: {
-            sessionId: "cursor-session-source",
-            provider: "cursor",
-            fork: true,
+    assert.deepEqual(responses[0]?.result, {
+      outcome: { outcome: "rejected", reason: "Plan rejected in T3 Code." },
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive classifies real Cursor ACP command permission payloads", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onNotification?.({
+          method: "session/update",
+          params: {
+            sessionId: "cursor-session-1",
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "tool-command-1",
+              title: "Terminal",
+              kind: "execute",
+              status: "pending",
+              rawInput: {},
+            },
           },
-        }),
-      );
-      if (forkFailure._tag !== "ProviderAdapterRequestError") {
-        assert.fail(`Expected ProviderAdapterRequestError, got ${forkFailure._tag}`);
-      }
-      assert.match(forkFailure.detail, /fork or conversation copy/);
-    }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
-  },
-);
+        });
+        options.onNotification?.({
+          method: "session/update",
+          params: {
+            sessionId: "cursor-session-1",
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tool-command-1",
+              status: "in_progress",
+            },
+          },
+        });
+        options.onRequest?.({
+          id: 44,
+          method: "session/request_permission",
+          params: {
+            sessionId: "cursor-session-1",
+            toolCall: {
+              toolCallId: "tool-command-1",
+              title: "`pwd`",
+              kind: "execute",
+              status: "pending",
+              content: [
+                {
+                  type: "content",
+                  content: { type: "text", text: "Not in allowlist: pwd" },
+                },
+              ],
+            },
+            options: [
+              { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+              { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
+              { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            ],
+          },
+        });
+        return { stopReason: "end_turn" };
+      },
+    }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-command-permission-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Run pwd", interactionMode: "default" });
+
+    const events = yield* Stream.take(adapter.streamEvents, 8).pipe(Stream.runCollect);
+    const toolUpdate = Array.from(events).find((event) => event.type === "item.updated");
+    const request = Array.from(events).find((event) => event.type === "request.opened");
+
+    assert.deepInclude(toolUpdate?.payload as Record<string, unknown>, {
+      itemType: "command_execution",
+      status: "inProgress",
+      title: "Terminal",
+    });
+    assert.deepInclude(request?.payload as Record<string, unknown>, {
+      requestType: "command_execution_approval",
+      detail: "`pwd`\nNot in allowlist: pwd",
+    });
+
+    yield* adapter.respondToRequest(
+      threadId,
+      ApprovalRequestId.makeUnsafe(request!.requestId!),
+      "acceptForSession",
+    );
+
+    assert.deepEqual(responses[0]?.result, {
+      outcome: { outcome: "selected", optionId: "allow-always" },
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive classifies Cursor ACP file permission payloads", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onRequest?.({
+          id: 45,
+          method: "session/request_permission",
+          params: {
+            sessionId: "cursor-session-1",
+            toolCall: {
+              toolCallId: "tool-edit-1",
+              title: "Edit File",
+              kind: "edit",
+              status: "pending",
+            },
+            options: [
+              { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+              { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            ],
+          },
+        });
+        return { stopReason: "end_turn" };
+      },
+    }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-file-permission-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Edit file", interactionMode: "default" });
+
+    const events = yield* Stream.take(adapter.streamEvents, 6).pipe(Stream.runCollect);
+    const request = Array.from(events).find((event) => event.type === "request.opened");
+    assert.deepInclude(request?.payload as Record<string, unknown>, {
+      requestType: "file_change_approval",
+      detail: "Edit File",
+    });
+
+    yield* adapter.respondToRequest(
+      threadId,
+      ApprovalRequestId.makeUnsafe(request!.requestId!),
+      "decline",
+    );
+
+    assert.deepEqual(responses[0]?.result, {
+      outcome: { outcome: "selected", optionId: "reject-once" },
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive cancels pending Cursor requests on interrupt", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  let resolvePrompt: ((value: unknown) => void) | undefined;
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onRequest?.({
+          id: 46,
+          method: "session/request_permission",
+          params: {
+            sessionId: "cursor-session-1",
+            toolCall: {
+              toolCallId: "tool-command-2",
+              title: "`pwd`",
+              kind: "execute",
+              status: "pending",
+            },
+            options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+          },
+        });
+        return await new Promise((resolve) => {
+          resolvePrompt = resolve;
+        });
+      },
+    }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-interrupt-pending-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    const turn = yield* adapter.sendTurn({
+      threadId,
+      input: "Run pwd",
+      interactionMode: "default",
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 6).pipe(Stream.runCollect);
+    const request = Array.from(events).find((event) => event.type === "request.opened");
+    assert.ok(request);
+
+    yield* adapter.interruptTurn(threadId, turn.turnId);
+    resolvePrompt?.({ stopReason: "cancelled" });
+
+    assert.deepEqual(responses[0]?.result, { outcome: { outcome: "cancelled" } });
+    assert.deepEqual(
+      calls.find((call) => call.method === "session/cancel")?.input,
+      "cursor-session-1",
+    );
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive answers Cursor ACP ask_question requests with option ids", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, {
+      calls,
+      responses,
+      prompt: async () => {
+        options.onRequest?.({
+          id: 51,
+          method: "cursor/ask_question",
+          params: {
+            toolCallId: "tool-question-1",
+            title: "Need input",
+            questions: [
+              {
+                id: "mode",
+                prompt: "Which mode should I use?",
+                options: [
+                  { id: "agent", label: "Agent" },
+                  { id: "plan", label: "Plan" },
+                ],
+              },
+            ],
+          },
+        });
+        return { stopReason: "end_turn" };
+      },
+    }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-question-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId, input: "Ask me", interactionMode: "default" });
+
+    const events = yield* Stream.take(adapter.streamEvents, 7).pipe(Stream.runCollect);
+    const request = Array.from(events).find((event) => event.type === "user-input.requested");
+    assert.ok(request);
+    assert.deepInclude(request?.payload as Record<string, unknown>, {
+      questions: [
+        {
+          id: "mode",
+          header: "Need input",
+          question: "Which mode should I use?",
+          options: [
+            { label: "Agent", description: "Agent" },
+            { label: "Plan", description: "Plan" },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+
+    yield* adapter.respondToUserInput(threadId, ApprovalRequestId.makeUnsafe(request!.requestId!), {
+      mode: "Plan",
+    });
+
+    assert.deepEqual(responses[0]?.result, {
+      outcome: {
+        outcome: "answered",
+        answers: [{ questionId: "mode", selectedOptionIds: ["plan"] }],
+      },
+    });
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive resumes Cursor ACP sessions with session/load", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, { calls, responses }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-load-acp");
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+      resumeCursor: { version: 1, sessionId: "cursor-existing", provider: "cursor" },
+    });
+
+    assert.ok(calls.some((call) => call.method === "session/load"));
+    assert.notOk(calls.some((call) => call.method === "session/new"));
+  }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});

@@ -546,7 +546,10 @@ export function projectStartupSnapshotEvent(
             if (thread.id !== payload.threadId) return thread;
             const plan = payload.proposedPlan;
             const current = thread.actionablePlanState;
-            const isActionable = plan.implementedAt === null && plan.planMarkdown.trim().length > 0;
+            const isActionable =
+              plan.status === "ready" &&
+              plan.implementedAt === null &&
+              plan.planMarkdown.trim().length > 0;
             const nextActionable =
               isActionable &&
               (current === null ||

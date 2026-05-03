@@ -21,6 +21,7 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
+import { isUserVisibleProvider } from "./providerVisibility";
 
 export type ProviderPickerKind = ProviderKind | "cursor";
 
@@ -40,18 +41,20 @@ export const PROVIDER_OPTIONS: Array<ProviderOption> = [
 
 /**
  * Build the provider picker options from server-provided snapshots.
- * Includes all server-registered providers (including provider profiles)
- * plus the static "coming soon" entries.
+ * Includes user-visible server-registered providers plus the static
+ * "coming soon" entries. Cursor profile plumbing remains internal until
+ * we have quiet auto-discovery/auth probing.
  */
 export function buildProviderOptions(
   serverProviders: ReadonlyArray<ServerProvider>,
 ): Array<ProviderOption> {
-  const options: ProviderOption[] = serverProviders.map((p) => ({
+  const visibleProviders = serverProviders.filter(isUserVisibleProvider);
+  const options: ProviderOption[] = visibleProviders.map((p) => ({
     value: p.provider as ProviderPickerKind,
     label: p.displayName ?? providerDisplayName(p.provider),
     available: true,
   }));
-  if (!serverProviders.some((provider) => provider.provider === "cursor")) {
+  if (!visibleProviders.some((provider) => provider.provider === "cursor")) {
     options.push({ value: "cursor", label: "Cursor", available: false });
   }
   return options;
@@ -78,7 +81,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
 
 export interface PendingApproval {
   requestId: ApprovalRequestId;
-  requestKind: "command" | "file-read" | "file-change" | "tool";
+  requestKind: "command" | "file-read" | "file-change" | "plan" | "tool";
   createdAt: string;
   detail?: string;
 }
@@ -105,6 +108,7 @@ export interface LatestProposedPlanState {
   updatedAt: string;
   turnId: TurnId | null;
   planMarkdown: string;
+  status?: ProposedPlan["status"];
   implementedAt: string | null;
   implementationThreadId: ThreadId | null;
 }
@@ -225,6 +229,8 @@ function requestKindFromRequestType(requestType: unknown): PendingApproval["requ
     case "file_change_approval":
     case "apply_patch_approval":
       return "file-change";
+    case "plan_approval":
+      return "plan";
     case "dynamic_tool_call":
     case "unknown":
       return "tool";
@@ -267,6 +273,7 @@ export function derivePendingApprovals(
       (payload.requestKind === "command" ||
         payload.requestKind === "file-read" ||
         payload.requestKind === "file-change" ||
+        payload.requestKind === "plan" ||
         payload.requestKind === "tool")
         ? payload.requestKind
         : payload
@@ -518,9 +525,13 @@ export function findSidebarProposedPlan(input: {
 }
 
 export function hasActionableProposedPlan(
-  proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt"> | null,
+  proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt" | "status"> | null,
 ): boolean {
-  return proposedPlan !== null && proposedPlan.implementedAt === null;
+  return (
+    proposedPlan !== null &&
+    (proposedPlan.status ?? "ready") === "ready" &&
+    proposedPlan.implementedAt === null
+  );
 }
 
 export function deriveWorkLogEntries(
@@ -718,6 +729,7 @@ function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPl
     updatedAt: proposedPlan.updatedAt,
     turnId: proposedPlan.turnId,
     planMarkdown: proposedPlan.planMarkdown,
+    status: proposedPlan.status,
     implementedAt: proposedPlan.implementedAt,
     implementationThreadId: proposedPlan.implementationThreadId,
   };
@@ -804,6 +816,7 @@ function extractWorkLogRequestKind(
     payload?.requestKind === "command" ||
     payload?.requestKind === "file-read" ||
     payload?.requestKind === "file-change" ||
+    payload?.requestKind === "plan" ||
     payload?.requestKind === "tool"
   ) {
     return payload.requestKind;

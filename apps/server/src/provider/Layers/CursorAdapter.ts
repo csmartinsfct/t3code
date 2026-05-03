@@ -1,23 +1,28 @@
 import { randomUUID } from "node:crypto";
 import {
+  ApprovalRequestId,
   asProviderInput,
   baseProviderKind,
-  type CanonicalItemType,
   EventId,
   ProviderItemId,
   RuntimeItemId,
+  RuntimeRequestId,
   ThreadId,
   TurnId,
+  type CanonicalItemType,
   type CursorSettings,
+  type ProviderApprovalDecision,
   type ProviderKind,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
   type ProviderSessionStartInput,
   type ProviderTurnStartResult,
+  type ProviderUserInputAnswers,
+  type RuntimeContentStreamKind,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { Effect, Layer, Option, Queue, Stream } from "effect";
 
 import { ManagedRunService } from "../../managedRuns/Services/ManagedRuns";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery";
@@ -32,34 +37,21 @@ import {
 } from "../Errors";
 import { CursorAdapter, type CursorAdapterShape } from "../Services/CursorAdapter";
 import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter";
+import {
+  createCursorAcpConnection,
+  type CursorAcpConnection,
+  type CursorAcpConnectionOptions,
+  type CursorAcpIncomingNotification,
+  type CursorAcpIncomingRequest,
+  type JsonRpcId,
+} from "../cursor/CursorAcpConnection";
 import { resolveCursorSettingsForProvider } from "../cursorProfileDiscovery";
-import { collectStreamAsString } from "../providerSnapshot";
 import {
   buildProviderSessionContextPrompt,
   hashProviderSessionContextPrompt,
 } from "../sessionContextPrompt";
-import {
-  buildCursorTurnEnv,
-  type CursorHeadlessMode,
-  type CursorTurnCommandInput,
-  type CursorTurnRunnerOptions,
-  type CursorTurnRunResult,
-  runCursorTurn,
-} from "../cursor/CursorTurnRunner";
-import type {
-  CursorInteractionQueryEvent,
-  CursorStreamJsonEvent,
-  CursorToolCallEvent,
-} from "../cursor/CursorStreamJson";
-import type {
-  LifecycleEntry,
-  ProviderLifecycleLoggerShape,
-} from "../Services/ProviderLifecycleLogger";
-import type { CursorProcessCleanupEvent } from "../cursor/CursorProcessTree";
 
 const PROVIDER = "cursor" as const;
-const CURSOR_ADAPTER_INTERRUPT_WAIT_MS = 5_000;
-const CURSOR_RUNNER_CLEANUP_GRACE_MS = 2_000;
 
 interface CursorResumeCursor {
   readonly version: 1;
@@ -75,23 +67,36 @@ interface CursorTurnState {
   readonly turnId: TurnId;
   readonly assistantItemId: RuntimeItemId;
   readonly items: Array<unknown>;
-  fiber: Fiber.Fiber<void, never> | undefined;
   assistantStarted: boolean;
-  assistantText: string;
-  assistantSegmentText: string;
-  reasoningText: string;
-  reasoningSegmentText: string;
-  readonly capturedProposedPlanKeys: Set<string>;
   completed: boolean;
   cancelRequested: boolean;
+}
+
+interface PendingCursorApprovalRequest {
+  readonly jsonRpcId: JsonRpcId;
+  readonly requestType:
+    | "command_execution_approval"
+    | "file_change_approval"
+    | "plan_approval"
+    | "unknown";
+}
+
+interface PendingCursorUserInputRequest {
+  readonly jsonRpcId: JsonRpcId;
+  readonly optionIdsByQuestionIdAndLabel: Record<string, Record<string, string>>;
 }
 
 interface CursorSessionContext {
   session: ProviderSession;
   readonly providerKind: ProviderKind;
   readonly settings: CursorSettings;
+  readonly connection: CursorAcpConnection;
   providerSessionId: string;
+  latestSessionInfo: unknown;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  readonly toolCalls: Map<string, { readonly itemType: CanonicalItemType; readonly title: string }>;
+  readonly pendingApprovals: Map<ApprovalRequestId, PendingCursorApprovalRequest>;
+  readonly pendingUserInputs: Map<ApprovalRequestId, PendingCursorUserInputRequest>;
   readonly sessionContextPrompt?: string;
   readonly sessionContextPromptHash?: string;
   sessionContextPromptInjected: boolean;
@@ -100,15 +105,7 @@ interface CursorSessionContext {
 }
 
 export interface CursorAdapterLiveOptions {
-  readonly createChat?: (input: {
-    readonly settings: CursorSettings;
-    readonly cwd?: string;
-  }) => Effect.Effect<string, ProviderAdapterError>;
-  readonly runTurn?: (
-    input: CursorTurnCommandInput,
-    options?: CursorTurnRunnerOptions,
-  ) => Effect.Effect<CursorTurnRunResult, ProviderAdapterError>;
-  readonly lifecycleLogger?: ProviderLifecycleLoggerShape;
+  readonly createConnection?: (options: CursorAcpConnectionOptions) => CursorAcpConnection;
 }
 
 function nowIso(): string {
@@ -127,8 +124,20 @@ function makeRuntimeItemId(prefix: string): RuntimeItemId {
   return RuntimeItemId.makeUnsafe(`${prefix}-${randomUUID()}`);
 }
 
+function asRuntimeRequestId(requestId: ApprovalRequestId): RuntimeRequestId {
+  return RuntimeRequestId.makeUnsafe(requestId);
+}
+
 function toMessage(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message.length > 0 ? cause.message : fallback;
+  if (cause instanceof Error && cause.message.length > 0) return cause.message;
+  if (isRecord(cause) && typeof cause.message === "string" && cause.message.length > 0) {
+    return cause.message;
+  }
+  return fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function trimOrUndefined(value: string | undefined): string | undefined {
@@ -136,58 +145,25 @@ function trimOrUndefined(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function cursorCleanupPolicyDetails(): Record<string, unknown> {
-  return {
-    cleanupRunner: "CursorTurnRunner",
-    signalSequence: ["SIGINT", "SIGTERM", "SIGKILL"],
-    graceMs: CURSOR_RUNNER_CLEANUP_GRACE_MS,
-    adapterWaitMs: CURSOR_ADAPTER_INTERRUPT_WAIT_MS,
-    posixTarget: "detached process group plus descendants",
-    windowsTarget: "taskkill /T; force kill uses /F",
-  };
-}
-
 function extractCursorSessionId(cursor: unknown): string | null {
-  if (typeof cursor === "string" && cursor.trim()) {
-    return cursor;
-  }
-  if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
-    return null;
-  }
-  const sessionId = (cursor as { readonly sessionId?: unknown }).sessionId;
+  if (typeof cursor === "string" && cursor.trim()) return cursor;
+  if (!isRecord(cursor)) return null;
+  const sessionId = cursor.sessionId;
   return typeof sessionId === "string" && sessionId.trim() ? sessionId : null;
 }
 
 function resumeCursorMatchesProvider(cursor: unknown, provider: ProviderKind): boolean {
-  if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
-    return true;
-  }
-  const cursorProvider = (cursor as { readonly provider?: unknown }).provider;
-  return cursorProvider === undefined || cursorProvider === provider;
+  if (!isRecord(cursor)) return true;
+  return cursor.provider === undefined || cursor.provider === provider;
 }
 
 function resumeCursorHasInjectedContext(cursor: unknown, contextPromptHash: string): boolean {
-  if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
-    return false;
-  }
-  const resume = cursor as {
-    readonly contextPromptHash?: unknown;
-    readonly contextPromptInjected?: unknown;
-  };
-  return resume.contextPromptInjected === true && resume.contextPromptHash === contextPromptHash;
+  if (!isRecord(cursor)) return false;
+  return cursor.contextPromptInjected === true && cursor.contextPromptHash === contextPromptHash;
 }
 
 function resumeCursorRequestsFork(cursor: unknown): boolean {
-  return (
-    !!cursor &&
-    typeof cursor === "object" &&
-    !Array.isArray(cursor) &&
-    (cursor as { readonly fork?: unknown }).fork === true
-  );
+  return isRecord(cursor) && cursor.fork === true;
 }
 
 function makeResumeCursor(input: {
@@ -211,59 +187,6 @@ function makeResumeCursor(input: {
   };
 }
 
-function commandFromCursorLaunch(
-  settings: CursorSettings,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-): ChildProcess.Command {
-  const launchCommand = settings.launchCommand.filter((part) => part.trim().length > 0);
-  const command = launchCommand.at(0) ?? settings.binaryPath;
-  const commandArgs = launchCommand.length > 0 ? [...launchCommand.slice(1), ...args] : [...args];
-  return ChildProcess.make(command, commandArgs, {
-    ...(cwd ? { cwd } : {}),
-    env: buildCursorTurnEnv(settings),
-    shell: process.platform === "win32",
-  });
-}
-
-const createCursorChat = (input: { readonly settings: CursorSettings; readonly cwd?: string }) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const child = yield* spawner.spawn(
-      commandFromCursorLaunch(input.settings, ["create-chat"], input.cwd),
-    );
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        collectStreamAsString(child.stdout),
-        collectStreamAsString(child.stderr),
-        child.exitCode.pipe(Effect.map(Number)),
-      ],
-      { concurrency: "unbounded" },
-    );
-    if (exitCode !== 0) {
-      return yield* new ProviderAdapterRequestError({
-        provider: PROVIDER,
-        method: "create-chat",
-        detail: stderr.trim() || stdout.trim() || `Cursor exited with code ${exitCode}.`,
-      });
-    }
-    const sessionId = stdout.trim().split(/\s+/)[0];
-    if (!sessionId) {
-      return yield* new ProviderAdapterRequestError({
-        provider: PROVIDER,
-        method: "create-chat",
-        detail: "Cursor create-chat did not return a session id.",
-      });
-    }
-    return sessionId;
-  }).pipe(Effect.scoped);
-
-function headlessModeFromInteractionMode(
-  interactionMode: ProviderSendTurnInput["interactionMode"],
-): CursorHeadlessMode | undefined {
-  return interactionMode === "plan" || interactionMode === "plan-accept" ? "plan" : undefined;
-}
-
 function appendSessionContextPrompt(
   text: string,
   context: CursorSessionContext,
@@ -277,32 +200,77 @@ function appendSessionContextPrompt(
   };
 }
 
-function resolveCursorTextDelta(
-  segmentText: string,
-  incomingText: string,
-): { readonly delta: string; readonly nextText: string } | null {
-  if (!incomingText) return null;
+function eventUpdate(notification: CursorAcpIncomingNotification): Record<string, unknown> | null {
+  if (notification.method !== "session/update" || !isRecord(notification.params)) return null;
+  const update = notification.params.update;
+  return isRecord(update) ? update : null;
+}
 
-  if (incomingText === segmentText || segmentText.startsWith(incomingText)) {
-    return { delta: "", nextText: segmentText };
+function extractTextContent(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return null;
+  const text = value.text;
+  return typeof text === "string" ? text : null;
+}
+
+function textDeltaFromSessionUpdate(update: Record<string, unknown>): {
+  readonly streamKind: RuntimeContentStreamKind;
+  readonly delta: string;
+} | null {
+  const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
+  const delta = extractTextContent(update.content ?? update.delta ?? update.text);
+  if (!delta) return null;
+  if (updateKind === "agent_thought_chunk") {
+    return { streamKind: "reasoning_text", delta };
   }
-
-  if (incomingText.startsWith(segmentText)) {
-    return {
-      delta: incomingText.slice(segmentText.length),
-      nextText: incomingText,
-    };
+  if (updateKind === "agent_message_chunk" || updateKind === "message" || updateKind === "") {
+    return { streamKind: "assistant_text", delta };
   }
+  return null;
+}
 
-  return {
-    delta: incomingText,
-    nextText: `${segmentText}${incomingText}`,
-  };
+function planFromSessionUpdate(update: Record<string, unknown>): {
+  readonly plan: ReadonlyArray<{ step: string; status: "pending" | "inProgress" | "completed" }>;
+} | null {
+  const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
+  if (updateKind !== "plan") return null;
+  const entries = Array.isArray(update.entries) ? update.entries : [];
+  const plan = entries
+    .map((entry): { step: string; status: "pending" | "inProgress" | "completed" } | null => {
+      if (!isRecord(entry)) return null;
+      const step =
+        typeof entry.content === "string"
+          ? entry.content
+          : typeof entry.title === "string"
+            ? entry.title
+            : typeof entry.step === "string"
+              ? entry.step
+              : null;
+      if (!step) return null;
+      const statusRaw = typeof entry.status === "string" ? entry.status : "";
+      const status =
+        statusRaw === "completed" || statusRaw === "done"
+          ? "completed"
+          : statusRaw === "in_progress" || statusRaw === "inProgress"
+            ? "inProgress"
+            : "pending";
+      return { step, status };
+    })
+    .filter((entry): entry is { step: string; status: "pending" | "inProgress" | "completed" } =>
+      Boolean(entry),
+    );
+  return plan.length > 0 ? { plan } : null;
+}
+
+function sessionTitleFromUpdate(update: Record<string, unknown>): string | null {
+  const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
+  if (updateKind !== "session_info_update") return null;
+  const title = update.title;
+  return typeof title === "string" && title.trim() ? title.trim() : null;
 }
 
 function titleCaseToolName(value: string): string {
-  const withoutSuffix = value.replace(/ToolCall$/u, "");
-  const spaced = withoutSuffix
+  const spaced = value
     .replace(/[_-]+/gu, " ")
     .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
     .trim();
@@ -311,113 +279,16 @@ function titleCaseToolName(value: string): string {
     : "Cursor tool call";
 }
 
-function extractCursorToolName(toolCall: unknown, fallback: string | undefined): string {
-  if (isRecord(toolCall)) {
-    const key = Object.keys(toolCall).find((candidate) => candidate.trim().length > 0);
-    if (key) return key;
-  }
-  return fallback && fallback.trim() ? fallback : "cursorToolCall";
-}
-
-function isCursorToolCallEvent(event: CursorStreamJsonEvent): event is CursorToolCallEvent {
-  return event.type === "tool_call";
-}
-
-function isCursorInteractionQueryEvent(
-  event: CursorStreamJsonEvent,
-): event is CursorInteractionQueryEvent {
-  return event.type === "interaction_query";
-}
-
-function cursorToolItemId(toolName: string, callId: string | undefined): RuntimeItemId {
-  const raw = callId && callId.trim() ? callId : toolName;
-  const safe = raw.replace(/[^a-zA-Z0-9._:-]+/gu, "-").replace(/^-+|-+$/gu, "");
-  return RuntimeItemId.makeUnsafe(`cursor-tool-${safe || "tool"}`);
-}
-
-function extractCursorToolArgs(toolCall: unknown): unknown {
-  if (!isRecord(toolCall)) return undefined;
-  const key = Object.keys(toolCall).find((candidate) => candidate.trim().length > 0);
-  if (!key) return undefined;
-  const body = toolCall[key];
-  return isRecord(body) && "args" in body ? body.args : body;
-}
-
-function extractCursorCreatePlanArgs(value: unknown): Record<string, unknown> | undefined {
-  if (!isRecord(value)) return undefined;
-  const directArgs = value.args;
-  if (isRecord(directArgs) && typeof directArgs.plan === "string") {
-    return directArgs;
-  }
-
-  const nested = value.createPlanRequestQuery ?? value.createPlanToolCall;
-  if (!isRecord(nested)) return undefined;
-  const nestedArgs = nested.args;
-  return isRecord(nestedArgs) && typeof nestedArgs.plan === "string" ? nestedArgs : undefined;
-}
-
-function extractCursorPlanMarkdown(value: unknown): string | undefined {
-  const args = extractCursorCreatePlanArgs(value);
-  const plan = args?.plan;
-  const trimmed = typeof plan === "string" ? plan.trim() : "";
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function extractCursorInteractionToolCallId(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
-  const toolCallId = value.toolCallId;
-  if (typeof toolCallId === "string" && toolCallId.trim()) return toolCallId;
-  const nested = value.createPlanRequestQuery;
-  if (!isRecord(nested)) return undefined;
-  const nestedToolCallId = nested.toolCallId;
-  return typeof nestedToolCallId === "string" && nestedToolCallId.trim()
-    ? nestedToolCallId
-    : undefined;
-}
-
-function summarizeCursorToolDetail(toolName: string, args: unknown): string | undefined {
-  if (args === undefined) return undefined;
-  const normalizedName = titleCaseToolName(toolName);
-  const planArgs = extractCursorCreatePlanArgs({ [toolName]: { args } });
-  if (planArgs) {
-    const name = typeof planArgs.name === "string" ? planArgs.name.trim() : "";
-    const overview = typeof planArgs.overview === "string" ? planArgs.overview.trim() : "";
-    const summary = name || overview;
-    return summary
-      ? `${normalizedName}: ${summary.slice(0, 400)}`
-      : `${normalizedName}: proposed plan`;
-  }
-
-  const command = isRecord(args)
-    ? typeof args.command === "string"
-      ? args.command
-      : typeof args.cmd === "string"
-        ? args.cmd
-        : undefined
-    : undefined;
-  if (command && command.trim()) {
-    return `${normalizedName}: ${command.trim().slice(0, 400)}`;
-  }
-
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(args);
-  } catch {
-    return normalizedName;
-  }
-  if (!serialized) return normalizedName;
-  return `${normalizedName}: ${serialized.length <= 400 ? serialized : `${serialized.slice(0, 397)}...`}`;
-}
-
-function classifyCursorToolItemType(toolName: string): CanonicalItemType {
-  const normalized = toolName.toLowerCase();
-  if (normalized.includes("plan") || normalized.includes("todo")) {
-    return "plan";
-  }
+function classifyCursorToolItemType(kind: unknown, title: unknown): CanonicalItemType {
+  const normalized =
+    `${typeof kind === "string" ? kind : ""} ${typeof title === "string" ? title : ""}`.toLowerCase();
+  if (normalized.includes("plan") || normalized.includes("todo")) return "plan";
+  if (normalized.includes("search") || normalized.includes("read")) return "dynamic_tool_call";
   if (
     normalized.includes("shell") ||
     normalized.includes("bash") ||
     normalized.includes("terminal") ||
+    normalized.includes("execute") ||
     normalized.includes("command")
   ) {
     return "command_execution";
@@ -435,6 +306,195 @@ function classifyCursorToolItemType(toolName: string): CanonicalItemType {
   return "dynamic_tool_call";
 }
 
+function toolCallRecordFromPermissionParams(params: unknown): Record<string, unknown> {
+  if (!isRecord(params)) return {};
+  return isRecord(params.toolCall) ? params.toolCall : params;
+}
+
+function permissionDetailFromCursorParams(params: Record<string, unknown>): string | undefined {
+  const toolCall = toolCallRecordFromPermissionParams(params);
+  const title =
+    typeof toolCall.title === "string" && toolCall.title.trim() ? toolCall.title.trim() : null;
+  const reason = (() => {
+    const content = toolCall.content;
+    if (!Array.isArray(content)) return null;
+    for (const entry of content) {
+      if (!isRecord(entry)) continue;
+      const nested = entry.content;
+      const text = extractTextContent(nested) ?? extractTextContent(entry);
+      if (text?.trim()) return text.trim();
+    }
+    return null;
+  })();
+  return [title, reason].filter(Boolean).join("\n").trim() || undefined;
+}
+
+function toolCallIdFromUpdate(update: Record<string, unknown>): string | null {
+  return typeof update.toolCallId === "string" && update.toolCallId.trim()
+    ? update.toolCallId.trim()
+    : null;
+}
+
+function toolEventFromSessionUpdate(update: Record<string, unknown>): {
+  readonly providerToolCallId: string;
+  readonly type: "item.started" | "item.updated" | "item.completed";
+  readonly itemId: RuntimeItemId;
+  readonly payload: {
+    readonly itemType: CanonicalItemType;
+    readonly status: "inProgress" | "completed" | "failed";
+    readonly title: string;
+    readonly detail?: string;
+    readonly data?: unknown;
+  };
+} | null {
+  const updateKind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : update.type;
+  if (updateKind !== "tool_call" && updateKind !== "tool_call_update") return null;
+  const toolCallId = toolCallIdFromUpdate(update) ?? `tool-${randomUUID()}`;
+  const statusRaw = typeof update.status === "string" ? update.status : "";
+  const type =
+    updateKind === "tool_call"
+      ? "item.started"
+      : statusRaw === "completed" || statusRaw === "failed"
+        ? "item.completed"
+        : "item.updated";
+  const title =
+    typeof update.title === "string" && update.title.trim()
+      ? update.title.trim()
+      : titleCaseToolName(toolCallId);
+  const detail = extractTextContent(update.content);
+  return {
+    providerToolCallId: toolCallId,
+    type,
+    itemId: RuntimeItemId.makeUnsafe(`cursor-tool-${toolCallId}`),
+    payload: {
+      itemType: classifyCursorToolItemType(update.kind, title),
+      status:
+        statusRaw === "failed" ? "failed" : type === "item.completed" ? "completed" : "inProgress",
+      title,
+      ...(detail ? { detail } : {}),
+      data: update,
+    },
+  };
+}
+
+function availableModelsFromSessionInfo(sessionInfo: unknown): ReadonlyArray<{
+  readonly modelId: string;
+  readonly name?: string;
+}> {
+  if (!isRecord(sessionInfo)) return [];
+  const modelEntries: unknown[] = [];
+  if (isRecord(sessionInfo.models) && Array.isArray(sessionInfo.models.availableModels)) {
+    modelEntries.push(...sessionInfo.models.availableModels);
+  }
+  if (Array.isArray(sessionInfo.configOptions)) {
+    for (const option of sessionInfo.configOptions) {
+      if (!isRecord(option)) continue;
+      const isModelOption =
+        option.id === "model" || option.category === "model" || option.name === "Model";
+      if (isModelOption && Array.isArray(option.options)) {
+        modelEntries.push(...option.options);
+      }
+    }
+  }
+  return modelEntries.flatMap((model) => {
+    if (!isRecord(model)) return [];
+    const modelId =
+      typeof model.modelId === "string"
+        ? model.modelId
+        : typeof model.value === "string"
+          ? model.value
+          : null;
+    if (!modelId) return [];
+    return [
+      {
+        modelId,
+        ...(typeof model.name === "string" ? { name: model.name } : {}),
+      },
+    ];
+  });
+}
+
+function resolveAcpModelId(model: string, sessionInfo: unknown): string {
+  const available = availableModelsFromSessionInfo(sessionInfo);
+  return (
+    available.find((candidate) => candidate.modelId === model)?.modelId ??
+    available.find((candidate) => candidate.name === model)?.modelId ??
+    model
+  );
+}
+
+function cursorModeFromInteractionMode(
+  interactionMode: ProviderSendTurnInput["interactionMode"],
+): string | undefined {
+  return interactionMode === "plan" || interactionMode === "plan-accept" ? "plan" : undefined;
+}
+
+function userInputQuestionsFromCursorRequest(params: unknown): {
+  readonly questions: ReadonlyArray<UserInputQuestion>;
+  readonly optionIdsByQuestionIdAndLabel: Record<string, Record<string, string>>;
+} | null {
+  if (!isRecord(params) || !Array.isArray(params.questions)) return null;
+  const header =
+    typeof params.title === "string" && params.title.trim() ? params.title.trim() : "Cursor";
+  const optionIdsByQuestionIdAndLabel: Record<string, Record<string, string>> = {};
+  const questions = params.questions.flatMap((question): UserInputQuestion[] => {
+    if (!isRecord(question)) return [];
+    const id = typeof question.id === "string" && question.id.trim() ? question.id.trim() : null;
+    const prompt =
+      typeof question.prompt === "string" && question.prompt.trim() ? question.prompt.trim() : null;
+    const options = Array.isArray(question.options)
+      ? question.options.flatMap((option) => {
+          if (!isRecord(option)) return [];
+          const optionId =
+            typeof option.id === "string" && option.id.trim() ? option.id.trim() : null;
+          const label =
+            typeof option.label === "string" && option.label.trim() ? option.label.trim() : null;
+          if (!id || !optionId || !label) return [];
+          optionIdsByQuestionIdAndLabel[id] = {
+            ...optionIdsByQuestionIdAndLabel[id],
+            [label]: optionId,
+            [optionId]: optionId,
+          };
+          return [{ label, description: label }];
+        })
+      : [];
+    return id && prompt && options.length > 0
+      ? [
+          {
+            id,
+            header,
+            question: prompt,
+            options,
+            multiSelect: question.allowMultiple === true,
+          },
+        ]
+      : [];
+  });
+  return questions.length > 0 ? { questions, optionIdsByQuestionIdAndLabel } : null;
+}
+
+function answersToCursorAskQuestionResponse(
+  answers: ProviderUserInputAnswers,
+  pending: PendingCursorUserInputRequest,
+) {
+  return {
+    outcome: {
+      outcome: "answered",
+      answers: Object.entries(answers).map(([questionId, value]) => {
+        const optionIdsByAnswer = pending.optionIdsByQuestionIdAndLabel[questionId] ?? {};
+        const values = Array.isArray(value) ? value : [value];
+        return {
+          questionId,
+          selectedOptionIds: values.map((answer) => {
+            const answerText = String(answer);
+            return optionIdsByAnswer[answerText] ?? answerText;
+          }),
+        };
+      }),
+    },
+  };
+}
+
 export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
   return Layer.effect(
     CursorAdapter,
@@ -443,59 +503,9 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const managedRunService = yield* ManagedRunService;
       const serverConfig = yield* ServerConfig;
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, CursorSessionContext>();
-      const createChat =
-        options?.createChat ??
-        ((input: { readonly settings: CursorSettings; readonly cwd?: string }) =>
-          createCursorChat(input).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-            Effect.mapError((cause) =>
-              cause._tag === "ProviderAdapterRequestError"
-                ? cause
-                : new ProviderAdapterRequestError({
-                    provider: PROVIDER,
-                    method: "create-chat",
-                    detail: toMessage(cause, "Cursor create-chat failed."),
-                    cause,
-                  }),
-            ),
-          ));
-      const runTurn =
-        options?.runTurn ??
-        ((input: CursorTurnCommandInput, runnerOptions?: CursorTurnRunnerOptions) =>
-          runCursorTurn(input, runnerOptions).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-            Effect.mapError(
-              (cause) =>
-                new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "sendTurn",
-                  detail: toMessage(cause, "Cursor turn failed."),
-                  cause,
-                }),
-            ),
-          ));
-      const lifecycle = options?.lifecycleLogger;
-      const lfcyl = (
-        threadId: ThreadId | null,
-        entry: Omit<LifecycleEntry, "sessionId" | "turnId"> & {
-          readonly sessionId?: string | undefined;
-          readonly turnId?: string | undefined;
-        },
-      ) => {
-        const clean = {
-          scope: entry.scope,
-          event: entry.event,
-          ...(entry.details !== undefined ? { details: entry.details } : {}),
-          ...(entry.sessionId !== undefined ? { sessionId: entry.sessionId } : {}),
-          ...(entry.turnId !== undefined ? { turnId: entry.turnId } : {}),
-        } satisfies LifecycleEntry;
-        return lifecycle
-          ? lifecycle.log(threadId, clean).pipe(Effect.ignoreCause({ log: true }))
-          : Effect.void;
-      };
+      const createConnection = options?.createConnection ?? createCursorAcpConnection;
 
       const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
         Queue.offerUnsafe(runtimeEventQueue, event);
@@ -514,11 +524,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
       });
 
       const updateSession = (context: CursorSessionContext, patch: Partial<ProviderSession>) => {
-        context.session = {
-          ...context.session,
-          ...patch,
-          updatedAt: nowIso(),
-        };
+        context.session = { ...context.session, ...patch, updatedAt: nowIso() };
       };
 
       const updateResumeCursor = (context: CursorSessionContext) => {
@@ -545,98 +551,16 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             context
               ? Effect.succeed(context)
               : Effect.fail(
-                  new ProviderAdapterSessionNotFoundError({
-                    provider: PROVIDER,
-                    threadId,
-                  }),
+                  new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
                 ),
           ),
           Effect.flatMap((context) =>
             context.stopped || context.session.status === "closed"
-              ? Effect.fail(
-                  new ProviderAdapterSessionClosedError({
-                    provider: PROVIDER,
-                    threadId,
-                  }),
-                )
+              ? Effect.fail(new ProviderAdapterSessionClosedError({ provider: PROVIDER, threadId }))
               : Effect.succeed(context),
           ),
           Effect.withSpan(`CursorAdapter.${operation}`),
         );
-
-      const logCursorProcessCleanupEvent = (
-        context: CursorSessionContext,
-        turn: CursorTurnState,
-        event: CursorProcessCleanupEvent,
-      ) =>
-        lfcyl(context.session.threadId, {
-          scope: "cursor.process_tree",
-          event: `cursor.process_tree.${event.stage}`,
-          sessionId: context.providerSessionId,
-          turnId: turn.turnId,
-          details: {
-            ...cursorCleanupPolicyDetails(),
-            stage: event.stage,
-            pid: event.pid,
-            ...(event.signal ? { signal: event.signal } : {}),
-            ...(event.graceMs !== undefined ? { graceMs: event.graceMs } : {}),
-            ...(event.message ? { message: event.message } : {}),
-          },
-        });
-
-      const interruptActiveTurnFiber = (
-        context: CursorSessionContext,
-        activeTurn: CursorTurnState,
-        operation: "interruptTurn" | "stopSession",
-      ) =>
-        Effect.gen(function* () {
-          if (!activeTurn.fiber) {
-            yield* lfcyl(context.session.threadId, {
-              scope: "cursor.adapter",
-              event: "cursor.turn.interrupt.skipped",
-              sessionId: context.providerSessionId,
-              turnId: activeTurn.turnId,
-              details: {
-                operation,
-                reason: "missing_fiber",
-                ...cursorCleanupPolicyDetails(),
-              },
-            });
-            return;
-          }
-
-          yield* lfcyl(context.session.threadId, {
-            scope: "cursor.adapter",
-            event: "cursor.turn.interrupt.requested",
-            sessionId: context.providerSessionId,
-            turnId: activeTurn.turnId,
-            details: {
-              operation,
-              ...cursorCleanupPolicyDetails(),
-            },
-          });
-
-          const outcome = yield* Fiber.interrupt(activeTurn.fiber).pipe(
-            Effect.as("completed" as const),
-            Effect.raceFirst(
-              Effect.sleep(`${CURSOR_ADAPTER_INTERRUPT_WAIT_MS} millis`).pipe(
-                Effect.as("timeout" as const),
-              ),
-            ),
-          );
-
-          yield* lfcyl(context.session.threadId, {
-            scope: "cursor.adapter",
-            event: "cursor.turn.interrupt.finished",
-            sessionId: context.providerSessionId,
-            turnId: activeTurn.turnId,
-            details: {
-              operation,
-              outcome,
-              ...cursorCleanupPolicyDetails(),
-            },
-          });
-        });
 
       const ensureAssistantItemStarted = (context: CursorSessionContext, turn: CursorTurnState) => {
         if (turn.assistantStarted) return;
@@ -649,35 +573,6 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             itemType: "assistant_message",
             status: "inProgress",
             title: "Cursor response",
-          },
-        });
-      };
-
-      const emitProposedPlanCompleted = (input: {
-        readonly context: CursorSessionContext;
-        readonly turn: CursorTurnState;
-        readonly planMarkdown: string | undefined;
-        readonly raw: CursorStreamJsonEvent["raw"];
-        readonly providerItemId?: string | undefined;
-      }) => {
-        const planMarkdown = input.planMarkdown?.trim();
-        if (!planMarkdown) return;
-        if (input.turn.capturedProposedPlanKeys.has(planMarkdown)) return;
-        input.turn.capturedProposedPlanKeys.add(planMarkdown);
-
-        offerRuntimeEvent({
-          ...eventBase(input.context, { source: "cursor.stream-json", payload: input.raw }),
-          type: "turn.proposed.completed",
-          turnId: input.turn.turnId,
-          ...(input.providerItemId
-            ? {
-                providerRefs: {
-                  providerItemId: ProviderItemId.makeUnsafe(input.providerItemId),
-                },
-              }
-            : {}),
-          payload: {
-            planMarkdown,
           },
         });
       };
@@ -728,136 +623,249 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         });
       };
 
-      const emitCursorRunResult = (context: CursorSessionContext, result: CursorTurnRunResult) => {
-        context.providerSessionId = result.sessionId;
-        updateResumeCursor(context);
-
-        const turn = context.activeTurn;
-        if (!turn) return;
-        for (const event of result.events) {
-          if (event.type === "assistant" && "text" in event && event.text) {
-            const resolved = resolveCursorTextDelta(turn.assistantSegmentText, event.text);
-            if (!resolved) continue;
-            turn.assistantSegmentText = resolved.nextText;
-            if (!resolved.delta) continue;
-            turn.assistantText += resolved.delta;
-            ensureAssistantItemStarted(context, turn);
-            turn.items.push({
-              type: "assistant_text",
-              delta: resolved.delta,
-              createdAt: nowIso(),
+      const cancelPendingRequests = (context: CursorSessionContext) => {
+        for (const [requestId, pending] of context.pendingApprovals) {
+          try {
+            context.connection.respond({
+              id: pending.jsonRpcId,
+              result: { outcome: { outcome: "cancelled" } },
             });
-            offerRuntimeEvent({
-              ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
-              type: "content.delta",
-              itemId: turn.assistantItemId,
-              payload: { streamKind: "assistant_text", delta: resolved.delta },
-            });
-          } else if (event.type === "thinking" && "text" in event && event.text) {
-            const resolved = resolveCursorTextDelta(turn.reasoningSegmentText, event.text);
-            if (!resolved) continue;
-            turn.reasoningSegmentText = resolved.nextText;
-            if (!resolved.delta) continue;
-            turn.reasoningText += resolved.delta;
-            ensureAssistantItemStarted(context, turn);
-            turn.items.push({
-              type: "reasoning_text",
-              delta: resolved.delta,
-              createdAt: nowIso(),
-            });
-            offerRuntimeEvent({
-              ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
-              type: "content.delta",
-              itemId: turn.assistantItemId,
-              payload: { streamKind: "reasoning_text", delta: resolved.delta },
-            });
-          } else if (isCursorInteractionQueryEvent(event)) {
-            const planMarkdown =
-              event.subtype === "request" && event.queryType === "createPlanRequestQuery"
-                ? extractCursorPlanMarkdown(event.query)
-                : undefined;
-            if (planMarkdown) {
-              emitProposedPlanCompleted({
-                context,
-                turn,
-                planMarkdown,
-                raw: event.raw,
-                providerItemId: extractCursorInteractionToolCallId(event.query),
-              });
-            } else if (event.queryType !== "createPlanRequestQuery") {
-              offerRuntimeEvent({
-                ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
-                type: "runtime.warning",
-                payload: {
-                  message:
-                    "Cursor emitted an unsupported interaction query. T3 logged it but did not respond to it.",
-                },
-              });
-            }
-          } else if (isCursorToolCallEvent(event)) {
-            turn.assistantSegmentText = "";
-            turn.reasoningSegmentText = "";
-            const toolName = extractCursorToolName(event.toolCall, event.callId);
-            const itemType = classifyCursorToolItemType(toolName);
-            const args = extractCursorToolArgs(event.toolCall);
-            const itemId = cursorToolItemId(toolName, event.callId);
-            const detail = summarizeCursorToolDetail(toolName, args);
-            const eventType =
-              event.subtype === "completed"
-                ? "item.completed"
-                : event.subtype === "started"
-                  ? "item.started"
-                  : "item.updated";
-            offerRuntimeEvent({
-              ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
-              type: eventType,
-              itemId,
-              payload: {
-                itemType,
-                status: eventType === "item.completed" ? "completed" : "inProgress",
-                title: titleCaseToolName(toolName),
-                ...(detail ? { detail } : {}),
-                data: {
-                  toolName,
-                  args,
-                  toolCall: event.toolCall,
-                  subtype: event.subtype,
-                },
-              },
-            });
-            if (event.subtype === "completed" && toolName === "createPlanToolCall") {
-              emitProposedPlanCompleted({
-                context,
-                turn,
-                planMarkdown: extractCursorPlanMarkdown(event.toolCall),
-                raw: event.raw,
-                providerItemId: event.callId,
-              });
-            }
+          } catch {
+            // The ACP process may already be gone during session shutdown.
           }
-        }
-
-        if (result.usage) {
-          const inputTokens = result.usage.inputTokens ?? 0;
-          const cachedInputTokens = result.usage.cacheReadTokens ?? 0;
-          const outputTokens = result.usage.outputTokens ?? 0;
           offerRuntimeEvent({
-            ...eventBase(context),
-            type: "thread.token-usage.updated",
+            ...eventBase(context, {
+              source: "cursor.acp.response",
+              payload: { requestId, decision: "cancel" },
+            }),
+            type: "request.resolved",
+            requestId: asRuntimeRequestId(requestId),
             payload: {
-              usage: {
-                usedTokens: inputTokens + outputTokens,
-                totalProcessedTokens: inputTokens + outputTokens,
-                inputTokens,
-                cachedInputTokens,
-                outputTokens,
-                lastInputTokens: inputTokens,
-                lastCachedInputTokens: cachedInputTokens,
-                lastOutputTokens: outputTokens,
-              },
+              requestType: pending.requestType,
+              decision: "cancel",
+              resolution: { decision: "cancel" },
             },
           });
         }
+        context.pendingApprovals.clear();
+
+        for (const [requestId, pending] of context.pendingUserInputs) {
+          try {
+            context.connection.respond({
+              id: pending.jsonRpcId,
+              result: { outcome: { outcome: "cancelled" } },
+            });
+          } catch {
+            // The ACP process may already be gone during session shutdown.
+          }
+          offerRuntimeEvent({
+            ...eventBase(context, {
+              source: "cursor.acp.response",
+              payload: { requestId, decision: "cancel" },
+            }),
+            type: "user-input.resolved",
+            requestId: asRuntimeRequestId(requestId),
+            payload: { answers: {} },
+          });
+        }
+        context.pendingUserInputs.clear();
+      };
+
+      const handleNotification = (
+        context: CursorSessionContext,
+        notification: CursorAcpIncomingNotification,
+      ) => {
+        const raw = {
+          source: "cursor.acp.notification",
+          method: notification.method,
+          payload: notification.params,
+        } satisfies ProviderRuntimeEvent["raw"];
+        const update = eventUpdate(notification);
+        if (!update) return;
+
+        const title = sessionTitleFromUpdate(update);
+        if (title) {
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "thread.metadata.updated",
+            payload: { name: title },
+          });
+          return;
+        }
+
+        const activeTurn = context.activeTurn;
+        const plan = planFromSessionUpdate(update);
+        if (plan && activeTurn) {
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "turn.plan.updated",
+            payload: plan,
+          });
+          return;
+        }
+
+        const tool = toolEventFromSessionUpdate(update);
+        if (tool && activeTurn) {
+          const previous = context.toolCalls.get(tool.providerToolCallId);
+          const payload = previous
+            ? {
+                ...tool.payload,
+                itemType:
+                  tool.payload.itemType === "dynamic_tool_call"
+                    ? previous.itemType
+                    : tool.payload.itemType,
+                title: tool.payload.title.startsWith("Tool ") ? previous.title : tool.payload.title,
+              }
+            : tool.payload;
+          context.toolCalls.set(tool.providerToolCallId, {
+            itemType: payload.itemType,
+            title: payload.title,
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: tool.type,
+            itemId: tool.itemId,
+            payload,
+          } as ProviderRuntimeEvent);
+          return;
+        }
+
+        const textDelta = textDeltaFromSessionUpdate(update);
+        if (!textDelta || !activeTurn) return;
+        ensureAssistantItemStarted(context, activeTurn);
+        activeTurn.items.push({
+          type: textDelta.streamKind,
+          delta: textDelta.delta,
+          createdAt: nowIso(),
+        });
+        offerRuntimeEvent({
+          ...eventBase(context, raw),
+          type: "content.delta",
+          itemId: activeTurn.assistantItemId,
+          payload: { streamKind: textDelta.streamKind, delta: textDelta.delta },
+        });
+      };
+
+      const handleRequest = (context: CursorSessionContext, request: CursorAcpIncomingRequest) => {
+        const raw = {
+          source: "cursor.acp.request",
+          method: request.method,
+          payload: request.params,
+        } satisfies ProviderRuntimeEvent["raw"];
+
+        if (request.method === "cursor/create_plan") {
+          if (!context.activeTurn) {
+            context.connection.respond({
+              id: request.id,
+              result: { outcome: { outcome: "cancelled" } },
+            });
+            return;
+          }
+          const params = isRecord(request.params) ? request.params : {};
+          const planMarkdown = typeof params.plan === "string" ? params.plan.trim() : "";
+          const requestId = ApprovalRequestId.makeUnsafe(`cursor-plan-${randomUUID()}`);
+          context.pendingApprovals.set(requestId, {
+            jsonRpcId: request.id,
+            requestType: "plan_approval",
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "turn.proposed.completed",
+            turnId: context.activeTurn.turnId,
+            ...(typeof params.toolCallId === "string"
+              ? { providerRefs: { providerItemId: ProviderItemId.makeUnsafe(params.toolCallId) } }
+              : {}),
+            payload: { planMarkdown: planMarkdown || "Cursor proposed a plan." },
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "request.opened",
+            requestId: asRuntimeRequestId(requestId),
+            payload: {
+              requestType: "plan_approval",
+              detail: "Review Cursor's proposed plan to continue this turn.",
+              args: params,
+            },
+          });
+          return;
+        }
+
+        if (request.method === "session/request_permission") {
+          if (!context.activeTurn) {
+            context.connection.respond({
+              id: request.id,
+              result: { outcome: { outcome: "cancelled" } },
+            });
+            return;
+          }
+          const requestId = ApprovalRequestId.makeUnsafe(`cursor-request-${randomUUID()}`);
+          const params = isRecord(request.params) ? request.params : {};
+          const toolCall = toolCallRecordFromPermissionParams(params);
+          const requestType = classifyCursorToolItemType(toolCall.kind, toolCall.title);
+          const canonicalRequestType =
+            requestType === "command_execution"
+              ? "command_execution_approval"
+              : requestType === "file_change"
+                ? "file_change_approval"
+                : "unknown";
+          context.pendingApprovals.set(requestId, {
+            jsonRpcId: request.id,
+            requestType: canonicalRequestType,
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "request.opened",
+            requestId: asRuntimeRequestId(requestId),
+            payload: {
+              requestType: canonicalRequestType,
+              ...(permissionDetailFromCursorParams(params)
+                ? { detail: permissionDetailFromCursorParams(params) }
+                : {}),
+              args: params,
+            },
+          });
+          return;
+        }
+
+        if (request.method === "cursor/ask_question") {
+          if (!context.activeTurn) {
+            context.connection.respond({
+              id: request.id,
+              result: { outcome: { outcome: "cancelled" } },
+            });
+            return;
+          }
+          const userInput = userInputQuestionsFromCursorRequest(request.params);
+          if (!userInput) {
+            context.connection.respond({
+              id: request.id,
+              result: { outcome: { outcome: "skipped", reason: "Unsupported question payload." } },
+            });
+            return;
+          }
+          const requestId = ApprovalRequestId.makeUnsafe(`cursor-user-input-${randomUUID()}`);
+          context.pendingUserInputs.set(requestId, {
+            jsonRpcId: request.id,
+            optionIdsByQuestionIdAndLabel: userInput.optionIdsByQuestionIdAndLabel,
+          });
+          offerRuntimeEvent({
+            ...eventBase(context, raw),
+            type: "user-input.requested",
+            requestId: asRuntimeRequestId(requestId),
+            payload: { questions: userInput.questions },
+          });
+          return;
+        }
+
+        context.connection.respond({
+          id: request.id,
+          error: { code: -32601, message: `Unsupported Cursor ACP request: ${request.method}.` },
+        });
+        offerRuntimeEvent({
+          ...eventBase(context, raw),
+          type: "runtime.warning",
+          payload: { message: `Unsupported Cursor ACP request: ${request.method}.` },
+        });
       };
 
       const startSession: CursorAdapterShape["startSession"] = Effect.fn("startCursorSession")(
@@ -881,8 +889,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             return yield* new ProviderAdapterRequestError({
               provider: PROVIDER,
               method: "startSession",
-              detail:
-                "Cursor Agent CLI does not expose a non-interactive fork or conversation copy method. Start a fresh Cursor session instead.",
+              detail: "Cursor ACP does not expose a verified fork method in T3 yet.",
             });
           }
 
@@ -895,11 +902,24 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               issue: `Cursor provider '${requestedProvider}' is disabled in T3 Code settings.`,
             });
           }
+
           const model =
             input.modelSelection && baseProviderKind(input.modelSelection.provider) === PROVIDER
               ? input.modelSelection.model
               : undefined;
-          const cwd = input.cwd;
+          const cwd = input.cwd ?? process.cwd();
+          let contextRef: CursorSessionContext | undefined;
+          const connection = createConnection({
+            settings: cursorSettings,
+            cwd,
+            onNotification: (notification) => {
+              if (contextRef) handleNotification(contextRef, notification);
+            },
+            onRequest: (request) => {
+              if (contextRef) handleRequest(contextRef, request);
+            },
+          });
+
           const checkpointContext = yield* projectionSnapshotQuery
             .getThreadCheckpointContext(input.threadId)
             .pipe(Effect.catch(() => Effect.succeed(Option.none())));
@@ -939,22 +959,39 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           const sessionContextPromptInjected = sessionContextPromptHash
             ? resumeCursorHasInjectedContext(input.resumeCursor, sessionContextPromptHash)
             : true;
+
           const existingSessionId = extractCursorSessionId(input.resumeCursor);
-          const providerSessionId =
-            existingSessionId ??
-            (yield* createChat({ settings: cursorSettings, ...(cwd ? { cwd } : {}) }));
+          const sessionResult = yield* Effect.tryPromise({
+            try: async () => {
+              await connection.initialize();
+              await connection.authenticate();
+              if (existingSessionId) {
+                const loaded = await connection.loadSession({ sessionId: existingSessionId, cwd });
+                return { sessionId: existingSessionId, result: loaded };
+              }
+              return await connection.newSession({ cwd });
+            },
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: existingSessionId ? "session/load" : "session/new",
+                detail: toMessage(cause, "Cursor ACP session start failed."),
+                cause,
+              }),
+          });
+          const providerSessionId = sessionResult.sessionId;
           const startedAt = nowIso();
           const session: ProviderSession = {
             provider: asProviderInput(requestedProvider),
             status: "ready",
             runtimeMode: input.runtimeMode,
-            ...(cwd ? { cwd } : {}),
+            cwd,
             ...(model ? { model } : {}),
             threadId: input.threadId,
             resumeCursor: makeResumeCursor({
               sessionId: providerSessionId,
               provider: requestedProvider,
-              ...(cwd ? { cwd } : {}),
+              cwd,
               ...(model ? { model } : {}),
               ...(sessionContextPromptHash ? { contextPromptHash: sessionContextPromptHash } : {}),
               contextPromptInjected: sessionContextPromptInjected,
@@ -966,14 +1003,20 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             session,
             providerKind: requestedProvider,
             settings: cursorSettings,
+            connection,
             providerSessionId,
+            latestSessionInfo: sessionResult.result,
             turns: [],
+            toolCalls: new Map(),
+            pendingApprovals: new Map(),
+            pendingUserInputs: new Map(),
             ...(sessionContextPrompt ? { sessionContextPrompt } : {}),
             ...(sessionContextPromptHash ? { sessionContextPromptHash } : {}),
             sessionContextPromptInjected,
             activeTurn: undefined,
             stopped: false,
           };
+          contextRef = context;
           sessions.set(input.threadId, context);
 
           offerRuntimeEvent({
@@ -991,7 +1034,6 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             type: "session.state.changed",
             payload: { state: "ready" },
           });
-
           return session;
         },
       );
@@ -1011,7 +1053,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",
-            issue: "Cursor adapter does not support T3 attachments yet.",
+            issue: "Cursor ACP adapter does not support T3 attachments yet.",
           });
         }
         const text = trimOrUndefined(input.input);
@@ -1032,7 +1074,6 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           context.sessionContextPromptInjected = true;
           updateResumeCursor(context);
         }
-        const headlessMode = headlessModeFromInteractionMode(input.interactionMode);
 
         const turnId = makeTurnId();
         updateSession(context, {
@@ -1057,58 +1098,63 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           turnId,
           assistantItemId: makeRuntimeItemId("cursor-assistant"),
           items: [],
-          fiber: undefined,
           assistantStarted: false,
-          assistantText: "",
-          assistantSegmentText: "",
-          reasoningText: "",
-          reasoningSegmentText: "",
-          capturedProposedPlanKeys: new Set(),
           completed: false,
           cancelRequested: false,
         };
         context.activeTurn = turn;
 
-        const turnEffect = runTurn(
-          {
-            settings: context.settings,
-            cwd: context.session.cwd ?? process.cwd(),
-            prompt: promptInput.prompt,
-            runtimeMode: context.session.runtimeMode,
-            resumeSessionId: context.providerSessionId,
-            ...(selectedModel ? { model: selectedModel } : {}),
-            ...(headlessMode ? { headlessMode } : {}),
-            streamPartialOutput: true,
-          },
-          {
-            onCleanupEvent: (event) => logCursorProcessCleanupEvent(context, turn, event),
-          },
-        );
-        const fiber = yield* Effect.forkDetach(
-          turnEffect.pipe(
+        yield* Effect.forkDetach(
+          Effect.tryPromise({
+            try: async () => {
+              const mode = cursorModeFromInteractionMode(input.interactionMode);
+              if (mode) {
+                context.latestSessionInfo = await context.connection.setConfigOption({
+                  sessionId: context.providerSessionId,
+                  configId: "mode",
+                  value: mode,
+                });
+              }
+              if (selectedModel) {
+                context.latestSessionInfo = await context.connection.setConfigOption({
+                  sessionId: context.providerSessionId,
+                  configId: "model",
+                  value: resolveAcpModelId(selectedModel, context.latestSessionInfo),
+                });
+              }
+              return await context.connection.prompt({
+                sessionId: context.providerSessionId,
+                text: promptInput.prompt,
+              });
+            },
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/prompt",
+                detail: toMessage(cause, "Cursor ACP prompt failed."),
+                cause,
+              }),
+          }).pipe(
             Effect.match({
               onFailure: (error) => {
-                const activeTurn = context.activeTurn;
-                const state = activeTurn?.cancelRequested ? "interrupted" : "failed";
+                const state = turn.cancelRequested ? "interrupted" : "failed";
                 offerRuntimeEvent({
                   ...eventBase(context),
                   type: "runtime.error",
-                  payload: {
-                    message: error.message,
-                    class: "provider_error",
-                  },
+                  payload: { message: error.message, class: "provider_error" },
                 });
                 finishTurn(context, state, { errorMessage: error.message });
               },
               onSuccess: (result) => {
-                emitCursorRunResult(context, result);
-                finishTurn(context, "completed", { stopReason: result.result.subtype ?? null });
+                const stopReason =
+                  isRecord(result) && typeof result.stopReason === "string"
+                    ? result.stopReason
+                    : null;
+                finishTurn(context, "completed", { stopReason });
               },
             }),
           ),
-          { startImmediately: true },
         );
-        turn.fiber = fiber;
 
         return {
           threadId: input.threadId,
@@ -1123,9 +1169,10 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           const activeTurn = context.activeTurn;
           if (!activeTurn || (turnId && activeTurn.turnId !== turnId)) return;
           activeTurn.cancelRequested = true;
-          if (activeTurn.fiber) {
-            yield* interruptActiveTurnFiber(context, activeTurn, "interruptTurn");
-          }
+          cancelPendingRequests(context);
+          yield* Effect.promise(() => context.connection.cancel(context.providerSessionId)).pipe(
+            Effect.ignore,
+          );
           offerRuntimeEvent({
             ...eventBase(context),
             type: "turn.aborted",
@@ -1135,27 +1182,82 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         },
       );
 
-      const respondUnsupported = (method: string) =>
-        Effect.fail(
-          new ProviderAdapterRequestError({
+      const respondToRequest: CursorAdapterShape["respondToRequest"] = Effect.fn(
+        "respondToCursorRequest",
+      )(function* (threadId, requestId, decision: ProviderApprovalDecision) {
+        const context = yield* getContext(threadId, "respondToRequest");
+        const pending = context.pendingApprovals.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method,
-            detail:
-              "Cursor Agent CLI interaction round trips are not supported by T3 yet. Continue in a new turn or use a provider with native approval support.",
+            method: "respondToRequest",
+            detail: `Unknown pending Cursor approval request: ${requestId}`,
+          });
+        }
+        const result =
+          pending.requestType === "plan_approval"
+            ? decision === "accept" || decision === "acceptForSession"
+              ? { outcome: { outcome: "accepted" } }
+              : decision === "decline"
+                ? { outcome: { outcome: "rejected", reason: "Plan rejected in T3 Code." } }
+                : { outcome: { outcome: "cancelled" } }
+            : decision === "accept"
+              ? { outcome: { outcome: "selected", optionId: "allow-once" } }
+              : decision === "acceptForSession"
+                ? { outcome: { outcome: "selected", optionId: "allow-always" } }
+                : decision === "decline"
+                  ? { outcome: { outcome: "selected", optionId: "reject-once" } }
+                  : { outcome: { outcome: "cancelled" } };
+        context.connection.respond({
+          id: pending.jsonRpcId,
+          result,
+        });
+        context.pendingApprovals.delete(requestId);
+        offerRuntimeEvent({
+          ...eventBase(context, {
+            source: "cursor.acp.response",
+            payload: { requestId, decision },
           }),
-        );
+          type: "request.resolved",
+          requestId: asRuntimeRequestId(requestId),
+          payload: { requestType: pending.requestType, decision, resolution: { decision } },
+        });
+      });
+
+      const respondToUserInput: CursorAdapterShape["respondToUserInput"] = Effect.fn(
+        "respondToCursorUserInput",
+      )(function* (threadId, requestId, answers: ProviderUserInputAnswers) {
+        const context = yield* getContext(threadId, "respondToUserInput");
+        const pending = context.pendingUserInputs.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "respondToUserInput",
+            detail: `Unknown pending Cursor user-input request: ${requestId}`,
+          });
+        }
+        context.connection.respond({
+          id: pending.jsonRpcId,
+          result: answersToCursorAskQuestionResponse(answers, pending),
+        });
+        context.pendingUserInputs.delete(requestId);
+        offerRuntimeEvent({
+          ...eventBase(context, { source: "cursor.acp.response", payload: { requestId, answers } }),
+          type: "user-input.resolved",
+          requestId: asRuntimeRequestId(requestId),
+          payload: { answers },
+        });
+      });
 
       const stopSession: CursorAdapterShape["stopSession"] = Effect.fn("stopCursorSession")(
         function* (threadId) {
           const context = yield* getContext(threadId, "stopSession");
           context.stopped = true;
+          cancelPendingRequests(context);
+          context.connection.close();
           if (context.activeTurn) {
             context.activeTurn.cancelRequested = true;
-            if (context.activeTurn.fiber) {
-              yield* interruptActiveTurnFiber(context, context.activeTurn, "stopSession");
-            }
             finishTurn(context, "interrupted", { errorMessage: "Cursor session stopped." });
-            context.activeTurn = undefined;
           }
           updateSession(context, { status: "closed", activeTurnId: undefined });
           sessions.delete(threadId);
@@ -1174,12 +1276,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
 
       const readThread: CursorAdapterShape["readThread"] = (threadId) =>
         getContext(threadId, "readThread").pipe(
-          Effect.map(
-            (context): ProviderThreadSnapshot => ({
-              threadId,
-              turns: context.turns,
-            }),
-          ),
+          Effect.map((context): ProviderThreadSnapshot => ({ threadId, turns: context.turns })),
         );
 
       const stopAll: CursorAdapterShape["stopAll"] = () =>
@@ -1196,8 +1293,8 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         startSession,
         sendTurn,
         interruptTurn,
-        respondToRequest: () => respondUnsupported("respondToRequest"),
-        respondToUserInput: () => respondUnsupported("respondToUserInput"),
+        respondToRequest,
+        respondToUserInput,
         stopSession,
         listSessions: () => Effect.succeed(Array.from(sessions.values()).map((ctx) => ctx.session)),
         hasSession: (threadId) => Effect.succeed(sessions.has(threadId)),
@@ -1207,8 +1304,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
             new ProviderAdapterRequestError({
               provider: PROVIDER,
               method: "rollbackThread",
-              detail:
-                "Cursor Agent CLI does not expose a non-interactive rollback or rewind method.",
+              detail: "Cursor ACP rollback is not implemented in T3 yet.",
             }),
           ),
         stopAll,

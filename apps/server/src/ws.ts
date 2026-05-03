@@ -1,4 +1,5 @@
 import {
+  Data,
   Duration,
   Effect,
   FileSystem,
@@ -88,6 +89,8 @@ import {
   resolveCodexMcpServerNames,
   resolveCodexProjectTrusted,
   resolveCodexProjectConfigPaths,
+  resolveCursorMcpConfigPaths,
+  resolveCursorMcpServerNames,
   resolveGeminiMcpServerNames,
   resolveGeminiSettingsPaths,
   trustCodexProject,
@@ -96,9 +99,16 @@ import {
   resolveCodexHomePath,
   resolveCodexHomePathForProvider,
 } from "./provider/codexProfileDiscovery";
+import { resolveCursorSettingsForProvider } from "./provider/cursorProfileDiscovery";
+import { probeCursorMcpServers } from "./provider/cursorMcpProbe";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
+
+class CursorMcpProbeWsError extends Data.TaggedError("CursorMcpProbeWsError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
@@ -830,6 +840,53 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               }
               const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, input.cwd);
               return { status: "ready" as const, serverNames };
+            }
+            if (base === "cursor") {
+              const settings = yield* serverSettings.getSettings;
+              const cursorSettings = resolveCursorSettingsForProvider(settings, input.provider);
+              const cursorConfigDir =
+                cursorSettings.configDir.trim() || nodePath.join(os.homedir(), ".cursor");
+              for (const configPath of resolveCursorMcpConfigPaths(cursorConfigDir, input.cwd)) {
+                yield* ensureWatchDirForFile(nodePath.dirname(configPath), "mcp.json");
+              }
+
+              const cliResult = yield* Effect.tryPromise({
+                try: () =>
+                  probeCursorMcpServers({
+                    settings: cursorSettings,
+                    ...(input.cwd ? { cwd: input.cwd } : {}),
+                  }),
+                catch: (cause) =>
+                  new CursorMcpProbeWsError({
+                    message: cause instanceof Error ? cause.message : String(cause),
+                    cause,
+                  }),
+              }).pipe(
+                Effect.map((servers) => ({ ok: true as const, servers })),
+                Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+              );
+
+              if (cliResult.ok) {
+                const servers = cliResult.servers;
+                return {
+                  status: "ready" as const,
+                  serverNames: servers.map((server) => server.name),
+                  servers,
+                };
+              }
+
+              const serverNames = yield* resolveCursorMcpServerNames(cursorConfigDir, input.cwd);
+              return {
+                status: "ready" as const,
+                serverNames,
+                servers: serverNames.map((name) => ({
+                  name,
+                  status: "configured (Cursor CLI status unavailable)",
+                })),
+                error: `Cursor MCP CLI probe failed; showing configured server names only: ${String(
+                  cliResult.error.message,
+                )}`,
+              };
             }
             // Claude (default or profile)
             if (!input.projectId || !input.cwd) {

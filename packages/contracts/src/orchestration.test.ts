@@ -629,6 +629,7 @@ it.effect("defaults proposed plan implementation metadata for historical rows", 
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
+    assert.strictEqual(parsed.status, "ready");
     assert.strictEqual(parsed.implementedAt, null);
     assert.strictEqual(parsed.implementationThreadId, null);
   }),
@@ -640,12 +641,30 @@ it.effect("preserves proposed plan implementation metadata when present", () =>
       id: "plan-2",
       turnId: "turn-2",
       planMarkdown: "# Plan",
+      status: "rejected",
       implementedAt: "2026-01-02T00:00:00.000Z",
       implementationThreadId: "thread-2",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-02T00:00:00.000Z",
     });
+    assert.strictEqual(parsed.status, "rejected");
     assert.strictEqual(parsed.implementedAt, "2026-01-02T00:00:00.000Z");
     assert.strictEqual(parsed.implementationThreadId, "thread-2");
+  }),
+);
+
+it.effect("decodes cancelled proposed plans as a distinct terminal status", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationProposedPlan({
+      id: "plan-3",
+      turnId: "turn-3",
+      planMarkdown: "# Plan",
+      status: "cancelled",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.status, "cancelled");
+    assert.strictEqual(parsed.implementedAt, null);
+    assert.strictEqual(parsed.implementationThreadId, null);
   }),
 );

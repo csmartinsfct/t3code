@@ -4698,7 +4698,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             titleSeed: activeThread.title,
             runtimeMode,
             interactionMode: nextInteractionMode,
-            ...(nextInteractionMode === "default" && activeProposedPlan
+            ...(nextInteractionMode === "default" &&
+            activeProposedPlan &&
+            hasActionableProposedPlan(activeProposedPlan)
               ? {
                   sourceProposedPlan: {
                     threadId: activeThread.id,
@@ -5675,6 +5677,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
                           <ComposerPendingApprovalActions
                             requestId={activePendingApproval.requestId}
+                            requestKind={activePendingApproval.requestKind}
                             isResponding={respondingRequestIds.includes(
                               activePendingApproval.requestId,
                             )}

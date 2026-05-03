@@ -26,7 +26,7 @@ import { CursorProvider } from "../Services/CursorProvider";
 import type { ServerProviderShape } from "../Services/ServerProvider";
 import {
   resolveCursorSettingsForProvider,
-  type DiscoveredCursorProfile,
+  type ResolvedCursorProfile,
 } from "../cursorProfileDiscovery";
 
 const PROVIDER = "cursor" as const;
@@ -470,7 +470,7 @@ export const CursorProviderLive = Layer.effect(
 );
 
 export function makeCursorProfileProvider(
-  profile: DiscoveredCursorProfile,
+  profile: ResolvedCursorProfile,
 ): Effect.Effect<
   ServerProviderShape,
   ServerSettingsError,

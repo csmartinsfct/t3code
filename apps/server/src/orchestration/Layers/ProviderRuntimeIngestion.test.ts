@@ -944,6 +944,101 @@ describe("ProviderRuntimeIngestion", () => {
     expect(proposedPlan?.planMarkdown).toBe(
       "## Ship plan\n\n- wire projection\n- render follow-up",
     );
+    expect(proposedPlan?.status).toBe("ready");
+  });
+
+  it("marks a proposed plan rejected when plan approval is declined", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-plan-rejected");
+
+    harness.emit({
+      type: "turn.proposed.completed",
+      eventId: asEventId("evt-plan-rejected-completed"),
+      provider: "cursor",
+      createdAt: now,
+      threadId,
+      turnId,
+      payload: {
+        planMarkdown: "## Reject this plan\n\n- do not implement",
+      },
+    });
+
+    harness.emit({
+      type: "request.resolved",
+      eventId: asEventId("evt-plan-rejected-resolution"),
+      provider: "cursor",
+      createdAt: new Date(Date.now() + 1).toISOString(),
+      threadId,
+      turnId,
+      requestId: ApprovalRequestId.makeUnsafe("cursor-plan-reject"),
+      payload: {
+        requestType: "plan_approval",
+        decision: "decline",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.proposedPlans.some(
+        (proposedPlan: ProviderRuntimeTestProposedPlan) =>
+          proposedPlan.id === "plan:thread-1:turn:turn-plan-rejected" &&
+          proposedPlan.status === "rejected",
+      ),
+    );
+    const proposedPlan = thread.proposedPlans.find(
+      (entry: ProviderRuntimeTestProposedPlan) =>
+        entry.id === "plan:thread-1:turn:turn-plan-rejected",
+    );
+    expect(proposedPlan?.status).toBe("rejected");
+    expect(proposedPlan?.implementedAt).toBeNull();
+  });
+
+  it("marks a proposed plan cancelled when plan approval is cancelled", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-plan-cancelled");
+
+    harness.emit({
+      type: "turn.proposed.completed",
+      eventId: asEventId("evt-plan-cancelled-completed"),
+      provider: "cursor",
+      createdAt: now,
+      threadId,
+      turnId,
+      payload: {
+        planMarkdown: "## Cancel this plan\n\n- keep visible\n- stop waiting",
+      },
+    });
+
+    harness.emit({
+      type: "request.resolved",
+      eventId: asEventId("evt-plan-cancelled-resolution"),
+      provider: "cursor",
+      createdAt: new Date(Date.now() + 1).toISOString(),
+      threadId,
+      turnId,
+      requestId: ApprovalRequestId.makeUnsafe("cursor-plan-cancel"),
+      payload: {
+        requestType: "plan_approval",
+        decision: "cancel",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.proposedPlans.some(
+        (proposedPlan: ProviderRuntimeTestProposedPlan) =>
+          proposedPlan.id === "plan:thread-1:turn:turn-plan-cancelled" &&
+          proposedPlan.status === "cancelled",
+      ),
+    );
+    const proposedPlan = thread.proposedPlans.find(
+      (entry: ProviderRuntimeTestProposedPlan) =>
+        entry.id === "plan:thread-1:turn:turn-plan-cancelled",
+    );
+    expect(proposedPlan?.status).toBe("cancelled");
+    expect(proposedPlan?.implementedAt).toBeNull();
   });
 
   it("marks the source proposed plan implemented only after the target turn starts", async () => {

@@ -27,7 +27,9 @@ const RuntimeEventRawSource = Schema.Literals([
   "gemini.acp.notification",
   "gemini.acp.request",
   "gemini.acp.response",
-  "cursor.stream-json",
+  "cursor.acp.notification",
+  "cursor.acp.request",
+  "cursor.acp.response",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 
@@ -138,6 +140,7 @@ export const CanonicalRequestType = Schema.Literals([
   "file_change_approval",
   "apply_patch_approval",
   "exec_command_approval",
+  "plan_approval",
   "tool_user_input",
   "dynamic_tool_call",
   "auth_tokens_refresh",

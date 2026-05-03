@@ -5,6 +5,7 @@ import { Effect, FileSystem, Path } from "effect";
 import {
   resolveCodexMcpServerNames,
   resolveCodexProjectTrusted,
+  resolveCursorMcpServerNames,
   resolveGeminiMcpServerNames,
   trustCodexProject,
 } from "./mcpConfigReader.ts";
@@ -162,6 +163,46 @@ url = "https://example.com/global"
       const serverNames = yield* resolveGeminiMcpServerNames(geminiHome, projectRoot);
 
       assert.deepEqual(serverNames, ["global-docs", "local-devtools"]);
+    }),
+  );
+
+  it.effect("merges user and project-scoped Cursor MCP server names", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const cursorConfigDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-cursor-config-",
+      });
+      const projectRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-cursor-project-",
+      });
+      const projectCursorDir = path.join(projectRoot, ".cursor");
+
+      yield* fileSystem.makeDirectory(projectCursorDir, { recursive: true });
+
+      yield* fileSystem.writeFileString(
+        path.join(cursorConfigDir, "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "global-docs": { url: "https://example.com/docs" },
+            "shared-server": { command: "node", args: ["global.js"] },
+          },
+        }),
+      );
+
+      yield* fileSystem.writeFileString(
+        path.join(projectCursorDir, "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            "local-devtools": { command: "npx", args: ["chrome-devtools-mcp"] },
+            "shared-server": { command: "node", args: ["local.js"] },
+          },
+        }),
+      );
+
+      const serverNames = yield* resolveCursorMcpServerNames(cursorConfigDir, projectRoot);
+
+      assert.deepEqual(serverNames, ["global-docs", "local-devtools", "shared-server"]);
     }),
   );
 

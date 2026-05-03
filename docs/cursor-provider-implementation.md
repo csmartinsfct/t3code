@@ -7,32 +7,26 @@ Code provider.
 
 ## Decision
 
-Cursor support should be implemented through a process-per-turn CLI adapter
-using:
+Cursor support uses Cursor ACP:
 
 ```bash
-agent --print --output-format stream-json --resume <session_id> ...
+agent acp
 ```
 
-Do not automate Cursor's terminal UI and do not wait for a long-lived app-server
-or ACP-like protocol. The current CLI already exposes enough for T3's
-`ProviderAdapterShape`: a stable chat id, resumable sessions, non-interactive
-turn execution, structured stream events, model selection, execution modes, MCP
-discovery, and auth/status probes.
+T3 spawns `agent acp` as a child process and communicates over newline-delimited
+JSON-RPC on stdio. The adapter initializes and authenticates with
+`cursor_login`, creates or loads a Cursor ACP session, persists the ACP
+`sessionId` as T3's provider resume cursor, sends turns through
+`session/prompt`, and normalizes `session/update`, `session/request_permission`,
+and Cursor extension methods into canonical provider runtime events.
 
-The adapter should create or discover a Cursor chat id before the first turn and
-persist it as the provider resume cursor. Each turn then spawns a fresh Cursor
-process with `--resume <session_id>`. From T3 Code's perspective this is the
-same lifecycle shape as the other providers: a command plus a provider-native
-resume cursor. The difference is implementation detail: there is no persistent
-provider child process between turns.
+ACP is the only Cursor runtime transport in T3 Code.
 
 References:
 
 - Cursor CLI overview: <https://docs.cursor.com/en/cli/overview>
 - Cursor CLI parameters: <https://docs.cursor.com/en/cli/reference/parameters>
-- Cursor CLI output format:
-  <https://docs.cursor.com/en/cli/reference/output-format>
+- Cursor CLI ACP: <https://cursor.com/docs/cli/acp>
 - Cursor CLI MCP: <https://docs.cursor.com/cli/mcp>
 - T3 provider integration map: [T3CO-27](t3://ticket/T3CO-27)
 - Gemini implementation reference:
@@ -49,15 +43,14 @@ References:
 - Add `cursor` as a first-class provider kind across contracts, settings,
   provider snapshots, adapter routing, model selection, orchestration, and the
   web provider/model picker.
-- Support Cursor profiles from the first implementation milestone. The default
-  provider is `cursor`; profiles are exact provider kinds such as
-  `cursor:metric`.
-- Start, stop, resume, interrupt, and send turns through the installed Cursor
-  CLI using `agent --print --output-format stream-json`.
-- Preserve Cursor chat ids in `ProviderRuntimeBinding.resumeCursor`. Stop paths
-  must mark bindings stopped and must never delete production bindings.
-- Normalize Cursor stream-json events into existing provider runtime events so
-  logs, projections, orchestration, and chat timeline UI stay provider-agnostic.
+- Support explicit Cursor profiles without auto-discovering local profile
+  directories. The default provider is `cursor`; configured profiles are exact
+  provider kinds such as `cursor:metric`.
+- Start, stop, resume, interrupt, and send turns through `agent acp`.
+- Preserve Cursor ACP session ids in `ProviderRuntimeBinding.resumeCursor`. Stop
+  paths must mark bindings stopped and must never delete production bindings.
+- Normalize Cursor ACP events into existing provider runtime events so logs,
+  projections, orchestration, and chat timeline UI stay provider-agnostic.
 - Provide honest capability flags for approvals, user input, rollback,
   attachments, MCP behavior, structured output, and secondary inference.
 - Add enough tests and manual probes to prevent profile/account mixups,
@@ -66,10 +59,9 @@ References:
 ## Non-Goals
 
 - Do not scrape or drive Cursor's interactive terminal UI.
-- Do not implement a long-lived Cursor transport unless Cursor later exposes a
-  stable app-server or ACP-like surface.
 - Do not route Cursor through Codex, Claude, or Gemini-specific adapter code.
-- Do not claim interactive approval or user-input parity in the first milestone.
+- Do not fall back to Cursor's non-ACP print/headless transport for approvals,
+  planning, or user input.
 - Do not rely on shell aliases or Bash functions as the only production profile
   mechanism.
 - Do not implement rollback, fork, rich attachments, or Cursor-native MCP tool
@@ -91,41 +83,33 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
 - Official docs use `cursor-agent`; this local install exposes `agent`. T3 must
   keep the binary configurable, with `agent` as the default for this repo.
 
-### Session And Resume
+### ACP
 
-- `agent create-chat` returns a UUID chat id without running a turn.
-- `agent --print --output-format stream-json --resume <id> "prompt"` resumes the
-  same chat id.
-- Resuming with the returned `session_id` preserved prior conversation context.
-- `agent ls` currently expects a TUI/raw terminal and failed in a non-TTY probe,
-  so it should not be used for status or runtime automation.
-
-### Stream JSON
-
-- `stream-json` emits newline-delimited JSON and ends with a terminal `result`
-  event on success.
-- Verified event types include `system/init`, `user`, `assistant`, `thinking`,
-  `tool_call`, `interaction_query`, and `result`.
-- `assistant` events are deltas; the terminal `result.result` contains the
-  aggregate assistant text. The adapter must not display both as separate final
-  assistant messages.
-- Tool events contain start/completion state and provider-specific tool payloads,
-  including read, write, and shell tool calls.
-- Plan mode emitted `createPlanToolCall` and `interaction_query` data. This is
-  useful but should be mapped conservatively until the UI behavior is designed.
-- `--output-format json` is too thin for normal runtime use because it only
-  emits a terminal result and omits deltas/tool lifecycle events.
-
-### Runtime Modes
-
-- `--mode plan` and `--mode ask` are available. `--plan` is shorthand for plan.
-- `--force` and `--yolo` allow commands unless explicitly denied.
-- `--sandbox enabled|disabled` and `--trust` are available in print/headless
-  mode.
-- In non-interactive default mode, approval-required behavior degrades because
-  there is no interactive T3 approval round trip. The first implementation
-  should map T3 `approval-required` to Cursor's default safe mode and clearly
-  surface provider rejections, but not promise interactive approvals.
+- `agent acp` starts a Cursor ACP server over newline-delimited JSON-RPC on
+  stdio.
+- `initialize` returns `authMethods` including `cursor_login`, plus capability
+  metadata for loading sessions, MCP transports, images, and session listing.
+- `authenticate` with `{ methodId: "cursor_login" }` reused the existing regular
+  Cursor login without a keychain prompt in local testing.
+- `session/new` returns a `sessionId`, available modes (`agent`, `plan`, `ask`),
+  available model ids, and config options.
+- `session/set_config_option` accepts `{ sessionId, configId: "mode", value:
+"plan" }` and returned updated config options with `currentValue: "plan"`.
+- Mode-change responses may only include the `configOptions` array, not the
+  top-level `models.availableModels` shape from `session/new`. Resolve selected
+  model names from both shapes before sending a follow-up `configId: "model"`
+  update.
+- `session/prompt` streams `session/update` notifications for assistant chunks,
+  thoughts, tool calls, plan updates, and other lifecycle state.
+- In ACP plan mode, Cursor emitted a blocking `cursor/create_plan` request with
+  `toolCallId`, `name`, `overview`, `plan`, and `todos`; responding with
+  `{ outcome: { outcome: "accepted" } }` let the turn continue and Cursor saved
+  the plan file under `~/.cursor/plans/...`.
+- The official docs describe `session/request_permission` for tool approvals and
+  Cursor extension methods including `cursor/ask_question`, `cursor/create_plan`,
+  `cursor/update_todos`, `cursor/task`, and `cursor/generate_image`.
+- Known local nuance: `session/set_config_option` uses `configId`, not
+  `optionId`; sending `optionId` returned a schema error.
 
 ### MCP
 
@@ -138,19 +122,11 @@ binary, version `2026.05.01-eea359f`, not inferred from docs alone.
 
 ### Interrupts And Child Processes
 
-- Interrupting the parent `agent` process can leave a spawned shell command alive
-  unless the process group or process tree is cleaned up.
-- Cursor adapter interrupt and stop paths must use process-group/tree cleanup,
-  not only `child.kill("SIGINT")` on the direct parent process.
-- T3CO-400 added Cursor runner cleanup that starts turn processes as detached
-  process-group leaders on POSIX and, on interruption, escalates
-  `SIGINT -> SIGTERM -> SIGKILL` across the root process group and discovered
-  descendants. Windows uses `taskkill /T`, adding `/F` for force-kill.
-- The adapter writes sanitized lifecycle entries for interrupt/stop requests and
-  runner cleanup stages. Look for `cursor.turn.interrupt.requested`,
-  `cursor.turn.interrupt.finished`, and `cursor.process_tree.*` events in the
-  thread `.lifecycle.log`; entries include the signal sequence, grace timeout,
-  adapter wait timeout, pid, stage, and signal, but never child command lines.
+- Cursor ACP exposes `session/cancel`; T3 uses that for active-turn interrupts.
+- Stopping a Cursor session closes the ACP child process after settling the T3
+  turn state.
+- If future Cursor ACP builds expose stronger cancellation/kill acknowledgements,
+  wire those through before adding process-tree-specific cleanup again.
 
 ### Multiple Profiles
 
@@ -170,6 +146,21 @@ The function launches the same `agent` binary with:
 
 The probe reported a distinct account from the default profile. Do not log raw
 emails or tokens; logs may include a redacted or hashed account label.
+
+Follow-up finding: auto-discovering `~/.cursor-profiles/*` is too aggressive for
+Cursor because background status probes can trigger macOS keychain prompts for
+profile homes. T3 therefore keeps `providers.cursorProfiles` as an explicit
+configuration surface but does not auto-register profile directories just
+because they exist on disk. T3 also does not synthesize profile HOME,
+`CURSOR_CONFIG_DIR`, or `CURSOR_DATA_DIR` paths. Those overrides are inherited
+from the base Cursor provider only when set there, or from the explicit profile
+fields when set on the profile itself. Because manual Cursor profile entry is
+easy to misconfigure and does not solve the keychain-prompt problem, T3 keeps
+the profile schema/provider plumbing but does not expose a Settings UI for
+adding or editing Cursor profiles yet. The same rollout guard applies to
+user-facing model selection and Fork with model menus: `cursor:*` providers may
+be registered for internal runtime tests/settings, but visible provider options
+filter them out until profile discovery and auth probing are quiet enough.
 
 ## Provider Identity And Profile Model
 
@@ -193,6 +184,11 @@ Exact provider kind must flow through:
 
 Same-base-provider matching is only for choosing the adapter implementation and
 grouping UI. It must not be used as identity after profiles exist.
+
+Current UI visibility exception: exact profile IDs must still round-trip through
+contracts, settings, provider snapshots, runtime bindings, and logs, but visible
+provider/model/fork menus intentionally hide `cursor:*` profile providers. Do
+not remove runtime support just because menus hide profiles.
 
 Profile settings should support both structured environment resolution and, when
 needed, wrapper commands:
@@ -218,12 +214,17 @@ over invoking an ambient shell alias. Status probes and turn execution must use
 the same resolved launch configuration so a profile cannot look authenticated
 but then run turns under a different account.
 
+Configured Cursor profiles should remain opt-in and advanced/internal until the
+auth/keychain behavior is quiet enough for routine background probes. The
+default provider should use the regular `agent` command and the user's normal
+Cursor login.
+
 For the `metric` profile, the first production-safe settings can be either:
 
 - a checked wrapper script path that performs the same setup as
   `cursor-metric`, or
-- structured `homePath`, `configDir`, and `dataDir` plus a small macOS keychain
-  bootstrap helper if the wrapper is not used.
+- explicit `homePath`, `configDir`, and `dataDir` values if the profile account
+  is already configured outside T3.
 
 Do not rely on `command -v cursor-metric` from the T3 server process; shell
 functions live in interactive shell startup files and are not a durable app
@@ -321,41 +322,6 @@ Deferred:
 - Promote additional model capability metadata only after the CLI exposes stable
   machine-readable model details.
 
-### Turn Runner And Stream Parser
-
-Files:
-
-- `apps/server/src/provider/cursor/CursorTurnRunner.ts`
-- `apps/server/src/provider/cursor/CursorStreamJson.ts`
-- focused tests beside those files
-
-Implemented in T3CO-397:
-
-- Build argv from pure inputs so tests can pin command construction.
-- Spawn the resolved Cursor launch config with cwd, environment, and stdio
-  suitable for NDJSON parsing.
-- Always pass `--print --output-format stream-json`.
-- Optionally pass `--stream-partial-output`; the flag is supported locally and
-  covered by args-builder tests.
-- Pass `--resume <sessionId>` after the first chat has been created.
-- Pass `--model <model>` per turn when requested.
-- Pass runtime flags:
-  - `full-access`: `--force --sandbox disabled --trust`
-  - `approval-required`: no force flag, optionally `--sandbox enabled`
-  - `plan`: `--mode plan`
-  - `ask`: `--mode ask`
-- Read stdout line by line, parse each JSON line, and ignore unknown fields.
-- Treat malformed JSON as a provider process error with raw line redaction.
-- Capture stderr separately and include bounded excerpts in lifecycle logs.
-- Resolve completion only after process exit and a successful terminal `result`.
-- Treat non-zero exit, missing terminal result, or result `is_error: true` as a
-  failed turn.
-
-Deferred to adapter/process-hardening tickets:
-
-- Clean up the entire process group/tree on interrupt, stop, timeout, and
-  process exit.
-
 ### Adapter Lifecycle
 
 Files:
@@ -366,14 +332,14 @@ Files:
 - `apps/server/src/provider/Layers/ProviderService.ts`
 - `apps/server/src/sessionContextPrompt.ts`
 
-T3CO-398 landed the first Cursor adapter milestone. The adapter registers
-`cursor` with the provider adapter registry, creates a Cursor chat id with
-`agent create-chat` during `startSession`, persists that id in
-`ProviderRuntimeBinding.resumeCursor`, and runs each user turn through a fresh
-`agent --print --output-format stream-json --resume <session_id>` process. The
-same adapter path resolves exact Cursor profile settings, injects T3 session
-context only once per matching context hash, rejects concurrent turns, and fails
-rollback, fork, approval, and user-input APIs with explicit provider errors.
+The Cursor adapter registers `cursor` with the provider adapter registry, starts
+`agent acp`, initializes and authenticates the ACP server, creates or loads a
+Cursor ACP session, persists that `sessionId` in
+`ProviderRuntimeBinding.resumeCursor`, and sends each user turn with
+`session/prompt`. The same adapter path resolves exact Cursor profile settings,
+injects T3 session context only once per matching context hash, rejects
+concurrent turns, maps plan/permission/user-input ACP requests into T3 runtime
+events, and fails rollback/fork with explicit provider errors.
 
 Recommended lifecycle:
 
@@ -383,24 +349,23 @@ Recommended lifecycle:
    - Resolve profile settings from the exact provider kind.
    - Build and hash the T3 session context prompt with
      `buildProviderSessionContextPrompt`.
-   - If there is a compatible resume cursor for the same exact provider and cwd,
-     reuse it.
-   - Otherwise call `agent create-chat` through the resolved launch config and
-     persist the returned chat id before any turn is started.
+   - Spawn `agent acp` through the resolved launch config.
+   - Send `initialize`, then `authenticate` with `methodId: "cursor_login"`.
+   - If there is a compatible resume cursor, call `session/load`; otherwise call
+     `session/new`.
    - Emit `session.started`, `thread.started`, and ready state with the Cursor
-     chat id as provider thread id.
+     ACP `sessionId` as provider thread id.
 2. `sendTurn`
    - Reject if another Cursor turn is active for the same T3 thread.
    - Build a prompt that injects T3 service guidance only when the stored
      `contextPromptHash` is absent or stale.
-   - Spawn a `CursorTurnRunner` process and stream normalized events back to the
-     runtime event queue.
-   - Update the stored cursor with `session_id` from `system/init` or `result`
-     if Cursor returns a newer value.
+   - Apply `session/set_config_option` for selected model and plan mode when
+     needed. Use `configId`, not `optionId`.
+   - Send `session/prompt` and stream normalized `session/update` notifications
+     back to the runtime event queue.
 3. `interruptTurn`
    - Mark the active turn cancel requested.
-   - Interrupt the active adapter fiber so the Cursor runner finalizer can clean
-     the process group/tree with timeout escalation.
+   - Send `session/cancel` to the ACP server.
    - Mark the T3 turn interrupted and preserve the resume cursor.
    - Emit interrupted state only once.
 4. `stopSession`
@@ -417,16 +382,14 @@ Capability declarations for the first milestone:
 {
   sessionModelSwitch: "in-session",
   rollbackThread: "unsupported",
-  respondToRequest: "unsupported",
-  respondToUserInput: "unsupported",
+  respondToRequest: "supported through session/request_permission",
+  respondToUserInput: "supported through cursor/ask_question",
   probeRateLimits: "unsupported"
 }
 ```
 
-`sessionModelSwitch` can be treated as in-session because T3 starts a new Cursor
-process per turn and can pass `--model` with the same `--resume` chat id. Keep a
-test that resumes one Cursor chat with two model flags before relying on this in
-UI polish.
+`sessionModelSwitch` is in-session because Cursor ACP exposes
+`session/set_config_option` for the model config.
 
 ### Runtime Event Normalization
 
@@ -437,22 +400,23 @@ Files:
 - `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts`
 - provider runtime tests and fixtures
 
-Map Cursor stream-json events as follows:
+Map Cursor ACP events as follows:
 
-| Cursor event                                  | T3 behavior                                                                                                                  |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `system/init`                                 | Record provider session metadata, update resume cursor, emit ready/running metadata if needed.                               |
-| `user`                                        | Log raw provider echo only; do not create a duplicate user message.                                                          |
-| `assistant`                                   | Emit assistant item started on the first text delta, then assistant deltas.                                                  |
-| `thinking`                                    | Emit reasoning deltas if the runtime contract supports them; otherwise preserve in raw provider logs only.                   |
-| `tool_call` `started`                         | Emit tool-call started with provider tool name, call id, and redacted args.                                                  |
-| `tool_call` `completed`                       | Emit tool-call completed or failed with bounded result output.                                                               |
-| `interaction_query`                           | Initially log and surface as unsupported provider interaction; map plan requests after UX is designed.                       |
-| `result` success                              | Finish the turn, record duration/request id/session id, and avoid duplicating aggregate text already emitted through deltas. |
-| non-zero exit, stderr error, missing `result` | Emit runtime error and failed turn.                                                                                          |
+| Cursor ACP event                                  | T3 behavior                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session/new` / `session/load`                    | Persist `sessionId` as the provider resume cursor and provider thread id.                                                                                                                                                                                        |
+| `session/update` `agent_message_chunk`            | Emit assistant item started on first text delta, then assistant deltas.                                                                                                                                                                                          |
+| `session/update` `agent_thought_chunk`            | Emit reasoning deltas.                                                                                                                                                                                                                                           |
+| `session/update` `tool_call` / `tool_call_update` | Emit provider-neutral tool lifecycle events.                                                                                                                                                                                                                     |
+| `session/update` `plan`                           | Emit `turn.plan.updated`.                                                                                                                                                                                                                                        |
+| `session/request_permission`                      | Emit `request.opened`; reply with Cursor's allow/reject option on response.                                                                                                                                                                                      |
+| `cursor/create_plan`                              | Emit `turn.proposed.completed` plus a blocking `plan_approval`; reply accepted/rejected/cancelled from the T3 approval decision. Rejected plans persist with `rejected` status, cancelled plans persist with `cancelled` status, and both stop being actionable. |
+| `cursor/ask_question`                             | Emit `user-input.requested`; reply with selected option ids.                                                                                                                                                                                                     |
+| `session/prompt` success                          | Finish the turn with the returned `stopReason`.                                                                                                                                                                                                                  |
+| ACP process or JSON-RPC error                     | Emit runtime error and failed turn.                                                                                                                                                                                                                              |
 
-The parser should preserve the raw event in bounded logs for debugging, but
-runtime events should stay provider-neutral.
+Raw ACP payloads should be preserved in bounded logs for debugging, but runtime
+events should stay provider-neutral.
 
 ### Context And T3 Service Injection
 
@@ -462,11 +426,12 @@ Files:
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
 - `docs/t3-agent-tools.md`
 
-Cursor print mode does not expose a separate system-prompt channel. Use the same
-hashing approach as Gemini's embedded context fallback:
+Cursor ACP does not currently advertise embedded context support in local
+`initialize` output, so T3 uses the same hashing approach as Gemini's text
+fallback:
 
 - Build T3 service guidance at session start.
-- Inject it into the first user prompt for a Cursor chat.
+- Inject it into the first user prompt for a Cursor ACP session.
 - Store `contextPromptHash` and `contextPromptInjected` in the Cursor resume
   cursor.
 - On resume, re-inject only if the hash changed.
@@ -487,14 +452,20 @@ Files:
 
 First milestone:
 
-- Add Cursor MCP discovery using the profile's resolved Cursor config and the
+- Cursor MCP discovery uses the profile's resolved Cursor settings and the
   project cwd.
-- Prefer CLI probes (`agent mcp list`, `agent mcp list-tools <id>`) for the
-  server-visible MCP menu if they are fast enough.
-- If CLI probes are too slow, parse Cursor's MCP config files only after
-  documenting the exact precedence and shape.
-- Continue injecting T3 REST services through the session prompt because it is
-  provider-neutral and already works for providers without native tool delivery.
+- The server-visible MCP menu probes `agent mcp list` first so T3 can surface
+  Cursor's own status text, including approval-required states such as `not
+loaded (needs approval)`.
+- If the CLI probe fails, T3 falls back to parsing user-level
+  `<CURSOR_CONFIG_DIR>/mcp.json` (default `~/.cursor/mcp.json`) and
+  project-local `.cursor/mcp.json`.
+- Official Cursor ACP docs state that ACP supports project/user `.cursor/mcp.json`
+  servers and that dashboard-configured MCP servers are not supported in ACP
+  mode.
+- T3 REST services continue to be injected through the first Cursor ACP prompt.
+  That keeps internal project service delivery provider-neutral and avoids
+  writing T3 MCP servers into the user's Cursor config.
 
 Deferred:
 
@@ -531,8 +502,8 @@ Files:
 - `apps/server/src/managedRuns/Layers/Inference.ts`
 
 Cursor should not become the default secondary inference provider in the first
-milestone. Cursor print mode can return `--output-format json`, but that output
-is a terminal text aggregate, not schema-constrained structured output.
+milestone. Cursor ACP is session-oriented and is not currently wired as a
+schema-constrained structured-output transport.
 
 First milestone:
 
@@ -588,9 +559,9 @@ Add a `cursor-adapter` lifecycle category and log:
 - process exit code/signal
 - interrupt cleanup actions
 
-T3CO-400 writes interrupt cleanup lifecycle events under `cursor.adapter` and
-`cursor.process_tree`. Cleanup stages are sanitized and include only operational
-metadata (`pid`, `stage`, `signal`, timeout policy), not process command lines.
+Cursor ACP lifecycle events are logged as canonical provider runtime events with
+raw `cursor.acp.notification`, `cursor.acp.request`, and `cursor.acp.response`
+payloads where useful.
 
 Never log raw API keys, tokens, full account emails, or full prompt contents.
 
@@ -599,14 +570,13 @@ Never log raw API keys, tokens, full account emails, or full prompt contents.
 1. Land this specification and feature-doc pointer.
 2. Add contracts, settings, model maps, and exact provider helpers for
    `cursor`/`cursor:<profileId>`.
-3. Add profile resolution and provider status discovery.
-4. Add `CursorTurnRunner` and `CursorStreamJson` with fixture-driven tests.
-5. Add `CursorAdapter` lifecycle and runtime-event normalization. (Done in
-   T3CO-398 for assistant/reasoning deltas, token usage, terminal turn state,
-   resume persistence, and unsupported capability errors.)
-6. Add process-tree interrupt cleanup. (Done in T3CO-400 for runner
-   interruption, adapter interrupt/stop, lifecycle cleanup visibility, unit
-   coverage, and local installed-agent verification.)
+3. Add explicit profile resolution and provider status discovery without
+   auto-discovering Cursor profile homes.
+4. Add `CursorAcpConnection` with JSON-RPC framing and launch configuration.
+5. Add `CursorAdapter` ACP lifecycle and runtime-event normalization for
+   assistant/reasoning deltas, tool calls, plan proposals, approvals, user input,
+   terminal turn state, resume persistence, and unsupported capability errors.
+6. Add ACP cancellation and process close coverage.
 7. Wire web provider picker, composer traits, draft persistence, and settings.
 8. Add MCP discovery and document the initial T3 REST service injection path.
 9. Decide attachment and secondary inference behavior with local probes.
@@ -620,16 +590,18 @@ Required automated tests:
 - model-selection normalization preserving Cursor `profileId`
 - settings defaults and patches for `providers.cursor` and
   `providers.cursorProfiles`
-- provider registry includes default and profile Cursor providers
+- provider registry includes the default Cursor provider and explicitly
+  configured Cursor profile providers
 - status probes use profile launch config and do not inherit ambient HOME
-- turn-runner argv/env construction for default and profile launches
-- stream-json parser fixtures for assistant deltas, tool calls, thinking,
-  interaction queries, success, non-zero exit, malformed JSON, and missing
-  terminal result
+- ACP command/env construction for default and profile launches
+- ACP adapter fixtures for assistant deltas, tool calls, thinking, plan
+  proposals, permission requests, user-input requests, successful prompt
+  completion, session load, and process errors
 - adapter start/resume/stop preserving resume cursors
 - same-base different-profile sessions do not reuse cursors
-- interrupt cleanup kills child shell processes
-- web picker displays and persists profile selections
+- interrupt cleanup sends `session/cancel` and stops the active turn
+- web picker and Fork with model menu display the base Cursor provider while
+  hiding `cursor:*` profiles during the guarded rollout
 
 Manual validation before enabling the provider in normal UI:
 
@@ -637,14 +609,12 @@ Manual validation before enabling the provider in normal UI:
 agent --version
 agent about --format json
 agent models
-agent create-chat
-agent --print --output-format stream-json --resume <id> "Say one short sentence."
-agent --print --output-format stream-json --resume <id> --mode plan "Plan a tiny change only."
+agent acp
 agent mcp list
 agent mcp list-tools <server-id>
-bash -lc 'cursor-metric about --format json'
-bash -lc 'cursor-metric create-chat'
-bash -lc 'cursor-metric --print --output-format stream-json --resume <id> "Say one short sentence."'
+# Optional only when an explicit Cursor profile is being validated:
+# bash -lc 'cursor-metric about --format json'
+# bash -lc 'cursor-metric acp'
 ```
 
 Before marking each implementation ticket complete, run:
@@ -661,15 +631,22 @@ Do not run `bun test`; use `bun run test` for any targeted Vitest suites.
 
 - Cursor CLI is beta and event fields may grow. Parser must ignore unknown
   fields and tests must pin only fields T3 depends on.
-- Non-interactive approvals are not a full T3 approval round trip.
+- Plan approval now uses a full T3 approval round trip, but Cursor ACP extension
+  payloads may still evolve and require parser updates.
+- Rejected and cancelled Cursor plans are first-class proposed plans with
+  distinct `status` values: `"rejected"` for an explicit decline and
+  `"cancelled"` for stopping the pending approval. They remain in the timeline
+  for audit but are excluded from sidebar `Plan Ready`, composer follow-up, and
+  source-plan implementation flows.
 - Shell functions are convenient for local profiles but not durable production
   configuration.
-- macOS keychain behavior can accidentally share auth across profiles unless
-  each profile launch uses the intended HOME/keychain setup.
-- `result.result` duplicates assistant text emitted as deltas.
-- Process interrupts can orphan shell children unless the adapter owns process
-  group/tree cleanup. T3CO-400 covers the Cursor runner path; keep this in mind
-  for any future long-lived Cursor transport.
+- macOS keychain behavior can accidentally share auth across profiles or prompt
+  for an unexpected profile keychain. Avoid Cursor profile auto-discovery and
+  keep profile probes opt-in.
+- ACP extension payloads may evolve. Keep unknown fields in raw payloads and
+  parse only fields T3 needs.
+- Process interrupts should prefer `session/cancel`, then close the ACP child if
+  the session is stopped.
 - Cursor history may be cwd-scoped. Resume validation should include cwd.
 - Cursor MCP config precedence needs verification before T3 edits or writes any
   Cursor MCP config.
@@ -677,13 +654,14 @@ Do not run `bun test`; use `bun run test` for any targeted Vitest suites.
 ## Done Criteria
 
 - `cursor` and `cursor:<profileId>` are valid provider kinds end to end.
-- Default Cursor and at least one configured profile can report installed/auth
-  status and model lists independently.
-- A Cursor chat can be created, used for a turn, stopped, resumed, and used for
-  another turn without losing context.
+- Default Cursor and any explicitly configured profile can report
+  installed/auth status and model lists independently.
+- A Cursor ACP session can be created, used for a turn, stopped, resumed with
+  `session/load`, and used for another turn without losing context.
 - Runtime events render assistant deltas, tool calls, and terminal states in the
   existing chat timeline without duplicate final messages.
-- Interrupting an active Cursor turn cleans up shell children.
+- Interrupting an active Cursor turn sends `session/cancel` and settles the T3
+  turn once.
 - Switching between `cursor` and `cursor:metric` never reuses the wrong resume
   cursor, account, rate-limit key, or provider status.
 - Unsupported capabilities fail with explicit provider errors.

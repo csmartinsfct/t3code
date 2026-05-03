@@ -260,6 +260,7 @@ function toProposedPlan(row: Schema.Schema.Type<typeof ProjectionThreadProposedP
     id: row.planId,
     turnId: row.turnId,
     planMarkdown: row.planMarkdown,
+    status: row.status,
     implementedAt: row.implementedAt,
     implementationThreadId: row.implementationThreadId,
     createdAt: row.createdAt,
@@ -517,6 +518,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           projection_thread_proposed_plans.thread_id AS "threadId",
           projection_thread_proposed_plans.turn_id AS "turnId",
           projection_thread_proposed_plans.plan_markdown AS "planMarkdown",
+          projection_thread_proposed_plans.status,
           projection_thread_proposed_plans.implemented_at AS "implementedAt",
           projection_thread_proposed_plans.implementation_thread_id AS "implementationThreadId",
           projection_thread_proposed_plans.created_at AS "createdAt",
@@ -542,6 +544,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           turn_id AS "turnId",
           plan_markdown AS "planMarkdown",
+          status,
           implemented_at AS "implementedAt",
           implementation_thread_id AS "implementationThreadId",
           created_at AS "createdAt",
@@ -779,11 +782,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           latest.updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans AS latest
         WHERE latest.implemented_at IS NULL
+          AND latest.status = 'ready'
           AND NOT EXISTS (
             SELECT 1
             FROM projection_thread_proposed_plans AS newer
             WHERE newer.thread_id = latest.thread_id
               AND newer.implemented_at IS NULL
+              AND newer.status = 'ready'
               AND (
                 newer.updated_at > latest.updated_at
                 OR (newer.updated_at = latest.updated_at AND newer.plan_id > latest.plan_id)

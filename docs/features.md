@@ -152,31 +152,46 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 ### Cursor
 
 - Provider status discovery is registered for the default Cursor Agent CLI and
-  named Cursor profiles. The server reports install/version/auth/model
-  snapshots before the runtime adapter is enabled.
+  explicitly configured Cursor profiles. The server reports
+  install/version/auth/model snapshots before the runtime adapter is enabled.
 - Authentication and model availability are delegated to Cursor CLI probes:
   `agent about --format json`, fallback `agent status`, and `agent models`.
   Account identifiers are treated as sensitive and are not displayed in provider
   status labels.
-- **Profiles:** Multiple named profiles are supported in status/settings from
-  the first Cursor milestone. The default provider appears as `cursor`; profiles
-  appear as exact provider entries such as `cursor:metric` and keep independent
-  HOME/config/data paths, accounts, status probes, resume cursors, rate-limit
-  keys, and draft state.
+- **Profiles:** Multiple named profiles remain supported through explicit
+  `providers.cursorProfiles` settings, but T3 does not auto-discover
+  `~/.cursor-profiles/*`. Cursor profile homes can prompt macOS keychain access
+  during background status probes, so profile setup must be deliberate. T3 does
+  not create profile homes, unlock keychains, or synthesize HOME/config/data
+  paths for Cursor profiles. There is no user-facing Settings UI for adding
+  Cursor profiles until auto-discovery and auth probing are quiet enough for
+  routine use. The default provider appears as `cursor`; configured profiles
+  remain exact provider entries such as `cursor:metric` internally and keep
+  independent launch commands, optional environment overrides, accounts, status
+  probes, resume cursors, rate-limit keys, and draft state. In the current
+  rollout, user-facing model pickers and Fork with model menus hide `cursor:*`
+  providers; only the base Cursor provider is selectable.
 - Configuration: enabled/disabled, binary path, optional launch command, profile
   HOME, `CURSOR_CONFIG_DIR`, `CURSOR_DATA_DIR`, custom environment, and custom
   model slugs.
-- Runtime shape: planned process-per-turn adapter with Cursor `session_id`
-  stored as T3's provider resume cursor and passed back through `--resume`.
-- Runtime access: T3 maps full access to Cursor force/sandbox-disabled flags and
-  maps approval-required mode to Cursor's default non-interactive behavior until
-  a stable approval round trip is proven.
-- MCP discovery: planned through Cursor CLI MCP probes or verified Cursor config
-  parsing. Initial T3 project-service access uses prompt-injected REST endpoint
-  guidance, matching other providers without native T3 tool delivery.
+- Runtime shape: Cursor runs through `agent acp` using newline-delimited
+  JSON-RPC over stdio. T3 stores the Cursor ACP `sessionId` as the provider
+  resume cursor and resumes with `session/load`.
+- Runtime access: T3 maps plan mode through `session/set_config_option`, sends
+  turns with `session/prompt`, responds to `session/request_permission`, and
+  handles `cursor/create_plan` as native T3 proposed plans with explicit
+  accept/reject/cancel approval responses back to Cursor ACP. Rejected Cursor
+  plans are retained with `rejected` status, cancelled Cursor plans are retained
+  with `cancelled` status, and neither terminal status is treated as a
+  `Plan Ready` follow-up.
+- MCP discovery: uses Cursor CLI `agent mcp list` from the project cwd so the
+  composer can show configured servers and approval/status text. If the CLI
+  probe fails, T3 falls back to parsing user-level `.cursor/mcp.json` and
+  project-local `.cursor/mcp.json`. Cursor ACP does not use MCP servers
+  configured through the Cursor dashboard.
 - See [Cursor Provider Implementation Specification](cursor-provider-implementation.md)
-  for rollout risks, profile requirements, stream-json event mapping, and
-  deferred capabilities.
+  for rollout risks, profile requirements, ACP event mapping, and deferred
+  capabilities.
 
 ### Provider configuration
 
@@ -188,7 +203,12 @@ Server settings expose per-provider configuration:
 - `providers.claudeProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath, configDir, customModels).
 - `providers.gemini` — enabled/disabled, binaryPath, homePath, customModels.
 - `providers.cursor` — enabled/disabled, binaryPath, optional launchCommand, homePath, configDir, dataDir, env, customModels.
-- `providers.cursorProfiles` — Array of profile configs (profileId, displayName, enabled, binaryPath or launchCommand, homePath, configDir, dataDir, env, customModels).
+- `providers.cursorProfiles` — Advanced/internal explicit array of profile
+  configs (profileId, displayName, enabled, binaryPath or launchCommand,
+  homePath, configDir, dataDir, env, customModels). T3 does not auto-discover
+  Cursor profile directories, expose manual profile creation in Settings, or
+  expose `cursor:*` profiles in user-facing model/fork selectors in the current
+  rollout.
 
 Model selection settings (each can target a specific provider + model):
 
@@ -252,7 +272,9 @@ The main chat view is the primary interface for interacting with agents.
 
 ### Pending approval panel
 
-When an agent requests approval (e.g. before executing a command), the composer area displays decision buttons (approve/decline) with context about the requested action.
+When an agent requests approval (e.g. before executing a command or asking the
+user to accept a Cursor plan), the composer area displays decision buttons
+(approve/decline) with context about the requested action.
 
 ### Pending user input panel
 
@@ -778,8 +800,8 @@ Internal T3 project services are exposed to every provider the same way: REST en
 - Codex: appended through `appendDeveloperInstructions`.
 - Claude: appended through `systemPrompt.append`.
 - Gemini: sent as an ACP embedded-context resource on the first user turn; the resume cursor tracks a hash so unchanged prompts are not re-injected.
-- Cursor: planned as first-turn prompt injection for print-mode sessions; the
-  resume cursor should track a hash so unchanged prompts are not re-injected.
+- Cursor: prepended to the first ACP `session/prompt` text for the session; the
+  resume cursor tracks a hash so unchanged prompts are not re-injected.
 
 ### Services exposed via REST API
 

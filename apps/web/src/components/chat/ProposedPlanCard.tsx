@@ -29,11 +29,13 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
+  status = "ready",
   cwd,
   workspaceRoot,
   onOpenTicketLink,
 }: {
   planMarkdown: string;
+  status?: "ready" | "rejected" | "cancelled" | undefined;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
   onOpenTicketLink?: (identifier: string) => void | Promise<void>;
@@ -61,6 +63,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     : null;
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
+  const statusLabel =
+    status === "rejected" ? "Plan rejected" : status === "cancelled" ? "Plan cancelled" : "Plan";
 
   const handleDownload = () => {
     downloadPlanAsTextFile(downloadFilename, saveContents);
@@ -133,7 +137,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
+          <Badge variant={status === "ready" ? "secondary" : "outline"}>{statusLabel}</Badge>
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
         <Menu>

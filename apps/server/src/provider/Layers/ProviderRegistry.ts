@@ -8,7 +8,7 @@ import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive, makeClaudeProfileProvider } from "./ClaudeProvider";
 import { CodexProviderLive, makeCodexProfileProvider } from "./CodexProvider";
-import { CursorProviderLive, makeCursorProfileProvider } from "./CursorProvider";
+import { checkCursorProviderStatus, CursorProviderLive } from "./CursorProvider";
 import { GeminiProviderLive } from "./GeminiProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { CodexProvider } from "../Services/CodexProvider";
@@ -18,8 +18,9 @@ import { ProviderRegistry, type ProviderRegistryShape } from "../Services/Provid
 import type { ServerProviderShape } from "../Services/ServerProvider";
 import { discoverClaudeProfiles, mergeClaudeProfiles } from "../claudeProfileDiscovery";
 import { discoverCodexProfiles, mergeCodexProfiles } from "../codexProfileDiscovery";
-import { discoverCursorProfiles, mergeCursorProfiles } from "../cursorProfileDiscovery";
+import { mergeCursorProfiles, resolveCursorSettingsForProvider } from "../cursorProfileDiscovery";
 import { ServerSettingsService } from "../../serverSettings";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 export const haveProvidersChanged = (
   previousProviders: ReadonlyArray<ServerProvider>,
@@ -34,15 +35,14 @@ export const ProviderRegistryLive = Layer.effect(
     const geminiProvider = yield* GeminiProvider;
     const cursorProvider = yield* CursorProvider;
     const serverSettings = yield* ServerSettingsService;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
     // ── Discover provider profiles ─────────────────────────────────
     const discoveredCodex = yield* discoverCodexProfiles();
     const discoveredClaude = yield* discoverClaudeProfiles();
-    const discoveredCursor = yield* discoverCursorProfiles();
     const settings = yield* serverSettings.getSettings;
     const codexProfiles = mergeCodexProfiles(discoveredCodex, settings.providers.codexProfiles);
     const claudeProfiles = mergeClaudeProfiles(discoveredClaude, settings.providers.claudeProfiles);
-    const cursorProfiles = mergeCursorProfiles(discoveredCursor, settings.providers.cursorProfiles);
 
     const profileProviders: Array<{ kind: ProviderKind; provider: ServerProviderShape }> = [];
     for (const profile of codexProfiles) {
@@ -51,10 +51,6 @@ export const ProviderRegistryLive = Layer.effect(
     }
     for (const profile of claudeProfiles) {
       const provider = yield* makeClaudeProfileProvider(profile);
-      profileProviders.push({ kind: profile.providerKind, provider });
-    }
-    for (const profile of cursorProfiles) {
-      const provider = yield* makeCursorProfileProvider(profile);
       profileProviders.push({ kind: profile.providerKind, provider });
     }
 
@@ -69,10 +65,31 @@ export const ProviderRegistryLive = Layer.effect(
     ];
 
     const loadProviders = () =>
-      Effect.all(
-        allProviders.map(({ provider }) => provider.getSnapshot),
-        { concurrency: "unbounded" },
-      );
+      Effect.gen(function* () {
+        const staticProviders = yield* Effect.all(
+          allProviders.map(({ provider }) => provider.getSnapshot),
+          { concurrency: "unbounded" },
+        );
+        const latestSettings = yield* serverSettings.getSettings;
+        const cursorProfiles = mergeCursorProfiles(latestSettings.providers.cursorProfiles);
+        const cursorProfileProviders = yield* Effect.all(
+          cursorProfiles.map((profile) =>
+            checkCursorProviderStatus({
+              providerKind: profile.providerKind,
+              displayName: profile.displayName,
+              settingsOverride: resolveCursorSettingsForProvider(
+                latestSettings,
+                profile.providerKind,
+              ),
+            }).pipe(
+              Effect.provideService(ServerSettingsService, serverSettings),
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            ),
+          ),
+          { concurrency: "unbounded" },
+        );
+        return [...staticProviders, ...cursorProfileProviders];
+      });
 
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
@@ -100,6 +117,9 @@ export const ProviderRegistryLive = Layer.effect(
         Effect.forkScoped,
       );
     }
+    yield* Stream.runForEach(serverSettings.streamChanges, () => syncProviders()).pipe(
+      Effect.forkScoped,
+    );
 
     const refresh = Effect.fn("refresh")(function* (provider?: ProviderKind) {
       if (provider) {

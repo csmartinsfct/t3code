@@ -52,6 +52,28 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.planMarkdown).toBe("# Ship it");
   });
 
+  it("decodes plan approval requests", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "request.opened",
+      eventId: "event-plan-approval-1",
+      provider: "cursor",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      requestId: "cursor-plan-1",
+      payload: {
+        requestType: "plan_approval",
+        detail: "Review Cursor's proposed plan to continue this turn.",
+      },
+    });
+
+    expect(parsed.type).toBe("request.opened");
+    if (parsed.type !== "request.opened") {
+      throw new Error("expected request.opened");
+    }
+    expect(parsed.payload.requestType).toBe("plan_approval");
+  });
+
   it("decodes user-input.requested with structured questions", () => {
     const parsed = decodeRuntimeEvent({
       type: "user-input.requested",

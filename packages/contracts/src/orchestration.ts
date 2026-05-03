@@ -454,10 +454,14 @@ export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
 export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
 
+export const OrchestrationProposedPlanStatus = Schema.Literals(["ready", "rejected", "cancelled"]);
+export type OrchestrationProposedPlanStatus = typeof OrchestrationProposedPlanStatus.Type;
+
 export const OrchestrationProposedPlan = Schema.Struct({
   id: OrchestrationProposedPlanId,
   turnId: Schema.NullOr(TurnId),
   planMarkdown: TrimmedNonEmptyString,
+  status: OrchestrationProposedPlanStatus.pipe(Schema.withDecodingDefault(() => "ready")),
   implementedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
   implementationThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
@@ -1405,6 +1409,7 @@ export const ThreadTurnDiff = TurnCountRange.mapFields(
 
 export const ProviderSessionRuntimeStatus = Schema.Literals([
   "starting",
+  "ready",
   "running",
   "stopped",
   "error",

@@ -3,6 +3,7 @@ import type {
   OrchestrationMessageMetadata,
   OrchestrationLatestTurn,
   OrchestrationProposedPlanId,
+  OrchestrationProposedPlanStatus,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
   ProjectPromptOverrides,
@@ -60,6 +61,7 @@ export interface ProposedPlan {
   id: OrchestrationProposedPlanId;
   turnId: TurnId | null;
   planMarkdown: string;
+  status?: OrchestrationProposedPlanStatus | undefined;
   implementedAt: string | null;
   implementationThreadId: ThreadId | null;
   createdAt: string;

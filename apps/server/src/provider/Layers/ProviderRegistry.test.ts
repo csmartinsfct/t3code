@@ -599,6 +599,71 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
 
+      it.effect("registers Cursor profiles added through settings without restart", () =>
+        Effect.gen(function* () {
+          const serverSettings = yield* makeMutableServerSettingsService();
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const providerRegistryLayer = ProviderRegistryLive.pipe(
+            Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
+            Layer.provideMerge(failingSpawnerLayer("spawn ENOENT")),
+          );
+          const runtimeServices = yield* Layer.build(
+            Layer.mergeAll(
+              Layer.succeed(ServerSettingsService, serverSettings),
+              providerRegistryLayer,
+            ),
+          ).pipe(Scope.provide(scope));
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry;
+
+            const initial = yield* registry.getProviders;
+            assert.strictEqual(
+              initial.some((status) => String(status.provider) === "cursor:metric"),
+              false,
+            );
+
+            yield* serverSettings.updateSettings({
+              providers: {
+                cursorProfiles: [
+                  {
+                    profileId: "metric",
+                    displayName: "Cursor (metric)",
+                    enabled: false,
+                    binaryPath: "agent",
+                    launchCommand: [],
+                    homePath: "",
+                    configDir: "",
+                    dataDir: "",
+                    env: {},
+                    customModels: [],
+                  },
+                ],
+              },
+            });
+
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+              const updated = yield* registry.getProviders;
+              const profile = updated.find((status) => String(status.provider) === "cursor:metric");
+              if (profile) {
+                assert.strictEqual(profile.displayName, "Cursor (metric)");
+                assert.strictEqual(profile.enabled, false);
+                return;
+              }
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+            }
+
+            const updated = yield* registry.getProviders;
+            assert.fail(
+              `Expected cursor:metric provider after settings update, got ${updated
+                .map((status) => status.provider)
+                .join(", ")}`,
+            );
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
       it.effect("skips codex probes entirely when the provider is disabled", () =>
         Effect.gen(function* () {
           const serverSettingsLayer = ServerSettingsService.layerTest({

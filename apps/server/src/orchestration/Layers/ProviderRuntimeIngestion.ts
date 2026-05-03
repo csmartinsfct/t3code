@@ -7,6 +7,7 @@ import {
   type OAuthUsageTier,
   type OrchestrationEvent,
   type OrchestrationProposedPlanId,
+  type OrchestrationProposedPlanStatus,
   CheckpointRef,
   isToolLifecycleItemType,
   ThreadId,
@@ -471,7 +472,7 @@ function orchestrationSessionStatusFromRuntimeState(
 
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
-): "command" | "file-read" | "file-change" | "tool" | undefined {
+): "command" | "file-read" | "file-change" | "plan" | "tool" | undefined {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -481,6 +482,8 @@ function requestKindFromCanonicalRequestType(
     case "file_change_approval":
     case "apply_patch_approval":
       return "file-change";
+    case "plan_approval":
+      return "plan";
     case "dynamic_tool_call":
     case "unknown":
       return "tool";
@@ -517,7 +520,9 @@ function runtimeEventToActivities(
                 ? "File-read approval requested"
                 : requestKind === "file-change"
                   ? "File-change approval requested"
-                  : "Tool approval requested",
+                  : requestKind === "plan"
+                    ? "Plan approval requested"
+                    : "Tool approval requested",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
@@ -1126,6 +1131,7 @@ const make = Effect.fn("make")(function* () {
     threadId: ThreadId;
     threadProposedPlans: ReadonlyArray<{
       id: string;
+      status?: OrchestrationProposedPlanStatus;
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
@@ -1133,6 +1139,7 @@ const make = Effect.fn("make")(function* () {
     planId: string;
     turnId?: TurnId;
     planMarkdown: string | undefined;
+    status?: OrchestrationProposedPlanStatus;
     createdAt: string;
     updatedAt: string;
   }) {
@@ -1150,6 +1157,7 @@ const make = Effect.fn("make")(function* () {
         id: input.planId,
         turnId: input.turnId ?? null,
         planMarkdown,
+        status: input.status ?? existingPlan?.status ?? "ready",
         implementedAt: existingPlan?.implementedAt ?? null,
         implementationThreadId: existingPlan?.implementationThreadId ?? null,
         createdAt: existingPlan?.createdAt ?? input.createdAt,
@@ -1164,6 +1172,7 @@ const make = Effect.fn("make")(function* () {
     threadId: ThreadId;
     threadProposedPlans: ReadonlyArray<{
       id: string;
+      status?: OrchestrationProposedPlanStatus;
       createdAt: string;
       implementedAt: string | null;
       implementationThreadId: ThreadId | null;
@@ -1336,6 +1345,7 @@ const make = Effect.fn("make")(function* () {
       .filter(
         (plan) =>
           plan.turnId === input.turnId &&
+          plan.status === "ready" &&
           plan.implementedAt === null &&
           plan.planMarkdown.trim().length > 0,
       )
@@ -1747,6 +1757,34 @@ const make = Effect.fn("make")(function* () {
         fallbackMarkdown: proposedPlanCompletion.planMarkdown,
         updatedAt: now,
       });
+    }
+
+    if (
+      event.type === "request.resolved" &&
+      event.payload.requestType === "plan_approval" &&
+      (event.payload.decision === "decline" || event.payload.decision === "cancel")
+    ) {
+      const turnId = toTurnId(event.turnId);
+      if (turnId) {
+        const threadContent = yield* projectionSnapshotQuery.getThreadContent(thread.id);
+        const planId = proposedPlanIdForTurn(thread.id, turnId);
+        const proposedPlan = threadContent.proposedPlans.find((entry) => entry.id === planId);
+        const terminalPlanStatus =
+          event.payload.decision === "cancel" ? "cancelled" : ("rejected" as const);
+        if (proposedPlan && proposedPlan.status !== terminalPlanStatus) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.proposed-plan.upsert",
+            commandId: providerCommandId(event, `proposed-plan-${terminalPlanStatus}`),
+            threadId: thread.id,
+            proposedPlan: {
+              ...proposedPlan,
+              status: terminalPlanStatus,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+        }
+      }
     }
 
     if (event.type === "turn.completed") {

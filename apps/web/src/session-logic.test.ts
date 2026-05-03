@@ -483,6 +483,36 @@ describe("hasActionableProposedPlan", () => {
       }),
     ).toBe(false);
   });
+
+  it("returns false for a rejected proposed plan", () => {
+    expect(
+      hasActionableProposedPlan({
+        id: "plan-1",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        planMarkdown: "# Plan",
+        status: "rejected",
+        implementedAt: null,
+        implementationThreadId: null,
+        createdAt: "2026-02-23T00:00:00.000Z",
+        updatedAt: "2026-02-23T00:00:02.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for a cancelled proposed plan", () => {
+    expect(
+      hasActionableProposedPlan({
+        id: "plan-1",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        planMarkdown: "# Plan",
+        status: "cancelled",
+        implementedAt: null,
+        implementationThreadId: null,
+        createdAt: "2026-02-23T00:00:00.000Z",
+        updatedAt: "2026-02-23T00:00:02.000Z",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("findSidebarProposedPlan", () => {
@@ -1359,7 +1389,7 @@ describe("PROVIDER_OPTIONS", () => {
     });
   });
 
-  it("uses server-provided Cursor status instead of duplicating the fallback", () => {
+  it("uses server-provided Cursor status and keeps configured Cursor profiles internal", () => {
     const options = buildProviderOptions([
       {
         provider: "cursor",
@@ -1385,9 +1415,6 @@ describe("PROVIDER_OPTIONS", () => {
       },
     ]);
 
-    expect(options).toEqual([
-      { value: "cursor", label: "Cursor", available: true },
-      { value: "cursor:metric", label: "Cursor (metric)", available: true },
-    ]);
+    expect(options).toEqual([{ value: "cursor", label: "Cursor", available: true }]);
   });
 });

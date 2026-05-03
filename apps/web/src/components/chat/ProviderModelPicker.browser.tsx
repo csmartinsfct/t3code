@@ -312,7 +312,7 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Claude");
         expect(text).toContain("Claude (metric)");
         expect(text).toContain("Cursor");
-        expect(text).toContain("Cursor (metric)");
+        expect(text).not.toContain("Cursor (metric)");
         expect(text).not.toContain("Claude Sonnet 4.6");
       });
     } finally {
@@ -550,27 +550,21 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("keeps discovered Cursor profiles as distinct provider selections", async () => {
+  it("keeps configured Cursor profile models internal-only in the picker menu", async () => {
     const mounted = await mountPicker({
-      provider: "cursor:metric",
-      model: "composer-2-fast",
+      provider: "cursor",
+      model: "composer-2",
       lockedProvider: null,
     });
 
     try {
-      await vi.waitFor(() => {
-        expect(page.getByRole("button").element().textContent).toContain("Composer 2 Fast");
-        expect(page.getByRole("button").element().textContent).toContain("metric");
-      });
-
       await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Cursor (metric)" }).hover();
-      await page.getByRole("menuitemradio", { name: "Composer 2 Fast" }).click();
 
-      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
-        "cursor:metric",
-        "composer-2-fast",
-      );
+      await vi.waitFor(() => {
+        expect(page.getByRole("menuitem", { name: "Cursor" }).element()).toBeTruthy();
+        expect(document.body.textContent ?? "").not.toContain("Cursor (metric)");
+      });
+      expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
     }

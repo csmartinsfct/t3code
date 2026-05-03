@@ -34,11 +34,18 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
-import { makeProviderServiceLive, runProviderIdleReaperSweep } from "./ProviderService.ts";
+import {
+  makeProviderServiceLive,
+  providerRuntimeBindingPatchFromEvent,
+  runProviderIdleReaperSweep,
+} from "./ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
-import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
+import {
+  ProviderSessionRuntimeRepository,
+  type ProviderSessionRuntime,
+} from "../../persistence/Services/ProviderSessionRuntime.ts";
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
@@ -230,6 +237,36 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
 
 const sleep = (ms: number) =>
   Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+function runtimePayloadRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+const waitForRuntime = (
+  repository: typeof ProviderSessionRuntimeRepository.Service,
+  threadId: ThreadId,
+  predicate: (runtime: ProviderSessionRuntime) => boolean,
+) =>
+  Effect.gen(function* () {
+    let lastObserved: ProviderSessionRuntime | null = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const runtime = yield* repository.getByThreadId({ threadId });
+      if (Option.isSome(runtime) && predicate(runtime.value)) {
+        return runtime.value;
+      }
+      if (Option.isSome(runtime)) {
+        lastObserved = runtime.value;
+      }
+      yield* sleep(20);
+    }
+    return yield* Effect.fail(
+      new Error(
+        `Timed out waiting for runtime row ${String(threadId)}; last observed ${JSON.stringify(lastObserved)}`,
+      ),
+    );
+  });
 
 const hasMetricSnapshot = (
   snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
@@ -874,6 +911,71 @@ routing.layer("ProviderServiceLive routing", (it) => {
           assert.equal(runtimePayload.lastError, null);
           assert.equal(runtimePayload.lastRuntimeEvent, "provider.sendTurn");
         }
+      }
+    }),
+  );
+
+  it.effect("normalizes Cursor terminal runtime events back into persisted runtime state", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const cases: ReadonlyArray<{
+        readonly state: "completed" | "interrupted" | "cancelled" | "failed";
+        readonly expectedStatus: "ready" | "error";
+        readonly errorMessage?: string;
+      }> = [
+        { state: "completed", expectedStatus: "ready" },
+        { state: "interrupted", expectedStatus: "ready" },
+        { state: "cancelled", expectedStatus: "ready" },
+        { state: "failed", expectedStatus: "error", errorMessage: "Cursor failed" },
+      ];
+
+      for (const terminalCase of cases) {
+        const threadId = asThreadId(`cursor-terminal-${terminalCase.state}`);
+        const resumeCursor = { opaque: `resume-${terminalCase.state}` };
+        yield* directory.upsert({
+          threadId,
+          provider: "cursor",
+          runtimeMode: "full-access",
+          status: "running",
+          resumeCursor,
+          runtimePayload: {
+            activeTurnId: `turn-${terminalCase.state}`,
+            model: "composer-2",
+          },
+        });
+
+        const patch = providerRuntimeBindingPatchFromEvent({
+          type: "turn.completed",
+          eventId: asEventId(`evt-cursor-terminal-${terminalCase.state}`),
+          provider: "cursor",
+          createdAt: new Date().toISOString(),
+          threadId,
+          turnId: asTurnId(`turn-${terminalCase.state}`),
+          payload: {
+            state: terminalCase.state,
+            ...(terminalCase.errorMessage ? { errorMessage: terminalCase.errorMessage } : {}),
+          },
+        });
+        assert.notEqual(patch, null);
+        if (patch) {
+          yield* directory.upsert(patch);
+        }
+
+        const runtime = yield* waitForRuntime(runtimeRepository, threadId, (entry) => {
+          const payload = runtimePayloadRecord(entry.runtimePayload);
+          return (
+            entry.status === terminalCase.expectedStatus &&
+            payload !== null &&
+            payload.activeTurnId === null
+          );
+        });
+
+        assert.deepEqual(runtime.resumeCursor, resumeCursor);
+        assert.equal(
+          runtimePayloadRecord(runtime.runtimePayload)?.lastTurnState,
+          terminalCase.state,
+        );
       }
     }),
   );

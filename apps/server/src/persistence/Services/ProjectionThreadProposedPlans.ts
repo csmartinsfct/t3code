@@ -1,6 +1,7 @@
 import {
   IsoDateTime,
   OrchestrationProposedPlanId,
+  OrchestrationProposedPlanStatus,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
@@ -15,6 +16,7 @@ export const ProjectionThreadProposedPlan = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.NullOr(TurnId),
   planMarkdown: TrimmedNonEmptyString,
+  status: OrchestrationProposedPlanStatus.pipe(Schema.withDecodingDefault(() => "ready")),
   implementedAt: Schema.NullOr(IsoDateTime),
   implementationThreadId: Schema.NullOr(ThreadId),
   createdAt: IsoDateTime,

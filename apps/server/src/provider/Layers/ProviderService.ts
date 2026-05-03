@@ -22,13 +22,14 @@ import {
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
+  type ProviderSessionRuntimeStatus,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
-import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
+import { Cause, Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
 
 import {
   increment,
@@ -95,7 +96,7 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
     ),
   );
 
-function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
+function toRuntimeStatus(session: ProviderSession): ProviderSessionRuntimeStatus {
   switch (session.status) {
     case "connecting":
       return "starting";
@@ -104,10 +105,177 @@ function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "st
     case "closed":
       return "stopped";
     case "ready":
+      return "ready";
     case "running":
     default:
       return "running";
   }
+}
+
+function runtimeStatusFromSessionState(
+  state: Extract<ProviderRuntimeEvent, { type: "session.state.changed" }>["payload"]["state"],
+): ProviderSessionRuntimeStatus {
+  switch (state) {
+    case "starting":
+      return "starting";
+    case "ready":
+      return "ready";
+    case "stopped":
+      return "stopped";
+    case "error":
+      return "error";
+    case "running":
+    case "waiting":
+      return "running";
+  }
+}
+
+function runtimeStatusFromTurnState(
+  state: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>["payload"]["state"],
+): ProviderSessionRuntimeStatus {
+  return state === "failed" ? "error" : "ready";
+}
+
+const TURN_COMPLETED_STATES = new Set(["completed", "failed", "interrupted", "cancelled"]);
+
+function turnCompletedPayloadFromEvent(
+  event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
+): {
+  readonly state: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>["payload"]["state"];
+  readonly errorMessage?: string | undefined;
+  readonly terminalReason?: string | undefined;
+} | null {
+  const payload = event.payload as unknown;
+  if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    const state = record.state;
+    if (typeof state === "string" && TURN_COMPLETED_STATES.has(state)) {
+      return {
+        state: state as Extract<
+          ProviderRuntimeEvent,
+          { type: "turn.completed" }
+        >["payload"]["state"],
+        ...(typeof record.errorMessage === "string" ? { errorMessage: record.errorMessage } : {}),
+        ...(typeof record.terminalReason === "string"
+          ? { terminalReason: record.terminalReason }
+          : {}),
+      };
+    }
+  }
+
+  const legacyStatus = (event as unknown as { readonly status?: unknown }).status;
+  if (typeof legacyStatus === "string" && TURN_COMPLETED_STATES.has(legacyStatus)) {
+    return {
+      state: legacyStatus as Extract<
+        ProviderRuntimeEvent,
+        { type: "turn.completed" }
+      >["payload"]["state"],
+    };
+  }
+
+  return null;
+}
+
+function providerFromRuntimeEvent(
+  event: ProviderRuntimeEvent,
+  existing: ProviderRuntimeBinding | undefined,
+): ProviderKind {
+  if (!existing) return event.provider;
+  const storedIsProfiled = providerProfileId(existing.provider) !== undefined;
+  const incomingIsProfiled = providerProfileId(event.provider) !== undefined;
+  if (
+    storedIsProfiled &&
+    !incomingIsProfiled &&
+    baseProviderKind(existing.provider) === baseProviderKind(event.provider)
+  ) {
+    return existing.provider;
+  }
+  return event.provider;
+}
+
+function runtimePayloadFromEvent(event: ProviderRuntimeEvent): Record<string, unknown> | null {
+  switch (event.type) {
+    case "turn.started":
+      return {
+        activeTurnId: event.turnId ?? null,
+        ...(event.payload.model ? { model: event.payload.model } : {}),
+        lastError: null,
+        lastRuntimeEvent: event.type,
+        lastRuntimeEventAt: event.createdAt,
+      };
+    case "turn.completed":
+      const completed = turnCompletedPayloadFromEvent(event);
+      if (!completed) return null;
+      return {
+        activeTurnId: null,
+        lastError: completed.state === "failed" ? (completed.errorMessage ?? "Turn failed") : null,
+        lastTurnState: completed.state,
+        ...(completed.terminalReason ? { terminalReason: completed.terminalReason } : {}),
+        lastRuntimeEvent: event.type,
+        lastRuntimeEventAt: event.createdAt,
+      };
+    case "session.state.changed":
+      return {
+        ...(event.payload.state === "ready" ||
+        event.payload.state === "stopped" ||
+        event.payload.state === "error"
+          ? { activeTurnId: null }
+          : {}),
+        lastError:
+          event.payload.state === "error"
+            ? (event.payload.reason ?? "Provider session error")
+            : event.payload.state === "ready"
+              ? null
+              : undefined,
+        lastRuntimeEvent: event.type,
+        lastRuntimeEventAt: event.createdAt,
+      };
+    case "session.exited":
+      return {
+        activeTurnId: null,
+        lastRuntimeEvent: event.type,
+        lastRuntimeEventAt: event.createdAt,
+      };
+    default:
+      return null;
+  }
+}
+
+export function providerRuntimeBindingPatchFromEvent(
+  event: ProviderRuntimeEvent,
+  existing?: ProviderRuntimeBinding | undefined,
+): {
+  readonly threadId: ThreadId;
+  readonly provider: ProviderKind;
+  readonly status?: ProviderSessionRuntimeStatus;
+  readonly runtimePayload?: Record<string, unknown>;
+} | null {
+  const status = (() => {
+    switch (event.type) {
+      case "turn.started":
+        return "running";
+      case "turn.completed":
+        const completed = turnCompletedPayloadFromEvent(event);
+        return completed ? runtimeStatusFromTurnState(completed.state) : null;
+      case "session.state.changed":
+        return runtimeStatusFromSessionState(event.payload.state);
+      case "session.exited":
+        return "stopped";
+      default:
+        return null;
+    }
+  })();
+  const runtimePayload = runtimePayloadFromEvent(event);
+  if (status === null && runtimePayload === null) {
+    return null;
+  }
+
+  return {
+    threadId: event.threadId,
+    provider: providerFromRuntimeEvent(event, existing),
+    ...(status !== null ? { status } : {}),
+    ...(runtimePayload !== null ? { runtimePayload } : {}),
+  };
 }
 
 function toRuntimePayloadFromSession(
@@ -262,6 +430,33 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       runtimePayload: toRuntimePayloadFromSession(session, extra),
     });
 
+  const persistRuntimeEventState = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const existing = Option.getOrUndefined(
+        yield* directory
+          .getBinding(event.threadId)
+          .pipe(Effect.orElseSucceed(() => Option.none<ProviderRuntimeBinding>())),
+      );
+      const patch = providerRuntimeBindingPatchFromEvent(event, existing);
+      if (patch === null) {
+        return;
+      }
+
+      yield* directory.upsert(patch);
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning(
+          formatTimelineLog("server.provider", "runtime-event.persist-state.failed", {
+            provider: event.provider,
+            eventType: event.type,
+            eventId: event.eventId,
+            threadId: event.threadId,
+            error: Cause.pretty(cause),
+          }),
+        ),
+      ),
+    );
+
   const providers = yield* registry.listProviders();
   const adapters = yield* Effect.forEach(providers, (provider) => registry.getByProvider(provider));
   const processRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
@@ -283,6 +478,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }),
         ),
       ),
+      Effect.andThen(persistRuntimeEventState(event)),
       Effect.andThen(publishRuntimeEvent(event)),
     );
 
