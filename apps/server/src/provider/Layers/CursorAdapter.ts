@@ -52,6 +52,8 @@ import {
 } from "../sessionContextPrompt";
 
 const PROVIDER = "cursor" as const;
+const CURSOR_ATTACHMENT_ERROR =
+  "Cursor ACP image attachments are not supported in T3 Code yet. Cursor currently advertises image prompt capability, but T3 has not verified a stable non-interactive payload contract. Remove attachments or reference files in the prompt text.";
 
 interface CursorResumeCursor {
   readonly version: 1;
@@ -1053,7 +1055,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",
-            issue: "Cursor ACP adapter does not support T3 attachments yet.",
+            issue: CURSOR_ATTACHMENT_ERROR,
           });
         }
         const text = trimOrUndefined(input.input);

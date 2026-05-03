@@ -482,20 +482,30 @@ Deferred:
 Files:
 
 - `apps/server/src/provider/Layers/CursorAdapter.ts`
-- attachment validation helpers used by Claude/Gemini adapters
+- `apps/server/src/provider/Layers/CursorAdapter.test.ts`
 
-First milestone should support text prompts and path references only. Cursor CLI
-supports file context through prompt text and project tools, but a stable
-non-interactive attachment payload was not verified.
+Current milestone supports text prompts and path references only. T3 chat
+attachments are currently image-only at the contract layer, and Cursor image
+attachments are rejected before a provider turn starts.
 
-Recommended behavior:
+Probe and protocol notes:
 
-- For text/file attachments that T3 can safely read, summarize them into the
-  prompt with bounded size limits.
-- For image or binary attachments, return a clear unsupported-provider error
-  until a local probe verifies a stable CLI contract.
-- Keep attachment errors before turn start so no partial provider run is
-  recorded for invalid input.
+- Local `agent acp` initialize probe on 2026-05-03 reported
+  `agentCapabilities.promptCapabilities.image: true`.
+- ACP schema says `session/prompt.prompt` accepts `ContentBlock[]`; text and
+  resource links are baseline, while image blocks require the agent image prompt
+  capability.
+- T3 does not yet send native Cursor image blocks because the stable
+  non-interactive Cursor image payload shape, data-size limits, and UI behavior
+  have not been verified against the installed CLI.
+
+Implemented behavior:
+
+- Any T3 image attachment for `cursor` or `cursor:<profileId>` fails with a
+  provider validation error before `session/prompt` is called.
+- Users should reference workspace files by path in prompt text for Cursor until
+  native ACP image payload support is verified and wired.
+- Existing Codex, Claude, and Gemini attachment paths are unchanged.
 
 ### Secondary Inference And Structured Output
 

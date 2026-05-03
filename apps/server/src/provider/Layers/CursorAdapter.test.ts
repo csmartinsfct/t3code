@@ -12,6 +12,7 @@ import {
 } from "../../orchestration/Services/ProjectionSnapshotQuery";
 import { ServerSettingsService } from "../../serverSettings";
 import { CursorAdapter } from "../Services/CursorAdapter";
+import { ProviderAdapterValidationError } from "../Errors";
 import type {
   CursorAcpConnection,
   CursorAcpConnectionOptions,
@@ -271,6 +272,82 @@ it.effect("CursorAdapterLive starts and sends turns through Cursor ACP", () => {
     );
     assert.ok(createConnection.mock.calls[0]?.[0].settings.binaryPath === "agent");
   }).pipe(Effect.provide(makeCursorTestLayer({ createConnection })));
+});
+
+it.effect("CursorAdapterLive rejects image attachments before starting Cursor turns", () => {
+  const calls: Array<{ method: string; input?: unknown }> = [];
+  const responses: Array<{ id: JsonRpcId; result?: unknown; error?: unknown }> = [];
+  const createConnection = vi.fn((options: CursorAcpConnectionOptions) =>
+    makeFakeConnection(options, { calls, responses }),
+  );
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    for (const provider of ["cursor", "cursor:metric"] as const) {
+      const threadId = ThreadId.makeUnsafe(`thread-${provider.replace(":", "-")}-attachment`);
+      yield* adapter.startSession({
+        threadId,
+        provider: provider as never,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const result = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Please inspect this screenshot.",
+          attachments: [
+            {
+              type: "image",
+              id: "cursor-attachment-1",
+              name: "screenshot.png",
+              mimeType: "image/png",
+              sizeBytes: 128,
+            },
+          ],
+          interactionMode: "default",
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      if (result._tag !== "Failure") return;
+      assert.deepEqual(
+        result.failure,
+        new ProviderAdapterValidationError({
+          provider: "cursor",
+          operation: "sendTurn",
+          issue:
+            "Cursor ACP image attachments are not supported in T3 Code yet. Cursor currently advertises image prompt capability, but T3 has not verified a stable non-interactive payload contract. Remove attachments or reference files in the prompt text.",
+        }),
+      );
+    }
+
+    assert.equal(calls.filter((call) => call.method === "session/prompt").length, 0);
+  }).pipe(
+    Effect.provide(
+      makeCursorTestLayer(
+        { createConnection },
+        {
+          providers: {
+            cursorProfiles: [
+              {
+                profileId: "metric",
+                displayName: "Cursor Metric",
+                enabled: true,
+                binaryPath: "agent",
+                launchCommand: [],
+                homePath: "",
+                configDir: "",
+                dataDir: "",
+                env: {},
+                customModels: [],
+              },
+            ],
+          },
+        },
+      ),
+    ),
+  );
 });
 
 it.effect("CursorAdapterLive captures Cursor ACP create_plan requests as proposed plans", () => {

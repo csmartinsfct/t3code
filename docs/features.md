@@ -184,6 +184,9 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
   plans are retained with `rejected` status, cancelled Cursor plans are retained
   with `cancelled` status, and neither terminal status is treated as a
   `Plan Ready` follow-up.
+- Attachments: T3 currently rejects Cursor image attachments before starting a
+  provider turn. Cursor users should reference workspace files by path in prompt
+  text until native ACP image payload support is verified and wired.
 - MCP discovery: uses Cursor CLI `agent mcp list` from the project cwd so the
   composer can show configured servers and approval/status text. If the CLI
   probe fails, T3 falls back to parsing user-level `.cursor/mcp.json` and
