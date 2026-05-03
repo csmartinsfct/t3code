@@ -4,6 +4,7 @@ import {
   baseProviderKind,
   type CanonicalItemType,
   EventId,
+  ProviderItemId,
   RuntimeItemId,
   ThreadId,
   TurnId,
@@ -45,7 +46,11 @@ import {
   type CursorTurnRunResult,
   runCursorTurn,
 } from "../cursor/CursorTurnRunner";
-import type { CursorStreamJsonEvent, CursorToolCallEvent } from "../cursor/CursorStreamJson";
+import type {
+  CursorInteractionQueryEvent,
+  CursorStreamJsonEvent,
+  CursorToolCallEvent,
+} from "../cursor/CursorStreamJson";
 import type {
   LifecycleEntry,
   ProviderLifecycleLoggerShape,
@@ -76,6 +81,7 @@ interface CursorTurnState {
   assistantSegmentText: string;
   reasoningText: string;
   reasoningSegmentText: string;
+  readonly capturedProposedPlanKeys: Set<string>;
   completed: boolean;
   cancelRequested: boolean;
 }
@@ -255,7 +261,7 @@ const createCursorChat = (input: { readonly settings: CursorSettings; readonly c
 function headlessModeFromInteractionMode(
   interactionMode: ProviderSendTurnInput["interactionMode"],
 ): CursorHeadlessMode | undefined {
-  return interactionMode === "plan" ? "plan" : undefined;
+  return interactionMode === "plan" || interactionMode === "plan-accept" ? "plan" : undefined;
 }
 
 function appendSessionContextPrompt(
@@ -317,6 +323,12 @@ function isCursorToolCallEvent(event: CursorStreamJsonEvent): event is CursorToo
   return event.type === "tool_call";
 }
 
+function isCursorInteractionQueryEvent(
+  event: CursorStreamJsonEvent,
+): event is CursorInteractionQueryEvent {
+  return event.type === "interaction_query";
+}
+
 function cursorToolItemId(toolName: string, callId: string | undefined): RuntimeItemId {
   const raw = callId && callId.trim() ? callId : toolName;
   const safe = raw.replace(/[^a-zA-Z0-9._:-]+/gu, "-").replace(/^-+|-+$/gu, "");
@@ -331,9 +343,51 @@ function extractCursorToolArgs(toolCall: unknown): unknown {
   return isRecord(body) && "args" in body ? body.args : body;
 }
 
+function extractCursorCreatePlanArgs(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const directArgs = value.args;
+  if (isRecord(directArgs) && typeof directArgs.plan === "string") {
+    return directArgs;
+  }
+
+  const nested = value.createPlanRequestQuery ?? value.createPlanToolCall;
+  if (!isRecord(nested)) return undefined;
+  const nestedArgs = nested.args;
+  return isRecord(nestedArgs) && typeof nestedArgs.plan === "string" ? nestedArgs : undefined;
+}
+
+function extractCursorPlanMarkdown(value: unknown): string | undefined {
+  const args = extractCursorCreatePlanArgs(value);
+  const plan = args?.plan;
+  const trimmed = typeof plan === "string" ? plan.trim() : "";
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function extractCursorInteractionToolCallId(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const toolCallId = value.toolCallId;
+  if (typeof toolCallId === "string" && toolCallId.trim()) return toolCallId;
+  const nested = value.createPlanRequestQuery;
+  if (!isRecord(nested)) return undefined;
+  const nestedToolCallId = nested.toolCallId;
+  return typeof nestedToolCallId === "string" && nestedToolCallId.trim()
+    ? nestedToolCallId
+    : undefined;
+}
+
 function summarizeCursorToolDetail(toolName: string, args: unknown): string | undefined {
   if (args === undefined) return undefined;
   const normalizedName = titleCaseToolName(toolName);
+  const planArgs = extractCursorCreatePlanArgs({ [toolName]: { args } });
+  if (planArgs) {
+    const name = typeof planArgs.name === "string" ? planArgs.name.trim() : "";
+    const overview = typeof planArgs.overview === "string" ? planArgs.overview.trim() : "";
+    const summary = name || overview;
+    return summary
+      ? `${normalizedName}: ${summary.slice(0, 400)}`
+      : `${normalizedName}: proposed plan`;
+  }
+
   const command = isRecord(args)
     ? typeof args.command === "string"
       ? args.command
@@ -357,6 +411,9 @@ function summarizeCursorToolDetail(toolName: string, args: unknown): string | un
 
 function classifyCursorToolItemType(toolName: string): CanonicalItemType {
   const normalized = toolName.toLowerCase();
+  if (normalized.includes("plan") || normalized.includes("todo")) {
+    return "plan";
+  }
   if (
     normalized.includes("shell") ||
     normalized.includes("bash") ||
@@ -596,6 +653,35 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
         });
       };
 
+      const emitProposedPlanCompleted = (input: {
+        readonly context: CursorSessionContext;
+        readonly turn: CursorTurnState;
+        readonly planMarkdown: string | undefined;
+        readonly raw: CursorStreamJsonEvent["raw"];
+        readonly providerItemId?: string | undefined;
+      }) => {
+        const planMarkdown = input.planMarkdown?.trim();
+        if (!planMarkdown) return;
+        if (input.turn.capturedProposedPlanKeys.has(planMarkdown)) return;
+        input.turn.capturedProposedPlanKeys.add(planMarkdown);
+
+        offerRuntimeEvent({
+          ...eventBase(input.context, { source: "cursor.stream-json", payload: input.raw }),
+          type: "turn.proposed.completed",
+          turnId: input.turn.turnId,
+          ...(input.providerItemId
+            ? {
+                providerRefs: {
+                  providerItemId: ProviderItemId.makeUnsafe(input.providerItemId),
+                },
+              }
+            : {}),
+          payload: {
+            planMarkdown,
+          },
+        });
+      };
+
       const finishTurn = (
         context: CursorSessionContext,
         state: "completed" | "failed" | "interrupted",
@@ -685,15 +771,29 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
               itemId: turn.assistantItemId,
               payload: { streamKind: "reasoning_text", delta: resolved.delta },
             });
-          } else if (event.type === "interaction_query") {
-            offerRuntimeEvent({
-              ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
-              type: "runtime.warning",
-              payload: {
-                message:
-                  "Cursor emitted an interaction query. T3 logs it, but provider-native interaction responses are not supported yet.",
-              },
-            });
+          } else if (isCursorInteractionQueryEvent(event)) {
+            const planMarkdown =
+              event.subtype === "request" && event.queryType === "createPlanRequestQuery"
+                ? extractCursorPlanMarkdown(event.query)
+                : undefined;
+            if (planMarkdown) {
+              emitProposedPlanCompleted({
+                context,
+                turn,
+                planMarkdown,
+                raw: event.raw,
+                providerItemId: extractCursorInteractionToolCallId(event.query),
+              });
+            } else if (event.queryType !== "createPlanRequestQuery") {
+              offerRuntimeEvent({
+                ...eventBase(context, { source: "cursor.stream-json", payload: event.raw }),
+                type: "runtime.warning",
+                payload: {
+                  message:
+                    "Cursor emitted an unsupported interaction query. T3 logged it but did not respond to it.",
+                },
+              });
+            }
           } else if (isCursorToolCallEvent(event)) {
             turn.assistantSegmentText = "";
             turn.reasoningSegmentText = "";
@@ -725,6 +825,15 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
                 },
               },
             });
+            if (event.subtype === "completed" && toolName === "createPlanToolCall") {
+              emitProposedPlanCompleted({
+                context,
+                turn,
+                planMarkdown: extractCursorPlanMarkdown(event.toolCall),
+                raw: event.raw,
+                providerItemId: event.callId,
+              });
+            }
           }
         }
 
@@ -954,6 +1063,7 @@ export function makeCursorAdapterLive(options?: CursorAdapterLiveOptions) {
           assistantSegmentText: "",
           reasoningText: "",
           reasoningSegmentText: "",
+          capturedProposedPlanKeys: new Set(),
           completed: false,
           cancelRequested: false,
         };

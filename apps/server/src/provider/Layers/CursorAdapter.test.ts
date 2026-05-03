@@ -1,6 +1,6 @@
 import { it, assert, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
+import { ApprovalRequestId, ProviderItemId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer, Option, Stream } from "effect";
 
 import { ServerConfig, type ServerConfigShape } from "../../config";
@@ -467,6 +467,156 @@ it.effect("CursorAdapterLive maps Cursor tool calls into item lifecycle events",
       title: "Shell",
     });
     assert.equal(String(toolEvents[0]?.itemId), String(toolEvents[1]?.itemId));
+  }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
+});
+
+it.effect("CursorAdapterLive captures Cursor createPlan interactions as proposed plans", () => {
+  const runInputs: CursorTurnCommandInput[] = [];
+  const createChat = vi.fn(() => Effect.succeed("cursor-session-plan"));
+  const runTurn = vi.fn((input: CursorTurnCommandInput) => {
+    runInputs.push(input);
+    const base = makeCursorRunResult(input.resumeSessionId ?? "cursor-session-plan", "");
+    const planMarkdown = "# Add cursor-plan doc\n\n- Create `docs/cursor-plan.md`.";
+    const planArgs = {
+      name: "Add cursor-plan doc",
+      overview: "Add a minimal docs file.",
+      plan: planMarkdown,
+      todos: [
+        {
+          id: "add-doc",
+          content: "Create docs/cursor-plan.md",
+          status: "TODO_STATUS_PENDING",
+        },
+      ],
+      phases: [],
+    };
+    return Effect.succeed({
+      ...base,
+      events: [
+        {
+          type: "tool_call" as const,
+          subtype: "started",
+          callId: "tool-plan-1",
+          toolCall: { createPlanToolCall: { args: planArgs } },
+          raw: {
+            type: "tool_call",
+            subtype: "started",
+            call_id: "tool-plan-1",
+            tool_call: { createPlanToolCall: { args: planArgs } },
+          },
+        },
+        {
+          type: "interaction_query" as const,
+          subtype: "request",
+          queryType: "createPlanRequestQuery",
+          query: {
+            id: 0,
+            createPlanRequestQuery: {
+              args: planArgs,
+              toolCallId: "tool-plan-1",
+            },
+          },
+          raw: {
+            type: "interaction_query",
+            subtype: "request",
+            query_type: "createPlanRequestQuery",
+            query: {
+              id: 0,
+              createPlanRequestQuery: {
+                args: planArgs,
+                toolCallId: "tool-plan-1",
+              },
+            },
+          },
+        },
+        {
+          type: "interaction_query" as const,
+          subtype: "response",
+          queryType: "createPlanRequestQuery",
+          response: { id: 0, createPlanRequestResponse: { result: { success: {} } } },
+          raw: {
+            type: "interaction_query",
+            subtype: "response",
+            query_type: "createPlanRequestQuery",
+            response: { id: 0, createPlanRequestResponse: { result: { success: {} } } },
+          },
+        },
+        {
+          type: "tool_call" as const,
+          subtype: "completed",
+          callId: "tool-plan-1",
+          toolCall: {
+            createPlanToolCall: {
+              args: planArgs,
+              result: { success: {}, planUri: "" },
+            },
+          },
+          raw: {
+            type: "tool_call",
+            subtype: "completed",
+            call_id: "tool-plan-1",
+            tool_call: {
+              createPlanToolCall: {
+                args: planArgs,
+                result: { success: {}, planUri: "" },
+              },
+            },
+          },
+        },
+        base.result,
+      ],
+    } satisfies CursorTurnRunResult);
+  });
+
+  return Effect.gen(function* () {
+    const adapter = yield* CursorAdapter;
+    const threadId = ThreadId.makeUnsafe("thread-cursor-plan");
+
+    yield* adapter.startSession({
+      threadId,
+      provider: "cursor",
+      cwd: "/tmp/project",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({
+      threadId,
+      input: "Plan a docs change.",
+      modelSelection: { provider: "cursor", model: "composer-2" },
+      interactionMode: "plan-accept",
+    });
+
+    const events = yield* Stream.take(adapter.streamEvents, 11).pipe(Stream.runCollect);
+    const proposedEvents = Array.from(events).filter(
+      (event) => event.type === "turn.proposed.completed",
+    );
+    const toolEvents = Array.from(events).filter(
+      (event) => event.type === "item.started" || event.type === "item.completed",
+    );
+
+    assert.equal(runInputs[0]?.headlessMode, "plan");
+    assert.equal(proposedEvents.length, 1);
+    assert.equal(proposedEvents[0]?.type, "turn.proposed.completed");
+    if (proposedEvents[0]?.type === "turn.proposed.completed") {
+      assert.equal(
+        proposedEvents[0].payload.planMarkdown,
+        "# Add cursor-plan doc\n\n- Create `docs/cursor-plan.md`.",
+      );
+      assert.deepEqual(proposedEvents[0].providerRefs, {
+        providerItemId: ProviderItemId.makeUnsafe("tool-plan-1"),
+      });
+    }
+    assert.deepInclude(toolEvents[0]?.payload ?? {}, {
+      itemType: "plan",
+      status: "inProgress",
+      title: "Create Plan",
+      detail: "Create Plan: Add cursor-plan doc",
+    });
+    assert.deepInclude(toolEvents[1]?.payload ?? {}, {
+      itemType: "plan",
+      status: "completed",
+      title: "Create Plan",
+    });
   }).pipe(Effect.provide(makeCursorTestLayer({ createChat, runTurn })));
 });
 
