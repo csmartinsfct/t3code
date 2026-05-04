@@ -35,7 +35,11 @@ import { NetService } from "@t3tools/shared/Net";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { resolveT3StateDir } from "@t3tools/shared/paths";
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import {
+  DEFAULT_IDLE_BROWSER_SUSPEND_MINUTES,
+  parsePersistedBrowserSuspendMinutes,
+  parsePersistedServerObservabilitySettings,
+} from "@t3tools/shared/serverSettings";
 import { formatTimelineLog, isTimelineLogMessage } from "@t3tools/shared/timeline";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { createSafeStdIoWrite } from "./safeStdio";
@@ -53,6 +57,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
+import { shouldSuspendForIdle } from "./embeddedBrowserIdleReaper";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 syncShellEnvironment();
@@ -140,6 +145,13 @@ type EmbeddedBrowserProjectState = {
   mounted: boolean;
   suspendedForModal: boolean;
   bounds: BrowserViewBounds | null;
+  // Updated on every activity signal (CDP request, mount, unmount, page
+  // event). The idle reaper compares this to the configured threshold to
+  // decide whether to suspend an unmounted view. See T3CO-422.
+  lastActivityAt: number;
+  // True while the project's WebContents have been background-throttled and
+  // audio-muted by the idle reaper. Cleared on the next activity signal.
+  suspended: boolean;
 };
 type EmbeddedBrowserWindowState = {
   readonly projectsByProjectId: Map<string, EmbeddedBrowserProjectState>;
@@ -200,6 +212,8 @@ const embeddedBrowserStateByWindow = new WeakMap<BrowserWindow, EmbeddedBrowserW
 const embeddedBrowserProjectsByProjectId = new Map<string, EmbeddedBrowserProjectState>();
 const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
   "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
+const EMBEDDED_BROWSER_IDLE_REAPER_INTERVAL_MS = 60_000;
+let embeddedBrowserIdleReaperTimer: NodeJS.Timeout | null = null;
 let backendObservabilitySettings: {
   readonly otlpTracesUrl: string | undefined;
   readonly otlpMetricsUrl: string | undefined;
@@ -1183,8 +1197,20 @@ async function handleBrowserCdpBrokerRequest(
     const rawViewId = isRecord(body) && typeof body.viewId === "string" ? body.viewId : undefined;
     if (rawViewId) {
       const { projectId } = parseViewId(rawViewId);
-      if (projectId) ensureEmbeddedBrowserProject(projectId);
+      if (projectId) markEmbeddedBrowserActive(ensureEmbeddedBrowserProject(projectId));
     }
+    // One-line breadcrumb per agent CDP request: which route, which project,
+    // and (for /send only) which CDP method. Subscriptions log on open only,
+    // not per delivered event, to avoid flooding active subscribe streams.
+    const cdpMethod =
+      url.pathname === "/send" && isRecord(body) && typeof body.method === "string"
+        ? body.method
+        : undefined;
+    console.log("[desktop/browser] cdp request", {
+      route: url.pathname,
+      viewId: rawViewId,
+      ...(cdpMethod ? { method: cdpMethod } : {}),
+    });
     if (url.pathname === "/send") {
       const result = await sendEmbeddedBrowserCdpCommand(parseCdpSendRequest(body));
       sendBrokerSuccess(response, result);
@@ -1734,6 +1760,82 @@ async function resumeEmbeddedBrowser(embedded: EmbeddedBrowserTabState): Promise
   return attachEmbeddedBrowserDebugger(embedded);
 }
 
+// Marks a project as freshly active and resumes it if it was idle-suspended.
+// Called from every activity chokepoint: CDP broker, BROWSER_MOUNT/UNMOUNT
+// IPC handlers, and a small set of page events. Idempotent. See T3CO-422.
+function markEmbeddedBrowserActive(project: EmbeddedBrowserProjectState): void {
+  project.lastActivityAt = Date.now();
+  if (project.suspended) resumeEmbeddedBrowserProject(project);
+}
+
+function suspendEmbeddedBrowserProject(project: EmbeddedBrowserProjectState): void {
+  if (project.suspended) return;
+  for (const tab of project.tabs.values()) {
+    if (isEmbeddedBrowserDestroyed(tab)) continue;
+    try {
+      tab.view.webContents.setBackgroundThrottling(true);
+      tab.view.webContents.setAudioMuted(true);
+    } catch (error) {
+      console.warn("[desktop/browser] suspend failed", { projectId: project.projectId, error });
+    }
+  }
+  project.suspended = true;
+  console.log("[desktop/browser] suspended idle project", {
+    projectId: project.projectId,
+    idleMs: Date.now() - project.lastActivityAt,
+    tabs: project.tabs.size,
+  });
+}
+
+function resumeEmbeddedBrowserProject(project: EmbeddedBrowserProjectState): void {
+  if (!project.suspended) return;
+  for (const tab of project.tabs.values()) {
+    if (isEmbeddedBrowserDestroyed(tab)) continue;
+    try {
+      tab.view.webContents.setBackgroundThrottling(false);
+      tab.view.webContents.setAudioMuted(false);
+    } catch (error) {
+      console.warn("[desktop/browser] resume failed", { projectId: project.projectId, error });
+    }
+  }
+  project.suspended = false;
+  console.log("[desktop/browser] resumed project", {
+    projectId: project.projectId,
+    tabs: project.tabs.size,
+  });
+}
+
+function readBrowserSuspendMinutes(): number {
+  try {
+    if (!FS.existsSync(SERVER_SETTINGS_PATH)) return DEFAULT_IDLE_BROWSER_SUSPEND_MINUTES;
+    return parsePersistedBrowserSuspendMinutes(FS.readFileSync(SERVER_SETTINGS_PATH, "utf8"));
+  } catch {
+    return DEFAULT_IDLE_BROWSER_SUSPEND_MINUTES;
+  }
+}
+
+function runEmbeddedBrowserIdleReaperSweep(): void {
+  const minutes = readBrowserSuspendMinutes();
+  if (minutes <= 0) return;
+  const thresholdMs = minutes * 60_000;
+  const now = Date.now();
+  for (const project of embeddedBrowserProjectsByProjectId.values()) {
+    if (isEmbeddedBrowserProjectDestroyed(project)) continue;
+    if (shouldSuspendForIdle({ project, thresholdMs, now })) {
+      suspendEmbeddedBrowserProject(project);
+    }
+  }
+}
+
+function startEmbeddedBrowserIdleReaper(): void {
+  if (embeddedBrowserIdleReaperTimer) return;
+  embeddedBrowserIdleReaperTimer = setInterval(
+    runEmbeddedBrowserIdleReaperSweep,
+    EMBEDDED_BROWSER_IDLE_REAPER_INTERVAL_MS,
+  );
+  embeddedBrowserIdleReaperTimer.unref?.();
+}
+
 function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
 }
@@ -2084,6 +2186,10 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
   const existing = embeddedBrowserProjectsByProjectId.get(projectId);
   if (existing && !isEmbeddedBrowserProjectDestroyed(existing)) return existing;
   if (existing) cleanupEmbeddedBrowserProject(existing);
+  console.log("[desktop/browser] materializing project view (offscreen)", {
+    projectId,
+    replacingDestroyed: existing !== undefined,
+  });
   const project: EmbeddedBrowserProjectState = {
     projectId,
     handle: `electron-wc:${projectId}`,
@@ -2093,6 +2199,8 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     mounted: false,
     suspendedForModal: false,
     bounds: null,
+    lastActivityAt: Date.now(),
+    suspended: false,
   };
   const rootTab = createEmbeddedBrowserTab(project, 0, "about:blank");
   project.tabs.set(0, rootTab);
@@ -2193,6 +2301,8 @@ function createEmbeddedBrowserTab(
   // Cmd/Ctrl+<number> is intentionally NOT bound — that range is owned by the
   // chat-thread navigation shortcut.
   view.webContents.on("before-input-event", (event, input) => {
+    // Any user input — keys, mouse — counts as activity for the idle reaper.
+    markEmbeddedBrowserActive(project);
     if (input.type !== "keyDown") return;
     const mod = input.meta || input.control;
     if (!mod) return;
@@ -2320,6 +2430,7 @@ function createEmbeddedBrowserTab(
       const owner = findEmbeddedBrowserOwnerWindow(tab);
       if (owner && !owner.isDestroyed()) owner.webContents.focus();
     }
+    markEmbeddedBrowserActive(project);
     notifyEmbeddedBrowserTabsChanged(project);
   });
   view.webContents.on("destroyed", () => {
@@ -2406,6 +2517,12 @@ function openNewBrowserTab(project: EmbeddedBrowserProjectState, url: string): n
   const tabId = project.nextTabId++;
   const tab = createEmbeddedBrowserTab(project, tabId, url);
   project.tabs.set(tabId, tab);
+  console.log("[desktop/browser] tab opened", {
+    projectId: project.projectId,
+    tabId,
+    url,
+    tabCount: project.tabs.size,
+  });
   notifyEmbeddedBrowserTabsChanged(project);
   return tabId;
 }
@@ -2419,6 +2536,7 @@ async function switchBrowserTab(
     notifyEmbeddedBrowserTabsChanged(project);
     return;
   }
+  const previousTabId = project.activeTabId;
   const currentActive = project.tabs.get(project.activeTabId);
   if (project.mounted && currentActive) {
     window.contentView.removeChildView(currentActive.view);
@@ -2430,6 +2548,11 @@ async function switchBrowserTab(
   if (project.bounds) {
     await mountActiveTabInWindow(project, window, project.bounds);
   }
+  console.log("[desktop/browser] tab switched", {
+    projectId: project.projectId,
+    fromTabId: previousTabId,
+    toTabId: tabId,
+  });
   notifyEmbeddedBrowserTabsChanged(project);
 }
 
@@ -2446,12 +2569,19 @@ async function closeBrowserTab(
     await tab.view.webContents.loadURL("about:blank");
     tab.title = "";
     tab.favicon = null;
+    console.log("[desktop/browser] tab reset (root)", { projectId: project.projectId, tabId });
     notifyEmbeddedBrowserTabsChanged(project);
     return;
   }
   const wasActive = project.activeTabId === tabId;
   project.tabs.delete(tabId);
   tab.view.webContents.close();
+  console.log("[desktop/browser] tab closed", {
+    projectId: project.projectId,
+    tabId,
+    wasActive,
+    tabCount: project.tabs.size,
+  });
   if (wasActive) {
     const next = project.tabs.keys().next();
     if (!next.done) {
@@ -2531,10 +2661,17 @@ function registerIpcHandlers(): void {
       }
       const project = scoped ?? ensureEmbeddedBrowserProject(projectId);
       if (!scoped) state.projectsByProjectId.set(projectId, project);
+      markEmbeddedBrowserActive(project);
 
       project.bounds = bounds;
       project.suspendedForModal = false;
       state.activeProjectId = projectId;
+      console.log("[desktop/browser] mount", {
+        projectId,
+        tabs: project.tabs.size,
+        activeTabId: project.activeTabId,
+        previousProjectId: previousActive?.projectId,
+      });
       await mountActiveTabInWindow(project, window, bounds);
       if (state.mountRequestId !== mountRequestId) {
         console.warn("[desktop/browser] embedded browser mount completed after newer request", {
@@ -2570,6 +2707,7 @@ function registerIpcHandlers(): void {
       : null;
     if (!window || !project) return;
 
+    const wasMounted = project.mounted;
     const activeTab = project.tabs.get(project.activeTabId);
     if (project.mounted && activeTab) {
       window.contentView.removeChildView(activeTab.view);
@@ -2577,7 +2715,15 @@ function registerIpcHandlers(): void {
     }
     project.mounted = false;
     project.suspendedForModal = false;
+    // Reset the idle clock so a freshly-unmounted project gets a full
+    // grace period before the reaper considers suspending it.
+    markEmbeddedBrowserActive(project);
     if (activeTab) await pauseEmbeddedBrowserMedia(activeTab);
+    console.log("[desktop/browser] unmount", {
+      projectId: project.projectId,
+      wasMounted,
+      tabs: project.tabs.size,
+    });
   });
 
   ipcMain.removeHandler(BROWSER_SUSPEND_CHANNEL);
@@ -3046,6 +3192,8 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
+  startEmbeddedBrowserIdleReaper();
+  writeDesktopLogHeader("bootstrap embedded browser idle reaper started");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
   mainWindow = createWindow();

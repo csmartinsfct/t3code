@@ -2519,3 +2519,69 @@ export function ArchivedTicketsPanel() {
     </SettingsPageContainer>
   );
 }
+
+export function BrowserSettingsPanel() {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Browser">
+        <SettingsRow
+          title="Suspend idle browsers after"
+          description="Background-throttle a project's embedded browser after this many minutes of inactivity. Suspended browsers resume instantly on the next agent call or when you open the browser pane. Choose 'Never' to disable suspension."
+          resetAction={
+            settings.idleBrowserSuspendMinutes !==
+            DEFAULT_UNIFIED_SETTINGS.idleBrowserSuspendMinutes ? (
+              <SettingResetButton
+                label="idle browser suspend"
+                onClick={() =>
+                  updateSettings({
+                    idleBrowserSuspendMinutes: DEFAULT_UNIFIED_SETTINGS.idleBrowserSuspendMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.idleBrowserSuspendMinutes)}
+              onValueChange={(value) =>
+                updateSettings({ idleBrowserSuspendMinutes: Number(value) })
+              }
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="Suspend idle browsers after">
+                <SelectValue>
+                  {settings.idleBrowserSuspendMinutes === 0
+                    ? "Never"
+                    : settings.idleBrowserSuspendMinutes < 60
+                      ? `${settings.idleBrowserSuspendMinutes} min`
+                      : `${settings.idleBrowserSuspendMinutes / 60} hr`}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="0">
+                  Never
+                </SelectItem>
+                <SelectItem hideIndicator value="5">
+                  5 minutes
+                </SelectItem>
+                <SelectItem hideIndicator value="15">
+                  15 minutes
+                </SelectItem>
+                <SelectItem hideIndicator value="30">
+                  30 minutes
+                </SelectItem>
+                <SelectItem hideIndicator value="60">
+                  1 hour
+                </SelectItem>
+                <SelectItem hideIndicator value="240">
+                  4 hours
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}

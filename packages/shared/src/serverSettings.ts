@@ -38,3 +38,14 @@ export function parsePersistedServerObservabilitySettings(
     return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
   }
 }
+
+export const DEFAULT_IDLE_BROWSER_SUSPEND_MINUTES = 30;
+
+export function parsePersistedBrowserSuspendMinutes(raw: string): number {
+  try {
+    const decoded = Schema.decodeUnknownSync(ServerSettingsJson)(raw);
+    return decoded.idleBrowserSuspendMinutes;
+  } catch {
+    return DEFAULT_IDLE_BROWSER_SUSPEND_MINUTES;
+  }
+}

@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   ClockIcon,
+  GlobeIcon,
   HistoryIcon,
   ScrollTextIcon,
   Settings2Icon,
@@ -23,6 +24,7 @@ import {
 
 export type SettingsSectionPath =
   | "/settings/general"
+  | "/settings/browser"
   | "/settings/archived"
   | "/settings/archived-tickets"
   | "/settings/scheduled-tasks"
@@ -37,6 +39,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
 }> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
+  { label: "Browser", to: "/settings/browser", icon: GlobeIcon },
   { label: "Runs", to: "/settings/runs", icon: ActivityIcon },
   { label: "Scheduled Tasks", to: "/settings/scheduled-tasks", icon: ClockIcon },
   { label: "Prompts", to: "/settings/prompts", icon: ScrollTextIcon },
