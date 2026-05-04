@@ -22,7 +22,10 @@ function installBrowserBridge() {
     switchTab: vi.fn(async () => undefined),
     closeTab: vi.fn(async () => 0),
     setViewport: vi.fn(async () => undefined),
+    popoutOpen: vi.fn(async () => undefined),
+    popoutClose: vi.fn(async () => undefined),
     onTabsChanged: vi.fn(() => () => undefined),
+    onPopoutStateChanged: vi.fn(() => () => undefined),
   } satisfies DesktopBrowserBridge;
 
   vi.stubGlobal("window", {

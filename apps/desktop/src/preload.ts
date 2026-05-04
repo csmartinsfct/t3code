@@ -26,6 +26,9 @@ const BROWSER_SWITCH_TAB_CHANNEL = "browser:switchTab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:closeTab";
 const BROWSER_SET_VIEWPORT_CHANNEL = "browser:setViewport";
 const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
+const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
+const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
+const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -79,6 +82,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     closeTab: (projectId, tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId),
     setViewport: (projectId, tabId, params) =>
       ipcRenderer.invoke(BROWSER_SET_VIEWPORT_CHANNEL, projectId, tabId, params),
+    popoutOpen: (projectId) => ipcRenderer.invoke(BROWSER_POPOUT_OPEN_CHANNEL, projectId),
+    popoutClose: (projectId) => ipcRenderer.invoke(BROWSER_POPOUT_CLOSE_CHANNEL, projectId),
     onTabsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
         if (typeof payload !== "object" || payload === null) return;
@@ -87,6 +92,16 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.on(BROWSER_TABS_CHANGED_CHANNEL, wrapped);
       return () => {
         ipcRenderer.removeListener(BROWSER_TABS_CHANGED_CHANNEL, wrapped);
+      };
+    },
+    onPopoutStateChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (typeof payload !== "object" || payload === null) return;
+        listener(payload as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(BROWSER_POPOUT_STATE_CHANNEL, wrapped);
+      return () => {
+        ipcRenderer.removeListener(BROWSER_POPOUT_STATE_CHANNEL, wrapped);
       };
     },
   },

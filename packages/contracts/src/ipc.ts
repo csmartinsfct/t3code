@@ -280,12 +280,17 @@ export interface DesktopBrowserBridge {
     tabId: number,
     params: ViewportEmulationParams | null,
   ) => Promise<void>;
+  popoutOpen: (projectId: string) => Promise<void>;
+  popoutClose: (projectId: string) => Promise<void>;
   onTabsChanged: (
     listener: (payload: {
       projectId: string;
       tabs: readonly BrowserTabSummary[];
       activeTabId: number;
     }) => void,
+  ) => () => void;
+  onPopoutStateChanged: (
+    listener: (payload: { projectId: string; isOpen: boolean }) => void,
   ) => () => void;
 }
 

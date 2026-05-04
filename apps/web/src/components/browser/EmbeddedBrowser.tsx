@@ -1,7 +1,9 @@
 import type { BrowserTabListing, BrowserTabSummary, ProjectId } from "@t3tools/contracts";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import {
+  ArrowDownLeftFromSquareIcon,
   ArrowRightIcon,
+  ArrowUpRightFromSquareIcon,
   GlobeIcon,
   MonitorSmartphoneIcon,
   PlusIcon,
@@ -86,6 +88,25 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   // active state; closing/reopening the project resets the map.
   const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(new Map());
   const [viewportToolbarOpen, setViewportToolbarOpen] = useState(false);
+
+  // Popout state (T3CO-424). True when this project's WebContentsView has
+  // been detached into a free-floating BrowserWindow. Pushed from the main
+  // process so every window hosting the project (main or popout) stays in
+  // sync without polling. The popout window's own EmbeddedBrowser instance
+  // ignores this flag — it is what's hosting the view, so it should always
+  // render the full chrome.
+  const [isPoppedOut, setIsPoppedOut] = useState(false);
+  const isInsidePopout = useMemo(
+    () => typeof window !== "undefined" && window.location.search.includes("popout="),
+    [],
+  );
+  useEffect(() => {
+    if (!browserBridge || isInsidePopout) return;
+    return browserBridge.onPopoutStateChanged((payload) => {
+      if (payload.projectId !== projectId) return;
+      setIsPoppedOut(payload.isOpen);
+    });
+  }, [browserBridge, isInsidePopout, projectId]);
 
   const activeEmulation = emulationByTab.get(activeTabId) ?? { kind: "off" as const };
   const effectiveDimensions = useMemo<{ width: number; height: number } | null>(() => {
@@ -196,6 +217,13 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
 
   useEffect(() => {
     if (!browserBridge) return;
+    // When the popout window is hosting this project, the main-window
+    // instance must not mount: the WebContentsView lives in the popout
+    // and trying to also mount it here would race with the popout's mount.
+    // The placeholder branch above already returns early; this guard ensures
+    // the effect's cleanup runs (unmounts the view from the main window)
+    // when `isPoppedOut` flips true, and re-mounts when it flips false.
+    if (isPoppedOut && !isInsidePopout) return;
     const element = rectRef.current;
     if (!element) return;
 
@@ -240,7 +268,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         }
       })();
     };
-  }, [browserBridge, projectId, scheduleBoundsSync]);
+  }, [browserBridge, isInsidePopout, isPoppedOut, projectId, scheduleBoundsSync]);
 
   // Subscribe to tab updates pushed from the main process on project mount
   // (title / favicon / navigation / new-tab / close-tab from either the agent
@@ -346,6 +374,22 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
 
   const atTabCap = tabs.length >= MAX_TABS;
 
+  if (isPoppedOut && !isInsidePopout) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <ArrowUpRightFromSquareIcon className="size-5 text-muted-foreground" />
+        <div className="text-sm text-muted-foreground">Browser opened in a separate window.</div>
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => browserBridge && void browserBridge.popoutClose(projectId)}
+        >
+          Bring back
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {browserBridge && tabs.length > 0 && (
@@ -410,6 +454,29 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         >
           <MonitorSmartphoneIcon className="size-3.5" />
         </button>
+        {isInsidePopout ? (
+          <button
+            type="button"
+            onClick={() => browserBridge && void browserBridge.popoutClose(projectId)}
+            disabled={!browserBridge}
+            className="flex size-7 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Return browser to main window"
+            title="Return to main window"
+          >
+            <ArrowDownLeftFromSquareIcon className="size-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => browserBridge && void browserBridge.popoutOpen(projectId)}
+            disabled={!browserBridge}
+            className="flex size-7 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Open browser in new window"
+            title="Open in window"
+          >
+            <ArrowUpRightFromSquareIcon className="size-3.5" />
+          </button>
+        )}
       </form>
       {viewportToolbarOpen && browserBridge ? (
         <EmbeddedBrowserViewportToolbar
