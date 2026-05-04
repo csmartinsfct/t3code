@@ -80,6 +80,9 @@ const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
 const BROWSER_SUSPEND_CHANNEL = "browser:suspendForModal";
 const BROWSER_RESUME_CHANNEL = "browser:resumeFromModal";
 const BROWSER_NAVIGATE_CHANNEL = "browser:navigate";
+const BROWSER_GO_BACK_CHANNEL = "browser:goBack";
+const BROWSER_GO_FORWARD_CHANNEL = "browser:goForward";
+const BROWSER_RELOAD_CHANNEL = "browser:reload";
 const BROWSER_GET_URL_CHANNEL = "browser:getUrl";
 const BROWSER_LIST_TABS_CHANNEL = "browser:listTabs";
 const BROWSER_NEW_TAB_CHANNEL = "browser:newTab";
@@ -2958,6 +2961,42 @@ function registerIpcHandlers(): void {
       }
     },
   );
+
+  ipcMain.removeHandler(BROWSER_GO_BACK_CHANNEL);
+  ipcMain.handle(BROWSER_GO_BACK_CHANNEL, async (event, rawProjectId: unknown) => {
+    const window = getIpcBrowserWindow(event);
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "goBack")
+      : null;
+    const tab = project ? (project.tabs.get(project.activeTabId) ?? null) : null;
+    const navigationHistory = tab?.view.webContents.navigationHistory;
+    if (navigationHistory && navigationHistory.canGoBack()) {
+      navigationHistory.goBack();
+    }
+  });
+
+  ipcMain.removeHandler(BROWSER_GO_FORWARD_CHANNEL);
+  ipcMain.handle(BROWSER_GO_FORWARD_CHANNEL, async (event, rawProjectId: unknown) => {
+    const window = getIpcBrowserWindow(event);
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "goForward")
+      : null;
+    const tab = project ? (project.tabs.get(project.activeTabId) ?? null) : null;
+    const navigationHistory = tab?.view.webContents.navigationHistory;
+    if (navigationHistory && navigationHistory.canGoForward()) {
+      navigationHistory.goForward();
+    }
+  });
+
+  ipcMain.removeHandler(BROWSER_RELOAD_CHANNEL);
+  ipcMain.handle(BROWSER_RELOAD_CHANNEL, async (event, rawProjectId: unknown) => {
+    const window = getIpcBrowserWindow(event);
+    const project = window
+      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "reload")
+      : null;
+    const tab = project ? (project.tabs.get(project.activeTabId) ?? null) : null;
+    tab?.view.webContents.reload();
+  });
 
   ipcMain.removeHandler(BROWSER_GET_URL_CHANNEL);
   ipcMain.handle(BROWSER_GET_URL_CHANNEL, async (event, rawProjectId: unknown) => {

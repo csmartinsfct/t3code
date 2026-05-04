@@ -2,6 +2,7 @@ import type { BrowserTabListing, BrowserTabSummary, ProjectId } from "@t3tools/c
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import {
   ArrowDownLeftFromSquareIcon,
+  ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpRightFromSquareIcon,
   GlobeIcon,
@@ -13,12 +14,21 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
 
+import type { ViewportEmulationParams } from "@t3tools/contracts";
+
 import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserModalSuspension";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
+import { EmbeddedBrowserViewportActions } from "./EmbeddedBrowserViewportActions";
 import { EmbeddedBrowserViewportToolbar } from "./EmbeddedBrowserViewportToolbar";
-import { paramsFromState, type TabEmulation } from "./devicePresets";
+import { ViewportResizeHandles } from "./ViewportResizeHandles";
+import {
+  DEFAULT_PRESET_ID,
+  DEFAULT_ZOOM,
+  paramsFromState,
+  type TabEmulation,
+} from "./devicePresets";
 
 interface EmbeddedBrowserProps {
   projectId: ProjectId;
@@ -31,9 +41,67 @@ interface BrowserRect {
   height: number;
 }
 
-const DEFAULT_URL = "https://news.ycombinator.com";
 const MAX_TABS = 5;
 const BLANK_URLS = new Set(["about:blank", "about:newtab"]);
+const EMULATION_STORAGE_PREFIX = "embeddedBrowser.emulation.";
+
+// Per-project localStorage persistence for the device-emulator state. Tab
+// IDs are stable across renderer mount/unmount cycles (the main process
+// preserves the project's tab map even after `unmount`), so the persisted
+// keys remain valid when the user navigates away and comes back.
+function loadEmulationByTab(projectId: ProjectId): Map<number, TabEmulation> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    const raw = window.localStorage.getItem(EMULATION_STORAGE_PREFIX + projectId);
+    if (!raw) return new Map();
+    const entries = JSON.parse(raw) as unknown;
+    if (!Array.isArray(entries)) return new Map();
+    return new Map(entries as Array<[number, TabEmulation]>);
+  } catch {
+    return new Map();
+  }
+}
+
+function saveEmulationByTab(projectId: ProjectId, map: Map<number, TabEmulation>): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = EMULATION_STORAGE_PREFIX + projectId;
+    if (map.size === 0) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, JSON.stringify([...map.entries()]));
+    }
+  } catch {
+    // localStorage may be unavailable (private mode, quota exceeded). Skip.
+  }
+}
+
+// In-memory per-project state cache. Survives EmbeddedBrowser remounts so
+// switching threads/projects and coming back doesn't blank the URL bar,
+// tab strip, and emulator before the WebContentsView reattaches and the
+// main process pushes truth back. The cache holds whatever the renderer
+// last saw; it's overwritten by `refreshTabs` / `getUrl` once mount completes.
+interface ProjectCacheEntry {
+  url: string;
+  tabs: readonly BrowserTabSummary[];
+  activeTabId: number;
+  emulationByTab: Map<number, TabEmulation>;
+}
+
+const projectStateCache = new Map<ProjectId, ProjectCacheEntry>();
+
+function readProjectCache(projectId: ProjectId): ProjectCacheEntry {
+  let entry = projectStateCache.get(projectId);
+  if (entry) return entry;
+  entry = {
+    url: "",
+    tabs: [],
+    activeTabId: 0,
+    emulationByTab: loadEmulationByTab(projectId),
+  };
+  projectStateCache.set(projectId, entry);
+  return entry;
+}
 
 // `about:blank` is an implementation detail of the embedded browser — the
 // URL input should feel empty when the active tab hasn't navigated anywhere.
@@ -53,7 +121,7 @@ function readElementRect(element: HTMLElement): BrowserRect {
 
 function normalizeUrlInput(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed) return DEFAULT_URL;
+  if (!trimmed) return "";
   return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
@@ -75,19 +143,47 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const mountPromiseRef = useRef<Promise<void> | null>(null);
   const lifecycleIdRef = useRef(0);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
-  const [url, setUrl] = useState(displayUrl(DEFAULT_URL));
+  // All renderer-visible state is seeded from the per-project cache so
+  // remounting the component (project switch, idle suspension, etc.)
+  // doesn't briefly blank the URL bar, tabs, or emulator. The cache is
+  // overwritten by the main process via `refreshTabs` / `getUrl` once
+  // mount completes. Emulation state additionally persists to localStorage
+  // so it survives a full process restart.
+  const [url, setUrl] = useState<string>(() => readProjectCache(projectId).url);
+  const [tabs, setTabs] = useState<readonly BrowserTabSummary[]>(
+    () => readProjectCache(projectId).tabs,
+  );
+  const [activeTabId, setActiveTabId] = useState<number>(
+    () => readProjectCache(projectId).activeTabId,
+  );
+  const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(
+    () => readProjectCache(projectId).emulationByTab,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tabs, setTabs] = useState<readonly BrowserTabSummary[]>([]);
-  const [activeTabId, setActiveTabId] = useState<number>(0);
 
   const browserBridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
 
-  // Per-tab device-emulation state (T3CO-423). Local-only, ephemeral —
-  // matches DevTools' session-only behavior. Switching tabs swaps the
-  // active state; closing/reopening the project resets the map.
-  const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(new Map());
-  const [viewportToolbarOpen, setViewportToolbarOpen] = useState(false);
+  // Mirrors `emulationByTab` for async closures (the mount callback) that
+  // need the current value without re-creating the closure on every change.
+  const emulationByTabRef = useRef(emulationByTab);
+  // Tracks which projectId the in-memory state corresponds to so the cache
+  // save effect doesn't persist project A's state under project B's key
+  // during a mid-life projectId change.
+  const loadedProjectRef = useRef(projectId);
+  // Remembers the *last non-off* emulation per tab so toggling the device
+  // button restores the user's previous device choice instead of resetting
+  // to the system default. Lives in a ref because it's only read on click.
+  const lastEmulationByTabRef = useRef<Map<number, TabEmulation>>(new Map());
+  // rAF-coalesced IPC during drag. Pointermove can fire >60Hz on macOS
+  // trackpads; if every move sent a `setViewport` IPC the main process
+  // would be flooded. Local React state still updates on every move so the
+  // visual feedback is immediate; only the IPC side coalesces.
+  const viewportIpcRafRef = useRef<number | null>(null);
+  const pendingViewportIpcRef = useRef<{
+    tabId: number;
+    params: ViewportEmulationParams | null;
+  } | null>(null);
 
   // Popout state (T3CO-424). True when this project's WebContentsView has
   // been detached into a free-floating BrowserWindow. Pushed from the main
@@ -108,6 +204,29 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     });
   }, [browserBridge, isInsidePopout, projectId]);
 
+  // Single effect that handles BOTH reload-on-projectId-change and save.
+  // Saving on every state change keeps the in-memory cache in sync so the
+  // next remount can render previous-known-good state instantly. The
+  // `loadedProjectRef` guard prevents writing the wrong project's state
+  // during a switch — when projectId changes, we reload from cache for
+  // the new project and skip the write this tick; the freshly-set state
+  // triggers another effect run that saves correctly.
+  useEffect(() => {
+    if (loadedProjectRef.current !== projectId) {
+      loadedProjectRef.current = projectId;
+      const cached = readProjectCache(projectId);
+      emulationByTabRef.current = cached.emulationByTab;
+      setUrl(cached.url);
+      setTabs(cached.tabs);
+      setActiveTabId(cached.activeTabId);
+      setEmulationByTab(cached.emulationByTab);
+      return;
+    }
+    emulationByTabRef.current = emulationByTab;
+    projectStateCache.set(projectId, { url, tabs, activeTabId, emulationByTab });
+    saveEmulationByTab(projectId, emulationByTab);
+  }, [projectId, url, tabs, activeTabId, emulationByTab]);
+
   const activeEmulation = emulationByTab.get(activeTabId) ?? { kind: "off" as const };
   const effectiveDimensions = useMemo<{ width: number; height: number } | null>(() => {
     const params = paramsFromState(activeEmulation);
@@ -120,6 +239,18 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     };
   }, [activeEmulation]);
 
+  const flushViewportIpc = useCallback(() => {
+    const pending = pendingViewportIpcRef.current;
+    pendingViewportIpcRef.current = null;
+    if (viewportIpcRafRef.current !== null) {
+      cancelAnimationFrame(viewportIpcRafRef.current);
+      viewportIpcRafRef.current = null;
+    }
+    if (pending && browserBridge) {
+      void browserBridge.setViewport(projectId, pending.tabId, pending.params);
+    }
+  }, [browserBridge, projectId]);
+
   const handleEmulationChange = useCallback(
     (next: TabEmulation, tabId: number) => {
       setEmulationByTab((prev) => {
@@ -131,12 +262,78 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         }
         return map;
       });
+      if (next.kind !== "off") {
+        lastEmulationByTabRef.current.set(tabId, next);
+      }
+      flushViewportIpc();
       if (browserBridge) {
         void browserBridge.setViewport(projectId, tabId, paramsFromState(next));
       }
     },
+    [browserBridge, flushViewportIpc, projectId],
+  );
+
+  // Drag-friendly variant: state is updated synchronously so React mirrors
+  // the cursor instantly, but the IPC side is coalesced to one call per
+  // animation frame. The latest pending params replace any earlier one.
+  const handleEmulationDrag = useCallback(
+    (next: TabEmulation, tabId: number) => {
+      setEmulationByTab((prev) => {
+        const map = new Map(prev);
+        if (next.kind === "off") {
+          map.delete(tabId);
+        } else {
+          map.set(tabId, next);
+        }
+        return map;
+      });
+      if (next.kind !== "off") {
+        lastEmulationByTabRef.current.set(tabId, next);
+      }
+      pendingViewportIpcRef.current = { tabId, params: paramsFromState(next) };
+      if (viewportIpcRafRef.current === null && browserBridge) {
+        viewportIpcRafRef.current = requestAnimationFrame(() => {
+          viewportIpcRafRef.current = null;
+          const pending = pendingViewportIpcRef.current;
+          pendingViewportIpcRef.current = null;
+          if (pending) {
+            void browserBridge.setViewport(projectId, pending.tabId, pending.params);
+          }
+        });
+      }
+    },
     [browserBridge, projectId],
   );
+
+  // Address-bar device toggle: enables emulation with the tab's last-used
+  // device (or the system default), and disables it on a second click.
+  const toggleEmulation = useCallback(() => {
+    const tabId = activeTabId;
+    const current = emulationByTab.get(tabId) ?? { kind: "off" as const };
+    if (current.kind !== "off") {
+      handleEmulationChange({ kind: "off" }, tabId);
+      return;
+    }
+    const last = lastEmulationByTabRef.current.get(tabId);
+    const next: TabEmulation = last ?? {
+      kind: "preset",
+      presetId: DEFAULT_PRESET_ID,
+      rotated: false,
+      zoom: DEFAULT_ZOOM,
+    };
+    handleEmulationChange(next, tabId);
+  }, [activeTabId, emulationByTab, handleEmulationChange]);
+
+  // Cleanup any pending rAF on unmount so we don't fire IPC after teardown.
+  useEffect(() => {
+    return () => {
+      if (viewportIpcRafRef.current !== null) {
+        cancelAnimationFrame(viewportIpcRafRef.current);
+        viewportIpcRafRef.current = null;
+      }
+      pendingViewportIpcRef.current = null;
+    };
+  }, []);
 
   const applyTabListing = useCallback((listing: BrowserTabListing) => {
     setTabs(listing.tabs);
@@ -183,6 +380,14 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
             if (!isCurrentLifecycle(lifecycleId)) return;
             setUrl(displayUrl(currentUrl));
             await refreshTabs();
+            // Re-apply persisted emulation to each tab. CDP
+            // `setDeviceMetricsOverride` may have been cleared on the
+            // main-process side during unmount; even if not, this is
+            // idempotent and ensures the WebContents reflects whatever
+            // state the renderer just restored from localStorage.
+            for (const [tabId, emulation] of emulationByTabRef.current.entries()) {
+              void browserBridge.setViewport(projectId, tabId, paramsFromState(emulation));
+            }
           })
           .catch((cause: unknown) => {
             if (!isCurrentLifecycle(lifecycleId)) return;
@@ -231,9 +436,10 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     lifecycleIdRef.current = lifecycleId;
     mountPromiseRef.current = null;
     mountedRef.current = false;
-    setTabs([]);
-    setActiveTabId(0);
-    setUrl(displayUrl(DEFAULT_URL));
+    // Don't clear url/tabs/activeTabId/emulationByTab — they're seeded
+    // from the per-project cache (see `readProjectCache`) and reflect
+    // the state the user last saw. The mount handler updates them with
+    // main-process truth (`getUrl` / `refreshTabs`) once attached.
     setLoading(false);
     setError(null);
     scheduleBoundsSync();
@@ -285,8 +491,9 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const navigate = useCallback(
     async (targetUrl: string) => {
       if (!browserBridge) return;
-      const lifecycleId = lifecycleIdRef.current;
       const nextUrl = normalizeUrlInput(targetUrl);
+      if (!nextUrl) return;
+      const lifecycleId = lifecycleIdRef.current;
       setLoading(true);
       setError(null);
       try {
@@ -353,6 +560,15 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         await browserBridge.closeTab(projectId, tabId);
         if (!isCurrentLifecycle(lifecycleId)) return;
         await refreshTabs();
+        // Drop persisted emulation for the closed tab — its tab id is
+        // gone for good and won't be reused.
+        setEmulationByTab((prev) => {
+          if (!prev.has(tabId)) return prev;
+          const map = new Map(prev);
+          map.delete(tabId);
+          return map;
+        });
+        lastEmulationByTabRef.current.delete(tabId);
       } catch (cause) {
         if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -371,6 +587,21 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     event.preventDefault();
     void navigate(url);
   };
+
+  const handleGoBack = useCallback(() => {
+    if (!browserBridge) return;
+    void browserBridge.goBack(projectId);
+  }, [browserBridge, projectId]);
+
+  const handleGoForward = useCallback(() => {
+    if (!browserBridge) return;
+    void browserBridge.goForward(projectId);
+  }, [browserBridge, projectId]);
+
+  const handleReload = useCallback(() => {
+    if (!browserBridge) return;
+    void browserBridge.reload(projectId);
+  }, [browserBridge, projectId]);
 
   const atTabCap = tabs.length >= MAX_TABS;
 
@@ -392,9 +623,90 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <form
+        className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2"
+        onSubmit={handleSubmit}
+      >
+        <button
+          type="button"
+          onClick={handleGoBack}
+          disabled={!browserBridge}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          aria-label="Go back"
+          title="Back"
+        >
+          <ArrowLeftIcon className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={handleGoForward}
+          disabled={!browserBridge}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          aria-label="Go forward"
+          title="Forward"
+        >
+          <ArrowRightIcon className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={handleReload}
+          disabled={!browserBridge}
+          className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          aria-label={loading ? "Loading" : "Reload"}
+          title="Reload"
+        >
+          <RotateCwIcon className={cn("size-3.5", loading && "animate-spin")} />
+        </button>
+        <input
+          ref={urlInputRef}
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-ring"
+          placeholder="Search or enter address"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={toggleEmulation}
+          className={cn(
+            "ml-1 flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+            activeEmulation.kind !== "off"
+              ? "border-primary/30 bg-primary/10 text-primary"
+              : "border-transparent bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+          aria-pressed={activeEmulation.kind !== "off"}
+          aria-label="Toggle device emulation"
+          title="Devices"
+        >
+          <MonitorSmartphoneIcon className="size-3.5" />
+        </button>
+        {isInsidePopout ? (
+          <button
+            type="button"
+            onClick={() => browserBridge && void browserBridge.popoutClose(projectId)}
+            disabled={!browserBridge}
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            aria-label="Return browser to main window"
+            title="Return to main window"
+          >
+            <ArrowDownLeftFromSquareIcon className="size-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => browserBridge && void browserBridge.popoutOpen(projectId)}
+            disabled={!browserBridge}
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            aria-label="Open browser in new window"
+            title="Open in window"
+          >
+            <ArrowUpRightFromSquareIcon className="size-3.5" />
+          </button>
+        )}
+      </form>
       {browserBridge && tabs.length > 0 && (
         <div
-          className="flex h-9 w-full shrink-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden bg-muted/30 pl-1.5 pr-2 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex h-9 w-full shrink-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 pl-1.5 pr-2 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           role="tablist"
           aria-label="Browser tabs"
         >
@@ -419,71 +731,6 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           </button>
         </div>
       )}
-      <form
-        className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3"
-        onSubmit={handleSubmit}
-      >
-        <GlobeIcon className="size-4 text-muted-foreground" />
-        <input
-          ref={urlInputRef}
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-ring"
-          placeholder="Search or enter address"
-          spellCheck={false}
-        />
-        <Button type="submit" size="icon-xs" variant="outline" disabled={!browserBridge || loading}>
-          {loading ? (
-            <RotateCwIcon className="size-3 animate-spin" />
-          ) : (
-            <ArrowRightIcon className="size-3" />
-          )}
-        </Button>
-        <button
-          type="button"
-          onClick={() => setViewportToolbarOpen((open) => !open)}
-          className={cn(
-            "flex size-7 items-center justify-center rounded-md border transition-colors",
-            viewportToolbarOpen || activeEmulation.kind !== "off"
-              ? "border-primary/30 bg-primary/10 text-primary"
-              : "border-border bg-transparent text-muted-foreground hover:text-foreground",
-          )}
-          aria-pressed={viewportToolbarOpen}
-          aria-label="Toggle device emulation toolbar"
-          title="Devices"
-        >
-          <MonitorSmartphoneIcon className="size-3.5" />
-        </button>
-        {isInsidePopout ? (
-          <button
-            type="button"
-            onClick={() => browserBridge && void browserBridge.popoutClose(projectId)}
-            disabled={!browserBridge}
-            className="flex size-7 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Return browser to main window"
-            title="Return to main window"
-          >
-            <ArrowDownLeftFromSquareIcon className="size-3.5" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => browserBridge && void browserBridge.popoutOpen(projectId)}
-            disabled={!browserBridge}
-            className="flex size-7 items-center justify-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Open browser in new window"
-            title="Open in window"
-          >
-            <ArrowUpRightFromSquareIcon className="size-3.5" />
-          </button>
-        )}
-      </form>
-      {viewportToolbarOpen && browserBridge ? (
-        <EmbeddedBrowserViewportToolbar
-          emulation={activeEmulation}
-          onChange={(next) => handleEmulationChange(next, activeTabId)}
-        />
-      ) : null}
       {error && (
         <div className="shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
           {error}
@@ -511,14 +758,28 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         ref={paneRef}
         className={
           effectiveDimensions
-            ? "flex min-h-0 flex-1 items-center justify-center bg-black/80"
+            ? "relative flex min-h-0 flex-1 items-start justify-center bg-black/80 px-6 pt-24 pb-6"
             : "min-h-0 flex-1 bg-background"
         }
       >
+        {effectiveDimensions && browserBridge ? (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center gap-2">
+            <div className="pointer-events-auto">
+              <EmbeddedBrowserViewportToolbar
+                emulation={activeEmulation}
+                onChange={(next) => handleEmulationChange(next, activeTabId)}
+              />
+            </div>
+            <div className="pointer-events-auto">
+              <EmbeddedBrowserViewportActions
+                emulation={activeEmulation}
+                onChange={(next) => handleEmulationChange(next, activeTabId)}
+              />
+            </div>
+          </div>
+        ) : null}
         <div
-          ref={rectRef}
-          data-browser-rect
-          className="bg-background"
+          className="relative"
           style={
             effectiveDimensions
               ? {
@@ -527,7 +788,15 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
                 }
               : { width: "100%", height: "100%" }
           }
-        />
+        >
+          <div ref={rectRef} data-browser-rect className="absolute inset-0 bg-background" />
+          {effectiveDimensions && browserBridge ? (
+            <ViewportResizeHandles
+              emulation={activeEmulation}
+              onChange={(next) => handleEmulationDrag(next, activeTabId)}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -571,7 +840,7 @@ function BrowserTab({ tab, active, onActivate, onClose }: BrowserTabProps) {
       title={tab.url}
       className={`group relative flex h-[30px] max-w-[180px] min-w-0 flex-1 basis-[140px] cursor-pointer items-center gap-2 rounded-t-md px-2.5 text-xs transition-colors select-none ${
         active
-          ? "bg-background text-foreground shadow-[0_-1px_0_theme(colors.primary/0.7)_inset] after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-background"
+          ? "bg-background text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-background"
           : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
       }`}
     >

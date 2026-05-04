@@ -41,6 +41,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { useMultiRepoGitStatus } from "../hooks/useMultiRepoGitStatus";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
+import { useEmbeddedBrowserOverlayLifecycle } from "../embeddedBrowserModalSuspension";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -755,6 +756,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  // Suspend the embedded Chromium browser while the image preview modal is
+  // open — the OS-level WebContentsView paints above all React DOM, so
+  // without this the modal would appear behind the browser. Mirrors the
+  // existing context-menu / dialog suspension flow.
+  useEmbeddedBrowserOverlayLifecycle(expandedImage !== null, "expanded-image");
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;

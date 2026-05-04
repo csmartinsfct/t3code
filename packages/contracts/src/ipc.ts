@@ -270,6 +270,9 @@ export interface DesktopBrowserBridge {
   suspendForModal: () => Promise<void>;
   resumeFromModal: () => Promise<void>;
   navigate: (projectId: string, url: string) => Promise<void>;
+  goBack: (projectId: string) => Promise<void>;
+  goForward: (projectId: string) => Promise<void>;
+  reload: (projectId: string) => Promise<void>;
   getUrl: (projectId: string) => Promise<string>;
   listTabs: (projectId: string) => Promise<BrowserTabListing>;
   newTab: (projectId: string, url?: string) => Promise<number>;

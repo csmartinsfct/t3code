@@ -1,11 +1,242 @@
 {
   "version": 1,
-  "generatedAt": "2026-04-30T03:57:50.951Z",
-  "lastProcessedCommit": "ffbdf750524b20ba864eec8d116775621c913a2b",
+  "generatedAt": "2026-05-04T16:12:16.314Z",
+  "lastProcessedCommit": "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b",
   "groups": [
+    {
+      "date": "2026-05-04",
+      "entries": [
+        {
+          "id": "9ae6b49281895f4e",
+          "title": "Embedded browser can be popped out into a separate window",
+          "summary": "Added a pop-out mode for the embedded browser so you can move it into its own window and return it to the main workspace without interrupting active browser-driven agent work.",
+          "category": "feature",
+          "commitShas": [
+            "376c66fda658fb1ff806e02be7ad1498a7381f01",
+            "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b"
+          ]
+        },
+        {
+          "id": "106b1bbc869a6d9a",
+          "title": "Embedded browser now supports device and viewport emulation",
+          "summary": "Added a viewport toolbar in the embedded browser with preset devices, custom width and height, zoom controls, rotation, and reset, making it easier to preview responsive layouts directly in-app.",
+          "category": "feature",
+          "commitShas": ["367ca105c562bd1f236f93ba6a500c63d36de04d"]
+        },
+        {
+          "id": "45b5dc0c1aef09f1",
+          "title": "Managed run logs load more reliably for older runs",
+          "summary": "Fixed legacy log-service alias handling so managed run logs open correctly for older or previously created runs.",
+          "category": "fix",
+          "commitShas": ["989f2b531c60d95ccbf18cad109d9e0083ae2fa2"]
+        },
+        {
+          "id": "3d4af409042bcd2d",
+          "title": "Embedded browsers now suspend automatically when idle",
+          "summary": "Hidden project browsers can now suspend after a configurable idle period to reduce background resource usage, then resume automatically when you return or an agent needs access. A new Browser section in Settings lets you control this behavior, including disabling it entirely.",
+          "category": "improvement",
+          "commitShas": ["7c20c73417d9dfd99a264f1566e403ff3b0307c9"]
+        },
+        {
+          "id": "4a2e554174e57e32",
+          "title": "Embedded browser stays available for every project",
+          "summary": "Agents can now use a project's embedded browser even when the browser pane is closed, with more reliable screenshots, PDF capture, and media extraction across restarts and different browser hosts.",
+          "category": "improvement",
+          "commitShas": ["e172ebae3f951698dc6c4a8eb3c2fb761fc3f17c"]
+        },
+        {
+          "id": "af589080f59cec17",
+          "title": "Improved model picker reliability across providers",
+          "summary": "Model names now fall back to clear static labels when needed, and switching Cursor models preserves the selected provider more reliably.",
+          "category": "fix",
+          "commitShas": [
+            "7edffbd5d5f95f08a301a45077a570e8dfc546e3",
+            "b3fdfda85ca779547a55a0885377c0dd2995b5ab"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-03",
+      "entries": [
+        {
+          "id": "edf3fe8b1a31c8fe",
+          "title": "Cursor MCP controls are available in the app",
+          "summary": "You can now manage Cursor MCP server actions from the interface, with clearer status labels, improved picker states, and fixes for project approval handling.",
+          "category": "feature",
+          "commitShas": [
+            "32ea17dfcc1b5a96de64a8f41f8210e970bea49b",
+            "3ef3a3dd4f814867d6a40bb82287856b31d07767",
+            "baf12c6d5c3b158e987440ece66a861e260a3065",
+            "c8c7721e51904ae0f0faa7975695ca3ba821fc47"
+          ]
+        },
+        {
+          "id": "33a4e7c10f1922b4",
+          "title": "Cursor ACP provider is now integrated",
+          "summary": "You can now use Cursor as a provider in T3 Code, with support for session lifecycle handling, streaming responses, provider-specific model dispatch, and a more complete end-to-end chat experience.",
+          "category": "feature",
+          "commitShas": [
+            "0bd19f295beb0a6894ece02c9fc1142d73afa579",
+            "395540efde0dc0f49a89457fa43eb5a5db1ffbbe",
+            "47aa0834a93438eb8dfb098b9323ae493d5a251f"
+          ]
+        },
+        {
+          "id": "f6a541875edbeba0",
+          "title": "Cursor model picking and defaults were refined",
+          "summary": "Cursor profile selection is now available in the picker, Composer 2 is the default where appropriate, and model and mode routing behave more consistently when starting turns.",
+          "category": "improvement",
+          "commitShas": [
+            "47aa0834a93438eb8dfb098b9323ae493d5a251f",
+            "586548396904dcaf4b0118e458d60b1e69d066a6",
+            "63647a8bc3d41e57bba2cdebbe93ba0d503590a5"
+          ]
+        },
+        {
+          "id": "6a7f8a7a39ba114b",
+          "title": "Cursor now supports image attachments",
+          "summary": "Image attachments can now be sent through Cursor ACP conversations, expanding Cursor support for multimodal workflows.",
+          "category": "feature",
+          "commitShas": [
+            "beb776471ced350915edb736bb68ee41ec08f901",
+            "dc8d26079397f4aba5da364900f8e8a64c08533c"
+          ]
+        },
+        {
+          "id": "05b46c6213a8510c",
+          "title": "Failed provider starts and forked transcript ordering were fixed",
+          "summary": "Threads now recover more predictably when a provider turn fails to start, and forked conversations preserve message order more reliably.",
+          "category": "fix",
+          "commitShas": [
+            "62071cca8ad3363db7defcf7a8d3b5124a3daae2",
+            "991957ac704c2bb52fb8a77f5a507582bfac3863"
+          ]
+        },
+        {
+          "id": "75cdb416c378f3b9",
+          "title": "Proposed plans from Cursor are captured in threads",
+          "summary": "When Cursor proposes a plan, T3 Code now records and surfaces that plan as part of the thread experience.",
+          "category": "feature",
+          "commitShas": [
+            "395540efde0dc0f49a89457fa43eb5a5db1ffbbe",
+            "3f503373228c203857fc82231d85e3f904aaa28d"
+          ]
+        },
+        {
+          "id": "5e241671505a93c3",
+          "title": "Cursor conversations are more stable during streaming and interruptions",
+          "summary": "Streaming output is normalized more consistently, duplicate assistant snapshots are reduced, and interrupted Cursor runs clean up more reliably to prevent stuck or confusing session states.",
+          "category": "fix",
+          "commitShas": [
+            "2bfbfe68a0673083199753ab36c38699a357f74a",
+            "59415492c1712e0b800a3ba2f67fa91cd0cff064",
+            "f2f70361b3d6308fb4a3b9223fa6f5c551a44c69"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-02",
+      "entries": [
+        {
+          "id": "97b53362105ac8da",
+          "title": "Initial Cursor support appears in model selection and provider setup",
+          "summary": "T3 Code now recognizes Cursor as an available provider and begins surfacing its models and availability in the app, laying the groundwork for selecting Cursor in chat workflows.",
+          "category": "feature",
+          "commitShas": [
+            "064c9c0f4834fa45be9bf4783059060ecf152953",
+            "c738da6fa4c90515e1bc3077d8a852ce68d4ee71",
+            "e8e030013e57e327c56e3a513fcd21b615a7490f"
+          ]
+        },
+        {
+          "id": "aedd42e31b57516a",
+          "title": "More reliable managed run stop handling",
+          "summary": "Fixed a case where managed runs could remain out of sync after being stopped, improving reliability and making run state updates more predictable.",
+          "category": "fix",
+          "commitShas": ["f0b981a746d9cc1f2efe3d5508e7520821ca62bc"]
+        },
+        {
+          "id": "1153974b20d492c1",
+          "title": "Managed run logs now stay scoped to the active thread",
+          "summary": "Managed run logs are now tied to the current thread, making it easier to inspect the right run activity without cross-thread mixups.",
+          "category": "improvement",
+          "commitShas": ["66b41f5618638252bbdbddec7627f0f67a136f97"]
+        },
+        {
+          "id": "6ee6b66ab3702b13",
+          "title": "Ticket previews in orchestration setup",
+          "summary": "Ticket previews are now available while configuring orchestration, making it easier to review work items without leaving the setup flow.",
+          "category": "feature",
+          "commitShas": [
+            "2e3b7bea3baee664a516020587463bb62e31e18f",
+            "9a49ce68bc3e5b33d454bc72abe6ec70f251ffb2"
+          ]
+        },
+        {
+          "id": "07e018e38366aca4",
+          "title": "Resizable ticket previews across management views",
+          "summary": "Added richer ticket and sub-ticket hover previews with resizable panels, giving you more control when inspecting details in board and ticket views.",
+          "category": "feature",
+          "commitShas": [
+            "827502195d946e273903777f4a30fc5277bd48fd",
+            "87b793996d3b18cc1f8b97fc5029465c471d8637",
+            "953013216d2db58fd8a3a36398348885e03ade71"
+          ]
+        },
+        {
+          "id": "ce9f8dab42ddca3e",
+          "title": "Improved WebSocket diagnostics for orchestration",
+          "summary": "Added clearer diagnostics around orchestration WebSocket activity to make connection and runtime issues easier to detect and understand in the app.",
+          "category": "improvement",
+          "commitShas": ["d4d0a89a8f3368773b0d95400a918ca9eae28c97"]
+        },
+        {
+          "id": "b551effe731ca91f",
+          "title": "Orchestration can proceed with external dependency warnings",
+          "summary": "Users can now continue starting orchestration even when external dependency warnings are present, making it easier to move forward while still surfacing potential issues.",
+          "category": "improvement",
+          "commitShas": ["57fec43af855ff972d8d3777d92a85d26641ffb3"]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-01",
+      "entries": [
+        {
+          "id": "7d34a9155f70bbce",
+          "title": "Restored chat file explorer and run link detection",
+          "summary": "The chat view once again shows the file explorer, and run-related URLs are inferred more reliably so relevant links appear correctly during conversations.",
+          "category": "fix",
+          "commitShas": ["b6a6f26fa3539fd451fb9a599330ed7bbe4fcc50"]
+        }
+      ]
+    },
     {
       "date": "2026-04-30",
       "entries": [
+        {
+          "id": "b124a89c07a15072",
+          "title": "Improved Markdown table styling in tickets",
+          "summary": "Markdown tables in tickets now render with more polished styling for better readability.",
+          "category": "improvement",
+          "commitShas": ["54dedb2c3d7467156d35346c945258ff45e158c8"]
+        },
+        {
+          "id": "63487684952dec02",
+          "title": "Ticket markdown tables render correctly",
+          "summary": "Resolved a rendering issue that could display markdown tables incorrectly in ticket descriptions.",
+          "category": "fix",
+          "commitShas": ["afe4db7646c401074ebd2415e0dccdc3700d85b5"]
+        },
+        {
+          "id": "74ba3f3ddca5f67a",
+          "title": "Managed runs recover more reliably after interrupted output",
+          "summary": "Fixed an issue where managed runs could show empty inference results and improved restart logging so resumed activity is clearer in the UI.",
+          "category": "fix",
+          "commitShas": ["7e2a1c2b9f4e8f628fcbadd75156c3c60b153ebb"]
+        },
         {
           "id": "4a1388bdd0c44e24",
           "title": "Managed runs now handle composite actions correctly",
@@ -2703,6 +2934,188 @@
           "ffbdf750524b20ba864eec8d116775621c913a2b"
         ],
         "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-30T14:27:52.087Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ffbdf750524b20ba864eec8d116775621c913a2b",
+        "toInclusiveCommit": "afe4db7646c401074ebd2415e0dccdc3700d85b5",
+        "commitShas": [
+          "7e2a1c2b9f4e8f628fcbadd75156c3c60b153ebb",
+          "afe4db7646c401074ebd2415e0dccdc3700d85b5"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-04-30T16:24:09.737Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "afe4db7646c401074ebd2415e0dccdc3700d85b5",
+        "toInclusiveCommit": "54dedb2c3d7467156d35346c945258ff45e158c8",
+        "commitShas": ["54dedb2c3d7467156d35346c945258ff45e158c8"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-01T20:14:39.854Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "54dedb2c3d7467156d35346c945258ff45e158c8",
+        "toInclusiveCommit": "b6a6f26fa3539fd451fb9a599330ed7bbe4fcc50",
+        "commitShas": ["b6a6f26fa3539fd451fb9a599330ed7bbe4fcc50"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-02T13:08:47.301Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "b6a6f26fa3539fd451fb9a599330ed7bbe4fcc50",
+        "toInclusiveCommit": "57fec43af855ff972d8d3777d92a85d26641ffb3",
+        "commitShas": ["57fec43af855ff972d8d3777d92a85d26641ffb3"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-02T14:19:24.774Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "57fec43af855ff972d8d3777d92a85d26641ffb3",
+        "toInclusiveCommit": "d4d0a89a8f3368773b0d95400a918ca9eae28c97",
+        "commitShas": ["d4d0a89a8f3368773b0d95400a918ca9eae28c97"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-02T16:25:24.647Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d4d0a89a8f3368773b0d95400a918ca9eae28c97",
+        "toInclusiveCommit": "2e3b7bea3baee664a516020587463bb62e31e18f",
+        "commitShas": [
+          "87b793996d3b18cc1f8b97fc5029465c471d8637",
+          "9a49ce68bc3e5b33d454bc72abe6ec70f251ffb2",
+          "827502195d946e273903777f4a30fc5277bd48fd",
+          "953013216d2db58fd8a3a36398348885e03ade71",
+          "2e3b7bea3baee664a516020587463bb62e31e18f"
+        ],
+        "commitCount": 5,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-02T17:01:30.511Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "2e3b7bea3baee664a516020587463bb62e31e18f",
+        "toInclusiveCommit": "66b41f5618638252bbdbddec7627f0f67a136f97",
+        "commitShas": ["66b41f5618638252bbdbddec7627f0f67a136f97"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-02T18:23:58.268Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "66b41f5618638252bbdbddec7627f0f67a136f97",
+        "toInclusiveCommit": "f0b981a746d9cc1f2efe3d5508e7520821ca62bc",
+        "commitShas": ["f0b981a746d9cc1f2efe3d5508e7520821ca62bc"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-03T22:45:48.653Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "f0b981a746d9cc1f2efe3d5508e7520821ca62bc",
+        "toInclusiveCommit": "baf12c6d5c3b158e987440ece66a861e260a3065",
+        "commitShas": [
+          "fa3fbbad7ab5ef6e59fbae70a908bb3b1586864c",
+          "e8e030013e57e327c56e3a513fcd21b615a7490f",
+          "064c9c0f4834fa45be9bf4783059060ecf152953",
+          "c738da6fa4c90515e1bc3077d8a852ce68d4ee71",
+          "0bd19f295beb0a6894ece02c9fc1142d73afa579",
+          "59415492c1712e0b800a3ba2f67fa91cd0cff064",
+          "586548396904dcaf4b0118e458d60b1e69d066a6",
+          "63647a8bc3d41e57bba2cdebbe93ba0d503590a5",
+          "f2f70361b3d6308fb4a3b9223fa6f5c551a44c69",
+          "991957ac704c2bb52fb8a77f5a507582bfac3863",
+          "2bfbfe68a0673083199753ab36c38699a357f74a",
+          "3f503373228c203857fc82231d85e3f904aaa28d",
+          "395540efde0dc0f49a89457fa43eb5a5db1ffbbe",
+          "62071cca8ad3363db7defcf7a8d3b5124a3daae2",
+          "e6cb228283f4a371cc328b186fb08738b7ca8a91",
+          "beb776471ced350915edb736bb68ee41ec08f901",
+          "dc8d26079397f4aba5da364900f8e8a64c08533c",
+          "e837b3bf1d39cb79e15fdb7a1b85e1cb3ec5975e",
+          "0aecbb3cd48c6fdac19dc6d6a2a61409858d5506",
+          "47aa0834a93438eb8dfb098b9323ae493d5a251f",
+          "32ea17dfcc1b5a96de64a8f41f8210e970bea49b",
+          "c8c7721e51904ae0f0faa7975695ca3ba821fc47",
+          "3ef3a3dd4f814867d6a40bb82287856b31d07767",
+          "baf12c6d5c3b158e987440ece66a861e260a3065"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-03T22:45:55.351Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "baf12c6d5c3b158e987440ece66a861e260a3065",
+        "toInclusiveCommit": "d48a2e387aa3f2f5c4b01a2ee738e9c54155b8d9",
+        "commitShas": [
+          "b3fdfda85ca779547a55a0885377c0dd2995b5ab",
+          "7edffbd5d5f95f08a301a45077a570e8dfc546e3",
+          "d48a2e387aa3f2f5c4b01a2ee738e9c54155b8d9"
+        ],
+        "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T00:14:14.970Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d48a2e387aa3f2f5c4b01a2ee738e9c54155b8d9",
+        "toInclusiveCommit": "e172ebae3f951698dc6c4a8eb3c2fb761fc3f17c",
+        "commitShas": ["e172ebae3f951698dc6c4a8eb3c2fb761fc3f17c"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T01:04:33.907Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e172ebae3f951698dc6c4a8eb3c2fb761fc3f17c",
+        "toInclusiveCommit": "7c20c73417d9dfd99a264f1566e403ff3b0307c9",
+        "commitShas": ["7c20c73417d9dfd99a264f1566e403ff3b0307c9"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T10:36:27.462Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "7c20c73417d9dfd99a264f1566e403ff3b0307c9",
+        "toInclusiveCommit": "989f2b531c60d95ccbf18cad109d9e0083ae2fa2",
+        "commitShas": ["989f2b531c60d95ccbf18cad109d9e0083ae2fa2"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T16:12:16.155Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "989f2b531c60d95ccbf18cad109d9e0083ae2fa2",
+        "toInclusiveCommit": "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b",
+        "commitShas": [
+          "367ca105c562bd1f236f93ba6a500c63d36de04d",
+          "376c66fda658fb1ff806e02be7ad1498a7381f01",
+          "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b"
+        ],
+        "commitCount": 3,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

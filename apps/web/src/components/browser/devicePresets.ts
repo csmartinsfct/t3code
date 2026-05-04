@@ -177,3 +177,45 @@ export const VIEWPORT_DIMENSION_MAX = 4096;
 // Match Chrome DevTools' zoom dropdown values. 1 = 100%.
 export const ZOOM_OPTIONS: ReadonlyArray<number> = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const DEFAULT_ZOOM = 1;
+
+export const DEFAULT_PRESET_ID = "pixel-7";
+
+// Shared helpers for the toolbar and the resize handles. They derive a
+// concrete dimension/zoom/mobile reading from a `TabEmulation` value so the
+// toolbar's inputs and the drag handlers can read the same source of truth.
+
+export function effectiveDimensions(state: TabEmulation): {
+  width: number | null;
+  height: number | null;
+} {
+  if (state.kind === "off") return { width: null, height: null };
+  if (state.kind === "preset") {
+    const preset = findPreset(state.presetId);
+    if (!preset) return { width: null, height: null };
+    return state.rotated
+      ? { width: preset.height, height: preset.width }
+      : { width: preset.width, height: preset.height };
+  }
+  return state.rotated
+    ? { width: state.height, height: state.width }
+    : { width: state.width, height: state.height };
+}
+
+export function effectiveZoom(state: TabEmulation): number {
+  if (state.kind === "preset" || state.kind === "custom") return state.zoom;
+  return DEFAULT_ZOOM;
+}
+
+export function effectiveMobile(state: TabEmulation): boolean {
+  if (state.kind === "preset") return findPreset(state.presetId)?.mobile ?? false;
+  if (state.kind === "custom") return state.mobile;
+  return false;
+}
+
+export function clampDimension(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  if (rounded < VIEWPORT_DIMENSION_MIN) return VIEWPORT_DIMENSION_MIN;
+  if (rounded > VIEWPORT_DIMENSION_MAX) return VIEWPORT_DIMENSION_MAX;
+  return rounded;
+}
