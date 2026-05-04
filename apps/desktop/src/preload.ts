@@ -24,6 +24,7 @@ const BROWSER_LIST_TABS_CHANNEL = "browser:listTabs";
 const BROWSER_NEW_TAB_CHANNEL = "browser:newTab";
 const BROWSER_SWITCH_TAB_CHANNEL = "browser:switchTab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:closeTab";
+const BROWSER_SET_VIEWPORT_CHANNEL = "browser:setViewport";
 const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -76,6 +77,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     switchTab: (projectId, tabId) =>
       ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId),
     closeTab: (projectId, tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId),
+    setViewport: (projectId, tabId, params) =>
+      ipcRenderer.invoke(BROWSER_SET_VIEWPORT_CHANNEL, projectId, tabId, params),
     onTabsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
         if (typeof payload !== "object" || payload === null) return;

@@ -249,6 +249,20 @@ export interface BrowserTabListing {
   activeTabId: number;
 }
 
+// Per-tab device emulation parameters dispatched to the embedded browser via
+// CDP `Emulation.setDeviceMetricsOverride` + `setTouchEmulationEnabled` +
+// `setUserAgentOverride`. Passing `null` to `setViewport` clears all three.
+// `scale` is the visual zoom applied to the rendered viewport (1 = 100%,
+// 0.5 = 50%, etc.) — matches Chrome DevTools' zoom dropdown. See T3CO-423.
+export interface ViewportEmulationParams {
+  readonly width: number;
+  readonly height: number;
+  readonly dpr: number;
+  readonly mobile: boolean;
+  readonly userAgent: string;
+  readonly scale: number;
+}
+
 export interface DesktopBrowserBridge {
   mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
   setBounds: (projectId: string, bounds: BrowserViewBounds) => Promise<void>;
@@ -261,6 +275,11 @@ export interface DesktopBrowserBridge {
   newTab: (projectId: string, url?: string) => Promise<number>;
   switchTab: (projectId: string, tabId: number) => Promise<void>;
   closeTab: (projectId: string, tabId: number) => Promise<number>;
+  setViewport: (
+    projectId: string,
+    tabId: number,
+    params: ViewportEmulationParams | null,
+  ) => Promise<void>;
   onTabsChanged: (
     listener: (payload: {
       projectId: string;

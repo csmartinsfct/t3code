@@ -85,6 +85,7 @@ const BROWSER_LIST_TABS_CHANNEL = "browser:listTabs";
 const BROWSER_NEW_TAB_CHANNEL = "browser:newTab";
 const BROWSER_SWITCH_TAB_CHANNEL = "browser:switchTab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:closeTab";
+const BROWSER_SET_VIEWPORT_CHANNEL = "browser:setViewport";
 const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const DESKTOP_SCHEME = "t3";
@@ -1655,6 +1656,42 @@ function normalizeBrowserBounds(value: unknown): BrowserViewBounds | null {
   };
 }
 
+// Chromium's `setDeviceMetricsOverride` rejects extreme values; clamp to the
+// range used by Chrome DevTools' device toolbar. See T3CO-423.
+const VIEWPORT_DIMENSION_MIN = 200;
+const VIEWPORT_DIMENSION_MAX = 4096;
+
+function normalizeViewportParams(value: unknown): {
+  width: number;
+  height: number;
+  dpr: number;
+  mobile: boolean;
+  userAgent: string;
+  scale: number;
+} | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const width = Number(record.width);
+  const height = Number(record.height);
+  const dpr = Number(record.dpr);
+  if (![width, height, dpr].every(Number.isFinite)) return null;
+  if (width < VIEWPORT_DIMENSION_MIN || width > VIEWPORT_DIMENSION_MAX) return null;
+  if (height < VIEWPORT_DIMENSION_MIN || height > VIEWPORT_DIMENSION_MAX) return null;
+  if (dpr <= 0 || dpr > 4) return null;
+  const userAgent = typeof record.userAgent === "string" ? record.userAgent : "";
+  const mobile = record.mobile === true;
+  const rawScale = Number(record.scale);
+  const scale = Number.isFinite(rawScale) && rawScale > 0 ? Math.min(rawScale, 4) : 1;
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    dpr,
+    mobile,
+    userAgent,
+    scale,
+  };
+}
+
 function normalizeBrowserUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -2844,6 +2881,55 @@ function registerIpcHandlers(): void {
       const tabId = Number(rawTabId);
       await closeBrowserTab(project, tabId, window);
       return project.activeTabId;
+    },
+  );
+
+  ipcMain.removeHandler(BROWSER_SET_VIEWPORT_CHANNEL);
+  ipcMain.handle(
+    BROWSER_SET_VIEWPORT_CHANNEL,
+    async (event, rawProjectId: unknown, rawTabId: unknown, rawParams: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "setViewport")
+        : null;
+      if (!project) return;
+      const tabId = Number(rawTabId);
+      if (!Number.isInteger(tabId)) return;
+      const tab = project.tabs.get(tabId);
+      if (!tab || isEmbeddedBrowserDestroyed(tab)) return;
+      // Touching emulation counts as activity — resume an idle-suspended view.
+      markEmbeddedBrowserActive(project);
+      if (rawParams === null) {
+        await sendBrowserCdp(tab, "Emulation.clearDeviceMetricsOverride", {});
+        await sendBrowserCdp(tab, "Emulation.setTouchEmulationEnabled", { enabled: false });
+        await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: "" });
+        return;
+      }
+      const params = normalizeViewportParams(rawParams);
+      if (!params) {
+        console.warn("[desktop/browser] setViewport called with invalid params", { rawParams });
+        return;
+      }
+      // Pure metrics override — no `viewport`, no `dontSetVisibleSize`.
+      // Chromium auto-sets its internal visible size to the metrics
+      // width/height so inner-page scrolling stays consistent with the
+      // page's CSS-px viewport. The renderer is responsible for sizing
+      // the WebContentsView to match (simulated × scale).
+      // `scale` (deprecated but functional) zooms the rendered output —
+      // matches Chrome DevTools' device-toolbar zoom dropdown.
+      await sendBrowserCdp(tab, "Emulation.setDeviceMetricsOverride", {
+        width: params.width,
+        height: params.height,
+        deviceScaleFactor: params.dpr,
+        mobile: params.mobile,
+        screenWidth: params.width,
+        screenHeight: params.height,
+        positionX: 0,
+        positionY: 0,
+        scale: params.scale,
+      });
+      await sendBrowserCdp(tab, "Emulation.setTouchEmulationEnabled", { enabled: params.mobile });
+      await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: params.userAgent });
     },
   );
 

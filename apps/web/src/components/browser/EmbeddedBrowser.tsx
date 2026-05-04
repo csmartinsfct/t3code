@@ -1,12 +1,22 @@
 import type { BrowserTabListing, BrowserTabSummary, ProjectId } from "@t3tools/contracts";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
-import { ArrowRightIcon, GlobeIcon, PlusIcon, RotateCwIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ArrowRightIcon,
+  GlobeIcon,
+  MonitorSmartphoneIcon,
+  PlusIcon,
+  RotateCwIcon,
+  XIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
 
 import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserModalSuspension";
+import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
+import { EmbeddedBrowserViewportToolbar } from "./EmbeddedBrowserViewportToolbar";
+import { paramsFromState, type TabEmulation } from "./devicePresets";
 
 interface EmbeddedBrowserProps {
   projectId: ProjectId;
@@ -57,6 +67,7 @@ function tabDisplayName(tab: BrowserTabSummary): string {
 
 export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const rectRef = useRef<HTMLDivElement | null>(null);
+  const paneRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
   const mountPromiseRef = useRef<Promise<void> | null>(null);
@@ -69,6 +80,42 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const [activeTabId, setActiveTabId] = useState<number>(0);
 
   const browserBridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
+
+  // Per-tab device-emulation state (T3CO-423). Local-only, ephemeral —
+  // matches DevTools' session-only behavior. Switching tabs swaps the
+  // active state; closing/reopening the project resets the map.
+  const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(new Map());
+  const [viewportToolbarOpen, setViewportToolbarOpen] = useState(false);
+
+  const activeEmulation = emulationByTab.get(activeTabId) ?? { kind: "off" as const };
+  const effectiveDimensions = useMemo<{ width: number; height: number } | null>(() => {
+    const params = paramsFromState(activeEmulation);
+    if (!params) return null;
+    // Apply zoom to the rect's CSS dimensions so the WebContentsView's
+    // bounds match the scaled rendered output that CDP `scale` produces.
+    return {
+      width: params.width * params.scale,
+      height: params.height * params.scale,
+    };
+  }, [activeEmulation]);
+
+  const handleEmulationChange = useCallback(
+    (next: TabEmulation, tabId: number) => {
+      setEmulationByTab((prev) => {
+        const map = new Map(prev);
+        if (next.kind === "off") {
+          map.delete(tabId);
+        } else {
+          map.set(tabId, next);
+        }
+        return map;
+      });
+      if (browserBridge) {
+        void browserBridge.setViewport(projectId, tabId, paramsFromState(next));
+      }
+    },
+    [browserBridge, projectId],
+  );
 
   const applyTabListing = useCallback((listing: BrowserTabListing) => {
     setTabs(listing.tabs);
@@ -164,8 +211,11 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     scheduleBoundsSync();
     const observer = new ResizeObserver(scheduleBoundsSync);
     observer.observe(element);
+    // Also observe the outer pane so sidebar drags (which change pane size
+    // but not rect content size) re-sync the rect's screen position.
+    const pane = paneRef.current;
+    if (pane) observer.observe(pane);
     window.addEventListener("resize", scheduleBoundsSync);
-
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", scheduleBoundsSync);
@@ -345,7 +395,28 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
             <ArrowRightIcon className="size-3" />
           )}
         </Button>
+        <button
+          type="button"
+          onClick={() => setViewportToolbarOpen((open) => !open)}
+          className={cn(
+            "flex size-7 items-center justify-center rounded-md border transition-colors",
+            viewportToolbarOpen || activeEmulation.kind !== "off"
+              ? "border-primary/30 bg-primary/10 text-primary"
+              : "border-border bg-transparent text-muted-foreground hover:text-foreground",
+          )}
+          aria-pressed={viewportToolbarOpen}
+          aria-label="Toggle device emulation toolbar"
+          title="Devices"
+        >
+          <MonitorSmartphoneIcon className="size-3.5" />
+        </button>
       </form>
+      {viewportToolbarOpen && browserBridge ? (
+        <EmbeddedBrowserViewportToolbar
+          emulation={activeEmulation}
+          onChange={(next) => handleEmulationChange(next, activeTabId)}
+        />
+      ) : null}
       {error && (
         <div className="shrink-0 border-b border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
           {error}
@@ -356,7 +427,41 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           Embedded browser is available in the desktop app.
         </div>
       )}
-      <div ref={rectRef} data-browser-rect className="min-h-0 flex-1 bg-background" />
+      {/*
+        The rect is clamped to the pane via `min(SIM, 100%)` so it can
+        never overflow in either axis — the WebContentsView bounds always
+        stay inside the pane, no overlap with adjacent chrome. When the
+        simulated viewport fits, the rect renders at full simulated size
+        and is letterboxed via flex centering. When it exceeds the pane,
+        the rect caps at pane size and the user sees only the top-left
+        portion of the simulated viewport (relying on Chromium's inner
+        page scroll for vertical content navigation). The pane (`paneRef`)
+        is observed by ResizeObserver so sidebar resizes trigger a
+        bounds re-sync without depending on the rect's content size
+        changing.
+      */}
+      <div
+        ref={paneRef}
+        className={
+          effectiveDimensions
+            ? "flex min-h-0 flex-1 items-center justify-center bg-black/80"
+            : "min-h-0 flex-1 bg-background"
+        }
+      >
+        <div
+          ref={rectRef}
+          data-browser-rect
+          className="bg-background"
+          style={
+            effectiveDimensions
+              ? {
+                  width: `min(${effectiveDimensions.width}px, 100%)`,
+                  height: `min(${effectiveDimensions.height}px, 100%)`,
+                }
+              : { width: "100%", height: "100%" }
+          }
+        />
+      </div>
     </div>
   );
 }
