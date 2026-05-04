@@ -204,7 +204,15 @@ async function readNdjsonLines(
     const composite = await readNdjsonFile(compositeLogPath(baseDir, projectId, runId, serviceId));
     if (composite.length > 0) return composite;
     const legacy = await readNdjsonFile(legacyLogPath(baseDir, projectId, runId));
-    return legacy.filter((line) => line.serviceId === serviceId);
+    const matchingLegacyLines = legacy.filter((line) => line.serviceId === serviceId);
+    if (matchingLegacyLines.length > 0) return matchingLegacyLines;
+    // Legacy single-process runs persist lines with `serviceId: null`, while
+    // older inference records may expose a process-specific service id. Treat a
+    // requested service id as an alias for the legacy stream in that case.
+    if (legacy.length > 0 && legacy.every((line) => line.serviceId === null)) {
+      return legacy;
+    }
+    return matchingLegacyLines;
   }
 
   const dir = compositeLogDir(baseDir, projectId, runId);
@@ -688,6 +696,19 @@ const makeManagedRunService = Effect.gen(function* () {
       runtimeServices = detail.runtimeServices.map(
         (stub) => enrichedById.get(stub.serviceId) ?? stub,
       );
+    } else if (!isComposite) {
+      // Legacy runs only have one terminal/log stream, keyed internally by the
+      // synthetic "main" service id. Keep inference metadata on that stable id
+      // so clients do not try to tail a non-existent per-service log file.
+      const inferredService = runtimeServices[0] ?? null;
+      runtimeServices =
+        inferredService === null
+          ? []
+          : [
+              Object.assign({}, inferredService, {
+                serviceId: LEGACY_SERVICE_ID,
+              }),
+            ];
     }
 
     const inferenceId = randomUUID();
@@ -1890,7 +1911,14 @@ const makeManagedRunService = Effect.gen(function* () {
     Stream.unwrap(
       Effect.gen(function* () {
         if (serviceId !== undefined) {
-          const pubsub = yield* getOrCreateLogPubSub(runId, serviceId);
+          const live = yield* Ref.get(liveRunsRef).pipe(
+            Effect.map((runs) => runs.get(runId) ?? null),
+          );
+          const resolvedServiceId =
+            live !== null && !live.composite && !live.services.has(serviceId)
+              ? LEGACY_SERVICE_ID
+              : serviceId;
+          const pubsub = yield* getOrCreateLogPubSub(runId, resolvedServiceId);
           return Stream.fromPubSub(pubsub);
         }
         const live = yield* Ref.get(liveRunsRef).pipe(

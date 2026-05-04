@@ -235,4 +235,87 @@ describe("ManagedRunService", () => {
       ),
     );
   });
+
+  it("serves legacy single-process logs when an inferred service id is requested", async () => {
+    const logsDir = await fs.mkdtemp(path.join(os.tmpdir(), "t3-managed-runs-"));
+    const rows = new Map<string, PersistedManagedRun>();
+
+    await fs.mkdir(path.join(logsDir, "managed-runs", projectId), { recursive: true });
+    await fs.writeFile(
+      path.join(logsDir, "managed-runs", projectId, `${runId}.ndjson`),
+      `${JSON.stringify({
+        timestamp: "2026-05-04T10:15:00.000Z",
+        stream: "pty",
+        line: "legacy line",
+        serviceId: null,
+      })}\n`,
+      "utf8",
+    );
+
+    const terminalManager: TerminalManagerShape = {
+      open: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+      resize: () => Effect.die("unused"),
+      clear: () => Effect.die("unused"),
+      restart: () => Effect.die("unused"),
+      close: () => Effect.die("unused"),
+      subscribe: () => Effect.succeed(() => undefined),
+    };
+
+    const layer = ManagedRunServiceLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(ServerConfig, makeServerConfig(logsDir)),
+          Layer.succeed(ManagedRunRepository, makeRepository(rows)),
+          Layer.succeed(TerminalManager, terminalManager),
+          Layer.succeed(ProjectionSnapshotQuery, {
+            getSnapshot: () => Effect.die("unused"),
+            getStartupSnapshot: () => Effect.die("unused"),
+            listProjects: () => Effect.die("unused"),
+            getThreadContent: () => Effect.die("unused"),
+            getCounts: () => Effect.die("unused"),
+            getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
+            getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
+            getProjectById: () => Effect.succeed(Option.none()),
+            getThreadById: () => Effect.succeed(Option.none()),
+            hasThreadUserMessages: () => Effect.succeed(Option.none()),
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          }),
+          Layer.succeed(ManagedRunInference, {
+            buildInferenceInput: () => Effect.die("unused"),
+            inferRunServices: () => Effect.die("unused"),
+          }),
+        ),
+      ),
+    );
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const managedRuns = yield* ManagedRunService;
+          yield* Effect.sleep(10);
+          rows.set(runId, {
+            ...makePersistedRun(),
+            runtimeServices: [
+              {
+                ...makeRuntimeService(),
+                serviceId: "solana-indexer" as ManagedRunRuntimeService["serviceId"],
+              },
+            ],
+          });
+
+          const lines = yield* managedRuns.getLogs({
+            runId,
+            serviceId: "solana-indexer" as ManagedRunRuntimeService["serviceId"],
+          });
+
+          expect(lines).toHaveLength(1);
+          expect(lines[0]).toMatchObject({
+            line: "legacy line",
+            serviceId: null,
+          });
+        }).pipe(Effect.provide(layer)),
+      ),
+    );
+  });
 });
