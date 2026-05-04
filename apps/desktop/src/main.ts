@@ -87,6 +87,9 @@ const BROWSER_SWITCH_TAB_CHANNEL = "browser:switchTab";
 const BROWSER_CLOSE_TAB_CHANNEL = "browser:closeTab";
 const BROWSER_SET_VIEWPORT_CHANNEL = "browser:setViewport";
 const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
+const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
+const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
+const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
@@ -211,6 +214,12 @@ let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
 const embeddedBrowserStateByWindow = new WeakMap<BrowserWindow, EmbeddedBrowserWindowState>();
 const embeddedBrowserProjectsByProjectId = new Map<string, EmbeddedBrowserProjectState>();
+// Popout windows that have detached a project's embedded browser into a free-
+// floating BrowserWindow. One popout per project at most. The same
+// WebContentsView instance is moved between the main window and the popout
+// window via add/removeChildView — no new view, no debugger reattach. See
+// T3CO-424.
+const popoutWindowsByProjectId = new Map<string, BrowserWindow>();
 const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
   "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
 const EMBEDDED_BROWSER_IDLE_REAPER_INTERVAL_MS = 60_000;
@@ -2214,6 +2223,135 @@ function parkEmbeddedBrowserView(view: WebContentsView): void {
   }
 }
 
+// T3CO-424. Popout: detach a project's WebContentsView into its own
+// free-floating BrowserWindow. The same view instance moves between the main
+// window and the popout — agents driving the project via /api/browser don't
+// notice the move because the WebContents stays alive across reparenting.
+function buildPopoutUrl(projectId: string): string {
+  const param = `popout=${encodeURIComponent(projectId)}`;
+  if (devServerUrl) {
+    const separator = devServerUrl.includes("?") ? "&" : "?";
+    return `${devServerUrl}${separator}${param}`;
+  }
+  return `${DESKTOP_SCHEME}://app/index.html?${param}`;
+}
+
+function broadcastPopoutState(projectId: string, isOpen: boolean): void {
+  const payload = { projectId, isOpen };
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    try {
+      window.webContents.send(BROWSER_POPOUT_STATE_CHANNEL, payload);
+    } catch (error) {
+      console.warn("[desktop/browser] failed to push popout state", { projectId, error });
+    }
+  }
+}
+
+function openPopoutWindow(projectId: string): void {
+  const existing = popoutWindowsByProjectId.get(projectId);
+  if (existing && !existing.isDestroyed()) {
+    existing.focus();
+    return;
+  }
+
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    minWidth: 480,
+    minHeight: 360,
+    show: false,
+    autoHideMenuBar: true,
+    ...getIconOption(),
+    title: APP_DISPLAY_NAME,
+    webPreferences: {
+      preload: Path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  popoutWindowsByProjectId.set(projectId, window);
+
+  window.webContents.on("page-title-updated", (event, title) => {
+    event.preventDefault();
+    const trimmed = title.trim();
+    window.setTitle(trimmed ? `${APP_DISPLAY_NAME} — ${trimmed}` : APP_DISPLAY_NAME);
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const externalUrl = getSafeExternalUrl(url);
+    if (externalUrl) {
+      void shell.openExternal(externalUrl);
+    }
+    return { action: "deny" };
+  });
+  window.once("ready-to-show", () => {
+    window.show();
+  });
+  // Park the active tab BEFORE the window destroys: Electron destroys any
+  // child views attached to a closing window's contentView, which would kill
+  // the WebContents and break the agent's CDP session. By detaching first
+  // and re-parenting to the offscreen BaseWindow, the view (and its debugger
+  // attachment) survives the window close cleanly. The main window's
+  // EmbeddedBrowser mount effect then re-attaches it on re-mount.
+  window.on("close", () => {
+    const state = embeddedBrowserStateByWindow.get(window);
+    const project = state?.projectsByProjectId.get(projectId);
+    const activeTab = project?.tabs.get(project.activeTabId);
+    if (project?.mounted && activeTab) {
+      try {
+        window.contentView.removeChildView(activeTab.view);
+      } catch (error) {
+        console.warn("[desktop/browser] popout removeChildView failed", { projectId, error });
+      }
+      parkEmbeddedBrowserView(activeTab.view);
+      project.mounted = false;
+    }
+  });
+  window.on("closed", () => {
+    if (popoutWindowsByProjectId.get(projectId) === window) {
+      popoutWindowsByProjectId.delete(projectId);
+    }
+    broadcastPopoutState(projectId, false);
+  });
+
+  // Race protection. The popout's renderer will call BROWSER_MOUNT_CHANNEL
+  // when it boots, but `mountActiveTabInWindow` skips `addChildView` when
+  // `project.mounted` is already true — so if the project's view is still
+  // attached to the main window's contentView when the popout mounts, the
+  // popout window ends up with chrome but no WebContentsView. Detach + park
+  // the view here so the popout's mount sees `mounted=false` and re-attaches
+  // cleanly. The main window's React side independently processes the
+  // popout-state broadcast and runs its own unmount cleanup; that IPC
+  // becomes a no-op since `mounted` is already false.
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (project?.mounted) {
+    const activeTab = project.tabs.get(project.activeTabId);
+    if (activeTab) {
+      for (const otherWindow of BrowserWindow.getAllWindows()) {
+        if (otherWindow === window || otherWindow.isDestroyed()) continue;
+        try {
+          otherWindow.contentView.removeChildView(activeTab.view);
+        } catch {
+          // ignore — view wasn't in this window's contentView
+        }
+      }
+      parkEmbeddedBrowserView(activeTab.view);
+    }
+    project.mounted = false;
+  }
+
+  void window.loadURL(buildPopoutUrl(projectId));
+  console.log("[desktop/browser] popout window opened", { projectId });
+  broadcastPopoutState(projectId, true);
+}
+
+function closePopoutWindow(projectId: string): void {
+  const window = popoutWindowsByProjectId.get(projectId);
+  if (!window || window.isDestroyed()) return;
+  window.close();
+}
+
 // Returns the live project for projectId, creating it (and its root tab)
 // offscreen if it does not exist or has been fully destroyed. Called from
 // the agent CDP broker handler (lazy first-touch) and BROWSER_MOUNT_CHANNEL
@@ -2932,6 +3070,20 @@ function registerIpcHandlers(): void {
       await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: params.userAgent });
     },
   );
+
+  ipcMain.removeHandler(BROWSER_POPOUT_OPEN_CHANNEL);
+  ipcMain.handle(BROWSER_POPOUT_OPEN_CHANNEL, async (_event, rawProjectId: unknown) => {
+    const projectId = normalizeProjectId(rawProjectId);
+    if (!projectId) return;
+    openPopoutWindow(projectId);
+  });
+
+  ipcMain.removeHandler(BROWSER_POPOUT_CLOSE_CHANNEL);
+  ipcMain.handle(BROWSER_POPOUT_CLOSE_CHANNEL, async (_event, rawProjectId: unknown) => {
+    const projectId = normalizeProjectId(rawProjectId);
+    if (!projectId) return;
+    closePopoutWindow(projectId);
+  });
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
