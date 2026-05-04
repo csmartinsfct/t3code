@@ -7,7 +7,7 @@ interface TicketMarkdownProps {
 
 export function TicketMarkdown({ children }: TicketMarkdownProps) {
   return (
-    <div className="ticket-markdown text-xs leading-relaxed">
+    <div className="ticket-markdown markdown-table text-xs leading-relaxed">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
     </div>
   );

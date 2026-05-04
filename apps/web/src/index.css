@@ -412,16 +412,53 @@ label:has(> select#reasoning-effort) select {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
 
-.chat-markdown table {
+/* Shared markdown table styles — used by both chat and ticket renderers. */
+.markdown-table table {
   width: 100%;
-  border-collapse: collapse;
+  max-width: 100%;
+  margin: 0.65rem 0 1rem;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #191918;
 }
 
-.chat-markdown th,
-.chat-markdown td {
-  border: 1px solid var(--border);
-  padding: 0.35rem 0.45rem;
+.markdown-table th,
+.markdown-table td {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  padding: 0.55rem 0.65rem;
   text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+  background: #191918;
+}
+
+.markdown-table th {
+  background: #1c1c1b;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.markdown-table tr:first-child > th,
+.markdown-table tr:first-child > td {
+  border-top: 0;
+}
+
+.markdown-table th:first-child,
+.markdown-table td:first-child {
+  border-left: 0;
+}
+
+.markdown-table th > p,
+.markdown-table td > p {
+  margin: 0;
 }
 
 /* Ticket markdown — compact variant for ticket descriptions & comments */
@@ -542,54 +579,6 @@ label:has(> select#reasoning-effort) select {
   padding: 0;
   line-height: 1.4;
   font-size: 0.7rem;
-}
-
-.ticket-markdown table {
-  width: 100%;
-  max-width: 100%;
-  margin: 0.65rem 0 1rem;
-  table-layout: fixed;
-  border-collapse: separate;
-  border-spacing: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #191918;
-}
-
-.ticket-markdown th,
-.ticket-markdown td {
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  padding: 0.55rem 0.65rem;
-  text-align: left;
-  vertical-align: top;
-  overflow-wrap: break-word;
-  word-break: normal;
-  white-space: normal;
-  background: #191918;
-}
-
-.ticket-markdown th {
-  background: #1c1c1b;
-  color: var(--foreground);
-  font-weight: 600;
-}
-
-.ticket-markdown tr:first-child > th,
-.ticket-markdown tr:first-child > td {
-  border-top: 0;
-}
-
-.ticket-markdown th:first-child,
-.ticket-markdown td:first-child {
-  border-left: 0;
-}
-
-.ticket-markdown th > p,
-.ticket-markdown td > p {
-  margin: 0;
 }
 
 /* Tiptap description editor */
