@@ -1,7 +1,3 @@
-import * as fs from "node:fs/promises";
-import type { Dirent } from "node:fs";
-import * as nodePath from "node:path";
-
 import { ProjectId } from "@t3tools/contracts";
 import { Data, Effect, Layer, ServiceMap } from "effect";
 
@@ -16,16 +12,7 @@ import {
 import type { BrowserManagerServiceShape } from "./Services/BrowserManager.ts";
 import { BrowserManagerService } from "./Services/BrowserManager.ts";
 
-export type PersistedBrowserHostKind = "playwright" | "electron";
-
-interface HostJson {
-  readonly host: PersistedBrowserHostKind;
-}
-
 interface ResolverState {
-  readonly persisted: Map<ProjectId, PersistedBrowserHostKind>;
-  readonly announcedElectronProjects: Set<ProjectId>;
-  readonly reannounceInProgress: boolean;
   // @ref maps, snapshot/console/network/dialog buffers, tab registry, and CDP
   // subscription iterators all live on the host instance. Memoize per project
   // so refs survive between HTTP requests and subscriptions don't leak. See
@@ -40,16 +27,6 @@ export class BrowserHostResolverError extends Data.TaggedError("BrowserHostResol
 
 export interface BrowserHostResolverShape {
   readonly get: (projectId: ProjectId) => Effect.Effect<BrowserHost, BrowserHostResolverError>;
-  readonly persistElectronHost: (
-    projectId: ProjectId,
-  ) => Effect.Effect<void, BrowserHostResolverError>;
-  readonly announceElectronHosts: (
-    projectIds: readonly ProjectId[],
-  ) => Effect.Effect<void, BrowserHostResolverError>;
-  readonly beginRestartRecovery: () => Effect.Effect<void, never>;
-  readonly completeRestartRecovery: (
-    projectIds: readonly ProjectId[],
-  ) => Effect.Effect<void, BrowserHostResolverError>;
   readonly dispose: () => Effect.Effect<void, never>;
 }
 
@@ -58,75 +35,10 @@ export class BrowserHostResolver extends ServiceMap.Service<
   BrowserHostResolverShape
 >()("t3/browser/BrowserHostResolver") {}
 
-function hostRoot(stateDir: string): string {
-  return nodePath.join(stateDir, "browser");
-}
-
-function hostJsonPath(stateDir: string, projectId: ProjectId): string {
-  return nodePath.join(hostRoot(stateDir), projectId, "host.json");
-}
-
-function parseHostJson(raw: string): PersistedBrowserHostKind | undefined {
-  try {
-    const parsed = JSON.parse(raw) as Partial<HostJson>;
-    return parsed.host === "electron" || parsed.host === "playwright" ? parsed.host : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function readPersistedHosts(
-  stateDir: string,
-): Promise<Map<ProjectId, PersistedBrowserHostKind>> {
-  const root = hostRoot(stateDir);
-  const hosts = new Map<ProjectId, PersistedBrowserHostKind>();
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(root, { withFileTypes: true });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return hosts;
-    throw err;
-  }
-
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const projectId = ProjectId.makeUnsafe(entry.name);
-        try {
-          const host = parseHostJson(await fs.readFile(hostJsonPath(stateDir, projectId), "utf8"));
-          if (host) hosts.set(projectId, host);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        }
-      }),
-  );
-  return hosts;
-}
-
-async function readPersistedHost(
-  stateDir: string,
-  projectId: ProjectId,
-): Promise<PersistedBrowserHostKind | undefined> {
-  try {
-    return parseHostJson(await fs.readFile(hostJsonPath(stateDir, projectId), "utf8"));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw err;
-  }
-}
-
-async function writeHostJson(
-  stateDir: string,
-  projectId: ProjectId,
-  host: PersistedBrowserHostKind,
-): Promise<void> {
-  const file = hostJsonPath(stateDir, projectId);
-  await fs.mkdir(nodePath.dirname(file), { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify({ host } satisfies HostJson, null, 2)}\n`, "utf8");
-}
-
 interface CreateBrowserHostResolverOptions {
+  // stateDir is unused by the resolver itself but kept on the options shape so
+  // getCachedBrowserHostResolver can scope its cache per data dir (broker
+  // URL/token rotation invalidates per stateDir).
   readonly stateDir: string;
   readonly browser: BrowserManagerServiceShape;
   readonly descriptors: ReadonlyMap<BrowserHostToolName, PlaywrightCommandDescriptor>;
@@ -135,16 +47,11 @@ interface CreateBrowserHostResolverOptions {
 }
 
 export async function createBrowserHostResolver({
-  stateDir,
   browser,
   descriptors,
   electronBroker,
 }: CreateBrowserHostResolverOptions): Promise<BrowserHostResolverShape> {
-  const persisted = await readPersistedHosts(stateDir);
   let state: ResolverState = {
-    persisted,
-    announcedElectronProjects: new Set<ProjectId>(),
-    reannounceInProgress: Array.from(persisted.values()).some((host) => host === "electron"),
     electronHosts: new Map<ProjectId, ElectronWebContentsBrowserHost>(),
   };
 
@@ -157,33 +64,16 @@ export async function createBrowserHostResolver({
 
   const electronHostOptions = electronBroker === undefined ? undefined : { broker: electronBroker };
 
+  // Always-on per project (T3CO-421): in desktop builds (electronBroker
+  // defined) every project resolves to the Electron WebContentsView host. The
+  // host is created lazily on first access and memoized for the life of the
+  // resolver so @ref maps, snapshot/console buffers, and CDP subscriptions
+  // survive between HTTP requests. In server-only builds the resolver returns
+  // a fresh PlaywrightBrowserHost — no disk persistence, no recovery state.
   const get: BrowserHostResolverShape["get"] = (projectId) =>
-    Effect.tryPromise({
-      try: async () => {
-        let persisted = state.persisted.get(projectId);
-        if (!persisted) {
-          persisted = await readPersistedHost(stateDir, projectId);
-          if (persisted) {
-            const persistedHost = persisted;
-            updateState((current) => {
-              const nextPersisted = new Map(current.persisted);
-              nextPersisted.set(projectId, persistedHost);
-              return { ...current, persisted: nextPersisted };
-            });
-          }
-        }
-        if (persisted !== "electron") return makePlaywrightHost(projectId);
-
-        if (
-          !electronBroker &&
-          state.reannounceInProgress &&
-          !state.announcedElectronProjects.has(projectId)
-        ) {
-          throw new BrowserHostResolverError({
-            message:
-              "Embedded browser host is recovering after a server restart; retry once the desktop process re-announces active browser views.",
-          });
-        }
+    Effect.try({
+      try: (): BrowserHost => {
+        if (electronBroker === undefined) return makePlaywrightHost(projectId);
         const cached = state.electronHosts.get(projectId);
         if (cached) return cached as unknown as BrowserHost;
         const host = new ElectronWebContentsBrowserHost(projectId, electronHostOptions);
@@ -195,63 +85,10 @@ export async function createBrowserHostResolver({
         return host as unknown as BrowserHost;
       },
       catch: (cause) =>
-        cause instanceof BrowserHostResolverError
-          ? cause
-          : new BrowserHostResolverError({
-              message: cause instanceof Error ? cause.message : String(cause),
-              cause,
-            }),
-    });
-
-  const persistElectronHost: BrowserHostResolverShape["persistElectronHost"] = (projectId) =>
-    Effect.gen(function* () {
-      yield* Effect.tryPromise({
-        try: () => writeHostJson(stateDir, projectId, "electron"),
-        catch: (cause) =>
-          new BrowserHostResolverError({
-            message: `failed to persist Electron browser host for ${projectId}: ${String(cause)}`,
-            cause,
-          }),
-      });
-      updateState((current) => {
-        const persisted = new Map(current.persisted);
-        persisted.set(projectId, "electron");
-        const announcedElectronProjects = new Set(current.announcedElectronProjects);
-        announcedElectronProjects.add(projectId);
-        return { ...current, persisted, announcedElectronProjects };
-      });
-    });
-
-  const announceElectronHosts: BrowserHostResolverShape["announceElectronHosts"] = (projectIds) =>
-    Effect.sync(() => {
-      updateState((current) => {
-        const announcedElectronProjects = new Set(current.announcedElectronProjects);
-        const persisted = new Map(current.persisted);
-        for (const projectId of projectIds) {
-          announcedElectronProjects.add(projectId);
-          persisted.set(projectId, "electron");
-        }
-        return { ...current, persisted, announcedElectronProjects };
-      });
-    });
-
-  const beginRestartRecovery = () =>
-    Effect.sync(() => {
-      updateState((current) => ({
-        ...current,
-        announcedElectronProjects: new Set<ProjectId>(),
-        reannounceInProgress: true,
-      }));
-    });
-
-  const completeRestartRecovery: BrowserHostResolverShape["completeRestartRecovery"] = (
-    projectIds,
-  ) =>
-    Effect.gen(function* () {
-      yield* announceElectronHosts(projectIds);
-      yield* Effect.sync(() => {
-        updateState((current) => ({ ...current, reannounceInProgress: false }));
-      });
+        new BrowserHostResolverError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
     });
 
   const dispose: BrowserHostResolverShape["dispose"] = () =>
@@ -263,10 +100,6 @@ export async function createBrowserHostResolver({
 
   return {
     get,
-    persistElectronHost,
-    announceElectronHosts,
-    beginRestartRecovery,
-    completeRestartRecovery,
     dispose,
   } satisfies BrowserHostResolverShape;
 }

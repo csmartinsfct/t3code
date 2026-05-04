@@ -844,7 +844,7 @@ The Electron shell wraps the server and web app into a native desktop applicatio
 ### Features
 
 - **Native window** — Platform-appropriate title bar and window management.
-- **Embedded browser** — Board toolbar browser mode mounts a per-project Electron `WebContentsView` with a URL bar and native Chromium rendering. Agent `/api/browser` calls drive the same visible view through the Electron CDP broker once `host.json` marks the project Electron-authoritative.
+- **Embedded browser** — Board toolbar browser mode mounts a per-project Electron `WebContentsView` with a URL bar and native Chromium rendering. Each project's view is always-on (per [T3CO-421](t3://ticket/T3CO-421)): created lazily on first agent CDP request or first user mount, parked in a hidden `BaseWindow` whenever it isn't visible, and driven by agent `/api/browser` calls through the Electron CDP broker regardless of whether the embedded UI happens to be open.
 - **Protocol handler** — `t3://` scheme for internal navigation (e.g. `t3://ticket/T3CO-42`).
 - **Auto-update** — Checks every 4 hours via electron-updater. Supports prerelease channels. GitHub token support for higher rate limits.
 - **Shell environment sync** — Preserves the user's PATH and shell environment in the embedded server.
@@ -864,7 +864,7 @@ The Electron shell wraps the server and web app into a native desktop applicatio
 
 ### Embedded browser
 
-The embedded browser is a native desktop-only project surface. The web renderer owns the chrome (URL bar and placeholder rect), while Electron main owns the `WebContentsView`, its per-project `persist:<projectId>` session, hidden-view throttling, and CDP debugger lifecycle. The server resolves `/api/browser` through the two-host model documented in [Browser Tools](browser-tools.md): Playwright remains the default headless host; Electron becomes authoritative for a project after first native mount and persists that choice in `browser/<projectId>/host.json`.
+The embedded browser is a native desktop-only project surface. The web renderer owns the chrome (URL bar and placeholder rect), while Electron main owns the `WebContentsView`, its per-project `persist:<projectId>` session, the hidden-view media-pause path, and the CDP debugger lifecycle. The server resolves `/api/browser` through the single-host desktop model documented in [Browser Tools](browser-tools.md): in the desktop runtime every project resolves to the always-on Electron `WebContentsView` host (created lazily, parked in a hidden `BaseWindow` when not visible); Playwright is only used in theoretical server-only deployments where the Electron CDP broker is not wired.
 
 The v0.1 placement is intentionally the management-board browser toggle. The browser is project infrastructure, so future layout work can move it into a project-pane system without changing the host resolver, CDP broker, or REST tool surface.
 

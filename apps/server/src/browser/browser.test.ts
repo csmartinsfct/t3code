@@ -162,10 +162,6 @@ function stubBrowserResolver(): BrowserHostResolverShape {
   const host = stubBrowserHost();
   return {
     get: () => Effect.succeed(host),
-    persistElectronHost: () => Effect.void,
-    announceElectronHosts: () => Effect.void,
-    beginRestartRecovery: () => Effect.void,
-    completeRestartRecovery: () => Effect.void,
     dispose: () => Effect.void,
   };
 }
@@ -276,10 +272,6 @@ it.effect("handlers dispatch through runTool and ignore shadow class methods", (
     const handlers = buildCommandHandlers({
       resolver: {
         get: () => Effect.succeed(host as unknown as BrowserHost),
-        persistElectronHost: () => Effect.void,
-        announceElectronHosts: () => Effect.void,
-        beginRestartRecovery: () => Effect.void,
-        completeRestartRecovery: () => Effect.void,
         dispose: () => Effect.void,
       },
       projectId: TEST_PROJECT,

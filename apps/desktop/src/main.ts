@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 
 import {
   app,
+  BaseWindow,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -1170,6 +1171,20 @@ async function handleBrowserCdpBrokerRequest(
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const body = await readBrokerJsonBody(request);
+    // Lazy materialization (T3CO-421): every routed request carries a
+    // `viewId` that resolves to a project. If the project doesn't have a
+    // live WebContentsView yet — common after restart, or for agents
+    // touching a project before the user has ever opened the embedded UI —
+    // create it offscreen here so the downstream lookup succeeds. Tab ops
+    // that additionally require a window-bound project (`/tabs/list`,
+    // `/tabs/new`, etc.) still throw if the project isn't mounted; the
+    // viewId-based agent surface (send/subscribe/attach-target/print-pdf)
+    // works without any user mount.
+    const rawViewId = isRecord(body) && typeof body.viewId === "string" ? body.viewId : undefined;
+    if (rawViewId) {
+      const { projectId } = parseViewId(rawViewId);
+      if (projectId) ensureEmbeddedBrowserProject(projectId);
+    }
     if (url.pathname === "/send") {
       const result = await sendEmbeddedBrowserCdpCommand(parseCdpSendRequest(body));
       sendBrokerSuccess(response, result);
@@ -1627,65 +1642,6 @@ function normalizeBrowserUrl(value: unknown): string | null {
   }
 }
 
-function browserHostJsonPath(projectId: string): string {
-  return Path.join(STATE_DIR, "browser", projectId, "host.json");
-}
-
-interface PersistedBrowserHostFile {
-  readonly host: "electron";
-  readonly tabs?: ReadonlyArray<{
-    readonly id: number;
-    readonly url: string;
-    readonly title?: string;
-  }>;
-  readonly activeTabId?: number;
-  readonly nextTabId?: number;
-}
-
-function writeBrowserHostAssignment(projectId: string): void {
-  writeBrowserHostFile(projectId, readBrowserHostFile(projectId));
-}
-
-function writeBrowserHostFile(projectId: string, state: PersistedBrowserHostFile): void {
-  try {
-    const file = browserHostJsonPath(projectId);
-    FS.mkdirSync(Path.dirname(file), { recursive: true });
-    FS.writeFileSync(file, `${JSON.stringify({ ...state, host: "electron" }, null, 2)}\n`, "utf8");
-  } catch (error) {
-    console.warn("[desktop/browser] failed to persist embedded browser host", {
-      projectId,
-      error,
-    });
-  }
-}
-
-function readBrowserHostFile(projectId: string): PersistedBrowserHostFile {
-  try {
-    const raw = FS.readFileSync(browserHostJsonPath(projectId), "utf8");
-    const parsed = JSON.parse(raw) as Partial<PersistedBrowserHostFile>;
-    return { host: "electron", ...parsed };
-  } catch {
-    return { host: "electron" };
-  }
-}
-
-function persistProjectTabs(project: EmbeddedBrowserProjectState): void {
-  const tabs = Array.from(project.tabs.values())
-    .filter((tab) => !isEmbeddedBrowserDestroyed(tab))
-    .map((tab) => ({
-      id: tab.tabId,
-      url: tab.view.webContents.getURL() || "about:blank",
-      title: tab.title || tab.view.webContents.getTitle(),
-    }))
-    .sort((a, b) => a.id - b.id);
-  writeBrowserHostFile(project.projectId, {
-    host: "electron",
-    tabs,
-    activeTabId: project.activeTabId,
-    nextTabId: project.nextTabId,
-  });
-}
-
 function isEmbeddedBrowserDestroyed(embedded: EmbeddedBrowserTabState): boolean {
   return embedded.view.webContents.isDestroyed();
 }
@@ -1761,8 +1717,12 @@ function scheduleEmbeddedBrowserDebuggerRetry(embedded: EmbeddedBrowserTabState)
   embedded.reattachRetryTimer.unref?.();
 }
 
-async function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserTabState): Promise<void> {
-  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
+// Pauses media in a hidden embedded browser. The view stays alive and CDP
+// commands run at full speed regardless of UI mount status — per T3CO-421
+// every project's WebContentsView is always-on, so unmount no longer means
+// "stop the page." The only deterministic UX win on hide is silencing
+// background <video>/<audio>; CPU throttling intentionally not applied.
+async function pauseEmbeddedBrowserMedia(embedded: EmbeddedBrowserTabState): Promise<void> {
   await sendBrowserCdp(embedded, "Runtime.evaluate", {
     expression:
       "Promise.resolve().then(() => { for (const media of document.querySelectorAll('video,audio')) { try { media.pause(); } catch {} } })",
@@ -1771,9 +1731,7 @@ async function pauseAndThrottleEmbeddedBrowser(embedded: EmbeddedBrowserTabState
 }
 
 async function resumeEmbeddedBrowser(embedded: EmbeddedBrowserTabState): Promise<boolean> {
-  if (!attachEmbeddedBrowserDebugger(embedded)) return false;
-  await sendBrowserCdp(embedded, "Emulation.setCPUThrottlingRate", { rate: 1 });
-  return true;
+  return attachEmbeddedBrowserDebugger(embedded);
 }
 
 function getIpcBrowserWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
@@ -2089,15 +2047,43 @@ function subscribeEmbeddedBrowserCdpEvents(
   response.once("close", cleanup);
 }
 
-// Creates an empty project and its root tab (tabId=0). The project becomes
-// the canonical owner of all tabs and the mount/bounds/suspend state; the
-// root tab owns a WebContentsView + CDP debugger attachment + per-tab
-// subscriptions and focus/title/favicon state.
-function createEmbeddedBrowserProject(
-  projectId: string,
-  state: EmbeddedBrowserWindowState,
-): EmbeddedBrowserProjectState {
-  const persisted = readBrowserHostFile(projectId);
+// Hidden BaseWindow that parents every embedded-browser WebContentsView when
+// it isn't mounted in a real BrowserWindow. Chromium suspends the compositor
+// for any view not attached to some window's contentView, which breaks
+// paint-dependent CDP commands (`Page.captureScreenshot`, `Page.printToPDF`,
+// media extraction) for hidden projects. The window is never shown.
+let offscreenBrowserHost: BaseWindow | null = null;
+function ensureOffscreenBrowserHost(): BaseWindow {
+  if (offscreenBrowserHost && !offscreenBrowserHost.isDestroyed()) return offscreenBrowserHost;
+  offscreenBrowserHost = new BaseWindow({
+    show: false,
+    width: 1280,
+    height: 800,
+    x: -10000,
+    y: -10000,
+    skipTaskbar: true,
+  });
+  return offscreenBrowserHost;
+}
+
+function parkEmbeddedBrowserView(view: WebContentsView): void {
+  const host = ensureOffscreenBrowserHost();
+  try {
+    host.contentView.addChildView(view);
+  } catch (error) {
+    console.warn("[desktop/browser] failed to park view in offscreen host", { error });
+  }
+}
+
+// Returns the live project for projectId, creating it (and its root tab)
+// offscreen if it does not exist or has been fully destroyed. Called from
+// the agent CDP broker handler (lazy first-touch) and BROWSER_MOUNT_CHANNEL
+// (reuse the warm view if it exists, create one if the agent raced ahead).
+// Per T3CO-421 a project's lifecycle is decoupled from window mount state.
+function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProjectState {
+  const existing = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (existing && !isEmbeddedBrowserProjectDestroyed(existing)) return existing;
+  if (existing) cleanupEmbeddedBrowserProject(existing);
   const project: EmbeddedBrowserProjectState = {
     projectId,
     handle: `electron-wc:${projectId}`,
@@ -2108,26 +2094,8 @@ function createEmbeddedBrowserProject(
     suspendedForModal: false,
     bounds: null,
   };
-  // Restore tabs from host.json if present — capped to protect against a
-  // corrupt/forged file. If no persisted tabs (or parsing fails), fall
-  // through to the single-root-tab bootstrap.
-  const persistedTabs = (persisted.tabs ?? []).slice(0, MAX_TABS_PER_PROJECT);
-  if (persistedTabs.length > 0) {
-    for (const entry of persistedTabs) {
-      const tab = createEmbeddedBrowserTab(project, entry.id, state, entry.url || "about:blank");
-      if (entry.title) tab.title = entry.title;
-      project.tabs.set(entry.id, tab);
-    }
-    const maxId = Math.max(...persistedTabs.map((entry) => entry.id));
-    project.nextTabId = Math.max(maxId + 1, persisted.nextTabId ?? maxId + 1);
-    project.activeTabId =
-      persisted.activeTabId !== undefined && project.tabs.has(persisted.activeTabId)
-        ? persisted.activeTabId
-        : persistedTabs[0]!.id;
-  } else {
-    const rootTab = createEmbeddedBrowserTab(project, 0, state, "about:blank");
-    project.tabs.set(0, rootTab);
-  }
+  const rootTab = createEmbeddedBrowserTab(project, 0, "about:blank");
+  project.tabs.set(0, rootTab);
   embeddedBrowserProjectsByProjectId.set(projectId, project);
   return project;
 }
@@ -2135,7 +2103,6 @@ function createEmbeddedBrowserProject(
 function createEmbeddedBrowserTab(
   project: EmbeddedBrowserProjectState,
   tabId: number,
-  state: EmbeddedBrowserWindowState,
   initialUrl: string,
 ): EmbeddedBrowserTabState {
   const { projectId } = project;
@@ -2154,6 +2121,10 @@ function createEmbeddedBrowserTab(
       disableDialogs: true,
     },
   });
+  // Park the new view immediately so Chromium starts compositing — see
+  // ensureOffscreenBrowserHost above. Mount paths use `addChildView` on a
+  // real BrowserWindow which re-parents it; unmount paths re-park it here.
+  parkEmbeddedBrowserView(view);
   // Electron disables Chromium's native pinch-to-zoom path by default. Without
   // this call, macOS trackpad pinch gestures inside the webview are swallowed
   // entirely — `zoom-changed` only fires for Ctrl+wheel, not for native pinch.
@@ -2352,7 +2323,11 @@ function createEmbeddedBrowserTab(
     notifyEmbeddedBrowserTabsChanged(project);
   });
   view.webContents.on("destroyed", () => {
-    cleanupEmbeddedBrowserView(tab, state);
+    // Resolve the owning window at destroy-time rather than at tab creation:
+    // a view created offscreen may later be bound to a real BrowserWindow.
+    const owner = findEmbeddedBrowserOwnerWindow(tab);
+    const ownerState = owner ? embeddedBrowserStateByWindow.get(owner) : undefined;
+    cleanupEmbeddedBrowserView(tab, ownerState);
     notifyEmbeddedBrowserTabsChanged(project);
   });
 
@@ -2380,9 +2355,7 @@ function createEmbeddedBrowserTab(
 
 // Push "tabs changed" updates to any interested BrowserWindow that hosts this
 // project so the tab strip in the chat shell can re-render without polling.
-// Also persists the current tab state to host.json so tabs survive restarts.
 function notifyEmbeddedBrowserTabsChanged(project: EmbeddedBrowserProjectState): void {
-  persistProjectTabs(project);
   const payload = summarizeEmbeddedBrowserTabs(project);
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -2430,9 +2403,8 @@ function openNewBrowserTab(project: EmbeddedBrowserProjectState, url: string): n
       `browser tab limit reached (${MAX_TABS_PER_PROJECT}); close an existing tab first`,
     );
   }
-  const state = embeddedBrowserStateByWindow.get(BrowserWindow.getAllWindows()[0]!);
   const tabId = project.nextTabId++;
-  const tab = createEmbeddedBrowserTab(project, tabId, state!, url);
+  const tab = createEmbeddedBrowserTab(project, tabId, url);
   project.tabs.set(tabId, tab);
   notifyEmbeddedBrowserTabsChanged(project);
   return tabId;
@@ -2450,7 +2422,8 @@ async function switchBrowserTab(
   const currentActive = project.tabs.get(project.activeTabId);
   if (project.mounted && currentActive) {
     window.contentView.removeChildView(currentActive.view);
-    void pauseAndThrottleEmbeddedBrowser(currentActive);
+    parkEmbeddedBrowserView(currentActive.view);
+    void pauseEmbeddedBrowserMedia(currentActive);
   }
   project.mounted = false;
   project.activeTabId = tabId;
@@ -2539,22 +2512,25 @@ function registerIpcHandlers(): void {
         const activeTab = previousActive.tabs.get(previousActive.activeTabId);
         if (activeTab) {
           window.contentView.removeChildView(activeTab.view);
-          await pauseAndThrottleEmbeddedBrowser(activeTab);
+          parkEmbeddedBrowserView(activeTab.view);
+          await pauseEmbeddedBrowserMedia(activeTab);
         }
         previousActive.mounted = false;
         previousActive.suspendedForModal = false;
       }
 
-      let project = state.projectsByProjectId.get(projectId);
-      if (project && isEmbeddedBrowserProjectDestroyed(project)) {
-        cleanupEmbeddedBrowserProject(project, state);
-        project = undefined;
+      // Reuse the warm offscreen project if one already exists (created
+      // either by a prior mount in another window or by an agent CDP call
+      // that lazily materialized it). Per T3CO-421, project lifecycle is
+      // global — projectsByProjectId on a window state is just a binding
+      // index that says "this window currently mounts this project."
+      let scoped = state.projectsByProjectId.get(projectId);
+      if (scoped && isEmbeddedBrowserProjectDestroyed(scoped)) {
+        cleanupEmbeddedBrowserProject(scoped, state);
+        scoped = undefined;
       }
-      if (!project) {
-        project = createEmbeddedBrowserProject(projectId, state);
-        state.projectsByProjectId.set(projectId, project);
-        writeBrowserHostAssignment(projectId);
-      }
+      const project = scoped ?? ensureEmbeddedBrowserProject(projectId);
+      if (!scoped) state.projectsByProjectId.set(projectId, project);
 
       project.bounds = bounds;
       project.suspendedForModal = false;
@@ -2597,10 +2573,11 @@ function registerIpcHandlers(): void {
     const activeTab = project.tabs.get(project.activeTabId);
     if (project.mounted && activeTab) {
       window.contentView.removeChildView(activeTab.view);
+      parkEmbeddedBrowserView(activeTab.view);
     }
     project.mounted = false;
     project.suspendedForModal = false;
-    if (activeTab) await pauseAndThrottleEmbeddedBrowser(activeTab);
+    if (activeTab) await pauseEmbeddedBrowserMedia(activeTab);
   });
 
   ipcMain.removeHandler(BROWSER_SUSPEND_CHANNEL);
@@ -2613,7 +2590,10 @@ function registerIpcHandlers(): void {
     if (!project.mounted) return;
 
     const activeTab = project.tabs.get(project.activeTabId);
-    if (activeTab) window.contentView.removeChildView(activeTab.view);
+    if (activeTab) {
+      window.contentView.removeChildView(activeTab.view);
+      parkEmbeddedBrowserView(activeTab.view);
+    }
     project.mounted = false;
   });
 

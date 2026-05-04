@@ -61,7 +61,7 @@ Every supported provider (Codex, Claude, Gemini, Cursor) reaches T3 services thr
 
 The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files or status commands and surfaced in the composer MCP menu.
 
-Browser automation has two host implementations behind that same REST endpoint. Agents do not choose between them per call. `BrowserHostResolver` checks the project state: Playwright serves headless/server contexts and projects without native browser history; Electron serves projects whose embedded browser was mounted and persisted in `browser/<projectId>/host.json`. This keeps the prompt/tool contract stable while letting desktop agents act in the exact tab the user can see.
+Browser automation has two host implementations behind that same REST endpoint. Agents do not choose between them per call. `BrowserHostResolver` picks Electron when the desktop process has wired its CDP broker into the resolver, and Playwright otherwise. In practice that means Electron in the desktop runtime (always) and Playwright only in theoretical server-only deployments. Per [T3CO-421](t3://ticket/T3CO-421) the desktop's per-project `WebContentsView` is always-on — created lazily on first agent or user touch and persisting across visibility toggles — so agents act in the exact tab the user can see, regardless of whether the embedded UI happens to be open.
 
 **Trade-offs:**
 

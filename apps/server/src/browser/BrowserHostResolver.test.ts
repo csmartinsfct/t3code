@@ -29,14 +29,6 @@ function fakeBrowserManager(): BrowserManagerServiceShape {
   };
 }
 
-function makeResolver(stateDir: string) {
-  return createBrowserHostResolver({
-    stateDir,
-    browser: fakeBrowserManager(),
-    descriptors: playwrightCommandDescriptors,
-  });
-}
-
 function fakeElectronBroker(): CdpBroker {
   return new CdpBroker({
     send: async () => ({}),
@@ -44,101 +36,28 @@ function fakeElectronBroker(): CdpBroker {
   });
 }
 
-it("BrowserHostResolver seeds Electron host assignments from host.json", async () => {
+it("BrowserHostResolver returns Electron host when broker present, Playwright otherwise (T3CO-421)", async () => {
+  // No host.json setup, no on-disk state — host choice is driven entirely
+  // by whether the broker is wired (desktop) or not (server-only).
   const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
   const stateDir = nodePath.join(baseDir, "userdata");
-  await fs.mkdir(nodePath.join(stateDir, "browser", PROJECT_ELECTRON), { recursive: true });
-  await fs.writeFile(
-    nodePath.join(stateDir, "browser", PROJECT_ELECTRON, "host.json"),
-    JSON.stringify({ host: "electron" }),
-  );
 
-  const resolver = await makeResolver(stateDir);
-  const recoveryError = await Effect.runPromise(resolver.get(PROJECT_ELECTRON).pipe(Effect.flip));
-  assert.include(recoveryError.message, "recovering after a server restart");
-
-  await Effect.runPromise(resolver.completeRestartRecovery([PROJECT_ELECTRON]));
-  const electronHost = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
-  const playwrightHost = await Effect.runPromise(resolver.get(PROJECT_PLAYWRIGHT));
-
-  assert.equal(electronHost.kind, "electron-wc");
-  assert.equal(playwrightHost.kind, "playwright");
-});
-
-it("BrowserHostResolver persists first Electron mount to host.json", async () => {
-  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
-  const stateDir = nodePath.join(baseDir, "userdata");
-  const resolver = await makeResolver(stateDir);
-  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
-  const file = nodePath.join(baseDir, "userdata", "browser", PROJECT_ELECTRON, "host.json");
-  const raw = await fs.readFile(file, "utf8");
-  const parsed = JSON.parse(raw) as { host?: string };
-  assert.equal(parsed.host, "electron");
-});
-
-it("BrowserHostResolver returns a transient recovery error until re-announce completes", async () => {
-  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
-  const stateDir = nodePath.join(baseDir, "userdata");
-  const resolver = await makeResolver(stateDir);
-  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
-  await Effect.runPromise(resolver.beginRestartRecovery());
-
-  const result = await Effect.runPromise(resolver.get(PROJECT_ELECTRON).pipe(Effect.flip));
-  assert.include(result.message, "recovering after a server restart");
-
-  await Effect.runPromise(resolver.completeRestartRecovery([PROJECT_ELECTRON]));
-  const host = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
-  assert.equal(host.kind, "electron-wc");
-  void baseDir;
-});
-
-it("BrowserHostResolver discovers host.json written after resolver creation when broker is connected", async () => {
-  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
-  const stateDir = nodePath.join(baseDir, "userdata");
-  const resolver = await createBrowserHostResolver({
+  const desktop = await createBrowserHostResolver({
     stateDir,
     browser: fakeBrowserManager(),
     descriptors: playwrightCommandDescriptors,
     electronBroker: fakeElectronBroker(),
   });
-
-  const playwrightHost = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
-  assert.equal(playwrightHost.kind, "playwright");
-
-  await fs.mkdir(nodePath.join(stateDir, "browser", PROJECT_ELECTRON), { recursive: true });
-  await fs.writeFile(
-    nodePath.join(stateDir, "browser", PROJECT_ELECTRON, "host.json"),
-    JSON.stringify({ host: "electron" }),
-  );
-
-  const electronHost = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
+  const electronHost = await Effect.runPromise(desktop.get(PROJECT_ELECTRON));
   assert.equal(electronHost.kind, "electron-wc");
-});
 
-it("BrowserHostResolver cached startup failures are retryable", async () => {
-  const baseDir = await fs.mkdtemp("/tmp/t3-browser-resolver-");
-  const stateDir = nodePath.join(baseDir, "userdata");
-  await fs.mkdir(stateDir, { recursive: true });
-  await fs.writeFile(nodePath.join(stateDir, "browser"), "not a directory", "utf8");
-
-  const options = {
+  const serverOnly = await createBrowserHostResolver({
     stateDir,
     browser: fakeBrowserManager(),
     descriptors: playwrightCommandDescriptors,
-  };
-
-  let firstFailure: unknown;
-  try {
-    await getCachedBrowserHostResolver(options);
-  } catch (cause) {
-    firstFailure = cause;
-  }
-  assert.isDefined(firstFailure);
-
-  await fs.rm(nodePath.join(stateDir, "browser"), { force: true });
-  const resolver = await getCachedBrowserHostResolver(options);
-  const host = await Effect.runPromise(resolver.get(PROJECT_PLAYWRIGHT));
-  assert.equal(host.kind, "playwright");
+  });
+  const playwrightHost = await Effect.runPromise(serverOnly.get(PROJECT_PLAYWRIGHT));
+  assert.equal(playwrightHost.kind, "playwright");
 });
 
 it("BrowserHostResolver memoizes Electron hosts per project across get() calls (T3CO-350)", async () => {
@@ -150,7 +69,6 @@ it("BrowserHostResolver memoizes Electron hosts per project across get() calls (
     descriptors: playwrightCommandDescriptors,
     electronBroker: fakeElectronBroker(),
   });
-  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
 
   const first = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
   const second = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
@@ -169,7 +87,6 @@ it("BrowserHostResolver concurrent get() calls return the same Electron host", a
     descriptors: playwrightCommandDescriptors,
     electronBroker: fakeElectronBroker(),
   });
-  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
 
   const [a, b, c] = await Promise.all([
     Effect.runPromise(resolver.get(PROJECT_ELECTRON)),
@@ -189,7 +106,6 @@ it("BrowserHostResolver.dispose disposes cached hosts and evicts the cache", asy
     descriptors: playwrightCommandDescriptors,
     electronBroker: fakeElectronBroker(),
   });
-  await Effect.runPromise(resolver.persistElectronHost(PROJECT_ELECTRON));
 
   const first = await Effect.runPromise(resolver.get(PROJECT_ELECTRON));
   await Effect.runPromise(resolver.dispose());
@@ -209,7 +125,6 @@ it("getCachedBrowserHostResolver disposes superseded entries on broker cycle", a
     electronBroker: brokerA,
     electronBrokerCacheKey: "broker-a",
   });
-  await Effect.runPromise(resolverA.persistElectronHost(PROJECT_ELECTRON));
   const hostA = await Effect.runPromise(resolverA.get(PROJECT_ELECTRON));
   // Spy on dispose — we want to confirm superseded entries actually close.
   // `BrowserHost.dispose` is declared readonly; the cast here is strictly for
