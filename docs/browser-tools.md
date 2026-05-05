@@ -702,6 +702,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `BoardToolbar` routes the status, priority, and label filter popovers through a shared routed popover. The host and overlay render the same filter content components; toggle/clear clicks emit non-dismissing route events so the popover remains open while the host-owned filter sets update and re-render into the active overlay session.
 
+`TicketLabelPicker` routes its search/create/toggle label menu through `OverlayRouteMenu`. The menu body is shared between DOM fallback and overlay, runs the same ticketing label APIs through `NativeApi`, and emits a non-dismissing `label-updated` event so the host refreshes the ticket detail while the overlay menu remains open.
+
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.

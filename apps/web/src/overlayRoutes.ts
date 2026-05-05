@@ -10,6 +10,7 @@ import "./components/chat/RateLimitMeter";
 import "./components/management/BoardToolbar";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
+import "./components/management/TicketLabelPicker";
 import "./components/terminal/TerminalTooltipOverlay";
 
 logWebTimeline("overlay-routes.loaded", {
@@ -30,6 +31,7 @@ logWebTimeline("overlay-routes.loaded", {
     "ticket-delete-confirm",
     "ticket-archive-confirm",
     "sub-tickets-archive-confirm",
+    "ticket-label-picker",
     "terminal-tooltip",
   ],
 });

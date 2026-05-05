@@ -1,8 +1,11 @@
-import type { Label, LabelId, ProjectId, TicketId } from "@t3tools/contracts";
+import type { Label, ProjectId, TicketId } from "@t3tools/contracts";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 
 // ── Preset palette for new labels ────────────────────────────────────
@@ -48,6 +51,8 @@ interface TicketLabelPickerProps {
   inline?: boolean;
 }
 
+const TICKET_LABEL_PICKER_OVERLAY_ROUTE_KEY = "ticket-label-picker";
+
 export function TicketLabelPicker({
   ticketId,
   projectId,
@@ -55,7 +60,75 @@ export function TicketLabelPicker({
   onUpdated,
   inline,
 }: TicketLabelPickerProps) {
-  const [open, setOpen] = useState(false);
+  const routedMenu = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: TICKET_LABEL_PICKER_OVERLAY_ROUTE_KEY,
+    params: { labels, projectId, ticketId },
+    kind: "menu",
+    side: "bottom",
+    align: "start",
+    onEvent: (type) => {
+      if (type === "label-updated") onUpdated();
+    },
+  });
+
+  const content = (
+    <>
+      {/* Add button — always first */}
+      <Menu open={routedMenu.domOpen} onOpenChange={routedMenu.onOpenChange}>
+        <MenuTrigger
+          render={
+            <button
+              ref={routedMenu.triggerRef}
+              type="button"
+              className="inline-flex size-5 items-center justify-center rounded-sm border border-dashed border-muted-foreground/25 text-muted-foreground/50 transition-colors hover:border-muted-foreground/40 hover:text-muted-foreground/80"
+              aria-label="Add label"
+              onFocusCapture={routedMenu.updateAnchor}
+              onPointerDownCapture={routedMenu.updateAnchor}
+            />
+          }
+        >
+          <PlusIcon className="size-3" />
+        </MenuTrigger>
+        <MenuPopup align="start">
+          <TicketLabelPickerMenuContent
+            labels={labels}
+            projectId={projectId}
+            ticketId={ticketId}
+            onUpdated={onUpdated}
+          />
+        </MenuPopup>
+      </Menu>
+
+      {/* Attached labels */}
+      {labels.map((label) => (
+        <TicketLabelChip key={label.id} label={label} ticketId={ticketId} onUpdated={onUpdated} />
+      ))}
+    </>
+  );
+
+  if (inline) {
+    return <div className="flex flex-wrap items-center gap-1.5">{content}</div>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
+      <div className="flex flex-wrap items-center gap-1.5">{content}</div>
+    </div>
+  );
+}
+
+function TicketLabelPickerMenuContent({
+  labels,
+  onUpdated,
+  projectId,
+  ticketId,
+}: {
+  labels: readonly Label[];
+  onUpdated: () => void;
+  projectId: string;
+  ticketId: TicketId;
+}) {
   const [allLabels, setAllLabels] = useState<readonly Label[]>([]);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -76,12 +149,9 @@ export function TicketLabelPicker({
   }, [projectId]);
 
   useEffect(() => {
-    if (open) {
-      void fetchLabels();
-      setSearch("");
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
-  }, [open, fetchLabels]);
+    void fetchLabels();
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [fetchLabels]);
 
   const filtered = useMemo(() => filterLabels(allLabels, search), [allLabels, search]);
 
@@ -101,19 +171,6 @@ export function TicketLabelPicker({
       }
     },
     [ticketId, attachedIds, onUpdated],
-  );
-
-  const handleRemoveLabel = useCallback(
-    async (labelId: LabelId) => {
-      try {
-        const api = ensureNativeApi();
-        await api.ticketing.removeTicketLabel({ ticketId, labelId });
-        onUpdated();
-      } catch (error) {
-        console.error("Failed to remove label:", error);
-      }
-    },
-    [ticketId, onUpdated],
   );
 
   const handleCreateLabel = useCallback(async () => {
@@ -144,104 +201,153 @@ export function TicketLabelPicker({
     [allLabels, search],
   );
 
-  const content = (
+  return (
     <>
-      {/* Add button — always first */}
-      <Menu open={open} onOpenChange={setOpen}>
-        <MenuTrigger
-          className="inline-flex size-5 items-center justify-center rounded-sm border border-dashed border-muted-foreground/25 text-muted-foreground/50 transition-colors hover:border-muted-foreground/40 hover:text-muted-foreground/80"
-          aria-label="Add label"
-        >
-          <PlusIcon className="size-3" />
-        </MenuTrigger>
-        <MenuPopup align="start">
-          {/* Search input */}
-          <div className="px-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter" && search.trim() && !exactNameExists) {
-                  void handleCreateLabel();
-                }
-              }}
-              placeholder="Search or create"
-              className="w-full bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/50 sm:text-sm"
-            />
-          </div>
-          <MenuSeparator />
-
-          {filtered.map((label) => {
-            const attached = isLabelAttached(attachedIds, label.id as string);
-            return (
-              <MenuItem
-                key={label.id}
-                closeOnClick={false}
-                onClick={() => void handleToggleLabel(label)}
-              >
-                <span
-                  className="size-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: label.color }}
-                />
-                <span className="flex-1 truncate">{label.name}</span>
-                {attached && <CheckIcon className="size-3 shrink-0 opacity-80" />}
-              </MenuItem>
-            );
-          })}
-          {/* Create new */}
-          {search.trim() && !exactNameExists && (
-            <>
-              {filtered.length > 0 && <MenuSeparator />}
-              <MenuItem
-                closeOnClick={false}
-                onClick={() => void handleCreateLabel()}
-                disabled={creating}
-              >
-                <PlusIcon className="size-3 shrink-0" />
-                <span className="text-muted-foreground">
-                  Create <span className="font-medium text-foreground">{search.trim()}</span>
-                </span>
-              </MenuItem>
-            </>
-          )}
-        </MenuPopup>
-      </Menu>
-
-      {/* Attached labels */}
-      {labels.map((label) => (
-        <span
-          key={label.id}
-          className="group/label inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] font-medium"
-          style={{
-            backgroundColor: `${label.color}14`,
-            color: label.color,
+      {/* Search input */}
+      <div className="px-2">
+        <input
+          ref={inputRef}
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter" && search.trim() && !exactNameExists) {
+              void handleCreateLabel();
+            }
           }}
-        >
-          {label.name}
-          <button
-            type="button"
-            className="inline-flex shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/label:opacity-70 hover:group-hover/label:opacity-100"
-            onClick={() => void handleRemoveLabel(label.id)}
-            aria-label={`Remove label ${label.name}`}
+          placeholder="Search or create"
+          className="w-full bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/50 sm:text-sm"
+        />
+      </div>
+      <MenuSeparator />
+
+      {filtered.map((label) => {
+        const attached = isLabelAttached(attachedIds, label.id as string);
+        return (
+          <MenuItem
+            key={label.id}
+            closeOnClick={false}
+            onClick={() => void handleToggleLabel(label)}
           >
-            <XIcon className="size-3" />
-          </button>
-        </span>
-      ))}
+            <span
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: label.color }}
+            />
+            <span className="flex-1 truncate">{label.name}</span>
+            {attached && <CheckIcon className="size-3 shrink-0 opacity-80" />}
+          </MenuItem>
+        );
+      })}
+      {/* Create new */}
+      {search.trim() && !exactNameExists && (
+        <>
+          {filtered.length > 0 && <MenuSeparator />}
+          <MenuItem
+            closeOnClick={false}
+            onClick={() => void handleCreateLabel()}
+            disabled={creating}
+          >
+            <PlusIcon className="size-3 shrink-0" />
+            <span className="text-muted-foreground">
+              Create <span className="font-medium text-foreground">{search.trim()}</span>
+            </span>
+          </MenuItem>
+        </>
+      )}
     </>
   );
+}
 
-  if (inline) {
-    return <div className="flex flex-wrap items-center gap-1.5">{content}</div>;
-  }
+function TicketLabelChip({
+  label,
+  onUpdated,
+  ticketId,
+}: {
+  label: Label;
+  onUpdated: () => void;
+  ticketId: TicketId;
+}) {
+  const handleRemoveLabel = useCallback(async () => {
+    try {
+      const api = ensureNativeApi();
+      await api.ticketing.removeTicketLabel({ ticketId, labelId: label.id });
+      onUpdated();
+    } catch (error) {
+      console.error("Failed to remove label:", error);
+    }
+  }, [label.id, ticketId, onUpdated]);
 
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium text-muted-foreground">Labels</h3>
-      <div className="flex flex-wrap items-center gap-1.5">{content}</div>
-    </div>
+    <span
+      className="group/label inline-flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        backgroundColor: `${label.color}14`,
+        color: label.color,
+      }}
+    >
+      {label.name}
+      <button
+        type="button"
+        className="inline-flex shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/label:opacity-70 hover:group-hover/label:opacity-100"
+        onClick={() => void handleRemoveLabel()}
+        aria-label={`Remove label ${label.name}`}
+      >
+        <XIcon className="size-3" />
+      </button>
+    </span>
   );
+}
+
+registerOverlayRoute<{
+  labels?: unknown;
+  projectId?: unknown;
+  ticketId?: unknown;
+}>(
+  TICKET_LABEL_PICKER_OVERLAY_ROUTE_KEY,
+  function TicketLabelPickerOverlayRoute({ message, controller }) {
+    const params = readTicketLabelPickerParams(message.params);
+
+    if (!params) {
+      controller.fail(new Error("Ticket label picker route requires ticket params."));
+      return null;
+    }
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="start">
+          <TicketLabelPickerMenuContent
+            labels={params.labels}
+            projectId={params.projectId}
+            ticketId={params.ticketId}
+            onUpdated={() => controller.bridge.emitEvent("label-updated", {})}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);
+
+function readTicketLabelPickerParams(params: Record<string, unknown>): {
+  labels: readonly Label[];
+  projectId: string;
+  ticketId: TicketId;
+} | null {
+  if (typeof params.projectId !== "string" || typeof params.ticketId !== "string") return null;
+  const labels = Array.isArray(params.labels)
+    ? params.labels.filter((label): label is Label => {
+        if (!label || typeof label !== "object") return false;
+        const candidate = label as { color?: unknown; id?: unknown; name?: unknown };
+        return (
+          typeof candidate.id === "string" &&
+          typeof candidate.name === "string" &&
+          typeof candidate.color === "string"
+        );
+      })
+    : [];
+  return {
+    labels,
+    projectId: params.projectId,
+    ticketId: params.ticketId as TicketId,
+  };
 }
