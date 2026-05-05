@@ -30,7 +30,7 @@ export function isNativeOverlayAvailable(): boolean {
 // ---------------------------------------------------------------------------
 
 export interface NativeOverlayHandle {
-  render(message: OverlayRenderMessage): void;
+  render(message: OverlayRenderMessage): Promise<void>;
   onEvent(handler: (type: string, payload: unknown) => void): () => void;
   onDismiss(handler: () => void): () => void;
   release(): void;
@@ -79,9 +79,7 @@ export function createOverlayRouteMessage(input: NativeOverlayRouteInput): Overl
   };
 }
 
-export async function acquireNativeOverlay(
-  initialMessage: OverlayRenderMessage,
-): Promise<NativeOverlayHandle | null> {
+async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null> {
   const bridge = getOverlayBridge();
   if (!bridge) return null;
 
@@ -93,14 +91,6 @@ export async function acquireNativeOverlay(
   try {
     id = await bridge.acquire();
   } catch {
-    return null;
-  }
-
-  // Send initial content immediately.
-  try {
-    await bridge.render(id, initialMessage);
-  } catch {
-    void bridge.release(id);
     return null;
   }
 
@@ -120,9 +110,9 @@ export async function acquireNativeOverlay(
   };
 
   return {
-    render(message: OverlayRenderMessage) {
+    async render(message: OverlayRenderMessage) {
       if (released) return;
-      void bridge.render(id, message);
+      await bridge.render(id, message);
     },
 
     onEvent(handler: (type: string, payload: unknown) => void) {
@@ -141,11 +131,27 @@ export async function acquireNativeOverlay(
   };
 }
 
+export async function acquireNativeOverlay(
+  initialMessage: OverlayRenderMessage,
+): Promise<NativeOverlayHandle | null> {
+  const handle = await acquireNativeOverlayHandle();
+  if (!handle) return null;
+
+  try {
+    await handle.render(initialMessage);
+  } catch {
+    handle.release();
+    return null;
+  }
+
+  return handle;
+}
+
 export async function openNativeOverlay<TResult = void>(
   initialMessage: OverlayRenderMessage,
   options: NativeOverlayOpenOptions<TResult> = {},
 ): Promise<NativeOverlaySession<TResult> | null> {
-  const handle = await acquireNativeOverlay(initialMessage);
+  const handle = await acquireNativeOverlayHandle();
   if (!handle) return null;
 
   let settled = false;
@@ -170,6 +176,13 @@ export async function openNativeOverlay<TResult = void>(
   handle.onDismiss(() => {
     settle(options.dismissValue as TResult);
   });
+
+  try {
+    await handle.render(initialMessage);
+  } catch {
+    handle.release();
+    return null;
+  }
 
   return {
     ...handle,

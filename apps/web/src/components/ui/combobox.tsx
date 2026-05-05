@@ -105,7 +105,7 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
                     )
               ).then((items) => {
                 if (version !== searchVersion) return;
-                handle.render(makeMessage(items, query));
+                void handle.render(makeMessage(items, query));
               });
               return;
             }

@@ -518,7 +518,7 @@ Electron's `WebContentsView` is an OS-level compositor surface that always paint
 
 When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
 
-`Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` are not yet migrated. They fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). These are full-screen overlays so the visual impact is minimal.
+Most `Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` surfaces still fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). The routed overlay path below is the migration mechanism for exact-UI arbitrary React content; `FileSearchModal` is the first routed `CommandDialog` migration.
 
 ### Architecture
 
@@ -577,7 +577,7 @@ Events from the overlay view carry `null` as the overlay ID (the view doesn't kn
 
 ### Host runtime
 
-Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup.
+Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup. Event and dismiss subscriptions are attached before the initial render message is sent, so fast routed-overlay bootstrap failures cannot be missed and can reliably fall back to the DOM path.
 
 For primitive components, the host app should usually go through the component adapter instead of calling the bridge directly. `Menu` supports serialized `overlayItems` plus `overlayOnSelect(id)` / `overlayOnAction(id)`, and falls back to the normal DOM/suspension path if a native overlay cannot be acquired. `OverlayMenuItem` intentionally models the small set of menu semantics needed to preserve host UI parity today: separators, group labels (`labelOnly`), checked/radio-looking rows (`checked`), icons, shortcuts, disabled state, destructive state, submenus, status dots, badges/descriptions, header actions, and secondary row actions. Header/row action buttons emit non-dismissing `action` events by default so refresh/approve-style controls can keep the menu open while the host updates state and re-renders the same native overlay session; set `dismissOnAction` only for action buttons that intentionally close the menu, like edit/reveal actions that open another surface. The chat provider/model picker, traits picker, compact composer controls menu, Open In picker, MCP servers picker, Skills picker, chat header Git/project-script menus, and orchestration thread switcher use this path so opening them above a mounted embedded browser no longer hides Chromium. Rich popovers such as the Active Runs card are intentionally not forced through `OverlayMenuItem`; they stay on the normal DOM/suspension path until Phase 2 can render the exact same component tree in the overlay view.
 

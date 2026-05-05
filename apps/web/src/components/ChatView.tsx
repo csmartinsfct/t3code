@@ -5193,7 +5193,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const existingHandle = nativeComposerMenuOverlayHandleRef.current;
     if (existingHandle) {
-      existingHandle.render(message);
+      void existingHandle.render(message);
       return;
     }
 

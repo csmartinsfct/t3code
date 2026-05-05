@@ -151,7 +151,7 @@ function Menu({
       nativeSessionRef.current = null;
       return;
     }
-    session.render(message);
+    void session.render(message);
   }, [buildNativeMessage]);
 
   useEffect(

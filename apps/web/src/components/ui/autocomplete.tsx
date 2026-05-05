@@ -141,7 +141,7 @@ function Autocomplete<ItemValue>(
                   )
             ).then((items) => {
               if (version !== searchVersion || nativeHandleRef.current !== handle) return;
-              handle.render(makeMessage(items, query));
+              void handle.render(makeMessage(items, query));
             });
             return;
           }

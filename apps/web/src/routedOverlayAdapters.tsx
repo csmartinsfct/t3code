@@ -113,7 +113,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
     }
 
     if (sessionRef.current) {
-      sessionRef.current.render(createOverlayRouteMessage(routeInputRef.current));
+      void sessionRef.current.render(createOverlayRouteMessage(routeInputRef.current));
       return;
     }
 
@@ -138,7 +138,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
       if (!session) return;
 
       sessionRef.current = session;
-      session.render(createOverlayRouteMessage(routeInputRef.current));
+      void session.render(createOverlayRouteMessage(routeInputRef.current));
       const result = await session.result;
 
       if (disposed || requestIdRef.current !== requestId) return;
@@ -162,7 +162,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
 
   useEffect(() => {
     if (!open || !shouldUseNative || fallbackOpen || !sessionRef.current) return;
-    sessionRef.current.render(createOverlayRouteMessage(routeInputRef.current));
+    void sessionRef.current.render(createOverlayRouteMessage(routeInputRef.current));
   }, [fallbackOpen, open, routeInputKey, routeInputRef, shouldUseNative]);
 
   const onDomOpenChange = useCallback<OpenChangeHandler<TDetails>>(
