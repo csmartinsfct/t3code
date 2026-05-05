@@ -949,12 +949,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       </div>
 
       {/* Board body */}
-      {loading ? (
+      {browserVisible ? (
+        <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
+      ) : loading ? (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
-      ) : browserVisible ? (
-        <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
       ) : orchestrationSubpage ? (
         <OrchestrationSubpage
           selectedTickets={orchestrationSubpage.tickets}

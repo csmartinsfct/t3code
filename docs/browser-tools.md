@@ -688,6 +688,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `ContextWindowMeter` and `RateLimitMeter` route their rich hover popovers through the shared routed-popover helper in `apps/web/src/routedPopover.ts`. The trigger stays in the host DOM, passes a trigger rect plus a serializable snapshot to the overlay route, and both DOM fallback and native overlay render the exact same breakdown/chart content components.
 
+`ManagedRunsControl` routes its Active Runs menu through the routed mini-app path because the menu contains arbitrary React content and actions: run cards, stop buttons, log drawer buttons, runtime service rows, and URL hover controls. The DOM fallback and overlay route both render the same extracted menu body; the overlay route uses `OverlayRouteMenu`/`OverlayRouteMenuPopup` so the Base UI menu styling and padding remain unchanged.
+
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.

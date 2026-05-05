@@ -17,6 +17,7 @@ import { AlertDialog } from "~/components/ui/alert-dialog";
 import { Sheet, SheetPopup } from "~/components/ui/sheet";
 import { CommandDialog } from "~/components/ui/command";
 import { Popover, PopoverPopup } from "~/components/ui/popover";
+import { Menu, MenuPopup } from "~/components/ui/menu";
 import { useOverlayRouteController } from "~/components/overlay/OverlayRouteContext";
 
 type OpenChangeHandler<TDetails> = (open: boolean, eventDetails?: TDetails) => void;
@@ -293,3 +294,35 @@ export function OverlayRoutePopoverPopup({
 }
 
 export { OverlayRoutePopoverPopup as OverlayRoutePopoverContent };
+
+export function OverlayRouteMenu({ cancelReason, ...props }: RouteRootProps<typeof Menu>) {
+  const handleOpenChange = useRouteDismiss(cancelReason);
+  return (
+    <Menu open onOpenChange={handleOpenChange} trackEmbeddedBrowserOverlay={false} {...props} />
+  );
+}
+
+export function OverlayRouteMenuPopup({
+  anchor,
+  align,
+  side,
+  ...props
+}: React.ComponentProps<typeof MenuPopup>) {
+  const { anchorRef, message } = useOverlayRouteController();
+  const presentation = message.presentation;
+  const routeSide =
+    presentation.kind === "popover" || presentation.kind === "menu" ? presentation.side : undefined;
+  const routeAlign =
+    presentation.kind === "popover" || presentation.kind === "menu"
+      ? presentation.align
+      : undefined;
+
+  return (
+    <MenuPopup
+      anchor={anchor ?? anchorRef}
+      align={align ?? routeAlign}
+      side={side ?? routeSide}
+      {...props}
+    />
+  );
+}

@@ -23,10 +23,15 @@ export function rectForOverlayAnchor(element: HTMLElement | null): OverlayAnchor
   };
 }
 
-export function useRoutedPopoverSurface<TElement extends HTMLElement = HTMLElement>({
+export function useRoutedPopoverSurface<
+  TElement extends HTMLElement = HTMLElement,
+  TResult = unknown,
+>({
   align,
   enabled = true,
   interaction = "click",
+  kind = "popover",
+  onResult,
   params,
   routeKey,
   side,
@@ -34,6 +39,8 @@ export function useRoutedPopoverSurface<TElement extends HTMLElement = HTMLEleme
   align?: PopoverPresentation["align"] | undefined;
   enabled?: boolean | undefined;
   interaction?: PopoverPresentation["interaction"] | undefined;
+  kind?: PopoverPresentation["kind"] | undefined;
+  onResult?: ((value: TResult) => void | Promise<void>) | undefined;
   params?: Record<string, unknown> | undefined;
   routeKey: string;
   side?: PopoverPresentation["side"] | undefined;
@@ -56,19 +63,20 @@ export function useRoutedPopoverSurface<TElement extends HTMLElement = HTMLEleme
     setState((current) => ({ ...current, open: nextOpen }));
   }, []);
 
-  const routed = useRoutedOverlaySurface({
+  const routed = useRoutedOverlaySurface<TResult>({
     open: enabled && state.open && state.anchor !== null,
     onOpenChange: handleRoutedOpenChange,
     routeKey,
     params,
     presentation: {
-      kind: "popover",
+      kind,
       anchor: state.anchor ?? ZERO_OVERLAY_ANCHOR,
       ...(side ? { side } : {}),
       ...(align ? { align } : {}),
       ...(interaction ? { interaction } : {}),
     },
     enabled: enabled && state.anchor !== null,
+    onResult,
   });
 
   const onOpenChange = useCallback(

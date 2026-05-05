@@ -20,6 +20,9 @@ import { truncate } from "@t3tools/shared/String";
 import { readNativeApi } from "~/nativeApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useRunLogsDrawerStore } from "~/runLogsDrawerStore";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -30,6 +33,21 @@ interface ManagedRunsControlProps {
   runs: ReadonlyArray<ManagedRunSummary>;
   scripts?: ReadonlyArray<ProjectScript>;
 }
+
+const MANAGED_RUNS_OVERLAY_ROUTE_KEY = "managed-runs-control";
+
+interface OpenRunLogsRequest {
+  label: string;
+  projectId: ManagedRunSummary["projectId"];
+  runId: ManagedRunSummary["runId"];
+  scriptId: string;
+  threadId: ThreadId;
+  type: "open-logs";
+}
+
+type ManagedRunsOverlayResult = OpenRunLogsRequest;
+
+type OpenRunLogsHandler = (request: OpenRunLogsRequest) => void;
 
 function resolveRunName(run: ManagedRunSummary, scripts?: ReadonlyArray<ProjectScript>): string {
   return scripts?.find((script) => script.id === run.scriptId)?.name ?? run.scriptId;
@@ -229,26 +247,10 @@ function RunStatusControl({ run, runName }: { run: ManagedRunSummary; runName: s
   );
 }
 
-function RunLogsButton({
-  activeThreadId,
-  run,
-  runName,
-}: {
-  activeThreadId: ThreadId;
-  run: ManagedRunSummary;
-  runName: string;
-}) {
-  const openTab = useRunLogsDrawerStore((state) => state.openTab);
-
+function RunLogsButton({ onOpenLogs, runName }: { onOpenLogs: () => void; runName: string }) {
   const handleClick = useCallback(() => {
-    openTab({
-      threadId: activeThreadId,
-      runId: run.runId,
-      projectId: run.projectId,
-      scriptId: run.scriptId,
-      label: runName,
-    });
-  }, [activeThreadId, openTab, run.projectId, run.runId, run.scriptId, runName]);
+    onOpenLogs();
+  }, [onOpenLogs]);
 
   return (
     <Popover>
@@ -257,7 +259,7 @@ function RunLogsButton({
         render={
           <button
             type="button"
-            className="pointer-events-none inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition group-hover/run-card:pointer-events-auto group-hover/run-card:opacity-100 group-focus-within/run-card:pointer-events-auto group-focus-within/run-card:opacity-100 hover:bg-accent hover:text-foreground"
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
             onClick={handleClick}
             aria-label={`View logs for ${runName}`}
           >
@@ -280,16 +282,28 @@ function RunLogsButton({
 
 function RunCard({
   activeThreadId,
+  onOpenLogs,
   run,
   scripts,
 }: {
   activeThreadId: ThreadId;
+  onOpenLogs: OpenRunLogsHandler;
   run: ManagedRunSummary;
   scripts?: ReadonlyArray<ProjectScript>;
 }) {
   const runName = resolveRunName(run, scripts);
   const statusLabel = runServiceStatusLabel(run);
   const isInferring = run.inferenceStatus === "pending";
+  const handleOpenLogs = useCallback(() => {
+    onOpenLogs({
+      type: "open-logs",
+      threadId: activeThreadId,
+      runId: run.runId,
+      projectId: run.projectId,
+      scriptId: run.scriptId,
+      label: runName,
+    });
+  }, [activeThreadId, onOpenLogs, run.projectId, run.runId, run.scriptId, runName]);
 
   return (
     <div
@@ -306,7 +320,7 @@ function RunCard({
             />
           )}
           {statusLabel && <span className="text-[10px] text-muted-foreground">{statusLabel}</span>}
-          <RunLogsButton activeThreadId={activeThreadId} run={run} runName={runName} />
+          <RunLogsButton onOpenLogs={handleOpenLogs} runName={runName} />
           <RunStatusControl run={run} runName={runName} />
         </div>
       </div>
@@ -331,16 +345,83 @@ function RunCard({
   );
 }
 
+function ManagedRunsMenuContent({
+  activeThreadId,
+  onOpenLogs,
+  runs,
+  scripts,
+}: ManagedRunsControlProps & {
+  onOpenLogs: OpenRunLogsHandler;
+}) {
+  return (
+    <div className="max-h-[420px] overflow-y-auto">
+      <MenuGroup>
+        <MenuGroupLabel>Active Runs</MenuGroupLabel>
+        {runs.length === 0 ? (
+          <div className="px-2 py-3 text-muted-foreground text-xs">
+            No active managed runs for this project.
+          </div>
+        ) : (
+          <div className="space-y-1 p-1">
+            {runs.map((run) => (
+              <RunCard
+                key={run.runId}
+                activeThreadId={activeThreadId}
+                onOpenLogs={onOpenLogs}
+                run={run}
+                {...(scripts ? { scripts } : {})}
+              />
+            ))}
+          </div>
+        )}
+      </MenuGroup>
+    </div>
+  );
+}
+
 export default function ManagedRunsControl({
   activeThreadId,
   runs,
   scripts,
 }: ManagedRunsControlProps) {
+  const openTab = useRunLogsDrawerStore((state) => state.openTab);
+  const openRunLogs = useCallback<OpenRunLogsHandler>(
+    (request) => {
+      openTab({
+        threadId: request.threadId,
+        runId: request.runId,
+        projectId: request.projectId,
+        scriptId: request.scriptId,
+        label: request.label,
+      });
+    },
+    [openTab],
+  );
+  const routedMenu = useRoutedPopoverSurface<HTMLButtonElement, ManagedRunsOverlayResult>({
+    routeKey: MANAGED_RUNS_OVERLAY_ROUTE_KEY,
+    params: {
+      activeThreadId,
+      runs,
+      ...(scripts ? { scripts } : {}),
+    },
+    kind: "menu",
+    side: "bottom",
+    align: "end",
+    onResult: openRunLogs,
+  });
+
   return (
-    <Menu>
+    <Menu open={routedMenu.domOpen} onOpenChange={routedMenu.onOpenChange}>
       <MenuTrigger
         render={
-          <Button size="xs" variant="outline" className="shrink-0 gap-1">
+          <Button
+            size="xs"
+            variant="outline"
+            className="shrink-0 gap-1"
+            onFocusCapture={routedMenu.updateAnchor}
+            onPointerDownCapture={routedMenu.updateAnchor}
+            ref={routedMenu.triggerRef}
+          >
             <ActivitySquareIcon className="size-3" />
             <span>Runs</span>
             <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
@@ -350,28 +431,53 @@ export default function ManagedRunsControl({
         }
       />
       <MenuPopup align="end" side="bottom" className="w-[340px]">
-        <div className="max-h-[420px] overflow-y-auto">
-          <MenuGroup>
-            <MenuGroupLabel>Active Runs</MenuGroupLabel>
-            {runs.length === 0 ? (
-              <div className="px-2 py-3 text-muted-foreground text-xs">
-                No active managed runs for this project.
-              </div>
-            ) : (
-              <div className="space-y-1 p-1">
-                {runs.map((run) => (
-                  <RunCard
-                    key={run.runId}
-                    activeThreadId={activeThreadId}
-                    run={run}
-                    {...(scripts ? { scripts } : {})}
-                  />
-                ))}
-              </div>
-            )}
-          </MenuGroup>
-        </div>
+        <ManagedRunsMenuContent
+          activeThreadId={activeThreadId}
+          onOpenLogs={openRunLogs}
+          runs={runs}
+          {...(scripts ? { scripts } : {})}
+        />
       </MenuPopup>
     </Menu>
   );
+}
+
+registerOverlayRoute<{
+  activeThreadId?: unknown;
+  runs?: unknown;
+  scripts?: unknown;
+}>(MANAGED_RUNS_OVERLAY_ROUTE_KEY, function ManagedRunsOverlayRoute({ message, controller }) {
+  const params = readManagedRunsOverlayParams(message.params);
+
+  if (!params) {
+    controller.fail(new Error("Managed runs overlay route requires run params."));
+    return null;
+  }
+
+  return (
+    <OverlayRouteMenu>
+      <OverlayRouteMenuPopup align="end" side="bottom" className="w-[340px]">
+        <ManagedRunsMenuContent {...params} onOpenLogs={(request) => controller.submit(request)} />
+      </OverlayRouteMenuPopup>
+    </OverlayRouteMenu>
+  );
+});
+
+function readManagedRunsOverlayParams(
+  params: Record<string, unknown>,
+): ManagedRunsControlProps | null {
+  if (typeof params.activeThreadId !== "string") return null;
+  if (!Array.isArray(params.runs)) return null;
+  if (params.scripts !== undefined && !Array.isArray(params.scripts)) return null;
+
+  const result: ManagedRunsControlProps = {
+    activeThreadId: params.activeThreadId as ThreadId,
+    runs: params.runs as ManagedRunsControlProps["runs"],
+  };
+
+  if (params.scripts) {
+    result.scripts = params.scripts as NonNullable<ManagedRunsControlProps["scripts"]>;
+  }
+
+  return result;
 }
