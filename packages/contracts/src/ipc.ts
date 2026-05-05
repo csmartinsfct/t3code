@@ -490,6 +490,7 @@ export type OverlayRoutePresentation =
       anchor: OverlayAnchorRect;
       side?: "top" | "bottom" | "left" | "right" | undefined;
       align?: "start" | "center" | "end" | undefined;
+      interaction?: "click" | "hover" | undefined;
     };
 
 export interface OverlayRouteMessage {

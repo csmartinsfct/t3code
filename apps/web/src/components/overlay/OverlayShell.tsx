@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from "react";
 import type React from "react";
-import type { CSSProperties, MouseEvent } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 
 import type { OverlayRenderMessage } from "@t3tools/contracts";
 import type { OverlayAnchorRect } from "@t3tools/contracts";
@@ -33,6 +33,18 @@ function getMessageAnchor(message: OverlayRenderMessage | null): OverlayAnchorRe
     return message.presentation.anchor;
   }
   return null;
+}
+
+function isHoverRouteMessage(message: OverlayRenderMessage | null): boolean {
+  return (
+    message?.type === "route" &&
+    (message.presentation.kind === "popover" || message.presentation.kind === "menu") &&
+    message.presentation.interaction === "hover"
+  );
+}
+
+function containsPoint(rect: DOMRect | OverlayAnchorRect, x: number, y: number): boolean {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
 class OverlayErrorBoundary extends Component<
@@ -75,7 +87,26 @@ class OverlayErrorBoundary extends Component<
 export function OverlayShell() {
   const [message, setMessage] = useState<OverlayRenderMessage | null>(null);
   const virtualAnchorRef = useRef<HTMLDivElement>(null);
+  const hoverDismissTimerRef = useRef<number | null>(null);
   const bridge = getBridge();
+
+  const clearHoverDismissTimer = () => {
+    if (hoverDismissTimerRef.current === null) return;
+    window.clearTimeout(hoverDismissTimerRef.current);
+    hoverDismissTimerRef.current = null;
+  };
+
+  const scheduleHoverDismiss = () => {
+    if (hoverDismissTimerRef.current !== null) return;
+    hoverDismissTimerRef.current = window.setTimeout(() => {
+      hoverDismissTimerRef.current = null;
+      logWebTimeline("overlay-shell.hover-dismiss", {
+        messageType: message?.type,
+        routeKey: message?.type === "route" ? message.routeKey : undefined,
+      });
+      bridge?.requestDismiss();
+    }, 120);
+  };
 
   useEffect(() => {
     if (!bridge) return;
@@ -98,6 +129,11 @@ export function OverlayShell() {
     };
   }, [bridge]);
 
+  useEffect(() => {
+    clearHoverDismissTimer();
+    return clearHoverDismissTimer;
+  }, [message]);
+
   const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       logWebTimeline("overlay-shell.backdrop-dismiss", {
@@ -109,6 +145,30 @@ export function OverlayShell() {
   };
 
   const messageAnchor = getMessageAnchor(message);
+
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!isHoverRouteMessage(message)) return;
+
+    const { clientX, clientY } = e;
+    if (messageAnchor && containsPoint(messageAnchor, clientX, clientY)) {
+      clearHoverDismissTimer();
+      return;
+    }
+
+    const popupElements = document.querySelectorAll<HTMLElement>('[data-slot="popover-popup"]');
+    for (const popup of popupElements) {
+      if (containsPoint(popup.getBoundingClientRect(), clientX, clientY)) {
+        clearHoverDismissTimer();
+        return;
+      }
+    }
+
+    scheduleHoverDismiss();
+  };
+
+  const handlePointerLeave = () => {
+    if (isHoverRouteMessage(message)) scheduleHoverDismiss();
+  };
 
   const anchorStyle: CSSProperties = messageAnchor
     ? {
@@ -130,6 +190,8 @@ export function OverlayShell() {
         pointerEvents: message ? "auto" : "none",
       }}
       onClick={handleBackdropClick}
+      onPointerLeave={handlePointerLeave}
+      onPointerMove={handlePointerMove}
     >
       {/* Virtual anchor — positioned at the trigger element's DOMRect.
           Base UI Positioner receives this as its `anchor` prop so it can

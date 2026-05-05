@@ -285,6 +285,7 @@ export function OverlayRoutePopoverPopup({
     <PopoverPopup
       anchor={anchor ?? anchorRef}
       align={align ?? routeAlign}
+      positionerClassName="transition-none"
       side={side ?? routeSide}
       {...props}
     />

@@ -1,3 +1,6 @@
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRoutePopover, OverlayRoutePopoverPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { cn } from "~/lib/utils";
 import {
   type OAuthTierSnapshot,
@@ -7,6 +10,8 @@ import {
   formatUpdatedAt,
 } from "~/lib/rateLimit";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+
+const RATE_LIMIT_METER_OVERLAY_ROUTE_KEY = "rate-limit-meter";
 
 // ---------------------------------------------------------------------------
 // Color helpers
@@ -127,15 +132,21 @@ function SingleTierContent(props: { rateLimit: RateLimitSnapshot }) {
 
 export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
   const { rateLimit } = props;
+  const routedPopover = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: RATE_LIMIT_METER_OVERLAY_ROUTE_KEY,
+    params: { rateLimit },
+    side: "top",
+    align: "end",
+    interaction: "hover",
+  });
   const usedPercentage = formatPercentage(rateLimit.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, rateLimit.usedPercentage ?? 0));
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (normalizedPercentage / 100) * circumference;
-  const hasOAuthTiers = rateLimit.oauthTiers.length > 0;
 
   return (
-    <Popover>
+    <Popover open={routedPopover.domOpen} onOpenChange={routedPopover.onOpenChange}>
       <PopoverTrigger
         openOnHover
         delay={150}
@@ -144,6 +155,9 @@ export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
           <button
             type="button"
             className="group inline-flex items-center justify-center rounded-full transition-opacity hover:opacity-85"
+            onFocusCapture={routedPopover.updateAnchor}
+            onMouseOverCapture={routedPopover.updateAnchor}
+            ref={routedPopover.triggerRef}
             aria-label={
               usedPercentage
                 ? `Rate limit ${usedPercentage} used`
@@ -192,50 +206,92 @@ export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
         }
       />
       <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2.5">
-        <div className="min-w-[180px] space-y-2 leading-tight">
-          {/* Header */}
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Usage
-          </div>
-
-          {hasOAuthTiers ? (
-            <div className="space-y-2">
-              {rateLimit.oauthTiers.map((tier) => (
-                <TierRow
-                  key={tier.tier}
-                  tier={tier}
-                  isPrimary={tier.tier === rateLimit.primaryTier?.tier}
-                />
-              ))}
-            </div>
-          ) : (
-            <SingleTierContent rateLimit={rateLimit} />
-          )}
-
-          {/* Overage */}
-          {rateLimit.isUsingOverage ? (
-            <div className="text-[10px] text-muted-foreground/60">
-              Overage: {rateLimit.overageStatus?.replace(/_/g, " ") ?? "active"}
-              {rateLimit.overageResetsAt ? ` · ${formatResetsAt(rateLimit.overageResetsAt)}` : null}
-            </div>
-          ) : null}
-          {rateLimit.overageDisabledReason ? (
-            <div className="text-[10px] text-muted-foreground/60">
-              Overage disabled: {rateLimit.overageDisabledReason.replace(/_/g, " ")}
-            </div>
-          ) : null}
-
-          {/* Fetch warning */}
-          {rateLimit.fetchWarning ? (
-            <div className="text-[10px] text-warning/70">{rateLimit.fetchWarning}</div>
-          ) : null}
-
-          {/* Timestamp */}
-          <div className="text-[10px] text-muted-foreground/40">
-            {formatUpdatedAt(rateLimit.updatedAt)}
-          </div>
-        </div>
+        <RateLimitPopoverContent rateLimit={rateLimit} />
       </PopoverPopup>
     </Popover>
   );
+}
+
+function RateLimitPopoverContent({ rateLimit }: { rateLimit: RateLimitSnapshot }) {
+  const hasOAuthTiers = rateLimit.oauthTiers.length > 0;
+
+  return (
+    <div className="min-w-[180px] space-y-2 leading-tight">
+      {/* Header */}
+      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        Usage
+      </div>
+
+      {hasOAuthTiers ? (
+        <div className="space-y-2">
+          {rateLimit.oauthTiers.map((tier) => (
+            <TierRow
+              key={tier.tier}
+              tier={tier}
+              isPrimary={tier.tier === rateLimit.primaryTier?.tier}
+            />
+          ))}
+        </div>
+      ) : (
+        <SingleTierContent rateLimit={rateLimit} />
+      )}
+
+      {/* Overage */}
+      {rateLimit.isUsingOverage ? (
+        <div className="text-[10px] text-muted-foreground/60">
+          Overage: {rateLimit.overageStatus?.replace(/_/g, " ") ?? "active"}
+          {rateLimit.overageResetsAt ? ` · ${formatResetsAt(rateLimit.overageResetsAt)}` : null}
+        </div>
+      ) : null}
+      {rateLimit.overageDisabledReason ? (
+        <div className="text-[10px] text-muted-foreground/60">
+          Overage disabled: {rateLimit.overageDisabledReason.replace(/_/g, " ")}
+        </div>
+      ) : null}
+
+      {/* Fetch warning */}
+      {rateLimit.fetchWarning ? (
+        <div className="text-[10px] text-warning/70">{rateLimit.fetchWarning}</div>
+      ) : null}
+
+      {/* Timestamp */}
+      <div className="text-[10px] text-muted-foreground/40">
+        {formatUpdatedAt(rateLimit.updatedAt)}
+      </div>
+    </div>
+  );
+}
+
+registerOverlayRoute<{ rateLimit?: unknown }>(
+  RATE_LIMIT_METER_OVERLAY_ROUTE_KEY,
+  function RateLimitMeterOverlayRoute({ message, controller }) {
+    const rateLimit = readRateLimitSnapshot(message.params.rateLimit);
+
+    if (!rateLimit) {
+      controller.fail(new Error("Rate limit meter route requires rateLimit params."));
+      return null;
+    }
+
+    return (
+      <OverlayRoutePopover>
+        <OverlayRoutePopoverPopup
+          tooltipStyle
+          side="top"
+          align="end"
+          className="w-max max-w-none px-3 py-2.5"
+        >
+          <RateLimitPopoverContent rateLimit={rateLimit} />
+        </OverlayRoutePopoverPopup>
+      </OverlayRoutePopover>
+    );
+  },
+);
+
+function readRateLimitSnapshot(value: unknown): RateLimitSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const snapshot = value as Partial<RateLimitSnapshot>;
+  if (typeof snapshot.status !== "string") return null;
+  if (!Array.isArray(snapshot.oauthTiers)) return null;
+  if (typeof snapshot.usedPercentage !== "number" && snapshot.usedPercentage !== null) return null;
+  return value as RateLimitSnapshot;
 }

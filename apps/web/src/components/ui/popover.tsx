@@ -46,6 +46,7 @@ function PopoverPopup({
   collisionAvoidance,
   collisionPadding,
   positionMethod,
+  positionerClassName,
   ...props
 }: PopoverPrimitive.Popup.Props & {
   side?: PopoverPrimitive.Positioner.Props["side"];
@@ -57,6 +58,7 @@ function PopoverPopup({
   collisionAvoidance?: PopoverPrimitive.Positioner.Props["collisionAvoidance"];
   collisionPadding?: PopoverPrimitive.Positioner.Props["collisionPadding"];
   positionMethod?: PopoverPrimitive.Positioner.Props["positionMethod"];
+  positionerClassName?: string | undefined;
 }) {
   return (
     <PopoverPrimitive.Portal>
@@ -64,7 +66,10 @@ function PopoverPopup({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
-        className="z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+        className={cn(
+          "z-50 h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none",
+          positionerClassName,
+        )}
         data-slot="popover-positioner"
         side={side}
         sideOffset={sideOffset}

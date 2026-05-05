@@ -1121,6 +1121,7 @@ export default function GitActionsControl({
       anchor: quickActionTooltipAnchor ?? ZERO_OVERLAY_ANCHOR,
       side: "bottom",
       align: "start",
+      interaction: "hover",
     },
     enabled: quickActionTooltipAnchor !== null,
   });
