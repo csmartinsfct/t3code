@@ -11,6 +11,7 @@ import {
   type NativeOverlaySession,
   useNativeOverlayActive,
 } from "~/nativeOverlayBridge";
+import { logWebTimeline } from "~/timelineLogger";
 import { Dialog } from "~/components/ui/dialog";
 import { AlertDialog } from "~/components/ui/alert-dialog";
 import { Sheet, SheetPopup } from "~/components/ui/sheet";
@@ -104,8 +105,16 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
   }, [open]);
 
   useEffect(() => {
+    logWebTimeline("routed-overlay.surface.effect", {
+      routeKey,
+      open,
+      shouldUseNative,
+      fallbackOpen,
+      hasSession: Boolean(sessionRef.current),
+    });
     if (!open || !shouldUseNative || fallbackOpen) {
       if (sessionRef.current) {
+        logWebTimeline("routed-overlay.surface.release", { routeKey });
         sessionRef.current.release();
         sessionRef.current = null;
       }
@@ -113,6 +122,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
     }
 
     if (sessionRef.current) {
+      logWebTimeline("routed-overlay.surface.rerender-existing", { routeKey });
       void sessionRef.current.render(createOverlayRouteMessage(routeInputRef.current));
       return;
     }
@@ -122,27 +132,40 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
     requestIdRef.current = requestId;
 
     void (async () => {
+      logWebTimeline("routed-overlay.surface.open-native.start", { routeKey, requestId });
       const session = await openNativeOverlayRoute<TResult>(routeInputRef.current, {
         fallback: async () => {
           if (disposed || requestIdRef.current !== requestId) return;
+          logWebTimeline("routed-overlay.surface.fallback", { routeKey, requestId });
           setFallbackOpen(true);
           await callbacksRef.current.fallback?.();
         },
       });
 
       if (disposed || requestIdRef.current !== requestId) {
+        logWebTimeline("routed-overlay.surface.open-native.stale", { routeKey, requestId });
         session?.release();
         return;
       }
 
-      if (!session) return;
+      if (!session) {
+        logWebTimeline("routed-overlay.surface.open-native.null-session", { routeKey, requestId });
+        return;
+      }
 
       sessionRef.current = session;
-      void session.render(createOverlayRouteMessage(routeInputRef.current));
+      logWebTimeline("routed-overlay.surface.open-native.success", { routeKey, requestId });
       const result = await session.result;
 
       if (disposed || requestIdRef.current !== requestId) return;
       if (sessionRef.current === session) sessionRef.current = null;
+      logWebTimeline("routed-overlay.surface.result", {
+        routeKey,
+        requestId,
+        status: result.status,
+        reason: result.status === "cancelled" ? result.reason : undefined,
+        message: result.status === "error" ? result.message : undefined,
+      });
 
       if (result.status === "submitted") {
         await callbacksRef.current.onResult?.(result.value);
@@ -158,7 +181,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
     return () => {
       disposed = true;
     };
-  }, [callbacksRef, fallbackOpen, open, routeInputRef, shouldUseNative]);
+  }, [callbacksRef, fallbackOpen, open, routeInputRef, routeKey, shouldUseNative]);
 
   useEffect(() => {
     if (!open || !shouldUseNative || fallbackOpen || !sessionRef.current) return;

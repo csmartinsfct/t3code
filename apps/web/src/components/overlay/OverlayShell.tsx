@@ -5,6 +5,8 @@ import type { CSSProperties, MouseEvent } from "react";
 import type { OverlayRenderMessage } from "@t3tools/contracts";
 import type { OverlayAnchorRect } from "@t3tools/contracts";
 
+import { logWebTimeline } from "~/timelineLogger";
+
 import { OverlayContent } from "./OverlayContent";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +36,7 @@ function getMessageAnchor(message: OverlayRenderMessage | null): OverlayAnchorRe
 }
 
 class OverlayErrorBoundary extends Component<
-  { children: React.ReactNode; onError: () => void; resetKey: unknown },
+  { children: React.ReactNode; onError: (error: unknown) => void; resetKey: unknown },
   { hasError: boolean; resetKey: unknown }
 > {
   override state = { hasError: false, resetKey: this.props.resetKey };
@@ -55,7 +57,7 @@ class OverlayErrorBoundary extends Component<
 
   override componentDidCatch(error: unknown) {
     console.error("[overlay] render failed", error);
-    this.props.onError();
+    this.props.onError(error);
   }
 
   override render() {
@@ -77,8 +79,19 @@ export function OverlayShell() {
 
   useEffect(() => {
     if (!bridge) return;
-    const unsubRender = bridge.onRender((msg) => setMessage(msg));
-    const unsubClear = bridge.onClear(() => setMessage(null));
+    const unsubRender = bridge.onRender((msg) => {
+      logWebTimeline("overlay-shell.render-message", {
+        type: msg.type,
+        ...(msg.type === "route"
+          ? { routeKey: msg.routeKey, presentation: msg.presentation.kind }
+          : {}),
+      });
+      setMessage(msg);
+    });
+    const unsubClear = bridge.onClear(() => {
+      logWebTimeline("overlay-shell.clear");
+      setMessage(null);
+    });
     return () => {
       unsubRender();
       unsubClear();
@@ -87,6 +100,10 @@ export function OverlayShell() {
 
   const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
+      logWebTimeline("overlay-shell.backdrop-dismiss", {
+        messageType: message?.type,
+        routeKey: message?.type === "route" ? message.routeKey : undefined,
+      });
       bridge?.requestDismiss();
     }
   };
@@ -122,8 +139,15 @@ export function OverlayShell() {
       {message && bridge && (
         <OverlayErrorBoundary
           resetKey={message}
-          onError={() => {
+          onError={(error) => {
+            const messageText = error instanceof Error ? error.message : String(error);
+            logWebTimeline("overlay-shell.error-boundary-dismiss", {
+              messageType: message.type,
+              routeKey: message.type === "route" ? message.routeKey : undefined,
+              error: messageText,
+            });
             setMessage(null);
+            bridge.emitEvent("bootstrap-error", { message: messageText });
             bridge.requestDismiss();
           }}
         >

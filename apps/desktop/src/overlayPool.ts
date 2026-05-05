@@ -4,6 +4,34 @@ import * as Path from "node:path";
 import { BaseWindow, BrowserWindow, ipcMain, nativeTheme, WebContentsView } from "electron";
 
 import type { OverlayRenderMessage } from "@t3tools/contracts";
+import { formatTimelineLog, isTimelineLogMessage } from "@t3tools/shared/timeline";
+
+function shortOverlayId(id: string): string {
+  return id.slice(0, 8);
+}
+
+function describeOverlayMessage(message: unknown): Record<string, unknown> {
+  if (!message || typeof message !== "object") {
+    return { messageType: typeof message };
+  }
+  const typed = message as Partial<OverlayRenderMessage>;
+  return {
+    type: typed.type,
+    ...(typed.type === "route"
+      ? {
+          routeKey: typed.routeKey,
+          presentation:
+            typed.presentation && typeof typed.presentation === "object"
+              ? (typed.presentation as { kind?: unknown }).kind
+              : undefined,
+        }
+      : {}),
+  };
+}
+
+function logOverlayTimeline(event: string, details?: Record<string, unknown>): void {
+  console.log(formatTimelineLog("desktop", `overlay.${event}`, details));
+}
 
 // ---------------------------------------------------------------------------
 // Overlay pool — manages a fixed set of pre-warmed WebContentsView instances
@@ -19,6 +47,7 @@ import type { OverlayRenderMessage } from "@t3tools/contracts";
 export interface OverlayPoolEntry {
   readonly id: string;
   readonly view: WebContentsView;
+  loadPromise: Promise<void>;
   status: "idle" | "active";
   hostWebContents: Electron.WebContents | null;
   ownerWindow: BrowserWindow | null;
@@ -38,14 +67,6 @@ export class OverlayPool {
     for (let i = 0; i < count; i++) {
       const entry = this.createEntry();
       this.parkWindow.contentView.addChildView(entry.view);
-      // Immediately begin loading so the document is ready when acquired.
-      void entry.view.webContents.loadURL(this.overlayUrl);
-    }
-    // Push theme to all pre-warmed views once they finish loading.
-    for (const entry of this.entries) {
-      entry.view.webContents.once("did-finish-load", () => {
-        this.pushTheme(entry);
-      });
     }
     void targetWindow; // retained for future per-window expansion
   }
@@ -53,11 +74,9 @@ export class OverlayPool {
   acquire(targetWindow: BrowserWindow, hostWebContents: Electron.WebContents): OverlayPoolEntry {
     const entry = this.entries.find((e) => e.status === "idle");
     if (!entry) {
+      logOverlayTimeline("pool.acquire.create-extra");
       // Pool exhausted — create an extra entry on demand (should be rare).
       const extra = this.createEntry();
-      this.entries.push(extra);
-      extra.view.webContents.once("did-finish-load", () => this.pushTheme(extra));
-      void extra.view.webContents.loadURL(this.overlayUrl);
       return this.acquireEntry(extra, targetWindow, hostWebContents);
     }
     return this.acquireEntry(entry, targetWindow, hostWebContents);
@@ -68,6 +87,8 @@ export class OverlayPool {
     if (!entry || entry.status !== "active") return;
 
     const owner = entry.ownerWindow;
+    const hostWebContents = entry.hostWebContents;
+    logOverlayTimeline("pool.release", { overlayId: shortOverlayId(id) });
 
     if (owner && !owner.isDestroyed()) {
       try {
@@ -75,6 +96,14 @@ export class OverlayPool {
       } catch {
         // ignore — already removed
       }
+    }
+
+    if (owner && !owner.isDestroyed()) {
+      owner.focus();
+    }
+    if (hostWebContents && !hostWebContents.isDestroyed()) {
+      hostWebContents.focus();
+      logOverlayTimeline("pool.release.focus-host", { overlayId: shortOverlayId(id) });
     }
 
     // Tell the overlay view to clear its content.
@@ -136,15 +165,52 @@ export class OverlayPool {
       },
     });
     view.setBackgroundColor("#00000000");
+    view.webContents.on("did-finish-load", () => {
+      logOverlayTimeline("view.did-finish-load", {
+        overlayId: shortOverlayId(id),
+        url: view.webContents.getURL(),
+      });
+    });
+    view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
+      logOverlayTimeline("view.did-fail-load", {
+        overlayId: shortOverlayId(id),
+        errorCode,
+        errorDescription,
+        validatedUrl,
+      });
+    });
+    view.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      if (level < 2 && !isTimelineLogMessage(message)) return;
+      logOverlayTimeline("view.console", {
+        overlayId: shortOverlayId(id),
+        level,
+        message,
+        line,
+        sourceId,
+      });
+    });
     // Note: no setIgnoreMouseEvents needed — idle views live in the offscreen
     // parkWindow so they never intercept events in the main BrowserWindow.
     const entry: OverlayPoolEntry = {
       id,
       view,
+      loadPromise: Promise.resolve(),
       status: "idle",
       hostWebContents: null,
       ownerWindow: null,
     };
+    entry.loadPromise = view.webContents
+      .loadURL(this.overlayUrl)
+      .then(() => {
+        this.pushTheme(entry);
+      })
+      .catch((error: unknown) => {
+        logOverlayTimeline("view.load-failed", {
+          overlayId: shortOverlayId(id),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      });
     this.entries.push(entry);
     return entry;
   }
@@ -167,10 +233,17 @@ export class OverlayPool {
     // addChildView puts it last → topmost; it captures all pointer events
     // for the window since it fills the full bounds.
     targetWindow.contentView.addChildView(entry.view);
+    entry.view.webContents.focus();
 
     entry.status = "active";
     entry.hostWebContents = hostWebContents;
     (entry as { ownerWindow: BrowserWindow | null }).ownerWindow = targetWindow;
+    logOverlayTimeline("pool.acquire.success", {
+      overlayId: shortOverlayId(entry.id),
+      bounds,
+      url: entry.view.webContents.getURL(),
+      isLoading: entry.view.webContents.isLoading(),
+    });
 
     return entry;
   }
@@ -254,6 +327,7 @@ export function registerOverlayIpcHandlers(
     if (!window) throw new Error("no browser window for overlay:acquire");
     const pool = getOrCreateOverlayPool(window);
     const entry = pool.acquire(window, event.sender);
+    logOverlayTimeline("ipc.acquire", { overlayId: shortOverlayId(entry.id) });
     return entry.id;
   });
 
@@ -264,21 +338,55 @@ export function registerOverlayIpcHandlers(
     const window = getWindow(event);
     if (!window) return;
     const pool = getOverlayPoolForWindow(window);
+    logOverlayTimeline("ipc.release", { overlayId: shortOverlayId(id) });
     pool?.release(id);
   });
 
   ipcMain.removeHandler(OVERLAY_RENDER_CHANNEL);
   ipcMain.handle(
     OVERLAY_RENDER_CHANNEL,
-    (event: Electron.IpcMainInvokeEvent, rawId: unknown, rawMessage: unknown) => {
+    async (event: Electron.IpcMainInvokeEvent, rawId: unknown, rawMessage: unknown) => {
       const id = typeof rawId === "string" ? rawId : null;
       if (!id) return;
       const window = getWindow(event);
       if (!window) return;
       const pool = getOverlayPoolForWindow(window);
       const entry = pool?.findById(id);
-      if (!entry || entry.status !== "active") return;
+      if (!entry || entry.status !== "active") {
+        logOverlayTimeline("ipc.render.missing-entry", {
+          overlayId: shortOverlayId(id),
+          ...describeOverlayMessage(rawMessage),
+        });
+        return;
+      }
+      logOverlayTimeline("ipc.render", {
+        overlayId: shortOverlayId(id),
+        isLoading: entry.view.webContents.isLoading(),
+        ...describeOverlayMessage(rawMessage),
+      });
+      try {
+        await entry.loadPromise;
+      } catch (error) {
+        logOverlayTimeline("ipc.render.load-unavailable", {
+          overlayId: shortOverlayId(id),
+          error: error instanceof Error ? error.message : String(error),
+          ...describeOverlayMessage(rawMessage),
+        });
+        throw error;
+      }
+      if (entry.status !== "active") {
+        logOverlayTimeline("ipc.render.stale-after-load", {
+          overlayId: shortOverlayId(id),
+          ...describeOverlayMessage(rawMessage),
+        });
+        return;
+      }
+      logOverlayTimeline("ipc.render.send", {
+        overlayId: shortOverlayId(id),
+        ...describeOverlayMessage(rawMessage),
+      });
       entry.view.webContents.send(OVERLAY_RENDER_CHANNEL, rawMessage as OverlayRenderMessage);
+      entry.view.webContents.focus();
     },
   );
 
@@ -291,6 +399,11 @@ export function registerOverlayIpcHandlers(
       for (const pool of poolsByWindow.values()) {
         const entry = pool.findByWebContents(event.sender);
         if (entry?.hostWebContents && !entry.hostWebContents.isDestroyed()) {
+          logOverlayTimeline("ipc.event", {
+            overlayId: shortOverlayId(entry.id),
+            eventType: type,
+            payload,
+          });
           // Use entry.id (not the rawId sent by the overlay view, which is null)
           // so the host renderer's onEvent(id, handler) filter matches correctly.
           entry.hostWebContents.send(OVERLAY_EVENT_CHANNEL, entry.id, type, payload);
@@ -307,6 +420,7 @@ export function registerOverlayIpcHandlers(
       if (!entry) continue;
       const hostWc = entry.hostWebContents;
       const entryId = entry.id;
+      logOverlayTimeline("ipc.dismiss", { overlayId: shortOverlayId(entryId) });
       pool.release(entryId);
       if (hostWc && !hostWc.isDestroyed()) {
         hostWc.send(OVERLAY_DISMISS_CHANNEL, entryId);

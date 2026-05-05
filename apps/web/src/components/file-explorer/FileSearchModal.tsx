@@ -12,6 +12,7 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { basenameOfPath, getVscodeIconUrlForEntry } from "~/vscode-icons";
 import { useFileExplorerStore, selectWorkspaceState } from "~/fileExplorerStore";
 import { OverlayRouteCommandDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
+import { logWebTimeline } from "~/timelineLogger";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import {
   Command,
@@ -65,6 +66,24 @@ export function FileSearchModal({ cwd, open, onOpenChange, onSelectFile }: FileS
     presentation: { kind: "command-dialog" },
     onResult: onSelectFile,
   });
+
+  useEffect(() => {
+    logWebTimeline("file-search.host-state", {
+      open,
+      domOpen: routed.domOpen,
+      nativeActive: routed.nativeActive,
+      nativeOpen: routed.nativeOpen,
+      fallbackOpen: routed.fallbackOpen,
+      recentTabs: recentTabs.length,
+    });
+  }, [
+    open,
+    recentTabs.length,
+    routed.domOpen,
+    routed.fallbackOpen,
+    routed.nativeActive,
+    routed.nativeOpen,
+  ]);
 
   return (
     <FileSearchDialog
@@ -222,8 +241,12 @@ registerOverlayRoute<{ cwd?: unknown; recentTabs?: unknown }>(
     const [query, setQuery] = useState("");
 
     useEffect(() => {
+      logWebTimeline("file-search.route-mounted", {
+        hasCwd: Boolean(cwd),
+        recentTabs: recentTabs.length,
+      });
       if (!cwd) controller.fail(new Error("File search requires a workspace path."));
-    }, [controller, cwd]);
+    }, [controller, cwd, recentTabs.length]);
 
     if (!cwd) return null;
 

@@ -11,6 +11,7 @@ import {
   isEmbeddedBrowserMounted,
   subscribeEmbeddedBrowserMounted,
 } from "./embeddedBrowserModalSuspension";
+import { logWebTimeline, warnWebTimeline } from "./timelineLogger";
 
 // ---------------------------------------------------------------------------
 // Feature detection
@@ -19,6 +20,22 @@ import {
 function getOverlayBridge() {
   if (typeof window === "undefined") return null;
   return window.desktopBridge?.overlay ?? null;
+}
+
+function describeOverlayMessage(message: OverlayRenderMessage): Record<string, unknown> {
+  return {
+    type: message.type,
+    ...(message.type === "route"
+      ? {
+          routeKey: message.routeKey,
+          presentation: message.presentation.kind,
+        }
+      : {}),
+  };
+}
+
+function describeOverlayId(id: string): string {
+  return id.slice(0, 8);
 }
 
 export function isNativeOverlayAvailable(): boolean {
@@ -81,7 +98,10 @@ export function createOverlayRouteMessage(input: NativeOverlayRouteInput): Overl
 
 async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null> {
   const bridge = getOverlayBridge();
-  if (!bridge) return null;
+  if (!bridge) {
+    warnWebTimeline("native-overlay.acquire.unavailable");
+    return null;
+  }
 
   // Save focus so we can restore it when the overlay closes.
   const previousFocus =
@@ -89,8 +109,11 @@ async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null>
 
   let id: string;
   try {
+    logWebTimeline("native-overlay.acquire.start");
     id = await bridge.acquire();
+    logWebTimeline("native-overlay.acquire.success", { overlayId: describeOverlayId(id) });
   } catch {
+    warnWebTimeline("native-overlay.acquire.failed");
     return null;
   }
 
@@ -101,6 +124,7 @@ async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null>
   const release = () => {
     if (released) return;
     released = true;
+    logWebTimeline("native-overlay.release", { overlayId: describeOverlayId(id) });
     for (const fn of eventUnsubs) fn();
     for (const fn of dismissUnsubs) fn();
     eventUnsubs.length = 0;
@@ -112,17 +136,35 @@ async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null>
   return {
     async render(message: OverlayRenderMessage) {
       if (released) return;
+      logWebTimeline("native-overlay.render.start", {
+        overlayId: describeOverlayId(id),
+        ...describeOverlayMessage(message),
+      });
       await bridge.render(id, message);
+      logWebTimeline("native-overlay.render.success", {
+        overlayId: describeOverlayId(id),
+        ...describeOverlayMessage(message),
+      });
     },
 
     onEvent(handler: (type: string, payload: unknown) => void) {
-      const unsub = bridge.onEvent(id, handler);
+      const unsub = bridge.onEvent(id, (type, payload) => {
+        logWebTimeline("native-overlay.event", {
+          overlayId: describeOverlayId(id),
+          eventType: type,
+          payload,
+        });
+        handler(type, payload);
+      });
       eventUnsubs.push(unsub);
       return unsub;
     },
 
     onDismiss(handler: () => void) {
-      const unsub = bridge.onDismiss(id, handler);
+      const unsub = bridge.onDismiss(id, () => {
+        logWebTimeline("native-overlay.dismiss", { overlayId: describeOverlayId(id) });
+        handler();
+      });
       dismissUnsubs.push(unsub);
       return unsub;
     },
@@ -140,6 +182,7 @@ export async function acquireNativeOverlay(
   try {
     await handle.render(initialMessage);
   } catch {
+    warnWebTimeline("native-overlay.initial-render.failed", describeOverlayMessage(initialMessage));
     handle.release();
     return null;
   }
@@ -153,6 +196,7 @@ export async function openNativeOverlay<TResult = void>(
 ): Promise<NativeOverlaySession<TResult> | null> {
   const handle = await acquireNativeOverlayHandle();
   if (!handle) return null;
+  logWebTimeline("native-overlay.open.start", describeOverlayMessage(initialMessage));
 
   let settled = false;
   let resolveResult: ((value: TResult) => void) | null = null;
@@ -180,6 +224,10 @@ export async function openNativeOverlay<TResult = void>(
   try {
     await handle.render(initialMessage);
   } catch {
+    warnWebTimeline(
+      "native-overlay.open.initial-render.failed",
+      describeOverlayMessage(initialMessage),
+    );
     handle.release();
     return null;
   }
