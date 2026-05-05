@@ -24,7 +24,12 @@ import {
   useState,
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import {
+  TERMINAL_TOOLTIP_OVERLAY_ROUTE_KEY,
+  TerminalTooltipContent,
+} from "~/components/terminal/TerminalTooltipOverlay";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { openInPreferredEditor } from "../editorPreferences";
 import {
   extractTerminalLinks,
@@ -683,11 +688,29 @@ interface TerminalActionButtonProps {
 }
 
 function TerminalActionButton({ label, className, onClick, children }: TerminalActionButtonProps) {
+  const routedTooltip = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: TERMINAL_TOOLTIP_OVERLAY_ROUTE_KEY,
+    params: { label },
+    side: "bottom",
+    align: "center",
+    interaction: "hover",
+  });
+
   return (
-    <Popover>
+    <Popover open={routedTooltip.domOpen} onOpenChange={routedTooltip.onOpenChange}>
       <PopoverTrigger
         openOnHover
-        render={<button type="button" className={className} onClick={onClick} aria-label={label} />}
+        render={
+          <button
+            type="button"
+            className={className}
+            onClick={onClick}
+            onFocusCapture={routedTooltip.updateAnchor}
+            onMouseOverCapture={routedTooltip.updateAnchor}
+            ref={routedTooltip.triggerRef}
+            aria-label={label}
+          />
+        }
       >
         {children}
       </PopoverTrigger>
@@ -698,7 +721,7 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
         align="center"
         className="pointer-events-none select-none"
       >
-        {label}
+        <TerminalTooltipContent label={label} />
       </PopoverPopup>
     </Popover>
   );
@@ -1154,30 +1177,13 @@ export default function ThreadTerminalDrawer({
                                 </span>
                               </button>
                               {normalizedTerminalIds.length > 1 && (
-                                <Popover>
-                                  <PopoverTrigger
-                                    openOnHover
-                                    render={
-                                      <button
-                                        type="button"
-                                        className="inline-flex size-3.5 items-center justify-center rounded text-xs font-medium leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                                        onClick={() => onCloseTerminal(terminalId)}
-                                        aria-label={closeTerminalLabel}
-                                      />
-                                    }
-                                  >
-                                    <XIcon className="size-2.5" />
-                                  </PopoverTrigger>
-                                  <PopoverPopup
-                                    tooltipStyle
-                                    side="bottom"
-                                    sideOffset={6}
-                                    align="center"
-                                    className="pointer-events-none select-none"
-                                  >
-                                    {closeTerminalLabel}
-                                  </PopoverPopup>
-                                </Popover>
+                                <TerminalActionButton
+                                  label={closeTerminalLabel}
+                                  className="inline-flex size-3.5 items-center justify-center rounded text-xs font-medium leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                                  onClick={() => onCloseTerminal(terminalId)}
+                                >
+                                  <XIcon className="size-2.5" />
+                                </TerminalActionButton>
                               )}
                             </div>
                           );
