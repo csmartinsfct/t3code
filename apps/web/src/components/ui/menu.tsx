@@ -2,45 +2,219 @@
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ChevronRightIcon } from "lucide-react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type * as React from "react";
 
+import type { OverlayMenuItem, OverlayMenuMessage } from "@t3tools/contracts";
+
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
+import {
+  openNativeOverlay,
+  useNativeOverlayActive,
+  type NativeOverlaySession,
+} from "~/nativeOverlayBridge";
 import { cn } from "~/lib/utils";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
+
+// Context passed from Menu → MenuTrigger when native overlay mode is active.
+// MenuTrigger reads this to intercept its click and call openNative() with
+// its own getBoundingClientRect() before Base UI tries to open the DOM popup.
+interface NativeMenuContextValue {
+  openNative?: (anchorRect: { x: number; y: number; width: number; height: number }) => void;
+}
+const NativeMenuContext = createContext<NativeMenuContextValue>({});
+
+type NativeMenuAnchorRect = { x: number; y: number; width: number; height: number };
+type MenuOpenDetails = Parameters<NonNullable<MenuPrimitive.Root.Props["onOpenChange"]>>[1];
 
 function Menu({
   open,
   defaultOpen,
   onOpenChange,
   trackEmbeddedBrowserOverlay = true,
+  overlayItems,
+  overlayMenuSide,
+  overlayMenuAlign,
+  overlayOnSelect,
+  overlayOnAction,
   ...props
 }: MenuPrimitive.Root.Props & {
   trackEmbeddedBrowserOverlay?: boolean;
+  /** Serializable item list. When provided and the native overlay system is
+   *  active, the menu popup renders in a transparent WebContentsView above
+   *  the embedded browser instead of the host DOM. */
+  overlayItems?: OverlayMenuItem[];
+  overlayMenuSide?: "top" | "bottom" | "left" | "right";
+  overlayMenuAlign?: "start" | "center" | "end";
+  overlayOnSelect?: (id: string) => void;
+  overlayOnAction?: (id: string) => void;
 }) {
+  const nativeActive = useNativeOverlayActive();
+  const [nativeAcquireFailed, setNativeAcquireFailed] = useState(false);
+  const nativeSessionRef = useRef<NativeOverlaySession<string | null> | null>(null);
+  const nativeAnchorRectRef = useRef<NativeMenuAnchorRect | null>(null);
+  const overlayOnSelectRef = useRef(overlayOnSelect);
+  const overlayOnActionRef = useRef(overlayOnAction);
+
+  useEffect(() => {
+    overlayOnSelectRef.current = overlayOnSelect;
+  }, [overlayOnSelect]);
+
+  useEffect(() => {
+    overlayOnActionRef.current = overlayOnAction;
+  }, [overlayOnAction]);
+
+  const useNative =
+    nativeActive &&
+    overlayItems !== undefined &&
+    trackEmbeddedBrowserOverlay &&
+    !nativeAcquireFailed;
+
+  const buildNativeMessage = useCallback(
+    (rect: NativeMenuAnchorRect): OverlayMenuMessage | null => {
+      if (!overlayItems) return null;
+      return {
+        type: "menu",
+        anchor: rect,
+        items: overlayItems,
+        ...(overlayMenuSide !== undefined && { side: overlayMenuSide }),
+        ...(overlayMenuAlign !== undefined && { align: overlayMenuAlign }),
+      };
+    },
+    [overlayItems, overlayMenuSide, overlayMenuAlign],
+  );
+
+  const openNative = useCallback(
+    (rect: NativeMenuAnchorRect) => {
+      const message = buildNativeMessage(rect);
+      if (!message) return;
+
+      if (nativeSessionRef.current) {
+        nativeSessionRef.current.release();
+        nativeSessionRef.current = null;
+        onOpenChange?.(false, {} as MenuOpenDetails);
+        return;
+      }
+
+      nativeAnchorRectRef.current = rect;
+      onOpenChange?.(true, {} as MenuOpenDetails);
+      void openNativeOverlay<string | null>(message, {
+        dismissValue: null,
+        resolveEvent: (type, payload) => {
+          const id = (payload as { id?: string })?.id;
+          if (!id) return null;
+          if (type === "action") {
+            overlayOnActionRef.current?.(id);
+            return null;
+          }
+          if (type !== "select") return null;
+          return { value: id };
+        },
+      }).then((session) => {
+        if (!session) {
+          setNativeAcquireFailed(true);
+          onOpenChange?.(true, {} as MenuOpenDetails);
+          return;
+        }
+        nativeSessionRef.current = session;
+        void session.result
+          .then((id) => {
+            if (id) overlayOnSelectRef.current?.(id);
+          })
+          .finally(() => {
+            if (nativeSessionRef.current === session) {
+              nativeSessionRef.current = null;
+            }
+            onOpenChange?.(false, {} as MenuOpenDetails);
+          });
+      });
+    },
+    [buildNativeMessage, onOpenChange],
+  );
+
+  useEffect(() => {
+    const session = nativeSessionRef.current;
+    const rect = nativeAnchorRectRef.current;
+    if (!session || !rect) return;
+    const message = buildNativeMessage(rect);
+    if (!message) {
+      session.release();
+      nativeSessionRef.current = null;
+      return;
+    }
+    session.render(message);
+  }, [buildNativeMessage]);
+
+  useEffect(
+    () => () => {
+      nativeSessionRef.current?.release();
+      nativeSessionRef.current = null;
+    },
+    [],
+  );
+
   const handleOpenChange = useTrackedOverlayOpen({
-    open,
-    defaultOpen,
-    onOpenChange,
-    enabled: trackEmbeddedBrowserOverlay,
+    open: useNative ? false : open,
+    defaultOpen: useNative ? false : defaultOpen,
+    onOpenChange: useNative
+      ? undefined
+      : (nextOpen, details) => {
+          if (!nextOpen) {
+            setNativeAcquireFailed(false);
+          }
+          onOpenChange?.(nextOpen, details as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        },
+    enabled: !useNative && trackEmbeddedBrowserOverlay,
     source: "menu",
   });
 
+  const nativeCtx = useMemo<NativeMenuContextValue>(
+    () => (useNative ? { openNative } : {}),
+    [openNative, useNative],
+  );
+
   return (
-    <MenuPrimitive.Root
-      defaultOpen={defaultOpen}
-      onOpenChange={handleOpenChange}
-      open={open}
-      {...props}
-    />
+    <NativeMenuContext.Provider value={nativeCtx}>
+      <MenuPrimitive.Root
+        defaultOpen={useNative ? false : defaultOpen}
+        onOpenChange={useNative ? undefined : handleOpenChange}
+        open={useNative ? false : open}
+        {...props}
+      />
+    </NativeMenuContext.Provider>
   );
 }
 
 const MenuPortal = MenuPrimitive.Portal;
 
-function MenuTrigger({ className, children, ...props }: MenuPrimitive.Trigger.Props) {
+function MenuTrigger({ className, children, onClick, ...props }: MenuPrimitive.Trigger.Props) {
+  const { openNative } = useContext(NativeMenuContext);
+
+  const handleClick = openNative
+    ? (e: Parameters<NonNullable<MenuPrimitive.Trigger.Props["onClick"]>>[0]) => {
+        e.preventDefault();
+        e.preventBaseUIHandler();
+        const rect = e.currentTarget.getBoundingClientRect();
+        openNative({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      }
+    : onClick;
+
   return (
-    <MenuPrimitive.Trigger className={className} data-slot="menu-trigger" {...props}>
+    <MenuPrimitive.Trigger
+      className={className}
+      data-slot="menu-trigger"
+      onClick={handleClick}
+      {...props}
+    >
       {children}
     </MenuPrimitive.Trigger>
   );

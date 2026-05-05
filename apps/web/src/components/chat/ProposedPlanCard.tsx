@@ -140,7 +140,31 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <Badge variant={status === "ready" ? "secondary" : "outline"}>{statusLabel}</Badge>
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
-        <Menu>
+        <Menu
+          overlayItems={[
+            { id: "copy", label: isCopied ? "Copied!" : "Copy to clipboard" },
+            { id: "download", label: "Download as markdown" },
+            {
+              id: "save",
+              label: "Save to workspace",
+              disabled: !workspaceRoot || isSavingToWorkspace,
+            },
+          ]}
+          overlayMenuAlign="end"
+          overlayOnSelect={(id) => {
+            if (id === "copy") {
+              handleCopyPlan();
+              return;
+            }
+            if (id === "download") {
+              handleDownload();
+              return;
+            }
+            if (id === "save" && workspaceRoot && !isSavingToWorkspace) {
+              openSaveDialog();
+            }
+          }}
+        >
           <MenuTrigger
             render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
           >

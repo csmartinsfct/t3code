@@ -1,6 +1,7 @@
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
+  OverlayMenuItem,
   GitStackedAction,
   GitStatusResult,
   ThreadId,
@@ -191,6 +192,12 @@ function GitActionItemIcon({ icon }: { icon: GitActionIconName }) {
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
   return <GitHubIcon />;
+}
+
+function gitActionOverlayIcon(icon: GitActionIconName): string {
+  if (icon === "commit") return "GitCommit";
+  if (icon === "push") return "CloudUpload";
+  return "Github";
 }
 
 function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
@@ -728,24 +735,27 @@ export default function GitActionsControl({
     }
   };
 
-  const openDialogForMenuItem = (item: GitActionMenuItem) => {
-    if (item.disabled) return;
-    if (item.kind === "open_pr") {
-      void openExistingPr();
-      return;
-    }
-    if (item.dialogAction === "push") {
-      void runGitActionWithToast({ action: "push" });
-      return;
-    }
-    if (item.dialogAction === "create_pr") {
-      void runGitActionWithToast({ action: "create_pr" });
-      return;
-    }
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-    setIsCommitDialogOpen(true);
-  };
+  const openDialogForMenuItem = useCallback(
+    (item: GitActionMenuItem) => {
+      if (item.disabled) return;
+      if (item.kind === "open_pr") {
+        void openExistingPr();
+        return;
+      }
+      if (item.dialogAction === "push") {
+        void runGitActionWithToast({ action: "push" });
+        return;
+      }
+      if (item.dialogAction === "create_pr") {
+        void runGitActionWithToast({ action: "create_pr" });
+        return;
+      }
+      setExcludedFiles(new Set());
+      setIsEditingFiles(false);
+      setIsCommitDialogOpen(true);
+    },
+    [openExistingPr, runGitActionWithToast],
+  );
 
   const runDialogAction = () => {
     if (!isCommitDialogOpen) return;
@@ -783,6 +793,98 @@ export default function GitActionsControl({
       });
     },
     [gitCwd, threadToastData],
+  );
+
+  const gitOverlayItems = useMemo<OverlayMenuItem[]>(() => {
+    const items: OverlayMenuItem[] = gitActionMenuItems.map((item) => {
+      const disabledReason = getMenuActionDisabledReason({
+        item,
+        gitStatus: gitStatusForActions,
+        isBusy: isGitActionRunning,
+        hasOriginRemote,
+      });
+      return {
+        id: `single:${item.id}`,
+        label: item.label,
+        icon: gitActionOverlayIcon(item.icon),
+        disabled: item.disabled,
+        ...(disabledReason ? { description: disabledReason } : {}),
+      };
+    });
+
+    if (!isMultiRepo && gitStatusForActions?.branch === null) {
+      items.push({
+        id: "hint:detached-head",
+        label: "Detached HEAD: create and checkout a branch to enable push and PR actions.",
+        labelOnly: true,
+      });
+    }
+
+    if (
+      !isMultiRepo &&
+      gitStatusForActions &&
+      gitStatusForActions.branch !== null &&
+      !gitStatusForActions.hasWorkingTreeChanges &&
+      gitStatusForActions.behindCount > 0 &&
+      gitStatusForActions.aheadCount === 0
+    ) {
+      items.push({
+        id: "hint:behind-upstream",
+        label: "Behind upstream. Pull/rebase first.",
+        labelOnly: true,
+      });
+    }
+
+    if (isMultiRepo && multiRepoMenu && multiRepoMenu.repoSections.length > 0) {
+      items.push({ id: "separator:repos", label: "", separator: true });
+      multiRepoMenu.repoSections.forEach((section, sectionIndex) => {
+        const repoStatus = statusByRepoCwd.get(section.repo.cwd) ?? null;
+        items.push({
+          id: `repo-label:${sectionIndex}`,
+          label: section.repo.label,
+          labelOnly: true,
+          ...(repoStatus?.hasWorkingTreeChanges ? { badge: "changes" } : {}),
+        });
+        section.items.forEach((item) => {
+          items.push({
+            id: `repo:${sectionIndex}:${item.id}`,
+            label: item.label,
+            icon: gitActionOverlayIcon(item.icon),
+            iconClassName: "size-4",
+            disabled: item.disabled,
+          });
+        });
+      });
+    }
+
+    return items;
+  }, [
+    gitActionMenuItems,
+    gitStatusForActions,
+    hasOriginRemote,
+    isGitActionRunning,
+    isMultiRepo,
+    multiRepoMenu,
+    statusByRepoCwd,
+  ]);
+
+  const handleGitOverlaySelect = useCallback(
+    (id: string) => {
+      if (id.startsWith("single:")) {
+        const item = gitActionMenuItems.find((entry) => entry.id === id.slice("single:".length));
+        if (item) openDialogForMenuItem(item);
+        return;
+      }
+      if (id.startsWith("repo:") && multiRepoMenu) {
+        const [, sectionIndexText, itemId] = id.split(":");
+        const sectionIndex = Number(sectionIndexText);
+        const item = Number.isInteger(sectionIndex)
+          ? multiRepoMenu.repoSections[sectionIndex]?.items.find((entry) => entry.id === itemId)
+          : undefined;
+        if (item) openDialogForMenuItem(item);
+      }
+    },
+    [gitActionMenuItems, multiRepoMenu, openDialogForMenuItem],
   );
 
   if (!gitCwd) return null;
@@ -837,6 +939,9 @@ export default function GitActionsControl({
           )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
+            overlayItems={gitOverlayItems}
+            overlayMenuAlign="end"
+            overlayOnSelect={handleGitOverlaySelect}
             onOpenChange={(open) => {
               if (open) void invalidateGitStatusQuery(queryClient, gitCwd);
             }}

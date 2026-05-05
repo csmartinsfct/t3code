@@ -14,6 +14,7 @@ interface TrackedOverlayOpenInput<TDetails> {
 
 let trackedOverlayCount = 0;
 let embeddedBrowserMounted = false;
+const mountListeners = new Set<() => void>();
 let desiredSuspended = false;
 let appliedSuspended = false;
 let applyingSuspension = false;
@@ -94,9 +95,19 @@ export function setEmbeddedBrowserMountedForModalSuspension(mounted: boolean): v
   embeddedBrowserMounted = mounted;
   if (!mounted) {
     appliedSuspended = false;
-    return;
+  } else {
+    applyDesiredSuspension();
   }
-  applyDesiredSuspension();
+  for (const fn of mountListeners) fn();
+}
+
+export function isEmbeddedBrowserMounted(): boolean {
+  return embeddedBrowserMounted;
+}
+
+export function subscribeEmbeddedBrowserMounted(fn: () => void): () => void {
+  mountListeners.add(fn);
+  return () => mountListeners.delete(fn);
 }
 
 export function useEmbeddedBrowserOverlayLifecycle(open: boolean, _source: string): void {

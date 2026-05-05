@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { BookOpenIcon, PencilIcon } from "lucide-react";
 
-import type { SkillEntry } from "@t3tools/contracts";
+import type { OverlayMenuItem, SkillEntry } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
@@ -41,7 +41,7 @@ function groupSkills(skills: readonly SkillEntry[]): SkillGroup[] {
   }
 
   // Then sub-packages, sorted alphabetically
-  const subKeys = [...groups.keys()].filter((k): k is string => k !== null).sort();
+  const subKeys = [...groups.keys()].filter((k): k is string => k !== null).toSorted();
   for (const key of subKeys) {
     const list = groups.get(key)!;
     result.push({ label: key, skills: list });
@@ -68,11 +68,71 @@ export const SkillsPicker = memo(function SkillsPicker({
   const [open, setOpen] = useState(false);
 
   const closeMenu = useCallback(() => setOpen(false), []);
+  const { overlayItems, overlaySelectionById } = useMemo(() => {
+    const items: OverlayMenuItem[] = [
+      {
+        id: "skills-header",
+        label: "Skills",
+        labelOnly: true,
+      },
+    ];
+    const selectionById = new Map<string, () => void>();
+
+    groups.forEach((group, groupIdx) => {
+      if (groupIdx > 0) {
+        items.push({
+          id: `skills-separator-${groupIdx}`,
+          label: "",
+          separator: true,
+        });
+      }
+
+      if (group.label !== null) {
+        items.push({
+          id: `skills-group-${group.label}`,
+          label: group.label,
+          labelOnly: true,
+        });
+      }
+
+      for (const skill of group.skills) {
+        const attachId = `skill:${skill.id}:attach`;
+        const revealId = `skill:${skill.id}:reveal`;
+        const isAttached = attachedSkillIds.has(skill.id);
+
+        items.push({
+          id: attachId,
+          label: skill.name,
+          selectDisabled: isAttached,
+          secondaryAction: {
+            id: revealId,
+            ariaLabel: `Reveal ${skill.name} in file explorer`,
+            icon: "Pencil",
+            iconClassName: "size-3",
+            dismissOnAction: true,
+          },
+        });
+
+        if (!isAttached) {
+          selectionById.set(attachId, () => onAttachSkill(skill));
+        }
+        selectionById.set(revealId, () => onRevealSkill(skill));
+      }
+    });
+
+    return { overlayItems: items, overlaySelectionById: selectionById };
+  }, [attachedSkillIds, groups, onAttachSkill, onRevealSkill]);
 
   if (skills.length === 0) return null;
 
   return (
-    <Menu open={open} onOpenChange={setOpen}>
+    <Menu
+      open={open}
+      onOpenChange={setOpen}
+      overlayItems={overlayItems}
+      overlayMenuAlign="start"
+      overlayOnSelect={(id) => overlaySelectionById.get(id)?.()}
+    >
       <MenuTrigger
         render={
           <Button

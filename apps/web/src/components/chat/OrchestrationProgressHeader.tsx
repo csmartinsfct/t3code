@@ -203,7 +203,15 @@ export function OrchestrationProgressHeader({
                   Resume
                 </Button>
                 <GroupSeparator />
-                <Menu>
+                <Menu
+                  overlayItems={[
+                    { id: "resume-fresh-agent", label: "Resume with fresh agent", icon: "Play" },
+                  ]}
+                  overlayMenuAlign="end"
+                  overlayOnSelect={(id) => {
+                    if (id === "resume-fresh-agent") onResumeWithFreshAgent();
+                  }}
+                >
                   <MenuTrigger
                     render={
                       <Button

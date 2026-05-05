@@ -1,5 +1,6 @@
 import type {
   DeclaredService,
+  OverlayMenuItem,
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
@@ -78,6 +79,15 @@ export function ScriptIcon({
   if (icon === "build") return <HammerIcon className={className} />;
   if (icon === "debug") return <BugIcon className={className} />;
   return <PlayIcon className={className} />;
+}
+
+function scriptOverlayIcon(icon: ProjectScriptIcon): string {
+  if (icon === "test") return "FlaskConical";
+  if (icon === "lint") return "ListChecks";
+  if (icon === "configure") return "Wrench";
+  if (icon === "build") return "Hammer";
+  if (icon === "debug") return "Bug";
+  return "Play";
 }
 
 export interface NewProjectScriptInput {
@@ -300,7 +310,7 @@ export default function ProjectScriptsControl({
     }
   };
 
-  const openAddDialog = () => {
+  const openAddDialog = useCallback(() => {
     setEditingScriptId(null);
     setName("");
     setCommand("");
@@ -311,20 +321,25 @@ export default function ProjectScriptsControl({
     setServiceDrafts([]);
     setValidationError(null);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
-    setName(script.name);
-    setCommand(script.command ?? "");
-    setIcon(script.icon);
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
-    setServiceDrafts(declaredServicesToDrafts(script.services));
-    setValidationError(null);
-    setDialogOpen(true);
-  };
+  const openEditDialog = useCallback(
+    (script: ProjectScript) => {
+      setEditingScriptId(script.id);
+      setName(script.name);
+      setCommand(script.command ?? "");
+      setIcon(script.icon);
+      setIconPickerOpen(false);
+      setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+      setKeybinding(
+        keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "",
+      );
+      setServiceDrafts(declaredServicesToDrafts(script.services));
+      setValidationError(null);
+      setDialogOpen(true);
+    },
+    [keybindings],
+  );
 
   const confirmDeleteScript = useCallback(() => {
     if (!editingScriptId) return;
@@ -332,6 +347,57 @@ export default function ProjectScriptsControl({
     setDialogOpen(false);
     void onDeleteScript(editingScriptId);
   }, [editingScriptId, onDeleteScript]);
+
+  const scriptOverlayItems = useMemo<OverlayMenuItem[]>(
+    () => [
+      ...scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return {
+          id: `run:${script.id}`,
+          label: script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name,
+          icon: scriptOverlayIcon(script.icon),
+          iconClassName: "size-4",
+          ...(shortcutLabel ? { shortcut: shortcutLabel } : {}),
+          secondaryAction: {
+            id: `edit:${script.id}`,
+            ariaLabel: `Edit ${script.name}`,
+            icon: "Settings",
+            iconClassName: "size-3.5",
+            dismissOnAction: true,
+          },
+        } satisfies OverlayMenuItem;
+      }),
+      {
+        id: "add",
+        label: "Add action",
+        icon: "Plus",
+        iconClassName: "size-4",
+      },
+    ],
+    [keybindings, scripts],
+  );
+
+  const handleScriptOverlaySelect = useCallback(
+    (id: string) => {
+      if (id === "add") {
+        openAddDialog();
+        return;
+      }
+      if (id.startsWith("run:")) {
+        const script = scripts.find((entry) => entry.id === id.slice("run:".length));
+        if (script) onRunScript(script);
+        return;
+      }
+      if (id.startsWith("edit:")) {
+        const script = scripts.find((entry) => entry.id === id.slice("edit:".length));
+        if (script) openEditDialog(script);
+      }
+    },
+    [onRunScript, openAddDialog, openEditDialog, scripts],
+  );
 
   return (
     <>
@@ -349,7 +415,12 @@ export default function ProjectScriptsControl({
             </span>
           </Button>
           <GroupSeparator className="hidden @3xl/header-actions:block" />
-          <Menu highlightItemOnHover={false}>
+          <Menu
+            highlightItemOnHover={false}
+            overlayItems={scriptOverlayItems}
+            overlayMenuAlign="end"
+            overlayOnSelect={handleScriptOverlaySelect}
+          >
             <MenuTrigger
               render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
             >

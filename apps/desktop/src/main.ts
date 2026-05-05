@@ -59,6 +59,12 @@ import {
 } from "./updateMachine";
 import { shouldSuspendForIdle } from "./embeddedBrowserIdleReaper";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import {
+  broadcastThemeToAllOverlays,
+  configureOverlayUrl,
+  getOrCreateOverlayPool,
+  registerOverlayIpcHandlers,
+} from "./overlayPool";
 
 syncShellEnvironment();
 
@@ -98,6 +104,11 @@ const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const devServerUrl = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL;
 const isDevelopment = Boolean(devServerUrl);
+
+// Configure the overlay URL so OverlayPool can load overlay.html into its views.
+configureOverlayUrl(
+  isDevelopment ? `${devServerUrl}/overlay.html` : `${DESKTOP_SCHEME}://app/overlay.html`,
+);
 const STATE_DIR = resolveT3StateDir(BASE_DIR, isDevelopment);
 const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
@@ -2345,6 +2356,9 @@ function openPopoutWindow(projectId: string): void {
   }
 
   void window.loadURL(buildPopoutUrl(projectId));
+  window.webContents.once("did-finish-load", () => {
+    getOrCreateOverlayPool(window);
+  });
   console.log("[desktop/browser] popout window opened", { projectId });
   broadcastPopoutState(projectId, true);
 }
@@ -3156,6 +3170,9 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+    // Propagate theme change to all overlay views so they re-apply the class.
+    const resolvedTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
+    broadcastThemeToAllOverlays(resolvedTheme);
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -3306,6 +3323,9 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
   });
+
+  // Overlay pool IPC handlers — delegate to overlayPool.ts.
+  registerOverlayIpcHandlers(getIpcBrowserWindow);
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -3435,6 +3455,12 @@ function createWindow(): BrowserWindow {
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
+
+  // Pre-warm the overlay pool for this window after the renderer finishes
+  // loading so the overlay views can share the same dev server session.
+  window.webContents.once("did-finish-load", () => {
+    getOrCreateOverlayPool(window);
+  });
 
   window.on("closed", () => {
     if (mainWindow === window) {

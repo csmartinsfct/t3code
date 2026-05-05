@@ -145,7 +145,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
         </Button>
-        <Menu>
+        <Menu
+          overlayItems={[{ id: "implement-new-thread", label: "Implement in a new thread" }]}
+          overlayMenuAlign="end"
+          overlayMenuSide="top"
+          overlayOnSelect={(id) => {
+            if (id === "implement-new-thread") void onImplementPlanInNewThread();
+          }}
+        >
           <MenuTrigger
             render={
               <Button

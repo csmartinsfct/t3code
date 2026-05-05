@@ -1,5 +1,9 @@
-import { type ProviderInteractionMode, type RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode } from "react";
+import {
+  type OverlayMenuItem,
+  type ProviderInteractionMode,
+  type RuntimeMode,
+} from "@t3tools/contracts";
+import { memo, type ReactNode, useMemo } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -16,11 +20,70 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   runtimeMode: RuntimeMode;
   supportsPlan: boolean;
   traitsMenuContent?: ReactNode;
+  traitsOverlayItems?: OverlayMenuItem[];
+  onTraitsOverlaySelect?: (id: string) => void;
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
+  const overlayItems = useMemo<OverlayMenuItem[]>(() => {
+    const items: OverlayMenuItem[] = [
+      ...(props.traitsOverlayItems ?? []),
+      ...(props.traitsOverlayItems && props.traitsOverlayItems.length > 0
+        ? [{ id: "separator:access", label: "", separator: true } satisfies OverlayMenuItem]
+        : []),
+      { id: "label:access", label: "Access", labelOnly: true },
+      {
+        id: "runtime:approval-required",
+        label: "Supervised",
+        checked: props.runtimeMode === "approval-required",
+      },
+      {
+        id: "runtime:full-access",
+        label: "Full access",
+        checked: props.runtimeMode === "full-access",
+      },
+      { id: "separator:mode", label: "", separator: true },
+      { id: "label:mode", label: "Mode", labelOnly: true },
+      { id: "interaction:default", label: "Chat", checked: props.interactionMode === "default" },
+    ];
+
+    if (props.supportsPlan) {
+      items.push(
+        { id: "interaction:plan", label: "Plan", checked: props.interactionMode === "plan" },
+        {
+          id: "interaction:plan-accept",
+          label: "Plan + Accept",
+          checked: props.interactionMode === "plan-accept",
+        },
+      );
+    }
+
+    return items;
+  }, [props.interactionMode, props.runtimeMode, props.supportsPlan, props.traitsOverlayItems]);
+
   return (
-    <Menu>
+    <Menu
+      overlayMenuAlign="start"
+      overlayOnSelect={(id) => {
+        if (props.onTraitsOverlaySelect) {
+          props.onTraitsOverlaySelect(id);
+        }
+        if (id === "runtime:approval-required" || id === "runtime:full-access") {
+          const nextMode = id.slice("runtime:".length) as RuntimeMode;
+          if (nextMode !== props.runtimeMode) props.onRuntimeModeChange(nextMode);
+          return;
+        }
+        if (
+          id === "interaction:default" ||
+          id === "interaction:plan" ||
+          id === "interaction:plan-accept"
+        ) {
+          const nextMode = id.slice("interaction:".length) as ProviderInteractionMode;
+          if (nextMode !== props.interactionMode) props.onInteractionModeChange(nextMode);
+        }
+      }}
+      overlayItems={overlayItems}
+    >
       <MenuTrigger
         render={
           <Button

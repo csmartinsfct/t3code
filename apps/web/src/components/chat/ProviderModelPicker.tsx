@@ -1,6 +1,7 @@
 import {
   baseProviderKind,
   type BaseProviderKind,
+  type OverlayMenuItem,
   providerProfileId,
   type ProviderKind,
   type ServerProvider,
@@ -10,7 +11,7 @@ import {
   resolveKnownProviderModelName,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import { memo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import {
   type ProviderPickerKind,
@@ -97,6 +98,11 @@ function providerIconClassName(
 const COMPACT_MODEL_ITEM_CLASS =
   "min-h-0 grid-cols-[0_1fr] gap-0 px-2.5 py-1 text-[13px] [&_svg]:hidden sm:min-h-0 sm:text-[13px]";
 const COMPACT_UNAVAILABLE_HEADER_CLASS = "h-auto min-h-0 flex-col items-start gap-0.5 px-2 py-1.5";
+const OVERLAY_MODEL_ID_PREFIX = "model:";
+
+function allowAllProviders(_provider: ProviderKind): boolean {
+  return true;
+}
 
 function getUnavailableProviderLabel(provider: ServerProvider): string {
   if (!provider.enabled) return "Disabled";
@@ -132,17 +138,25 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
-  const providerFilter = props.providerFilter ?? (() => true);
-  const unavailableProviderOptions = getUnavailableProviderOptions(props.providers, providerFilter);
-  const getPickerModelOptions = (provider: ProviderKind) => {
-    const liveModels = props.providers ? getProviderModels(props.providers, provider) : [];
-    if (liveModels.length > 0) {
-      return liveModels;
-    }
+  const providerFilter = props.providerFilter ?? allowAllProviders;
+  const unavailableProviderOptions = useMemo(
+    () => getUnavailableProviderOptions(props.providers, providerFilter),
+    [props.providers, providerFilter],
+  );
+  const getPickerModelOptions = useCallback(
+    (provider: ProviderKind) => {
+      const liveModels = props.providers ? getProviderModels(props.providers, provider) : [];
+      if (liveModels.length > 0) {
+        return liveModels;
+      }
 
-    const configuredModels = props.modelOptionsByProvider[baseProviderKind(provider)];
-    return configuredModels.length > 0 ? configuredModels : getKnownProviderModelOptions(provider);
-  };
+      const configuredModels = props.modelOptionsByProvider[baseProviderKind(provider)];
+      return configuredModels.length > 0
+        ? configuredModels
+        : getKnownProviderModelOptions(provider);
+    },
+    [props.modelOptionsByProvider, props.providers],
+  );
   const selectedProviderOptions = getPickerModelOptions(activeProvider);
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ??
@@ -161,9 +175,122 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     props.onProviderModelChange(provider, resolvedModel);
     setIsMenuOpen(false);
   };
+  const { overlayItems, overlaySelectionById } = useMemo(() => {
+    const selectionById = new Map<string, { provider: ProviderKind; model: string }>();
+    let separatorIndex = 0;
+    let disabledIndex = 0;
+
+    const separator = (): OverlayMenuItem => ({
+      id: `separator:${separatorIndex++}`,
+      label: "",
+      separator: true,
+    });
+    const disabledItem = (label: string): OverlayMenuItem => ({
+      id: `disabled:${disabledIndex++}`,
+      label,
+      disabled: true,
+    });
+    const modelItems = (
+      provider: ProviderKind,
+      models: ReadonlyArray<{ slug: string; name: string }>,
+      disabled = false,
+    ): OverlayMenuItem[] =>
+      models.map((modelOption) => {
+        const id = `${OVERLAY_MODEL_ID_PREFIX}${selectionById.size}`;
+        selectionById.set(id, { provider, model: modelOption.slug });
+        return {
+          id,
+          label: modelOption.name,
+          disabled,
+        };
+      });
+
+    if (props.lockedProvider !== null) {
+      const lockedProviderSnapshot = props.providers
+        ? getProviderSnapshot(props.providers, props.lockedProvider)
+        : undefined;
+      const lockedProviderSelectable = isProviderSelectable(lockedProviderSnapshot);
+      const items: OverlayMenuItem[] = [];
+      if (lockedProviderSnapshot && !lockedProviderSelectable) {
+        items.push(disabledItem(getUnavailableProviderLabel(lockedProviderSnapshot)), separator());
+      }
+      items.push(
+        ...modelItems(
+          props.lockedProvider,
+          getPickerModelOptions(props.lockedProvider),
+          Boolean(lockedProviderSnapshot && !lockedProviderSelectable),
+        ),
+      );
+      return { overlayItems: items, overlaySelectionById: selectionById };
+    }
+
+    const items: OverlayMenuItem[] = [];
+    for (const option of getAvailableProviderOptions(props.providers, providerFilter)) {
+      const liveProvider = props.providers
+        ? getProviderSnapshot(props.providers, option.value)
+        : undefined;
+      const providerSelectable = isProviderSelectable(liveProvider);
+      const providerModelOptions = getPickerModelOptions(option.value);
+      const base = baseProviderKind(option.value);
+      const children: OverlayMenuItem[] =
+        liveProvider && !providerSelectable
+          ? [
+              disabledItem(getUnavailableProviderLabel(liveProvider)),
+              separator(),
+              ...modelItems(option.value, providerModelOptions, true),
+            ]
+          : modelItems(option.value, providerModelOptions);
+
+      items.push({
+        id: `provider:${option.value}`,
+        label: option.label,
+        icon: `provider:${base}`,
+        iconClassName: cn(
+          "size-4 shrink-0",
+          providerSelectable
+            ? providerIconClassName(option.value, "text-muted-foreground/85")
+            : "text-muted-foreground/55 opacity-70",
+        ),
+        disabled: children.length === 0,
+        children,
+      });
+    }
+
+    const unavailableOptions = unavailableProviderOptions.map((option) => ({
+      id: `unavailable:${option.value}`,
+      label: `${option.label}    Coming soon`,
+      icon: `provider:${baseProviderKind(option.value)}`,
+      iconClassName: "size-4 shrink-0 text-muted-foreground/85 opacity-80",
+      disabled: true,
+    }));
+    if (unavailableOptions.length > 0) items.push(separator(), ...unavailableOptions);
+    if (unavailableOptions.length === 0) items.push(separator());
+    for (const option of COMING_SOON_PROVIDER_OPTIONS) {
+      items.push({
+        id: `coming-soon:${option.id}`,
+        label: `${option.label}    Coming soon`,
+        disabled: true,
+      });
+    }
+
+    return { overlayItems: items, overlaySelectionById: selectionById };
+  }, [
+    getPickerModelOptions,
+    props.lockedProvider,
+    props.providers,
+    providerFilter,
+    unavailableProviderOptions,
+  ]);
 
   return (
     <Menu
+      overlayItems={overlayItems}
+      overlayMenuAlign="start"
+      overlayOnSelect={(id) => {
+        const selection = overlaySelectionById.get(id);
+        if (!selection) return;
+        handleModelChange(selection.provider, selection.model);
+      }}
       open={isMenuOpen}
       onOpenChange={(open) => {
         if (props.disabled) {

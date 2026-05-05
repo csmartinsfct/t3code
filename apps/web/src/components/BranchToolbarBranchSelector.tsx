@@ -1,4 +1,4 @@
-import type { GitBranch } from "@t3tools/contracts";
+import type { GitBranch, OverlayComboboxItem } from "@t3tools/contracts";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon } from "lucide-react";
@@ -74,6 +74,51 @@ function getBranchTriggerLabel(input: {
   return resolvedActiveBranch;
 }
 
+function getBranchBadge(branch: GitBranch, activeProjectCwd: string): string | null {
+  const hasSecondaryWorktree = branch.worktreePath && branch.worktreePath !== activeProjectCwd;
+  return branch.current
+    ? "current"
+    : hasSecondaryWorktree
+      ? "worktree"
+      : branch.isRemote
+        ? "remote"
+        : branch.isDefault
+          ? "default"
+          : null;
+}
+
+function toBranchOverlayItem(input: {
+  itemValue: string;
+  branchByName: ReadonlyMap<string, GitBranch>;
+  activeProjectCwd: string;
+  query: string;
+}): OverlayComboboxItem | null {
+  const { activeProjectCwd, branchByName, itemValue, query } = input;
+  if (itemValue.startsWith("__checkout_pull_request__:")) {
+    const reference = itemValue.slice("__checkout_pull_request__:".length);
+    return {
+      value: itemValue,
+      label: "Checkout Pull Request",
+      description: reference,
+    };
+  }
+  if (itemValue.startsWith("__create_new_branch__:")) {
+    const branchName = itemValue.slice("__create_new_branch__:".length) || query;
+    return {
+      value: itemValue,
+      label: `Create new branch "${branchName}"`,
+    };
+  }
+
+  const branch = branchByName.get(itemValue);
+  if (!branch) return null;
+  return {
+    value: itemValue,
+    label: itemValue,
+    badge: getBranchBadge(branch, activeProjectCwd) ?? undefined,
+  };
+}
+
 export function BranchToolbarBranchSelector({
   activeProjectCwd,
   activeThreadBranch,
@@ -132,6 +177,10 @@ export function BranchToolbarBranchSelector({
     () => new Map(branches.map((branch) => [branch.name, branch] as const)),
     [branches],
   );
+  const overlayBranchByNameRef = useRef<ReadonlyMap<string, GitBranch>>(branchByName);
+  useEffect(() => {
+    overlayBranchByNameRef.current = branchByName;
+  }, [branchByName]);
   const normalizedDeferredBranchQuery = deferredTrimmedBranchQuery.toLowerCase();
   const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
@@ -171,6 +220,20 @@ export function BranchToolbarBranchSelector({
       createBranchItemValue,
       normalizedDeferredBranchQuery,
     ],
+  );
+  const branchOverlayItems = useMemo(
+    () =>
+      filteredBranchPickerItems
+        .map((itemValue) =>
+          toBranchOverlayItem({
+            itemValue,
+            branchByName,
+            activeProjectCwd,
+            query: trimmedBranchQuery,
+          }),
+        )
+        .filter((item): item is OverlayComboboxItem => item !== null),
+    [activeProjectCwd, branchByName, filteredBranchPickerItems, trimmedBranchQuery],
   );
   const [resolvedActiveBranch, setOptimisticBranch] = useOptimistic(
     canonicalActiveBranch,
@@ -253,6 +316,84 @@ export function BranchToolbarBranchSelector({
     });
   };
 
+  const handleOverlayBranchSearch = useCallback(
+    async (query: string): Promise<OverlayComboboxItem[]> => {
+      setBranchQuery(query);
+      const trimmedQuery = query.trim();
+      const parsedPrReference = parsePullRequestReference(trimmedQuery);
+      const nextCheckoutPullRequestItemValue =
+        parsedPrReference && onCheckoutPullRequestRequest
+          ? `__checkout_pull_request__:${parsedPrReference}`
+          : null;
+
+      let nextBranches = branches;
+      if (branchCwd) {
+        const result = await queryClient
+          .fetchInfiniteQuery(
+            gitBranchSearchInfiniteQueryOptions({
+              cwd: branchCwd,
+              query: trimmedQuery,
+            }),
+          )
+          .catch(() => null);
+        if (result) {
+          nextBranches = filterVisibleBranchPickerBranches(
+            result.pages.flatMap((page) => page.branches),
+          );
+        }
+      }
+
+      const nextBranchByName = new Map(
+        nextBranches.map((branch) => [branch.name, branch] as const),
+      );
+      overlayBranchByNameRef.current = nextBranchByName;
+      const nextBranchNames = nextBranches.map((branch) => branch.name);
+      const nextCanCreateBranch = !isSelectingWorktreeBase && trimmedQuery.length > 0;
+      const nextCreateBranchItemValue = nextCanCreateBranch
+        ? `__create_new_branch__:${trimmedQuery}`
+        : null;
+      const nextItems = [...nextBranchNames];
+      if (nextCreateBranchItemValue && !nextBranchByName.has(trimmedQuery)) {
+        nextItems.push(nextCreateBranchItemValue);
+      }
+      if (nextCheckoutPullRequestItemValue) {
+        nextItems.unshift(nextCheckoutPullRequestItemValue);
+      }
+
+      const normalizedQuery = trimmedQuery.toLowerCase();
+      const nextFilteredItems =
+        normalizedQuery.length === 0
+          ? nextItems
+          : nextItems.filter((itemValue) =>
+              shouldIncludeBranchPickerItem({
+                itemValue,
+                normalizedQuery,
+                createBranchItemValue: nextCreateBranchItemValue,
+                checkoutPullRequestItemValue: nextCheckoutPullRequestItemValue,
+              }),
+            );
+
+      return nextFilteredItems
+        .map((itemValue) =>
+          toBranchOverlayItem({
+            itemValue,
+            branchByName: nextBranchByName,
+            activeProjectCwd,
+            query: trimmedQuery,
+          }),
+        )
+        .filter((item): item is OverlayComboboxItem => item !== null);
+    },
+    [
+      activeProjectCwd,
+      branchCwd,
+      branches,
+      isSelectingWorktreeBase,
+      onCheckoutPullRequestRequest,
+      queryClient,
+    ],
+  );
+
   const createBranch = (rawName: string) => {
     const name = rawName.trim();
     const api = readNativeApi();
@@ -289,6 +430,26 @@ export function BranchToolbarBranchSelector({
       onSetThreadBranch(name, activeWorktreePath);
       setBranchQuery("");
     });
+  };
+
+  const handleOverlayBranchSelect = (value: string) => {
+    if (value.startsWith("__checkout_pull_request__:")) {
+      const reference = value.slice("__checkout_pull_request__:".length);
+      if (!reference || !onCheckoutPullRequestRequest) return;
+      setIsBranchMenuOpen(false);
+      setBranchQuery("");
+      onComposerFocusRequest?.();
+      onCheckoutPullRequestRequest(reference);
+      return;
+    }
+
+    if (value.startsWith("__create_new_branch__:")) {
+      createBranch(value.slice("__create_new_branch__:".length));
+      return;
+    }
+
+    const branch = branchByName.get(value) ?? overlayBranchByNameRef.current.get(value);
+    if (branch) selectBranch(branch);
   };
 
   useEffect(() => {
@@ -489,6 +650,15 @@ export function BranchToolbarBranchSelector({
       items={branchPickerItems}
       filteredItems={filteredBranchPickerItems}
       autoHighlight
+      overlayItems={branchOverlayItems}
+      overlayInputValue={branchQuery}
+      overlayPlaceholder="Search branches..."
+      overlayEmptyText="No branches found."
+      overlayStatusText={branchStatusText}
+      overlayComboboxSide="top"
+      overlayComboboxAlign="end"
+      overlayOnSearch={handleOverlayBranchSearch}
+      overlayOnSelect={handleOverlayBranchSelect}
       virtualized={shouldVirtualizeBranchList}
       onItemHighlighted={(_value, eventDetails) => {
         if (!isBranchMenuOpen || eventDetails.index < 0) return;

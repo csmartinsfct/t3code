@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      /* Tailwind v4 places utilities inside @layer — unlayered rules win
+         over @layer regardless of specificity. Only set box-sizing here;
+         DO NOT set padding/margin or any property that Tailwind utilities
+         need to own. Tailwind's own preflight (loaded via index.css) handles
+         the base resets correctly inside the cascade layer. */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body,
+      #overlay-root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay-root"></div>
+    <script type="module" src="/src/overlay.tsx"></script>
+  </body>
+</html>

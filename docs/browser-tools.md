@@ -509,3 +509,137 @@ This uses `Runtime.evaluate` (command channel) and sidesteps `Runtime.addBinding
 | Cookies missing after restart                      | Verify profile dir exists at `<dataDir>/browser/<projectId>/chromium-profile/Default/Cookies`. Session cookies (no `max-age`) don't persist; that's per-spec.                                                                              |
 | `Ref @e3 not found`                                | Snapshot is stale. Re-call `snapshot` after any navigation.                                                                                                                                                                                |
 | Agent doesn't know the endpoint exists             | Settings → Prompts → Browser — confirm the admin prompt is enabled (it's a shipped default). Also check the `## T3 Browser Automation` block is present in the rendered system prompt for the failing session.                             |
+
+---
+
+## Overlay View System
+
+Electron's `WebContentsView` is an OS-level compositor surface that always paints above HTML/React DOM — no CSS `z-index` crosses that boundary. Context menus, dropdowns, and other overlays would disappear behind it without a dedicated solution.
+
+When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
+
+`Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` are not yet migrated. They fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). These are full-screen overlays so the visual impact is minimal.
+
+### Architecture
+
+```
+┌─────────────────────────── BrowserWindow ──────────────────────────────┐
+│  contentView                                                             │
+│  ├─ hostView (WebContentsView)   ← T3 React app                         │
+│  ├─ embeddedBrowserView (WCV)    ← Chromium, per project                │
+│  └─ overlayView (WCV)            ← full-window transparent layer        │
+│     z-order: overlay > embedded > host                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key files
+
+| File                                                 | Role                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/src/overlayPool.ts`                    | `OverlayPool` class — manages 2 pre-warmed overlay `WebContentsView`s per window. Parked in an off-screen `BaseWindow` when idle; moved to the main window (topmost) on acquire and returned on release. Also owns all overlay IPC handler registration.    |
+| `apps/desktop/src/overlay-preload.ts`                | Dedicated preload for overlay views. Exposes `overlayBridge` (onRender, onClear, emitEvent, requestDismiss, getConfig, onThemeChange). Does NOT expose browser-control APIs.                                                                                |
+| `apps/web/overlay.html`                              | Second Vite entry point. Imports the same `index.css` so Tailwind tokens and component styles are identical to the main app.                                                                                                                                |
+| `apps/web/src/overlay.tsx`                           | Overlay renderer entry — mounts `OverlayShell`, applies theme before first render.                                                                                                                                                                          |
+| `apps/web/src/components/overlay/OverlayShell.tsx`   | Root overlay component. Full-window transparent div. Positions a zero-size "virtual anchor" div at the trigger's DOMRect so Base UI Positioner can do smart flip/collision-avoidance. Backdrop click calls `requestDismiss()`.                              |
+| `apps/web/src/components/overlay/OverlayContent.tsx` | Switches on `OverlayRenderMessage.type` → delegates to the right component.                                                                                                                                                                                 |
+| `apps/web/src/components/overlay/Overlay*.tsx`       | Per-overlay-type render components (`OverlayMenu`, `OverlaySelect`, `OverlayCombobox`, `OverlayAutocomplete`, `OverlayComposerCommand`, `OverlayAlertDialog`, `OverlayImagePreview`). Use the same Base UI primitives and Tailwind classes as the host app. |
+| `apps/web/src/nativeOverlayBridge.ts`                | Host-side bridge. `openNativeOverlay(message, options)` owns the acquire → render → event/result → dismiss → release lifecycle. `acquireNativeOverlay(message)` remains as the low-level handle API. `useNativeOverlayActive()` returns the gate condition. |
+
+### Gate condition
+
+```typescript
+useNativeOverlayActive() === true
+  when: running in Electron
+    AND embedded browser is currently mounted
+```
+
+When `false` (no browser visible, web build, popout window), all overlays render in DOM as normal. Zero behavioral difference for non-browser flows.
+
+### IPC flow
+
+```
+Host renderer                    Main process              Overlay view
+────────────────                 ─────────────             ────────────
+overlay.acquire()   ──invoke──►  pool.acquire()
+                    ◄─ id ──────
+overlay.render(id, msg) ─────►  send("overlay:render", msg) ──►  OverlayShell.onRender
+                                                                  renders popup
+ipcRenderer.on(overlay:event)   forward with entry.id  ◄── emitEvent("select", {id})
+onEvent fires → resolve(id)
+overlay.release(id) ──invoke──►  pool.release()
+                                 sends "overlay:clear"  ──►  OverlayShell.onClear
+```
+
+Events from the overlay view carry `null` as the overlay ID (the view doesn't know its own ID). The main process replaces it with the correct `entry.id` before forwarding to the host renderer so the `onEvent(id, handler)` filter matches.
+
+### Host runtime
+
+Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup.
+
+For primitive components, the host app should usually go through the component adapter instead of calling the bridge directly. `Menu` supports serialized `overlayItems` plus `overlayOnSelect(id)` / `overlayOnAction(id)`, and falls back to the normal DOM/suspension path if a native overlay cannot be acquired. `OverlayMenuItem` intentionally models the small set of menu semantics needed to preserve host UI parity today: separators, group labels (`labelOnly`), checked/radio-looking rows (`checked`), icons, shortcuts, disabled state, destructive state, submenus, status dots, badges/descriptions, header actions, and secondary row actions. Header/row action buttons emit non-dismissing `action` events by default so refresh/approve-style controls can keep the menu open while the host updates state and re-renders the same native overlay session; set `dismissOnAction` only for action buttons that intentionally close the menu, like edit/reveal actions that open another surface. The chat provider/model picker, traits picker, compact composer controls menu, Open In picker, MCP servers picker, Skills picker, chat header Git/project-script menus, and orchestration thread switcher use this path so opening them above a mounted embedded browser no longer hides Chromium. Rich popovers such as the Active Runs card are intentionally not forced through `OverlayMenuItem`; they stay on the normal DOM/suspension path until Phase 2 can render the exact same component tree in the overlay view.
+
+Use the current primitive overlay path only when the popup can be faithfully represented as serializable menu/select/combobox/autocomplete data and discrete host callbacks. That includes normal command menus, checked menus, grouped menus, select lists, branch/model pickers, serialized typeahead rows, and menu-local buttons whose loading/disabled state can be refreshed by sending a new JSON message to the same overlay session. Keep the DOM/suspension fallback, or move the work to Phase 2, when exact UI parity requires arbitrary React children, forms, TanStack Query state, custom card layouts, routed dialog content, or any component tree that would have to be reimplemented differently inside `OverlayMenuItem`.
+
+`Select` has the same acquire-failure fallback for callsites that provide serialized `overlayItems`. `OverlaySelectItem` supports separators, icons, and `hideIndicator` so native selects can mirror host `SelectItem hideIndicator` menus. The embedded-browser viewport toolbar device-preset/zoom selects and branch environment select use this native path.
+
+`Combobox` also has an adapter for serialized result rows. The overlay view owns the search input and emits `search` events; the host can return a refreshed JSON item list through `overlayOnSearch`, then receive the selected value through `overlayOnSelect`. The chat branch selector uses this path so searching/selecting branches above a mounted embedded browser does not suspend Chromium.
+
+`Autocomplete` has the same opt-in constraint for serialized rows. Its native path opens from `AutocompleteInput` / `AutocompleteTrigger`, renders an overlay-owned input copy at the trigger/input rect using the same input classes, and renders the popup/list with the same autocomplete popup/list/item classes. It is not a `CommandDialog` migration: arbitrary command palettes, grouped custom JSX, and routed file-search behavior remain Phase 2 unless a callsite provides a plain JSON row list and discrete search/select callbacks.
+
+The chat composer `@` / `/` / `/model` suggestion menu is handled by a narrow `composer-command` overlay type rather than the generic `Autocomplete` adapter. It sends the already-derived `ComposerCommandItem[]` rows to the overlay and renders the exact `ComposerCommandMenu` component there, while selection/highlight events flow back to `ChatView`. This keeps the file icons, active row styling, loading/empty copy, keyboard navigation, and row spacing identical without treating arbitrary `CommandDialog` content as Phase 1 work.
+
+### Adding a new overlay type
+
+**Step 1 — add a type to `packages/contracts/src/ipc.ts`:**
+
+```typescript
+export interface OverlayMyNewMessage {
+  type: "my-new";
+  anchor: OverlayAnchorRect; // for positional overlays
+  // ...serializable props only (no React elements, no callbacks)
+}
+// Add to OverlayRenderMessage union
+```
+
+**Step 2 — add a render component in `apps/web/src/components/overlay/`:**
+
+```typescript
+export function OverlayMyNew({ message, bridge }: OverlayMyNewProps) {
+  // Render using Base UI + Tailwind. Use anchorRef for positioning if needed.
+  // bridge.emitEvent("result", payload)  → sends to host
+  // bridge.requestDismiss()              → triggers pool release
+}
+```
+
+**Step 3 — add the case to `OverlayContent.tsx`.**
+
+**Step 4 — call it from the host trigger site:**
+
+```typescript
+const session = await openNativeOverlay(
+  { type: "my-new", anchor: rect, ...props },
+  {
+    dismissValue: null,
+    resolveEvent: (type, payload) => (type === "result" ? { value: payload } : null),
+  },
+);
+
+if (!session) {
+  // existing DOM/suspension fallback
+  return;
+}
+
+const result = await session.result;
+```
+
+### Constraints and known limitations
+
+**Serialization:** All props must be JSON-serializable. Callbacks become event IDs (the overlay emits `{ type: "select", id: "..." }` and the host maps that back to the real callback).
+
+**Dialogs not yet migrated:** `Dialog`, `AlertDialog`, `Sheet`, `CommandDialog` still suspend the embedded browser when open (see `embeddedBrowserModalSuspension.tsx`). They have rich interactive content that can't be serialized over IPC without a full app context in the overlay view — tracked as Phase 2 work.
+
+**macOS compositing artifact:** The overlay view uses a transparent background (`#00000000`). On macOS this causes a subtle brightness shift of the content behind the overlay while it's open. This is a fundamental macOS CALayer compositing behavior and cannot be avoided without tight-fitting overlay bounds (future work) or forking Electron.
+
+**Pool size:** 2 views per window (1 active + 1 pre-warmed). Can be increased in `getOrCreateOverlayPool(window)` if concurrent overlays are ever needed.
+
+**Popout windows:** Each popout `BrowserWindow` gets its own pool, initialized on `did-finish-load`. The existing `getIpcBrowserWindow(event)` routing ensures overlay IPC is dispatched to the correct pool.

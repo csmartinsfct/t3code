@@ -21,6 +21,7 @@ import {
   type TurnId,
   type KeybindingCommand,
   type ManagedRunSummary,
+  type OverlayComposerCommandMessage,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
@@ -42,6 +43,12 @@ import { gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { useMultiRepoGitStatus } from "../hooks/useMultiRepoGitStatus";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { useEmbeddedBrowserOverlayLifecycle } from "../embeddedBrowserModalSuspension";
+import {
+  acquireNativeOverlay,
+  openNativeOverlay,
+  type NativeOverlayHandle,
+  useNativeOverlayActive,
+} from "../nativeOverlayBridge";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -205,6 +212,7 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
+import { useTraitsOverlayMenu } from "./chat/TraitsPicker";
 import { McpServersPicker } from "./chat/McpServersPicker";
 import { SkillsPicker } from "./chat/SkillsPicker";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
@@ -756,11 +764,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
-  // Suspend the embedded Chromium browser while the image preview modal is
-  // open — the OS-level WebContentsView paints above all React DOM, so
-  // without this the modal would appear behind the browser. Mirrors the
-  // existing context-menu / dialog suspension flow.
-  useEmbeddedBrowserOverlayLifecycle(expandedImage !== null, "expanded-image");
+  const nativeOverlayActive = useNativeOverlayActive();
+  // When native overlay is active: render the image preview in a transparent
+  // WebContentsView above the embedded browser so the browser stays visible.
+  // When NOT active: fall back to the suspension approach (browser hides briefly).
+  useEmbeddedBrowserOverlayLifecycle(
+    !nativeOverlayActive && expandedImage !== null,
+    "expanded-image",
+  );
+  // Native overlay handle for the image preview.
+  const nativeImageOverlayHandleRef = useRef<
+    import("../nativeOverlayBridge").NativeOverlaySession<void> | null
+  >(null);
+  const nativeComposerMenuOverlayHandleRef = useRef<NativeOverlayHandle | null>(null);
+  const nativeComposerMenuOpeningRef = useRef(false);
+  const composerMenuAnchorRef = useRef<HTMLDivElement | null>(null);
+  const [nativeComposerMenuAcquireFailed, setNativeComposerMenuAcquireFailed] = useState(false);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
@@ -3479,6 +3498,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const closeExpandedImage = useCallback(() => {
+    nativeImageOverlayHandleRef.current?.release();
+    nativeImageOverlayHandleRef.current = null;
     setExpandedImage(null);
   }, []);
   const navigateExpandedImage = useCallback((direction: -1 | 1) => {
@@ -4920,6 +4941,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     prompt,
     onPromptChange: setPromptFromTraits,
   });
+  const providerTraitsOverlayMenu = useTraitsOverlayMenu({
+    provider: selectedProvider,
+    threadId,
+    model: selectedModel,
+    models: selectedProviderModels,
+    modelOptions: composerModelOptions?.[baseProviderKind(selectedProvider)],
+    prompt,
+    onPromptChange: setPromptFromTraits,
+  });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
     threadId,
@@ -5110,6 +5140,116 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
       workspaceEntriesQuery.isLoading ||
       workspaceEntriesQuery.isFetching);
+  const useNativeComposerMenu =
+    nativeOverlayActive &&
+    composerMenuOpen &&
+    !isComposerApprovalState &&
+    !nativeComposerMenuAcquireFailed;
+
+  useEffect(() => {
+    if (!composerMenuOpen) {
+      setNativeComposerMenuAcquireFailed(false);
+    }
+  }, [composerMenuOpen]);
+
+  useEffect(
+    () => () => {
+      nativeComposerMenuOpeningRef.current = false;
+      nativeComposerMenuOverlayHandleRef.current?.release();
+      nativeComposerMenuOverlayHandleRef.current = null;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const release = () => {
+      nativeComposerMenuOpeningRef.current = false;
+      nativeComposerMenuOverlayHandleRef.current?.release();
+      nativeComposerMenuOverlayHandleRef.current = null;
+    };
+
+    if (!useNativeComposerMenu) {
+      release();
+      return;
+    }
+
+    const rect = composerMenuAnchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const message: OverlayComposerCommandMessage = {
+      type: "composer-command",
+      anchor: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      },
+      items: composerMenuItems,
+      resolvedTheme,
+      isLoading: isComposerMenuLoading,
+      triggerKind: composerTriggerKind,
+      activeItemId: activeComposerMenuItem?.id ?? null,
+    };
+
+    const existingHandle = nativeComposerMenuOverlayHandleRef.current;
+    if (existingHandle) {
+      existingHandle.render(message);
+      return;
+    }
+
+    if (nativeComposerMenuOpeningRef.current) return;
+    nativeComposerMenuOpeningRef.current = true;
+    let canceled = false;
+    void acquireNativeOverlay(message).then((handle) => {
+      nativeComposerMenuOpeningRef.current = false;
+      if (canceled) {
+        handle?.release();
+        return;
+      }
+      if (!handle) {
+        setNativeComposerMenuAcquireFailed(true);
+        return;
+      }
+
+      nativeComposerMenuOverlayHandleRef.current = handle;
+      handle.onEvent((type, payload) => {
+        if (type === "highlight") {
+          const id = (payload as { id?: unknown } | null)?.id;
+          setComposerHighlightedItemId(typeof id === "string" ? id : null);
+          return;
+        }
+
+        if (type === "select") {
+          const id = (payload as { id?: unknown } | null)?.id;
+          if (typeof id !== "string") return;
+          const item = composerMenuItemsRef.current.find((candidate) => candidate.id === id);
+          if (item) {
+            onSelectComposerItem(item);
+          }
+          release();
+        }
+      });
+      handle.onDismiss(() => {
+        release();
+        setComposerTrigger(null);
+      });
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    activeComposerMenuItem?.id,
+    composerMenuItems,
+    composerMenuOpen,
+    composerTriggerKind,
+    isComposerApprovalState,
+    isComposerMenuLoading,
+    nativeComposerMenuAcquireFailed,
+    onSelectComposerItem,
+    resolvedTheme,
+    useNativeComposerMenu,
+  ]);
 
   const onPromptChange = useCallback(
     (
@@ -5196,9 +5336,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
       [groupId]: !existing[groupId],
     }));
   }, []);
-  const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
-    setExpandedImage(preview);
-  }, []);
+  const openImagePreview = useCallback(
+    (preview: ExpandedImagePreview) => {
+      if (nativeOverlayActive) {
+        // Native overlay path: render entirely in the overlay WebContentsView.
+        // Do NOT set host DOM expandedImage state — that would render a fixed
+        // div in the host renderer which sits BEHIND the embedded browser.
+        void openNativeOverlay<void>(
+          {
+            type: "image-preview",
+            images: preview.images.map((img) => ({ src: img.src, name: img.name })),
+            initialIndex: preview.index,
+          },
+          {
+            resolveEvent: (type) => (type === "close" ? { value: undefined } : null),
+          },
+        ).then((session) => {
+          if (!session) {
+            // Acquire failed — fall back to host DOM + suspension.
+            setExpandedImage(preview);
+            return;
+          }
+          nativeImageOverlayHandleRef.current = session;
+          void session.result.finally(() => {
+            if (nativeImageOverlayHandleRef.current === session) {
+              nativeImageOverlayHandleRef.current = null;
+            }
+          });
+        });
+      } else {
+        // Non-native path: host DOM rendering + suspension (original behavior).
+        setExpandedImage(preview);
+      }
+    },
+    [nativeOverlayActive],
+  );
+  const onExpandTimelineImage = useCallback(
+    (preview: ExpandedImagePreview) => openImagePreview(preview),
+    [openImagePreview],
+  );
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
@@ -5518,12 +5694,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         </div>
                       ) : null}
                       <div
+                        ref={composerMenuAnchorRef}
                         className={cn(
                           "relative px-3 pb-2 sm:px-4",
                           hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
                         )}
                       >
-                        {composerMenuOpen && !isComposerApprovalState && (
+                        {composerMenuOpen && !isComposerApprovalState && !useNativeComposerMenu && (
                           <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
                             <ComposerCommandMenu
                               items={composerMenuItems}
@@ -5590,7 +5767,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                           image.id,
                                         );
                                         if (!preview) return;
-                                        setExpandedImage(preview);
+                                        openImagePreview(preview);
                                       }}
                                     >
                                       <img
@@ -5756,6 +5933,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   runtimeMode={runtimeMode}
                                   supportsPlan={supportsPlan}
                                   traitsMenuContent={providerTraitsMenuContent}
+                                  onTraitsOverlaySelect={(id) => {
+                                    providerTraitsOverlayMenu.overlaySelectionById.get(id)?.();
+                                  }}
+                                  {...(providerTraitsOverlayMenu.overlayItems !== undefined
+                                    ? {
+                                        traitsOverlayItems: providerTraitsOverlayMenu.overlayItems,
+                                      }
+                                    : {})}
                                   onInteractionModeChange={handleInteractionModeChange}
                                   onRuntimeModeChange={handleRuntimeModeChange}
                                 />

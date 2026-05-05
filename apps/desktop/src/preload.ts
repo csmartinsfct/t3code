@@ -32,6 +32,11 @@ const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
 const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
+const OVERLAY_ACQUIRE_CHANNEL = "overlay:acquire";
+const OVERLAY_RELEASE_CHANNEL = "overlay:release";
+const OVERLAY_RENDER_CHANNEL = "overlay:render";
+const OVERLAY_EVENT_CHANNEL = "overlay:event";
+const OVERLAY_DISMISS_CHANNEL = "overlay:dismiss";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -68,6 +73,31 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
     };
+  },
+  overlay: {
+    acquire: () => ipcRenderer.invoke(OVERLAY_ACQUIRE_CHANNEL),
+    release: (id: string) => ipcRenderer.invoke(OVERLAY_RELEASE_CHANNEL, id),
+    render: (id: string, msg: import("@t3tools/contracts").OverlayRenderMessage) =>
+      ipcRenderer.invoke(OVERLAY_RENDER_CHANNEL, id, msg),
+    onEvent: (id: string, listener: (type: string, payload: unknown) => void) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        receivedId: unknown,
+        type: unknown,
+        payload: unknown,
+      ) => {
+        if (receivedId === id) listener(type as string, payload);
+      };
+      ipcRenderer.on(OVERLAY_EVENT_CHANNEL, wrapped);
+      return () => ipcRenderer.removeListener(OVERLAY_EVENT_CHANNEL, wrapped);
+    },
+    onDismiss: (id: string, listener: () => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, receivedId: unknown) => {
+        if (receivedId === id) listener();
+      };
+      ipcRenderer.on(OVERLAY_DISMISS_CHANNEL, wrapped);
+      return () => ipcRenderer.removeListener(OVERLAY_DISMISS_CHANNEL, wrapped);
+    },
   },
   browser: {
     mount: (projectId, bounds) => ipcRenderer.invoke(BROWSER_MOUNT_CHANNEL, projectId, bounds),

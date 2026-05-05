@@ -8,20 +8,120 @@ import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from "lucide-react
 import type * as React from "react";
 
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
+import { openNativeOverlay, useNativeOverlayActive } from "~/nativeOverlayBridge";
 import { cn } from "~/lib/utils";
+import type { OverlaySelectItem } from "@t3tools/contracts";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
+
+interface NativeSelectContextValue {
+  openNative?: (anchorRect: { x: number; y: number; width: number; height: number }) => void;
+}
+const NativeSelectContext = createContext<NativeSelectContextValue>({});
 
 function Select<Value, Multiple extends boolean | undefined = false>(
-  props: SelectPrimitive.Root.Props<Value, Multiple>,
+  props: SelectPrimitive.Root.Props<Value, Multiple> & {
+    overlayItems?: OverlaySelectItem[];
+    overlaySelectSide?: "top" | "bottom";
+    overlaySelectAlign?: "start" | "center" | "end";
+    overlayAlignItemWithTrigger?: boolean;
+  },
 ) {
+  const {
+    overlayItems,
+    overlaySelectSide,
+    overlaySelectAlign,
+    overlayAlignItemWithTrigger,
+    open,
+    defaultOpen,
+    onOpenChange,
+    onValueChange,
+    value,
+    ...rootProps
+  } = props;
+  const nativeActive = useNativeOverlayActive();
+  const [nativeAcquireFailed, setNativeAcquireFailed] = useState(false);
+  const useNative = nativeActive && overlayItems !== undefined && !nativeAcquireFailed;
+
+  const openNative = useCallback(
+    (rect: { x: number; y: number; width: number; height: number }) => {
+      if (!overlayItems) return;
+      void openNativeOverlay<unknown>(
+        {
+          type: "select",
+          anchor: rect,
+          items: overlayItems,
+          value: String(value ?? ""),
+          ...(overlaySelectSide !== undefined && { side: overlaySelectSide }),
+          ...(overlaySelectAlign !== undefined && { align: overlaySelectAlign }),
+          ...(overlayAlignItemWithTrigger !== undefined && {
+            alignItemWithTrigger: overlayAlignItemWithTrigger,
+          }),
+        } as import("@t3tools/contracts").OverlaySelectMessage,
+        {
+          resolveEvent: (type, payload) => {
+            if (type !== "select") return null;
+            const value = (payload as { value?: unknown })?.value;
+            return { value };
+          },
+        },
+      ).then((session) => {
+        if (!session) {
+          setNativeAcquireFailed(true);
+          onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+          return;
+        }
+        void session.result.then((value) => {
+          if (value === undefined || !onValueChange) return;
+          onValueChange(
+            value as Parameters<NonNullable<typeof onValueChange>>[0],
+            {} as Parameters<NonNullable<typeof onValueChange>>[1],
+          );
+        });
+      });
+    },
+    [
+      overlayItems,
+      overlaySelectSide,
+      overlaySelectAlign,
+      overlayAlignItemWithTrigger,
+      value,
+      onOpenChange,
+      onValueChange,
+    ],
+  );
+
   const handleOpenChange = useTrackedOverlayOpen({
-    open: props.open,
-    defaultOpen: props.defaultOpen,
-    onOpenChange: props.onOpenChange,
-    enabled: true,
+    open: useNative ? false : open,
+    defaultOpen: useNative ? false : defaultOpen,
+    onOpenChange: useNative
+      ? undefined
+      : (nextOpen, details) => {
+          if (!nextOpen) {
+            setNativeAcquireFailed(false);
+          }
+          onOpenChange?.(nextOpen, details as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        },
+    enabled: !useNative,
     source: "select",
   });
 
-  return <SelectPrimitive.Root {...props} onOpenChange={handleOpenChange} />;
+  const nativeCtx = useMemo<NativeSelectContextValue>(
+    () => (useNative ? { openNative } : {}),
+    [openNative, useNative],
+  );
+
+  return (
+    <NativeSelectContext.Provider value={nativeCtx}>
+      <SelectPrimitive.Root
+        {...rootProps}
+        defaultOpen={useNative ? false : defaultOpen}
+        onValueChange={onValueChange}
+        open={useNative ? false : open}
+        value={value}
+        onOpenChange={useNative ? undefined : handleOpenChange}
+      />
+    </NativeSelectContext.Provider>
+  );
 }
 
 const selectTriggerVariants = cva(
@@ -90,12 +190,25 @@ function SelectTrigger({
   size = "default",
   variant = "default",
   children,
+  onClick,
   ...props
 }: SelectPrimitive.Trigger.Props & VariantProps<typeof selectTriggerVariants>) {
+  const { openNative } = useContext(NativeSelectContext);
+
+  const handleClick = openNative
+    ? (e: Parameters<NonNullable<SelectPrimitive.Trigger.Props["onClick"]>>[0]) => {
+        e.preventDefault();
+        e.preventBaseUIHandler();
+        const rect = e.currentTarget.getBoundingClientRect();
+        openNative({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      }
+    : onClick;
+
   return (
     <SelectPrimitive.Trigger
       className={cn(selectTriggerVariants({ size, variant }), className)}
       data-slot="select-trigger"
+      onClick={handleClick}
       {...props}
     >
       {children}

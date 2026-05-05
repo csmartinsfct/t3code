@@ -1,4 +1,4 @@
-import { EditorId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { EditorId, type OverlayMenuItem, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
@@ -73,6 +73,10 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
   return baseOptions.filter((option) => availableEditors.includes(option.value));
 };
 
+function getOverlayIconName(editorId: EditorId): string {
+  return editorId === "file-manager" ? "FolderClosed" : `editor:${editorId}`;
+}
+
 export const OpenInPicker = memo(function OpenInPicker({
   keybindings,
   availableEditors,
@@ -105,6 +109,21 @@ export const OpenInPicker = memo(function OpenInPicker({
     () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
     [keybindings],
   );
+  const overlayItems = useMemo<OverlayMenuItem[]>(() => {
+    if (options.length === 0) {
+      return [{ id: "none", label: "No installed editors found", disabled: true }];
+    }
+    return options.map(({ label, value }) => ({
+      id: value,
+      label,
+      icon: getOverlayIconName(value),
+      iconClassName: "text-muted-foreground",
+      shortcut:
+        value === preferredEditor && openFavoriteEditorShortcutLabel
+          ? openFavoriteEditorShortcutLabel
+          : undefined,
+    }));
+  }, [openFavoriteEditorShortcutLabel, options, preferredEditor]);
 
   useOpenFavoriteEditorShortcut({ keybindings, openInCwd, preferredEditor });
 
@@ -122,7 +141,14 @@ export const OpenInPicker = memo(function OpenInPicker({
         </span>
       </Button>
       <GroupSeparator className="hidden @3xl/header-actions:block" />
-      <Menu>
+      <Menu
+        overlayItems={overlayItems}
+        overlayMenuAlign="end"
+        overlayOnSelect={(id) => {
+          if (id === "none") return;
+          openInEditor(id as EditorId);
+        }}
+      >
         <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
