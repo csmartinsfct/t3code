@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 
 import { OverlayShell } from "./components/overlay/OverlayShell";
 import { createWsNativeApi } from "./wsNativeApi";
+import "./overlayRoutes";
 
 // Apply theme immediately before first render to avoid any flash.
 const config = window.overlayBridge?.getConfig();
