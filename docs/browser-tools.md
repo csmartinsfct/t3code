@@ -518,7 +518,7 @@ Electron's `WebContentsView` is an OS-level compositor surface that always paint
 
 When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
 
-Most `Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` surfaces still fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). The routed overlay path below is the migration mechanism for exact-UI arbitrary React content. Current routed migrations include `FileSearchModal`, Git commit/default-branch confirmation dialogs, and the project-script add/edit/delete dialog.
+Most `Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` surfaces still fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). The routed overlay path below is the migration mechanism for exact-UI arbitrary React content. Current routed migrations include `FileSearchModal`, Git commit/default-branch confirmation dialogs, the project-script add/edit/delete dialog, and selected management/ticketing confirmations.
 
 ### Architecture
 
@@ -693,6 +693,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 `ProposeActionCard` routes its action icon picker through the same routed popover helper. The host and overlay render the same icon-grid content, and selection returns the chosen `ProjectScriptIcon` as a route result so the host card state remains authoritative.
 
 `ThreadTerminalDrawer` routes its terminal action hover tooltips through a small shared terminal-tooltip route. The route keeps the tooltip content and `PopoverPopup` props identical between the host DOM fallback and native overlay view while avoiding importing the heavy xterm drawer into the overlay route bootstrap.
+
+`MoveTicketToBoardDialog` routes the sub-ticket "move to board" confirmation through `OverlayRouteAlertDialog`. The host and overlay share the exact same AlertDialog content component; the overlay route submits only a confirm result, while the host keeps the ticket mutation and selection cleanup authoritative.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 

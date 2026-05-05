@@ -7,6 +7,7 @@ import "./components/ProjectScriptsControl";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/RateLimitMeter";
+import "./components/management/MoveTicketToBoardDialog";
 import "./components/terminal/TerminalTooltipOverlay";
 
 logWebTimeline("overlay-routes.loaded", {
@@ -20,6 +21,7 @@ logWebTimeline("overlay-routes.loaded", {
     "context-window-meter",
     "propose-action-icon-picker",
     "rate-limit-meter",
+    "move-ticket-to-board",
     "terminal-tooltip",
   ],
 });
