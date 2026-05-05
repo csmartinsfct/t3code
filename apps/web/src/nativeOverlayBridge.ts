@@ -69,6 +69,16 @@ export interface NativeOverlayRouteOptions<TResult> {
   dismissValue?: NativeOverlayRouteResult<TResult>;
 }
 
+export function createOverlayRouteMessage(input: NativeOverlayRouteInput): OverlayRouteMessage {
+  return {
+    type: "route",
+    routeKey: input.routeKey,
+    params: input.params ?? {},
+    ...(input.context ? { context: input.context } : {}),
+    presentation: input.presentation,
+  };
+}
+
 export async function acquireNativeOverlay(
   initialMessage: OverlayRenderMessage,
 ): Promise<NativeOverlayHandle | null> {
@@ -171,13 +181,7 @@ export async function openNativeOverlayRoute<TResult = unknown>(
   input: NativeOverlayRouteInput,
   options: NativeOverlayRouteOptions<TResult> = {},
 ): Promise<NativeOverlaySession<NativeOverlayRouteResult<TResult>> | null> {
-  const message: OverlayRouteMessage = {
-    type: "route",
-    routeKey: input.routeKey,
-    params: input.params ?? {},
-    ...(input.context ? { context: input.context } : {}),
-    presentation: input.presentation,
-  };
+  const message = createOverlayRouteMessage(input);
 
   const session = await openNativeOverlay<NativeOverlayRouteResult<TResult>>(message, {
     dismissValue: options.dismissValue ?? { status: "cancelled", reason: "dismissed" },

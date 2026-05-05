@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type React from "react";
+import type { RefObject } from "react";
 
 import type { OverlayRouteMessage } from "@t3tools/contracts";
 
@@ -13,6 +14,7 @@ export type OverlayRouteResult<TResult = unknown> =
 export interface OverlayRouteController {
   message: OverlayRouteMessage;
   bridge: OverlayBridgeHandle;
+  anchorRef: RefObject<HTMLDivElement | null>;
   submit(value?: unknown): void;
   cancel(reason?: string): void;
   fail(error: unknown): void;
@@ -36,4 +38,8 @@ export function useOverlayRouteController(): OverlayRouteController {
     throw new Error("useOverlayRouteController must be used inside an overlay route");
   }
   return controller;
+}
+
+export function useOverlayRouteAnchorRef(): RefObject<HTMLDivElement | null> {
+  return useOverlayRouteController().anchorRef;
 }

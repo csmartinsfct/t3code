@@ -36,7 +36,7 @@ export function OverlayContent({ message, anchorRef, bridge }: OverlayContentPro
     case "image-preview":
       return <OverlayImagePreview message={message} bridge={bridge} />;
     case "route":
-      return <OverlayRoute message={message} bridge={bridge} />;
+      return <OverlayRoute message={message} anchorRef={anchorRef} bridge={bridge} />;
     // Phase 2 types — not yet implemented.
     case "dialog":
     case "sheet":

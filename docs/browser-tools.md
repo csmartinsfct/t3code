@@ -629,6 +629,54 @@ On the overlay side, route components are registered in `overlayRouteRegistry.ts
 - Providers from `OverlayRouteProviders`: TanStack Query, the app atom registry, and toast providers.
 - A WebSocket-backed `window.nativeApi` installed by `overlay.tsx`.
 
+#### Routed adapter pattern
+
+Use `apps/web/src/routedOverlayAdapters.tsx` for arbitrary React surfaces. The host callsite keeps its existing DOM component path but gates its `open` prop with `useRoutedOverlaySurface()`:
+
+```typescript
+const routed = useRoutedOverlaySurface({
+  open,
+  onOpenChange: setOpen,
+  routeKey: "file-search",
+  params: { cwd },
+  context: { projectId, threadId, cwd },
+  presentation: { kind: "command-dialog" },
+});
+
+return (
+  <FileSearchModalDom
+    open={routed.domOpen}
+    onOpenChange={routed.onDomOpenChange}
+  />
+);
+```
+
+When native overlay is active, the hook opens the registered route and keeps the DOM popup closed so Chromium stays visible. When native overlay is inactive, disabled, unavailable, or fails during acquire/bootstrap, `routed.domOpen` follows the original `open` value and the existing DOM/suspension behavior remains intact.
+
+The overlay route component renders the same primitive tree using route wrappers from the same adapter module:
+
+```tsx
+registerOverlayRoute("file-search", function FileSearchOverlayRoute({ message }) {
+  return (
+    <OverlayRouteCommandDialog>
+      <CommandDialogPopup>
+        <FileSearchModalContent cwd={String(message.params.cwd)} />
+      </CommandDialogPopup>
+    </OverlayRouteCommandDialog>
+  );
+});
+```
+
+Available route wrappers:
+
+- `OverlayRouteDialog`
+- `OverlayRouteAlertDialog`
+- `OverlayRouteCommandDialog`
+- `OverlayRouteSheet` plus `OverlayRouteSheetPopup`
+- `OverlayRoutePopover` plus `OverlayRoutePopoverPopup` / `OverlayRoutePopoverContent`
+
+These wrappers are intentionally thin: they control open/dismiss semantics and then delegate to the existing UI primitives, preserving styles, focus behavior, escape/outside-click handling, nested overlay behavior, and close buttons. Popover routes get the overlay view's virtual anchor via `OverlayRoutePopoverPopup`, so anchored rich popovers can align to the original trigger rect.
+
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.

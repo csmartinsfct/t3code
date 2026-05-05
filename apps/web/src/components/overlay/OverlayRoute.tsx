@@ -1,5 +1,6 @@
 import { Component, useEffect, useMemo } from "react";
 import type React from "react";
+import type { RefObject } from "react";
 
 import type { OverlayRouteMessage } from "@t3tools/contracts";
 
@@ -10,6 +11,7 @@ import { getOverlayRoute, listOverlayRoutes } from "./overlayRouteRegistry";
 
 interface OverlayRouteProps {
   message: OverlayRouteMessage;
+  anchorRef: RefObject<HTMLDivElement | null>;
   bridge: OverlayBridgeHandle;
 }
 
@@ -47,11 +49,12 @@ class OverlayRouteErrorBoundary extends Component<
   }
 }
 
-export function OverlayRoute({ message, bridge }: OverlayRouteProps) {
+export function OverlayRoute({ message, anchorRef, bridge }: OverlayRouteProps) {
   const controller = useMemo<OverlayRouteController>(
     () => ({
       message,
       bridge,
+      anchorRef,
       submit(value?: unknown) {
         bridge.emitEvent("result", { value });
         bridge.requestDismiss();
@@ -66,7 +69,7 @@ export function OverlayRoute({ message, bridge }: OverlayRouteProps) {
         bridge.requestDismiss();
       },
     }),
-    [bridge, message],
+    [anchorRef, bridge, message],
   );
 
   const RouteComponent = getOverlayRoute(message.routeKey);

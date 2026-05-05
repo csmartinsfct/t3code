@@ -3,6 +3,7 @@ import type React from "react";
 import type { CSSProperties, MouseEvent } from "react";
 
 import type { OverlayRenderMessage } from "@t3tools/contracts";
+import type { OverlayAnchorRect } from "@t3tools/contracts";
 
 import { OverlayContent } from "./OverlayContent";
 
@@ -18,6 +19,18 @@ interface OverlayBridge {
 
 function getBridge(): OverlayBridge | null {
   return (window as Window & { overlayBridge?: OverlayBridge }).overlayBridge ?? null;
+}
+
+function getMessageAnchor(message: OverlayRenderMessage | null): OverlayAnchorRect | null {
+  if (!message) return null;
+  if ("anchor" in message && message.anchor) return message.anchor;
+  if (
+    message.type === "route" &&
+    (message.presentation.kind === "popover" || message.presentation.kind === "menu")
+  ) {
+    return message.presentation.anchor;
+  }
+  return null;
 }
 
 class OverlayErrorBoundary extends Component<
@@ -78,17 +91,18 @@ export function OverlayShell() {
     }
   };
 
-  const anchorStyle: CSSProperties =
-    message && "anchor" in message && message.anchor
-      ? {
-          position: "fixed",
-          left: message.anchor.x,
-          top: message.anchor.y,
-          width: message.anchor.width,
-          height: message.anchor.height,
-          pointerEvents: "none",
-        }
-      : { position: "fixed", left: -9999, top: -9999, width: 0, height: 0, pointerEvents: "none" };
+  const messageAnchor = getMessageAnchor(message);
+
+  const anchorStyle: CSSProperties = messageAnchor
+    ? {
+        position: "fixed",
+        left: messageAnchor.x,
+        top: messageAnchor.y,
+        width: messageAnchor.width,
+        height: messageAnchor.height,
+        pointerEvents: "none",
+      }
+    : { position: "fixed", left: -9999, top: -9999, width: 0, height: 0, pointerEvents: "none" };
 
   return (
     <div
