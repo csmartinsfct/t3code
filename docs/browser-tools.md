@@ -518,7 +518,7 @@ Electron's `WebContentsView` is an OS-level compositor surface that always paint
 
 When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
 
-Most `Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` surfaces still fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). The routed overlay path below is the migration mechanism for exact-UI arbitrary React content; `FileSearchModal` is the first routed `CommandDialog` migration.
+Most `Dialog`, `AlertDialog`, `Sheet`, and `CommandDialog` surfaces still fall back to the suspension system in `embeddedBrowserModalSuspension.tsx` (the browser briefly hides while these are open). The routed overlay path below is the migration mechanism for exact-UI arbitrary React content. Current routed migrations include `FileSearchModal`, Git commit/default-branch confirmation dialogs, and the project-script add/edit/delete dialog.
 
 ### Architecture
 
@@ -680,7 +680,11 @@ Available route wrappers:
 
 These wrappers are intentionally thin: they control open/dismiss semantics and then delegate to the existing UI primitives, preserving styles, focus behavior, escape/outside-click handling, nested overlay behavior, and close buttons. Popover routes get the overlay view's virtual anchor via `OverlayRoutePopoverPopup`, so anchored rich popovers can align to the original trigger rect.
 
-`FileSearchModal` is the first routed `CommandDialog` migration. It keeps the exact command palette component tree, passes recent open tabs as serializable route params because the overlay WebContents cannot see the host WebContents' in-memory file-explorer store, runs fuzzy search inside the overlay through the WebSocket-backed `NativeApi`, and returns the selected relative path to the host so the existing open-file side effect remains host-owned.
+`FileSearchModal` keeps the exact command palette component tree, passes recent open tabs as serializable route params because the overlay WebContents cannot see the host WebContents' in-memory file-explorer store, runs fuzzy search inside the overlay through the WebSocket-backed `NativeApi`, and returns the selected relative path to the host so the existing open-file side effect remains host-owned.
+
+`GitActionsControl` routes the commit dialog, default-branch confirmation dialog, and disabled quick-action tooltip through the same shared dialog/popover content used by the DOM fallback. The overlay route owns local form/file-selection state, then returns a small result payload to the host so the existing git action/toast/progress pipeline remains host-owned. Disabled Git menu-item reasons are represented in the native menu payload as item descriptions when the menu itself renders in the overlay view.
+
+`ProjectScriptsControl` routes the add/edit/delete action dialog through the same editor component used by the DOM fallback. The overlay route owns local form state, icon picking, service row editing, validation, and delete confirmation, then submits a serializable save/delete result back to the host so script persistence and keybinding updates remain host-owned.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 

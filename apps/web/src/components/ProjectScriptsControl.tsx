@@ -17,7 +17,14 @@ import {
   TrashIcon,
   WrenchIcon,
 } from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+import React, {
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   keybindingValueForCommand,
@@ -56,6 +63,8 @@ import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "./ui/menu"
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 
 export const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "play", label: "Play" },
@@ -101,6 +110,7 @@ export interface NewProjectScriptInput {
 }
 
 let nextDraftKey = 0;
+const PROJECT_SCRIPT_EDITOR_OVERLAY_ROUTE_KEY = "project-script-editor";
 
 /** Mutable draft kept in component state while editing. */
 interface ServiceDraft {
@@ -207,18 +217,37 @@ function keybindingFromEvent(event: KeyboardEvent<HTMLInputElement>): string | n
   return parts.join("+");
 }
 
-export default function ProjectScriptsControl({
-  scripts,
+type ProjectScriptEditorResult =
+  | {
+      action: "save";
+      input: NewProjectScriptInput;
+      scriptId?: string | undefined;
+    }
+  | {
+      action: "delete";
+      scriptId: string;
+    };
+
+function ProjectScriptEditorDialog({
+  closeOnSubmit = true,
+  editingScript,
   keybindings,
-  preferredScriptId = null,
-  onRunScript,
-  onAddScript,
-  onUpdateScript,
-  onDeleteScript,
-}: ProjectScriptsControlProps) {
-  const addScriptFormId = React.useId();
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  onDelete,
+  onOpenChange,
+  onSubmit,
+  open,
+  scripts,
+}: {
+  closeOnSubmit?: boolean | undefined;
+  editingScript: ProjectScript | null;
+  keybindings: ResolvedKeybindingsConfig;
+  onDelete: (scriptId: string) => Promise<void> | void;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (result: ProjectScriptEditorResult) => Promise<void> | void;
+  open: boolean;
+  scripts: ProjectScript[];
+}) {
+  const formId = React.useId();
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
@@ -226,20 +255,36 @@ export default function ProjectScriptsControl({
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [serviceDrafts, setServiceDrafts] = useState<ServiceDraft[]>([]);
-  const compositeMode = isCompositeDraft(serviceDrafts);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isEditing = editingScript !== null;
+  const compositeMode = isCompositeDraft(serviceDrafts);
 
-  const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
+  useEffect(() => {
+    if (!open) return;
+    if (editingScript) {
+      setName(editingScript.name);
+      setCommand(editingScript.command ?? "");
+      setIcon(editingScript.icon);
+      setRunOnWorktreeCreate(editingScript.runOnWorktreeCreate);
+      setKeybinding(
+        keybindingValueForCommand(keybindings, commandForProjectScript(editingScript.id)) ?? "",
+      );
+      setServiceDrafts(declaredServicesToDrafts(editingScript.services));
+    } else {
+      setName("");
+      setCommand("");
+      setIcon("play");
+      setRunOnWorktreeCreate(false);
+      setKeybinding("");
+      setServiceDrafts([]);
     }
-    return primaryProjectScript(scripts);
-  }, [preferredScriptId, scripts]);
-  const isEditing = editingScriptId !== null;
-  const dropdownItemClassName =
-    "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
+    setIconPickerOpen(false);
+    setValidationError(null);
+    setDeleteConfirmOpen(false);
+    setIsSubmitting(false);
+  }, [editingScript, keybindings, open]);
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Tab") return;
@@ -253,7 +298,7 @@ export default function ProjectScriptsControl({
     setKeybinding(next);
   };
 
-  const submitAddScript = async (event: FormEvent) => {
+  const submitScript = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedCommand = command.trim();
@@ -279,9 +324,10 @@ export default function ProjectScriptsControl({
     }
 
     setValidationError(null);
+    setIsSubmitting(true);
     try {
       const scriptIdForValidation =
-        editingScriptId ??
+        editingScript?.id ??
         nextProjectScriptId(
           trimmedName,
           scripts.map((script) => script.id),
@@ -290,7 +336,7 @@ export default function ProjectScriptsControl({
         keybinding,
         command: commandForProjectScript(scriptIdForValidation),
       });
-      const payload = {
+      const input = {
         name: trimmedName,
         command: trimmedCommand,
         icon,
@@ -298,55 +344,385 @@ export default function ProjectScriptsControl({
         keybinding: keybindingRule?.key ?? null,
         services: draftsToServices(serviceDrafts),
       } satisfies NewProjectScriptInput;
-      if (editingScriptId) {
-        await onUpdateScript(editingScriptId, payload);
-      } else {
-        await onAddScript(payload);
-      }
-      setDialogOpen(false);
-      setIconPickerOpen(false);
+      await onSubmit({
+        action: "save",
+        input,
+        ...(editingScript ? { scriptId: editingScript.id } : {}),
+      });
+      if (closeOnSubmit) onOpenChange(false);
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : "Failed to save action.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  const confirmDeleteScript = async () => {
+    if (!editingScript) return;
+    setIsSubmitting(true);
+    try {
+      await onDelete(editingScript.id);
+      setDeleteConfirmOpen(false);
+      if (closeOnSubmit) onOpenChange(false);
+    } catch (error) {
+      setDeleteConfirmOpen(false);
+      setValidationError(error instanceof Error ? error.message : "Failed to delete action.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
+            <DialogDescription>
+              Actions are project-scoped commands you can run from the top bar or keybindings.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <form id={formId} className="space-y-4" onSubmit={submitScript}>
+              <ProjectScriptEditorFormFields
+                captureKeybinding={captureKeybinding}
+                command={command}
+                compositeMode={compositeMode}
+                icon={icon}
+                iconPickerOpen={iconPickerOpen}
+                keybinding={keybinding}
+                name={name}
+                runOnWorktreeCreate={runOnWorktreeCreate}
+                serviceDrafts={serviceDrafts}
+                setCommand={setCommand}
+                setIcon={setIcon}
+                setIconPickerOpen={setIconPickerOpen}
+                setName={setName}
+                setRunOnWorktreeCreate={setRunOnWorktreeCreate}
+                setServiceDrafts={setServiceDrafts}
+                validationError={validationError}
+              />
+            </form>
+          </DialogPanel>
+          <DialogFooter>
+            {isEditing && (
+              <Button
+                type="button"
+                variant="destructive-outline"
+                className="mr-auto"
+                disabled={isSubmitting}
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                Delete
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSubmitting}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button form={formId} type="submit" disabled={isSubmitting}>
+              {isEditing ? "Save changes" : "Save action"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete action "{name}"?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" disabled={isSubmitting} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button variant="destructive" disabled={isSubmitting} onClick={confirmDeleteScript}>
+              Delete action
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
+  );
+}
+
+function ProjectScriptEditorFormFields({
+  captureKeybinding,
+  command,
+  compositeMode,
+  icon,
+  iconPickerOpen,
+  keybinding,
+  name,
+  runOnWorktreeCreate,
+  serviceDrafts,
+  setCommand,
+  setIcon,
+  setIconPickerOpen,
+  setName,
+  setRunOnWorktreeCreate,
+  setServiceDrafts,
+  validationError,
+}: {
+  captureKeybinding: (event: KeyboardEvent<HTMLInputElement>) => void;
+  command: string;
+  compositeMode: boolean;
+  icon: ProjectScriptIcon;
+  iconPickerOpen: boolean;
+  keybinding: string;
+  name: string;
+  runOnWorktreeCreate: boolean;
+  serviceDrafts: ServiceDraft[];
+  setCommand: (value: string) => void;
+  setIcon: (value: ProjectScriptIcon) => void;
+  setIconPickerOpen: (value: boolean) => void;
+  setName: (value: string) => void;
+  setRunOnWorktreeCreate: (value: boolean) => void;
+  setServiceDrafts: React.Dispatch<React.SetStateAction<ServiceDraft[]>>;
+  validationError: string | null;
+}) {
+  return (
+    <>
+      <div className="space-y-1.5">
+        <Label htmlFor="script-name">Name</Label>
+        <div className="flex items-center gap-2">
+          <Popover onOpenChange={setIconPickerOpen} open={iconPickerOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="size-9 shrink-0 hover:bg-popover active:bg-popover data-pressed:bg-popover data-pressed:shadow-xs/5 data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]"
+                  aria-label="Choose icon"
+                />
+              }
+            >
+              <ScriptIcon icon={icon} className="size-4.5" />
+            </PopoverTrigger>
+            <PopoverPopup align="start">
+              <div className="grid grid-cols-3 gap-2">
+                {SCRIPT_ICONS.map((entry) => {
+                  const isSelected = entry.id === icon;
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs ${
+                        isSelected
+                          ? "border-primary/70 bg-primary/10"
+                          : "border-border/70 hover:bg-accent/60"
+                      }`}
+                      onClick={() => {
+                        setIcon(entry.id);
+                        setIconPickerOpen(false);
+                      }}
+                    >
+                      <ScriptIcon icon={entry.id} className="size-4" />
+                      <span>{entry.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverPopup>
+          </Popover>
+          <Input
+            id="script-name"
+            autoFocus
+            placeholder="Test"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="script-keybinding">Keybinding</Label>
+        <Input
+          id="script-keybinding"
+          placeholder="Press shortcut"
+          value={keybinding}
+          readOnly
+          onKeyDown={captureKeybinding}
+        />
+        <p className="text-xs text-muted-foreground">
+          Press a shortcut. Use <code>Backspace</code> to clear.
+        </p>
+      </div>
+      {!compositeMode && (
+        <div className="space-y-1.5">
+          <Label htmlFor="script-command">Command</Label>
+          <Textarea
+            id="script-command"
+            placeholder="bun test"
+            value={command}
+            onChange={(event) => setCommand(event.target.value)}
+          />
+        </div>
+      )}
+      <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+        <span>Run automatically on worktree creation</span>
+        <Switch
+          checked={runOnWorktreeCreate}
+          onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
+        />
+      </label>
+
+      <div className="space-y-1.5">
+        <Label>Services</Label>
+        <p className="text-xs text-muted-foreground">
+          Add a CMD to run a service as its own subprocess with a separate log tab.
+        </p>
+        <div className="overflow-hidden rounded-md border border-border/70">
+          {serviceDrafts.length === 0 ? (
+            <button
+              type="button"
+              className="flex w-full items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              onClick={() =>
+                setServiceDrafts((prev) => [
+                  ...prev,
+                  { key: ++nextDraftKey, name: "", command: "" },
+                ])
+              }
+            >
+              <PlusIcon className="size-3" />
+              Add service
+            </button>
+          ) : (
+            <>
+              {serviceDrafts.map((draft, idx) => (
+                <div
+                  key={draft.key}
+                  className={`group flex flex-col gap-1.5 px-2.5 py-2 ${idx > 0 ? "border-t border-border/50" : ""}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      placeholder="Name (e.g. Backend)"
+                      value={draft.name}
+                      className="h-6 min-w-0 flex-1 bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                      onChange={(e) =>
+                        setServiceDrafts((prev) =>
+                          prev.map((d, i) => (i === idx ? { ...d, name: e.target.value } : d)),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground hover:!text-destructive focus-visible:text-muted-foreground"
+                      onClick={() => setServiceDrafts((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      <TrashIcon className="size-3" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pl-1">
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                      Cmd
+                    </span>
+                    <div className="h-4 w-px shrink-0 bg-border/60" />
+                    <input
+                      placeholder="(optional) run as own subprocess — e.g. bun run dev:server"
+                      value={draft.command}
+                      className="h-6 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                      onChange={(e) =>
+                        setServiceDrafts((prev) =>
+                          prev.map((d, i) => (i === idx ? { ...d, command: e.target.value } : d)),
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="flex w-full items-center gap-1.5 border-t border-border/50 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                onClick={() =>
+                  setServiceDrafts((prev) => [
+                    ...prev,
+                    { key: ++nextDraftKey, name: "", command: "" },
+                  ])
+                }
+              >
+                <PlusIcon className="size-2.5" />
+                Add service
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {validationError && <p className="text-sm text-destructive">{validationError}</p>}
+    </>
+  );
+}
+
+export default function ProjectScriptsControl({
+  scripts,
+  keybindings,
+  preferredScriptId = null,
+  onRunScript,
+  onAddScript,
+  onUpdateScript,
+  onDeleteScript,
+}: ProjectScriptsControlProps) {
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const editingScript = editingScriptId
+    ? (scripts.find((script) => script.id === editingScriptId) ?? null)
+    : null;
+
+  const primaryScript = useMemo(() => {
+    if (preferredScriptId) {
+      const preferred = scripts.find((script) => script.id === preferredScriptId);
+      if (preferred) return preferred;
+    }
+    return primaryProjectScript(scripts);
+  }, [preferredScriptId, scripts]);
+  const dropdownItemClassName =
+    "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
+
   const openAddDialog = useCallback(() => {
     setEditingScriptId(null);
-    setName("");
-    setCommand("");
-    setIcon("play");
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(false);
-    setKeybinding("");
-    setServiceDrafts([]);
-    setValidationError(null);
     setDialogOpen(true);
   }, []);
 
-  const openEditDialog = useCallback(
-    (script: ProjectScript) => {
-      setEditingScriptId(script.id);
-      setName(script.name);
-      setCommand(script.command ?? "");
-      setIcon(script.icon);
-      setIconPickerOpen(false);
-      setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-      setKeybinding(
-        keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "",
-      );
-      setServiceDrafts(declaredServicesToDrafts(script.services));
-      setValidationError(null);
-      setDialogOpen(true);
+  const openEditDialog = useCallback((script: ProjectScript) => {
+    setEditingScriptId(script.id);
+    setDialogOpen(true);
+  }, []);
+
+  const handleEditorResult = useCallback(
+    async (result: ProjectScriptEditorResult) => {
+      if (result.action === "delete") {
+        await onDeleteScript(result.scriptId);
+        return;
+      }
+      if (result.scriptId) {
+        await onUpdateScript(result.scriptId, result.input);
+        return;
+      }
+      await onAddScript(result.input);
     },
-    [keybindings],
+    [onAddScript, onDeleteScript, onUpdateScript],
   );
 
-  const confirmDeleteScript = useCallback(() => {
-    if (!editingScriptId) return;
-    setDeleteConfirmOpen(false);
-    setDialogOpen(false);
-    void onDeleteScript(editingScriptId);
-  }, [editingScriptId, onDeleteScript]);
+  const editorRoute = useRoutedOverlaySurface<ProjectScriptEditorResult>({
+    open: dialogOpen,
+    onOpenChange: (open) => {
+      setDialogOpen(open);
+      if (!open) setEditingScriptId(null);
+    },
+    routeKey: PROJECT_SCRIPT_EDITOR_OVERLAY_ROUTE_KEY,
+    params: {
+      editingScriptId,
+      keybindings,
+      scripts,
+    },
+    presentation: { kind: "dialog" },
+    onResult: handleEditorResult,
+  });
 
   const scriptOverlayItems = useMemo<OverlayMenuItem[]>(
     () => [
@@ -486,251 +862,65 @@ export default function ProjectScriptsControl({
         </Button>
       )}
 
-      <Dialog
-        onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setIconPickerOpen(false);
-          }
-        }}
-        onOpenChangeComplete={(open) => {
-          if (open) return;
-          setEditingScriptId(null);
-          setName("");
-          setCommand("");
-          setIcon("play");
-          setRunOnWorktreeCreate(false);
-          setKeybinding("");
-          setServiceDrafts([]);
-          setValidationError(null);
-        }}
-        open={dialogOpen}
-      >
-        <DialogPopup>
-          <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
-            <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            <form id={addScriptFormId} className="space-y-4" onSubmit={submitAddScript}>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-name">Name</Label>
-                <div className="flex items-center gap-2">
-                  <Popover onOpenChange={setIconPickerOpen} open={iconPickerOpen}>
-                    <PopoverTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="size-9 shrink-0 hover:bg-popover active:bg-popover data-pressed:bg-popover data-pressed:shadow-xs/5 data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]"
-                          aria-label="Choose icon"
-                        />
-                      }
-                    >
-                      <ScriptIcon icon={icon} className="size-4.5" />
-                    </PopoverTrigger>
-                    <PopoverPopup align="start">
-                      <div className="grid grid-cols-3 gap-2">
-                        {SCRIPT_ICONS.map((entry) => {
-                          const isSelected = entry.id === icon;
-                          return (
-                            <button
-                              key={entry.id}
-                              type="button"
-                              className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs ${
-                                isSelected
-                                  ? "border-primary/70 bg-primary/10"
-                                  : "border-border/70 hover:bg-accent/60"
-                              }`}
-                              onClick={() => {
-                                setIcon(entry.id);
-                                setIconPickerOpen(false);
-                              }}
-                            >
-                              <ScriptIcon icon={entry.id} className="size-4" />
-                              <span>{entry.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </PopoverPopup>
-                  </Popover>
-                  <Input
-                    id="script-name"
-                    autoFocus
-                    placeholder="Test"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-keybinding">Keybinding</Label>
-                <Input
-                  id="script-keybinding"
-                  placeholder="Press shortcut"
-                  value={keybinding}
-                  readOnly
-                  onKeyDown={captureKeybinding}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Press a shortcut. Use <code>Backspace</code> to clear.
-                </p>
-              </div>
-              {!compositeMode && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="script-command">Command</Label>
-                  <Textarea
-                    id="script-command"
-                    placeholder="bun test"
-                    value={command}
-                    onChange={(event) => setCommand(event.target.value)}
-                  />
-                </div>
-              )}
-              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
-                <span>Run automatically on worktree creation</span>
-                <Switch
-                  checked={runOnWorktreeCreate}
-                  onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
-                />
-              </label>
-
-              {/* Services */}
-              <div className="space-y-1.5">
-                <Label>Services</Label>
-                <p className="text-xs text-muted-foreground">
-                  Add a CMD to run a service as its own subprocess with a separate log tab.
-                </p>
-                <div className="overflow-hidden rounded-md border border-border/70">
-                  {serviceDrafts.length === 0 ? (
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-                      onClick={() =>
-                        setServiceDrafts((prev) => [
-                          ...prev,
-                          { key: ++nextDraftKey, name: "", command: "" },
-                        ])
-                      }
-                    >
-                      <PlusIcon className="size-3" />
-                      Add service
-                    </button>
-                  ) : (
-                    <>
-                      {serviceDrafts.map((draft, idx) => (
-                        <div
-                          key={draft.key}
-                          className={`group flex flex-col gap-1.5 px-2.5 py-2 ${idx > 0 ? "border-t border-border/50" : ""}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              placeholder="Name (e.g. Backend)"
-                              value={draft.name}
-                              className="h-6 min-w-0 flex-1 bg-transparent text-xs font-medium text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                              onChange={(e) =>
-                                setServiceDrafts((prev) =>
-                                  prev.map((d, i) =>
-                                    i === idx ? { ...d, name: e.target.value } : d,
-                                  ),
-                                )
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground hover:!text-destructive focus-visible:text-muted-foreground"
-                              onClick={() =>
-                                setServiceDrafts((prev) => prev.filter((_, i) => i !== idx))
-                              }
-                            >
-                              <TrashIcon className="size-3" />
-                            </button>
-                          </div>
-                          <div className="flex items-center gap-2 pl-1">
-                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                              Cmd
-                            </span>
-                            <div className="h-4 w-px shrink-0 bg-border/60" />
-                            <input
-                              placeholder="(optional) run as own subprocess — e.g. bun run dev:server"
-                              value={draft.command}
-                              className="h-6 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
-                              onChange={(e) =>
-                                setServiceDrafts((prev) =>
-                                  prev.map((d, i) =>
-                                    i === idx ? { ...d, command: e.target.value } : d,
-                                  ),
-                                )
-                              }
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-1.5 border-t border-border/50 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-                        onClick={() =>
-                          setServiceDrafts((prev) => [
-                            ...prev,
-                            { key: ++nextDraftKey, name: "", command: "" },
-                          ])
-                        }
-                      >
-                        <PlusIcon className="size-2.5" />
-                        Add service
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {validationError && <p className="text-sm text-destructive">{validationError}</p>}
-            </form>
-          </DialogPanel>
-          <DialogFooter>
-            {isEditing && (
-              <Button
-                type="button"
-                variant="destructive-outline"
-                className="mr-auto"
-                onClick={() => setDeleteConfirmOpen(true)}
-              >
-                Delete
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setDialogOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button form={addScriptFormId} type="submit">
-              {isEditing ? "Save changes" : "Save action"}
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
-
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete action "{name}"?</AlertDialogTitle>
-            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={confirmDeleteScript}>
-              Delete action
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <ProjectScriptEditorDialog
+        editingScript={editingScript}
+        keybindings={keybindings}
+        onDelete={(scriptId) => handleEditorResult({ action: "delete", scriptId })}
+        onOpenChange={editorRoute.onDomOpenChange}
+        onSubmit={handleEditorResult}
+        open={editorRoute.domOpen}
+        scripts={scripts}
+      />
     </>
   );
+}
+
+registerOverlayRoute<{
+  editingScriptId?: unknown;
+  keybindings?: unknown;
+  scripts?: unknown;
+}>(
+  PROJECT_SCRIPT_EDITOR_OVERLAY_ROUTE_KEY,
+  function ProjectScriptEditorOverlayRoute({ message, controller }) {
+    const scripts = readProjectScriptsParam(message.params.scripts);
+    const keybindings = readKeybindingsParam(message.params.keybindings);
+    const editingScriptId =
+      typeof message.params.editingScriptId === "string" ? message.params.editingScriptId : null;
+    const editingScript = editingScriptId
+      ? (scripts.find((script) => script.id === editingScriptId) ?? null)
+      : null;
+
+    return (
+      <ProjectScriptEditorDialog
+        closeOnSubmit={false}
+        editingScript={editingScript}
+        keybindings={keybindings}
+        onDelete={(scriptId) => controller.submit({ action: "delete", scriptId })}
+        onOpenChange={(open) => {
+          if (!open) controller.cancel("dismissed");
+        }}
+        onSubmit={(result) => controller.submit(result)}
+        open
+        scripts={scripts}
+      />
+    );
+  },
+);
+
+function readProjectScriptsParam(value: unknown): ProjectScript[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((script): script is ProjectScript => {
+    if (!script || typeof script !== "object") return false;
+    const candidate = script as { id?: unknown; name?: unknown; icon?: unknown };
+    return (
+      typeof candidate.id === "string" &&
+      typeof candidate.name === "string" &&
+      typeof candidate.icon === "string"
+    );
+  });
+}
+
+function readKeybindingsParam(value: unknown): ResolvedKeybindingsConfig {
+  if (!Array.isArray(value)) return [];
+  return value as ResolvedKeybindingsConfig;
 }

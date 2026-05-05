@@ -2,6 +2,7 @@ import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
   OverlayMenuItem,
+  OverlayAnchorRect,
   GitStackedAction,
   GitStatusResult,
   ThreadId,
@@ -54,6 +55,13 @@ import {
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { readNativeApi } from "~/nativeApi";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import {
+  OverlayRouteDialog,
+  OverlayRoutePopover,
+  OverlayRoutePopoverPopup,
+  useRoutedOverlaySurface,
+} from "~/routedOverlayAdapters";
 import { useStore } from "~/store";
 
 interface GitActionsControlProps {
@@ -187,6 +195,32 @@ function getMenuActionDisabledReason({
 const COMMIT_DIALOG_TITLE = "Commit changes";
 const COMMIT_DIALOG_DESCRIPTION =
   "Review and confirm your commit. Leave the message blank to auto-generate one.";
+const GIT_COMMIT_OVERLAY_ROUTE_KEY = "git-commit-dialog";
+const GIT_DEFAULT_BRANCH_OVERLAY_ROUTE_KEY = "git-default-branch-confirm";
+const GIT_TOOLTIP_OVERLAY_ROUTE_KEY = "git-tooltip";
+const ZERO_OVERLAY_ANCHOR: OverlayAnchorRect = { x: 0, y: 0, width: 0, height: 0 };
+
+type GitCommitFile = GitStatusResult["workingTree"]["files"][number];
+
+interface GitCommitDialogResult {
+  commitMessage?: string | undefined;
+  filePaths?: string[] | undefined;
+  featureBranch?: boolean | undefined;
+}
+
+interface GitCommitDialogParams {
+  branch: string | null;
+  isDefaultBranch: boolean;
+  files: readonly GitCommitFile[];
+}
+
+type GitDefaultBranchDialogResult = "abort" | "continue" | "feature-branch";
+
+interface GitDefaultBranchDialogParams {
+  title: string;
+  description: string;
+  continueLabel: string;
+}
 
 function GitActionItemIcon({ icon }: { icon: GitActionIconName }) {
   if (icon === "commit") return <GitCommitIcon />;
@@ -215,6 +249,262 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
   return <InfoIcon className={iconClassName} />;
 }
 
+function GitCommitDialogContent({
+  branch,
+  files,
+  isDefaultBranch,
+  onOpenChange,
+  onOpenFile,
+  onSubmit,
+}: GitCommitDialogParams & {
+  onOpenChange: (open: boolean) => void;
+  onOpenFile: (filePath: string) => void;
+  onSubmit: (result: GitCommitDialogResult) => void;
+}) {
+  const [commitMessage, setCommitMessage] = useState("");
+  const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
+  const [isEditingFiles, setIsEditingFiles] = useState(false);
+  const selectedFiles = files.filter((f) => !excludedFiles.has(f.path));
+  const allSelected = excludedFiles.size === 0;
+  const noneSelected = selectedFiles.length === 0;
+
+  const submit = (featureBranch: boolean) => {
+    const trimmedMessage = commitMessage.trim();
+    onSubmit({
+      ...(trimmedMessage ? { commitMessage: trimmedMessage } : {}),
+      ...(!allSelected ? { filePaths: selectedFiles.map((file) => file.path) } : {}),
+      ...(featureBranch ? { featureBranch: true } : {}),
+    });
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
+        <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
+      </DialogHeader>
+      <DialogPanel className="space-y-4">
+        <div className="space-y-3 rounded-lg border border-input bg-muted/40 p-3 text-xs">
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
+            <span className="text-muted-foreground">Branch</span>
+            <span className="flex items-center justify-between gap-2">
+              <span className="font-medium">{branch ?? "(detached HEAD)"}</span>
+              {isDefaultBranch && (
+                <span className="text-right text-warning text-xs">Warning: default branch</span>
+              )}
+            </span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {isEditingFiles && files.length > 0 && (
+                  <Checkbox
+                    checked={allSelected}
+                    indeterminate={!allSelected && !noneSelected}
+                    onCheckedChange={() => {
+                      setExcludedFiles(
+                        allSelected ? new Set(files.map((file) => file.path)) : new Set(),
+                      );
+                    }}
+                  />
+                )}
+                <span className="text-muted-foreground">Files</span>
+                {!allSelected && !isEditingFiles && (
+                  <span className="text-muted-foreground">
+                    ({selectedFiles.length} of {files.length})
+                  </span>
+                )}
+              </div>
+              {files.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setIsEditingFiles((prev) => !prev)}
+                >
+                  {isEditingFiles ? "Done" : "Edit"}
+                </Button>
+              )}
+            </div>
+            {files.length === 0 ? (
+              <p className="font-medium">none</p>
+            ) : (
+              <div className="space-y-2">
+                <ScrollArea className="h-44 rounded-md border border-input bg-background">
+                  <div className="space-y-1 p-1">
+                    {files.map((file) => {
+                      const isExcluded = excludedFiles.has(file.path);
+                      return (
+                        <div
+                          key={file.path}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-xs transition-colors hover:bg-accent/50"
+                        >
+                          {isEditingFiles && (
+                            <Checkbox
+                              checked={!excludedFiles.has(file.path)}
+                              onCheckedChange={() => {
+                                setExcludedFiles((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(file.path)) {
+                                    next.delete(file.path);
+                                  } else {
+                                    next.add(file.path);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            className="flex flex-1 items-center justify-between gap-3 text-left truncate"
+                            onClick={() => onOpenFile(file.path)}
+                          >
+                            <span
+                              className={`truncate${isExcluded ? " text-muted-foreground" : ""}`}
+                            >
+                              {file.path}
+                            </span>
+                            <span className="shrink-0">
+                              {isExcluded ? (
+                                <span className="text-muted-foreground">Excluded</span>
+                              ) : (
+                                <>
+                                  <span className="text-success">+{file.insertions}</span>
+                                  <span className="text-muted-foreground"> / </span>
+                                  <span className="text-destructive">-{file.deletions}</span>
+                                </>
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+                <div className="flex justify-end font-mono">
+                  <span className="text-success">
+                    +{selectedFiles.reduce((sum, file) => sum + file.insertions, 0)}
+                  </span>
+                  <span className="text-muted-foreground"> / </span>
+                  <span className="text-destructive">
+                    -{selectedFiles.reduce((sum, file) => sum + file.deletions, 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs font-medium">Commit message (optional)</p>
+          <Textarea
+            value={commitMessage}
+            onChange={(event) => setCommitMessage(event.target.value)}
+            placeholder="Leave empty to auto-generate"
+            size="sm"
+          />
+        </div>
+      </DialogPanel>
+      <DialogFooter>
+        <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button variant="outline" size="sm" disabled={noneSelected} onClick={() => submit(true)}>
+          Commit on new branch
+        </Button>
+        <Button size="sm" disabled={noneSelected} onClick={() => submit(false)}>
+          Commit
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+function GitCommitDialog({
+  open,
+  onOpenChange,
+  ...contentProps
+}: GitCommitDialogParams & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onOpenFile: (filePath: string) => void;
+  onSubmit: (result: GitCommitDialogResult) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPopup>
+        <GitCommitDialogContent onOpenChange={onOpenChange} {...contentProps} />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function GitDefaultBranchDialogContent({
+  continueLabel,
+  description,
+  onOpenChange,
+  onSubmit,
+  title,
+}: GitDefaultBranchDialogParams & {
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (result: GitDefaultBranchDialogResult) => void;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>{description}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            onSubmit("abort");
+            onOpenChange(false);
+          }}
+        >
+          Abort
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => onSubmit("continue")}>
+          {continueLabel}
+        </Button>
+        <Button size="sm" onClick={() => onSubmit("feature-branch")}>
+          Checkout feature branch & continue
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+function GitDefaultBranchDialog({
+  open,
+  onOpenChange,
+  ...contentProps
+}: GitDefaultBranchDialogParams & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (result: GitDefaultBranchDialogResult) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPopup className="max-w-xl">
+        <GitDefaultBranchDialogContent onOpenChange={onOpenChange} {...contentProps} />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function rectForElement(element: HTMLElement | null): OverlayAnchorRect | null {
+  if (!element) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
 export default function GitActionsControl({
   gitCwd,
   multiRepoStatus,
@@ -230,11 +520,12 @@ export default function GitActionsControl({
   const setThreadBranch = useStore((store) => store.setThreadBranch);
   const queryClient = useQueryClient();
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
-  const [dialogCommitMessage, setDialogCommitMessage] = useState("");
-  const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set());
-  const [isEditingFiles, setIsEditingFiles] = useState(false);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
+  const quickActionDisabledButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [quickActionTooltipOpen, setQuickActionTooltipOpen] = useState(false);
+  const [quickActionTooltipAnchor, setQuickActionTooltipAnchor] =
+    useState<OverlayAnchorRect | null>(null);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
   let runGitActionWithToast: (input: RunGitActionWithToastInput) => Promise<void>;
 
@@ -303,9 +594,6 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
-  const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
-  const allSelected = excludedFiles.size === 0;
-  const noneSelected = selectedFiles.length === 0;
 
   const initMutation = useMutation(gitInitMutationOptions({ cwd: gitCwd, queryClient }));
 
@@ -650,7 +938,7 @@ export default function GitActionsControl({
     },
   );
 
-  const continuePendingDefaultBranchAction = () => {
+  const continuePendingDefaultBranchAction = useCallback(() => {
     if (!pendingDefaultBranchAction) return;
     const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
@@ -661,9 +949,9 @@ export default function GitActionsControl({
       ...(filePaths ? { filePaths } : {}),
       skipDefaultBranchPrompt: true,
     });
-  };
+  }, [pendingDefaultBranchAction, runGitActionWithToast]);
 
-  const checkoutFeatureBranchAndContinuePendingAction = () => {
+  const checkoutFeatureBranchAndContinuePendingAction = useCallback(() => {
     if (!pendingDefaultBranchAction) return;
     const { action, commitMessage, onConfirmed, filePaths } = pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
@@ -675,25 +963,7 @@ export default function GitActionsControl({
       featureBranch: true,
       skipDefaultBranchPrompt: true,
     });
-  };
-
-  const runDialogActionOnNewBranch = () => {
-    if (!isCommitDialogOpen) return;
-    const commitMessage = dialogCommitMessage.trim();
-
-    setIsCommitDialogOpen(false);
-    setDialogCommitMessage("");
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-
-    void runGitActionWithToast({
-      action: "commit",
-      ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
-      featureBranch: true,
-      skipDefaultBranchPrompt: true,
-    });
-  };
+  }, [pendingDefaultBranchAction, runGitActionWithToast]);
 
   const runQuickAction = () => {
     if (quickAction.kind === "open_pr") {
@@ -750,26 +1020,10 @@ export default function GitActionsControl({
         void runGitActionWithToast({ action: "create_pr" });
         return;
       }
-      setExcludedFiles(new Set());
-      setIsEditingFiles(false);
       setIsCommitDialogOpen(true);
     },
     [openExistingPr, runGitActionWithToast],
   );
-
-  const runDialogAction = () => {
-    if (!isCommitDialogOpen) return;
-    const commitMessage = dialogCommitMessage.trim();
-    setIsCommitDialogOpen(false);
-    setDialogCommitMessage("");
-    setExcludedFiles(new Set());
-    setIsEditingFiles(false);
-    void runGitActionWithToast({
-      action: "commit",
-      ...(commitMessage ? { commitMessage } : {}),
-      ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
-    });
-  };
 
   const openChangedFileInEditor = useCallback(
     (filePath: string) => {
@@ -794,6 +1048,82 @@ export default function GitActionsControl({
     },
     [gitCwd, threadToastData],
   );
+
+  const runCommitDialogResult = useCallback(
+    (result: GitCommitDialogResult) => {
+      void runGitActionWithToast({
+        action: "commit",
+        ...(result.commitMessage ? { commitMessage: result.commitMessage } : {}),
+        ...(result.filePaths ? { filePaths: result.filePaths } : {}),
+        ...(result.featureBranch ? { featureBranch: true, skipDefaultBranchPrompt: true } : {}),
+      });
+    },
+    [runGitActionWithToast],
+  );
+
+  const handleDefaultBranchDialogResult = useCallback(
+    (result: GitDefaultBranchDialogResult) => {
+      if (result === "abort") {
+        setPendingDefaultBranchAction(null);
+        return;
+      }
+      if (result === "feature-branch") {
+        checkoutFeatureBranchAndContinuePendingAction();
+        return;
+      }
+      continuePendingDefaultBranchAction();
+    },
+    [checkoutFeatureBranchAndContinuePendingAction, continuePendingDefaultBranchAction],
+  );
+
+  const commitDialogRoute = useRoutedOverlaySurface<GitCommitDialogResult>({
+    open: isCommitDialogOpen,
+    onOpenChange: setIsCommitDialogOpen,
+    routeKey: GIT_COMMIT_OVERLAY_ROUTE_KEY,
+    params: {
+      branch: gitStatusForActions?.branch ?? null,
+      files: allFiles,
+      isDefaultBranch,
+    },
+    ...(gitCwd ? { context: { cwd: gitCwd } } : {}),
+    presentation: { kind: "dialog" },
+    onResult: runCommitDialogResult,
+  });
+
+  const defaultBranchDialogParams: GitDefaultBranchDialogParams = {
+    title: pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?",
+    description: pendingDefaultBranchActionCopy?.description ?? "",
+    continueLabel: pendingDefaultBranchActionCopy?.continueLabel ?? "Continue",
+  };
+
+  const defaultBranchDialogRoute = useRoutedOverlaySurface<GitDefaultBranchDialogResult>({
+    open: pendingDefaultBranchAction !== null,
+    onOpenChange: (open) => {
+      if (!open) setPendingDefaultBranchAction(null);
+    },
+    routeKey: GIT_DEFAULT_BRANCH_OVERLAY_ROUTE_KEY,
+    params: { ...defaultBranchDialogParams },
+    presentation: { kind: "dialog" },
+    onResult: handleDefaultBranchDialogResult,
+  });
+
+  const updateQuickActionTooltipAnchor = useCallback(() => {
+    setQuickActionTooltipAnchor(rectForElement(quickActionDisabledButtonRef.current));
+  }, []);
+
+  const quickActionTooltipRoute = useRoutedOverlaySurface<void>({
+    open: Boolean(quickActionDisabledReason && quickActionTooltipOpen && quickActionTooltipAnchor),
+    onOpenChange: setQuickActionTooltipOpen,
+    routeKey: GIT_TOOLTIP_OVERLAY_ROUTE_KEY,
+    params: { text: quickActionDisabledReason ?? "" },
+    presentation: {
+      kind: "popover",
+      anchor: quickActionTooltipAnchor ?? ZERO_OVERLAY_ANCHOR,
+      side: "bottom",
+      align: "start",
+    },
+    enabled: quickActionTooltipAnchor !== null,
+  });
 
   const gitOverlayItems = useMemo<OverlayMenuItem[]>(() => {
     const items: OverlayMenuItem[] = gitActionMenuItems.map((item) => {
@@ -903,13 +1233,22 @@ export default function GitActionsControl({
       ) : (
         <Group aria-label="Git actions" className="shrink-0">
           {quickActionDisabledReason ? (
-            <Popover>
+            <Popover
+              open={quickActionTooltipRoute.domOpen}
+              onOpenChange={(open) => {
+                if (open) updateQuickActionTooltipAnchor();
+                quickActionTooltipRoute.onDomOpenChange(open);
+              }}
+            >
               <PopoverTrigger
                 openOnHover
                 render={
                   <Button
                     aria-disabled="true"
                     className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
+                    onFocusCapture={updateQuickActionTooltipAnchor}
+                    onMouseOverCapture={updateQuickActionTooltipAnchor}
+                    ref={quickActionDisabledButtonRef}
                     size="xs"
                     variant="outline"
                   />
@@ -1047,201 +1386,148 @@ export default function GitActionsControl({
         </Group>
       )}
 
-      <Dialog
-        open={isCommitDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            setIsCommitDialogOpen(false);
-            setDialogCommitMessage("");
-            setExcludedFiles(new Set());
-            setIsEditingFiles(false);
-          }
+      <GitCommitDialog
+        open={commitDialogRoute.domOpen}
+        onOpenChange={commitDialogRoute.onDomOpenChange}
+        branch={gitStatusForActions?.branch ?? null}
+        files={allFiles}
+        isDefaultBranch={isDefaultBranch}
+        onOpenFile={openChangedFileInEditor}
+        onSubmit={(result) => {
+          runCommitDialogResult(result);
+          setIsCommitDialogOpen(false);
         }}
-      >
-        <DialogPopup>
-          <DialogHeader>
-            <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
-            <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="space-y-3 rounded-lg border border-input bg-muted/40 p-3 text-xs">
-              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
-                <span className="text-muted-foreground">Branch</span>
-                <span className="flex items-center justify-between gap-2">
-                  <span className="font-medium">
-                    {gitStatusForActions?.branch ?? "(detached HEAD)"}
-                  </span>
-                  {isDefaultBranch && (
-                    <span className="text-right text-warning text-xs">Warning: default branch</span>
-                  )}
-                </span>
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {isEditingFiles && allFiles.length > 0 && (
-                      <Checkbox
-                        checked={allSelected}
-                        indeterminate={!allSelected && !noneSelected}
-                        onCheckedChange={() => {
-                          setExcludedFiles(
-                            allSelected ? new Set(allFiles.map((f) => f.path)) : new Set(),
-                          );
-                        }}
-                      />
-                    )}
-                    <span className="text-muted-foreground">Files</span>
-                    {!allSelected && !isEditingFiles && (
-                      <span className="text-muted-foreground">
-                        ({selectedFiles.length} of {allFiles.length})
-                      </span>
-                    )}
-                  </div>
-                  {allFiles.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setIsEditingFiles((prev) => !prev)}
-                    >
-                      {isEditingFiles ? "Done" : "Edit"}
-                    </Button>
-                  )}
-                </div>
-                {!gitStatusForActions || allFiles.length === 0 ? (
-                  <p className="font-medium">none</p>
-                ) : (
-                  <div className="space-y-2">
-                    <ScrollArea className="h-44 rounded-md border border-input bg-background">
-                      <div className="space-y-1 p-1">
-                        {allFiles.map((file) => {
-                          const isExcluded = excludedFiles.has(file.path);
-                          return (
-                            <div
-                              key={file.path}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-xs transition-colors hover:bg-accent/50"
-                            >
-                              {isEditingFiles && (
-                                <Checkbox
-                                  checked={!excludedFiles.has(file.path)}
-                                  onCheckedChange={() => {
-                                    setExcludedFiles((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(file.path)) {
-                                        next.delete(file.path);
-                                      } else {
-                                        next.add(file.path);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="flex flex-1 items-center justify-between gap-3 text-left truncate"
-                                onClick={() => openChangedFileInEditor(file.path)}
-                              >
-                                <span
-                                  className={`truncate${isExcluded ? " text-muted-foreground" : ""}`}
-                                >
-                                  {file.path}
-                                </span>
-                                <span className="shrink-0">
-                                  {isExcluded ? (
-                                    <span className="text-muted-foreground">Excluded</span>
-                                  ) : (
-                                    <>
-                                      <span className="text-success">+{file.insertions}</span>
-                                      <span className="text-muted-foreground"> / </span>
-                                      <span className="text-destructive">-{file.deletions}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </ScrollArea>
-                    <div className="flex justify-end font-mono">
-                      <span className="text-success">
-                        +{selectedFiles.reduce((sum, f) => sum + f.insertions, 0)}
-                      </span>
-                      <span className="text-muted-foreground"> / </span>
-                      <span className="text-destructive">
-                        -{selectedFiles.reduce((sum, f) => sum + f.deletions, 0)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-medium">Commit message (optional)</p>
-              <Textarea
-                value={dialogCommitMessage}
-                onChange={(event) => setDialogCommitMessage(event.target.value)}
-                placeholder="Leave empty to auto-generate"
-                size="sm"
-              />
-            </div>
-          </DialogPanel>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setIsCommitDialogOpen(false);
-                setDialogCommitMessage("");
-                setExcludedFiles(new Set());
-                setIsEditingFiles(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={noneSelected}
-              onClick={runDialogActionOnNewBranch}
-            >
-              Commit on new branch
-            </Button>
-            <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
-              Commit
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
+      />
 
-      <Dialog
-        open={pendingDefaultBranchAction !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDefaultBranchAction(null);
-          }
-        }}
-      >
-        <DialogPopup className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>
-              {pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?"}
-            </DialogTitle>
-            <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setPendingDefaultBranchAction(null)}>
-              Abort
-            </Button>
-            <Button variant="outline" size="sm" onClick={continuePendingDefaultBranchAction}>
-              {pendingDefaultBranchActionCopy?.continueLabel ?? "Continue"}
-            </Button>
-            <Button size="sm" onClick={checkoutFeatureBranchAndContinuePendingAction}>
-              Checkout feature branch & continue
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
+      <GitDefaultBranchDialog
+        open={defaultBranchDialogRoute.domOpen}
+        onOpenChange={defaultBranchDialogRoute.onDomOpenChange}
+        {...defaultBranchDialogParams}
+        onSubmit={handleDefaultBranchDialogResult}
+      />
     </>
   );
+}
+
+registerOverlayRoute<{
+  branch?: unknown;
+  files?: unknown;
+  isDefaultBranch?: unknown;
+}>(GIT_COMMIT_OVERLAY_ROUTE_KEY, function GitCommitOverlayRoute({ message, controller }) {
+  const cwd = message.context?.cwd;
+  const params = readGitCommitDialogParams(message.params);
+
+  const openFile = useCallback(
+    (filePath: string) => {
+      const api = readNativeApi();
+      if (!api || !cwd) {
+        toastManager.add({
+          type: "error",
+          title: "Editor opening is unavailable.",
+        });
+        return;
+      }
+      const target = resolvePathLinkTarget(filePath, cwd);
+      void openInPreferredEditor(api, target).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Unable to open file",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      });
+    },
+    [cwd],
+  );
+
+  return (
+    <OverlayRouteDialog>
+      <DialogPopup>
+        <GitCommitDialogContent
+          {...params}
+          onOpenChange={(open) => {
+            if (!open) controller.cancel("dismissed");
+          }}
+          onOpenFile={openFile}
+          onSubmit={(result) => controller.submit(result)}
+        />
+      </DialogPopup>
+    </OverlayRouteDialog>
+  );
+});
+
+registerOverlayRoute<{
+  continueLabel?: unknown;
+  description?: unknown;
+  title?: unknown;
+}>(
+  GIT_DEFAULT_BRANCH_OVERLAY_ROUTE_KEY,
+  function GitDefaultBranchOverlayRoute({ message, controller }) {
+    const params = readGitDefaultBranchDialogParams(message.params);
+
+    return (
+      <OverlayRouteDialog>
+        <DialogPopup className="max-w-xl">
+          <GitDefaultBranchDialogContent
+            {...params}
+            onOpenChange={() => undefined}
+            onSubmit={(result) => controller.submit(result)}
+          />
+        </DialogPopup>
+      </OverlayRouteDialog>
+    );
+  },
+);
+
+registerOverlayRoute<{
+  text?: unknown;
+}>(GIT_TOOLTIP_OVERLAY_ROUTE_KEY, function GitTooltipOverlayRoute({ message }) {
+  const text = typeof message.params.text === "string" ? message.params.text : "";
+
+  return (
+    <OverlayRoutePopover>
+      <OverlayRoutePopoverPopup tooltipStyle side="bottom" align="start">
+        {text}
+      </OverlayRoutePopoverPopup>
+    </OverlayRoutePopover>
+  );
+});
+
+function readGitCommitDialogParams(params: Record<string, unknown>): GitCommitDialogParams {
+  return {
+    branch: typeof params.branch === "string" ? params.branch : null,
+    files: readGitCommitFilesParam(params.files),
+    isDefaultBranch: params.isDefaultBranch === true,
+  };
+}
+
+function readGitCommitFilesParam(value: unknown): GitCommitFile[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const file = entry as { deletions?: unknown; insertions?: unknown; path?: unknown };
+    if (
+      typeof file.path !== "string" ||
+      typeof file.insertions !== "number" ||
+      typeof file.deletions !== "number"
+    ) {
+      return [];
+    }
+    return [
+      {
+        path: file.path,
+        insertions: file.insertions,
+        deletions: file.deletions,
+      },
+    ];
+  });
+}
+
+function readGitDefaultBranchDialogParams(
+  params: Record<string, unknown>,
+): GitDefaultBranchDialogParams {
+  return {
+    title: typeof params.title === "string" ? params.title : "Run action on default branch?",
+    description: typeof params.description === "string" ? params.description : "",
+    continueLabel: typeof params.continueLabel === "string" ? params.continueLabel : "Continue",
+  };
 }
