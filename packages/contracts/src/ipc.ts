@@ -174,6 +174,7 @@ import type {
   OrchestrationStartRunInput,
   ProviderKind,
 } from "./orchestration";
+import type { ProjectId, ThreadId } from "./baseSchemas";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
 
@@ -470,7 +471,39 @@ export interface OverlayImagePreviewMessage {
   initialIndex: number;
 }
 
-// Phase 2 placeholders — defined in contracts now so the union is complete.
+export interface OverlayRouteContext {
+  projectId?: ProjectId | undefined;
+  threadId?: ThreadId | undefined;
+  cwd?: string | undefined;
+}
+
+export type OverlayRoutePresentation =
+  | {
+      kind: "dialog" | "alert-dialog" | "command-dialog";
+    }
+  | {
+      kind: "sheet";
+      side: "left" | "right" | "top" | "bottom";
+    }
+  | {
+      kind: "popover" | "menu";
+      anchor: OverlayAnchorRect;
+      side?: "top" | "bottom" | "left" | "right" | undefined;
+      align?: "start" | "center" | "end" | undefined;
+    };
+
+export interface OverlayRouteMessage {
+  type: "route";
+  routeKey: string;
+  params: Record<string, unknown>;
+  context?: OverlayRouteContext | undefined;
+  presentation: OverlayRoutePresentation;
+}
+
+// Legacy Phase 2 placeholders. New arbitrary-content work should prefer the
+// generic `route` message so all routed overlays share one lifecycle/result
+// protocol, regardless of whether they present as a dialog, sheet, command
+// dialog, popover, or rich menu.
 export interface OverlayDialogMessage {
   type: "dialog";
   dialogKey: string;
@@ -499,6 +532,7 @@ export type OverlayRenderMessage =
   | OverlayComposerCommandMessage
   | OverlayAlertDialogMessage
   | OverlayImagePreviewMessage
+  | OverlayRouteMessage
   | OverlayDialogMessage
   | OverlaySheetMessage
   | OverlayCommandMessage;

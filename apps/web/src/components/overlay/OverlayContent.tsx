@@ -8,6 +8,7 @@ import { OverlayCombobox } from "./OverlayCombobox";
 import { OverlayComposerCommand } from "./OverlayComposerCommand";
 import { OverlayImagePreview } from "./OverlayImagePreview";
 import { OverlayMenu } from "./OverlayMenu";
+import { OverlayRoute } from "./OverlayRoute";
 import { OverlaySelect } from "./OverlaySelect";
 import type { OverlayBridgeHandle } from "./overlayTypes";
 
@@ -34,6 +35,8 @@ export function OverlayContent({ message, anchorRef, bridge }: OverlayContentPro
       return <OverlayAlertDialog message={message} bridge={bridge} />;
     case "image-preview":
       return <OverlayImagePreview message={message} bridge={bridge} />;
+    case "route":
+      return <OverlayRoute message={message} bridge={bridge} />;
     // Phase 2 types — not yet implemented.
     case "dialog":
     case "sheet":

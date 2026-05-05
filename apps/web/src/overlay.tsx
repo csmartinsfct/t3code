@@ -4,20 +4,21 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import { OverlayShell } from "./components/overlay/OverlayShell";
+import { createWsNativeApi } from "./wsNativeApi";
 
 // Apply theme immediately before first render to avoid any flash.
-const config = (
-  window as Window & { overlayBridge?: { getConfig(): { theme: string } } }
-).overlayBridge?.getConfig();
+const config = window.overlayBridge?.getConfig();
 const theme = config?.theme ?? "dark";
 document.documentElement.classList.toggle("dark", theme === "dark");
 
+// Routed overlays need the same NativeApi shape as the host app. The overlay
+// WebContentsView intentionally does not expose the full desktopBridge, so this
+// API is backed by the WebSocket RPC client and the serverUrl from overlay
+// config.
+window.nativeApi = createWsNativeApi();
+
 // Keep in sync with the main app's theme changes.
-(
-  window as Window & {
-    overlayBridge?: { onThemeChange(h: (t: "light" | "dark") => void): () => void };
-  }
-).overlayBridge?.onThemeChange((t) => {
+window.overlayBridge?.onThemeChange((t) => {
   document.documentElement.classList.toggle("dark", t === "dark");
 });
 

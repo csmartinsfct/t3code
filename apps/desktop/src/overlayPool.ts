@@ -246,6 +246,7 @@ export const OVERLAY_THEME_CHANGE_CHANNEL = "overlay:theme-change";
 
 export function registerOverlayIpcHandlers(
   getWindow: (event: Electron.IpcMainInvokeEvent) => BrowserWindow | null,
+  getServerUrl: () => string | null,
 ): void {
   ipcMain.removeHandler(OVERLAY_ACQUIRE_CHANNEL);
   ipcMain.handle(OVERLAY_ACQUIRE_CHANNEL, (event: Electron.IpcMainInvokeEvent) => {
@@ -318,6 +319,6 @@ export function registerOverlayIpcHandlers(
   ipcMain.removeAllListeners(OVERLAY_GET_CONFIG_CHANNEL);
   ipcMain.on(OVERLAY_GET_CONFIG_CHANNEL, (event: Electron.IpcMainEvent) => {
     const theme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
-    event.returnValue = { theme, serverUrl: null };
+    event.returnValue = { theme, serverUrl: getServerUrl() };
   });
 }

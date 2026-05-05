@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import type { OverlayRenderMessage } from "@t3tools/contracts";
+import type {
+  OverlayRouteContext,
+  OverlayRouteMessage,
+  OverlayRoutePresentation,
+  OverlayRenderMessage,
+} from "@t3tools/contracts";
 
 import {
   isEmbeddedBrowserMounted,
@@ -45,6 +50,23 @@ export interface NativeOverlayOpenOptions<TResult> {
     payload: unknown,
   ) => NativeOverlayEventResolution<TResult> | null | undefined;
   dismissValue?: TResult;
+}
+
+export type NativeOverlayRouteResult<TResult = unknown> =
+  | { status: "submitted"; value: TResult }
+  | { status: "cancelled"; reason?: string | undefined }
+  | { status: "error"; message: string };
+
+export interface NativeOverlayRouteInput {
+  routeKey: string;
+  params?: Record<string, unknown> | undefined;
+  context?: OverlayRouteContext | undefined;
+  presentation: OverlayRoutePresentation;
+}
+
+export interface NativeOverlayRouteOptions<TResult> {
+  fallback?: () => void | Promise<void>;
+  dismissValue?: NativeOverlayRouteResult<TResult>;
 }
 
 export async function acquireNativeOverlay(
@@ -142,6 +164,68 @@ export async function openNativeOverlay<TResult = void>(
   return {
     ...handle,
     result,
+  };
+}
+
+export async function openNativeOverlayRoute<TResult = unknown>(
+  input: NativeOverlayRouteInput,
+  options: NativeOverlayRouteOptions<TResult> = {},
+): Promise<NativeOverlaySession<NativeOverlayRouteResult<TResult>> | null> {
+  const message: OverlayRouteMessage = {
+    type: "route",
+    routeKey: input.routeKey,
+    params: input.params ?? {},
+    ...(input.context ? { context: input.context } : {}),
+    presentation: input.presentation,
+  };
+
+  const session = await openNativeOverlay<NativeOverlayRouteResult<TResult>>(message, {
+    dismissValue: options.dismissValue ?? { status: "cancelled", reason: "dismissed" },
+    resolveEvent: (type, payload) => {
+      if (type === "result") {
+        return {
+          value: {
+            status: "submitted",
+            value: (payload as { value?: TResult } | null)?.value as TResult,
+          },
+        };
+      }
+      if (type === "cancel") {
+        const reason = (payload as { reason?: unknown } | null)?.reason;
+        return {
+          value: {
+            status: "cancelled",
+            ...(typeof reason === "string" ? { reason } : {}),
+          },
+        };
+      }
+      if (type === "bootstrap-error") {
+        const message =
+          (payload as { message?: unknown } | null)?.message ?? "Overlay route failed to load.";
+        return {
+          value: {
+            status: "error",
+            message: String(message),
+          },
+        };
+      }
+      return null;
+    },
+  });
+
+  if (!session) {
+    await options.fallback?.();
+    return null;
+  }
+
+  return {
+    ...session,
+    result: session.result.then(async (result) => {
+      if (result.status === "error") {
+        await options.fallback?.();
+      }
+      return result;
+    }),
   };
 }
 

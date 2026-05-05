@@ -3325,7 +3325,7 @@ function registerIpcHandlers(): void {
   });
 
   // Overlay pool IPC handlers — delegate to overlayPool.ts.
-  registerOverlayIpcHandlers(getIpcBrowserWindow);
+  registerOverlayIpcHandlers(getIpcBrowserWindow, () => backendWsUrl);
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {

@@ -534,16 +534,18 @@ When the embedded browser is active, overlays render in their own `WebContentsVi
 
 ### Key files
 
-| File                                                 | Role                                                                                                                                                                                                                                                        |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop/src/overlayPool.ts`                    | `OverlayPool` class — manages 2 pre-warmed overlay `WebContentsView`s per window. Parked in an off-screen `BaseWindow` when idle; moved to the main window (topmost) on acquire and returned on release. Also owns all overlay IPC handler registration.    |
-| `apps/desktop/src/overlay-preload.ts`                | Dedicated preload for overlay views. Exposes `overlayBridge` (onRender, onClear, emitEvent, requestDismiss, getConfig, onThemeChange). Does NOT expose browser-control APIs.                                                                                |
-| `apps/web/overlay.html`                              | Second Vite entry point. Imports the same `index.css` so Tailwind tokens and component styles are identical to the main app.                                                                                                                                |
-| `apps/web/src/overlay.tsx`                           | Overlay renderer entry — mounts `OverlayShell`, applies theme before first render.                                                                                                                                                                          |
-| `apps/web/src/components/overlay/OverlayShell.tsx`   | Root overlay component. Full-window transparent div. Positions a zero-size "virtual anchor" div at the trigger's DOMRect so Base UI Positioner can do smart flip/collision-avoidance. Backdrop click calls `requestDismiss()`.                              |
-| `apps/web/src/components/overlay/OverlayContent.tsx` | Switches on `OverlayRenderMessage.type` → delegates to the right component.                                                                                                                                                                                 |
-| `apps/web/src/components/overlay/Overlay*.tsx`       | Per-overlay-type render components (`OverlayMenu`, `OverlaySelect`, `OverlayCombobox`, `OverlayAutocomplete`, `OverlayComposerCommand`, `OverlayAlertDialog`, `OverlayImagePreview`). Use the same Base UI primitives and Tailwind classes as the host app. |
-| `apps/web/src/nativeOverlayBridge.ts`                | Host-side bridge. `openNativeOverlay(message, options)` owns the acquire → render → event/result → dismiss → release lifecycle. `acquireNativeOverlay(message)` remains as the low-level handle API. `useNativeOverlayActive()` returns the gate condition. |
+| File                                                        | Role                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/desktop/src/overlayPool.ts`                           | `OverlayPool` class — manages 2 pre-warmed overlay `WebContentsView`s per window. Parked in an off-screen `BaseWindow` when idle; moved to the main window (topmost) on acquire and returned on release. Also owns all overlay IPC handler registration.                                                                                        |
+| `apps/desktop/src/overlay-preload.ts`                       | Dedicated preload for overlay views. Exposes `overlayBridge` (onRender, onClear, emitEvent, requestDismiss, getConfig, onThemeChange). Does NOT expose browser-control APIs.                                                                                                                                                                    |
+| `apps/web/overlay.html`                                     | Second Vite entry point. Imports the same `index.css` so Tailwind tokens and component styles are identical to the main app.                                                                                                                                                                                                                    |
+| `apps/web/src/overlay.tsx`                                  | Overlay renderer entry — mounts `OverlayShell`, applies theme before first render.                                                                                                                                                                                                                                                              |
+| `apps/web/src/components/overlay/OverlayShell.tsx`          | Root overlay component. Full-window transparent div. Positions a zero-size "virtual anchor" div at the trigger's DOMRect so Base UI Positioner can do smart flip/collision-avoidance. Backdrop click calls `requestDismiss()`.                                                                                                                  |
+| `apps/web/src/components/overlay/OverlayContent.tsx`        | Switches on `OverlayRenderMessage.type` → delegates to the right component.                                                                                                                                                                                                                                                                     |
+| `apps/web/src/components/overlay/Overlay*.tsx`              | Per-overlay-type render components (`OverlayMenu`, `OverlaySelect`, `OverlayCombobox`, `OverlayAutocomplete`, `OverlayComposerCommand`, `OverlayRoute`, `OverlayAlertDialog`, `OverlayImagePreview`). Use the same Base UI primitives and Tailwind classes as the host app.                                                                     |
+| `apps/web/src/components/overlay/overlayRouteRegistry.tsx`  | Phase 2 route registry. Routed overlay components register by `routeKey`; `OverlayRoute` resolves the component and provides controller/result helpers.                                                                                                                                                                                         |
+| `apps/web/src/components/overlay/OverlayRouteProviders.tsx` | Phase 2 provider shell for routed overlays: `QueryClientProvider`, `AppAtomRegistryProvider`, and toast providers. Overlay entry also installs a WebSocket-backed `window.nativeApi`.                                                                                                                                                           |
+| `apps/web/src/nativeOverlayBridge.ts`                       | Host-side bridge. `openNativeOverlay(message, options)` owns the acquire → render → event/result → dismiss → release lifecycle. `openNativeOverlayRoute(input, options)` wraps the Phase 2 routed-overlay protocol. `acquireNativeOverlay(message)` remains as the low-level handle API. `useNativeOverlayActive()` returns the gate condition. |
 
 ### Gate condition
 
@@ -587,6 +589,49 @@ Use the current primitive overlay path only when the popup can be faithfully rep
 `Autocomplete` has the same opt-in constraint for serialized rows. Its native path opens from `AutocompleteInput` / `AutocompleteTrigger`, renders an overlay-owned input copy at the trigger/input rect using the same input classes, and renders the popup/list with the same autocomplete popup/list/item classes. It is not a `CommandDialog` migration: arbitrary command palettes, grouped custom JSX, and routed file-search behavior remain Phase 2 unless a callsite provides a plain JSON row list and discrete search/select callbacks.
 
 The chat composer `@` / `/` / `/model` suggestion menu is handled by a narrow `composer-command` overlay type rather than the generic `Autocomplete` adapter. It sends the already-derived `ComposerCommandItem[]` rows to the overlay and renders the exact `ComposerCommandMenu` component there, while selection/highlight events flow back to `ChatView`. This keeps the file icons, active row styling, loading/empty copy, keyboard navigation, and row spacing identical without treating arbitrary `CommandDialog` content as Phase 1 work.
+
+### Routed Overlays
+
+Phase 2 arbitrary-content overlays use one generic `route` message instead of adding one IPC message per dialog or popover. Use this path for `Dialog`, `AlertDialog`, `Sheet`, `CommandDialog`, arbitrary-child `Popover`, and rich menu/card bodies whose exact UI depends on React children, controlled inputs, TanStack Query, Zustand/store state, WebSocket-backed data, or custom layout.
+
+The host opens a routed overlay with `openNativeOverlayRoute`:
+
+```typescript
+const session = await openNativeOverlayRoute<{ submitted: boolean }>(
+  {
+    routeKey: "project-script.edit",
+    params: { scriptId },
+    context: { projectId, threadId, cwd },
+    presentation: { kind: "dialog" },
+  },
+  {
+    fallback: () => setEditDialogOpen(true),
+  },
+);
+
+if (!session) return; // fallback was invoked
+const result = await session.result;
+if (result.status === "submitted") {
+  // consume result.value
+}
+```
+
+`openNativeOverlayRoute` still uses the same `OverlayPool`, `overlay.acquire`, `overlay.render`, result, dismiss, and focus-restore lifecycle as primitive overlays. It resolves to:
+
+- `{ status: "submitted", value }` when the overlay route calls `controller.submit(value)`.
+- `{ status: "cancelled", reason? }` when the route calls `controller.cancel(reason)` or the user dismisses the overlay.
+- `{ status: "error", message }` when the route fails to bootstrap or throws during render.
+
+On the overlay side, route components are registered in `overlayRouteRegistry.tsx` and rendered through `OverlayRoute`. Routed components receive:
+
+- `message.params` and `message.context`.
+- `controller.submit(value)`, `controller.cancel(reason)`, and `controller.fail(error)`.
+- Providers from `OverlayRouteProviders`: TanStack Query, the app atom registry, and toast providers.
+- A WebSocket-backed `window.nativeApi` installed by `overlay.tsx`.
+
+The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
+
+Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.
 
 ### Adding a new overlay type
 
