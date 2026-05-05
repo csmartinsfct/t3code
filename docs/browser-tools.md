@@ -625,6 +625,8 @@ if (result.status === "submitted") {
 - `{ status: "cancelled", reason? }` when the route calls `controller.cancel(reason)` or the user dismisses the overlay.
 - `{ status: "error", message }` when the route fails to bootstrap or throws during render.
 
+Routes can also emit non-dismissing custom events with `controller.bridge.emitEvent(type, payload)`. `useRoutedOverlaySurface` forwards those events through `onEvent` without releasing the overlay, which is the right path for rich popovers whose buttons update host state while staying open. When params change after such a host update, the existing overlay session re-renders with the new payload.
+
 On the overlay side, route components are registered in `overlayRouteRegistry.tsx` and rendered through `OverlayRoute`. Routed components receive:
 
 - `message.params` and `message.context`.
@@ -697,6 +699,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 `MoveTicketToBoardDialog` routes the sub-ticket "move to board" confirmation through `OverlayRouteAlertDialog`. The host and overlay share the exact same AlertDialog content component; the overlay route submits only a confirm result, while the host keeps the ticket mutation and selection cleanup authoritative.
 
 `TicketConfirmDialogs` routes the Kanban board and ticket-detail delete/archive confirmations through the same AlertDialog adapter. These management surfaces are not browser-overlap testable in the current app layout because the embedded browser and ticket management views are mutually exclusive today, but the migrations keep DOM fallback and overlay content shared so the UI remains identical if those surfaces become browser-adjacent later.
+
+`BoardToolbar` routes the status, priority, and label filter popovers through a shared routed popover. The host and overlay render the same filter content components; toggle/clear clicks emit non-dismissing route events so the popover remains open while the host-owned filter sets update and re-render into the active overlay session.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 

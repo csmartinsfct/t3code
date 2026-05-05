@@ -45,6 +45,7 @@ export interface UseRoutedOverlaySurfaceOptions<TResult = unknown, TDetails = un
   context?: OverlayRouteContext | undefined;
   presentation: OverlayRoutePresentation;
   fallback?: (() => void | Promise<void>) | undefined;
+  onEvent?: ((type: string, payload: unknown) => void | Promise<void>) | undefined;
   onResult?: ((value: TResult) => void | Promise<void>) | undefined;
   onCancel?: ((reason?: string) => void | Promise<void>) | undefined;
   onError?: ((message: string) => void | Promise<void>) | undefined;
@@ -67,6 +68,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
   context,
   presentation,
   fallback,
+  onEvent,
   onResult,
   onCancel,
   onError,
@@ -79,6 +81,7 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
 
   const callbacksRef = useLatest({
     fallback,
+    onEvent,
     onCancel,
     onError,
     onOpenChange,
@@ -155,6 +158,17 @@ export function useRoutedOverlaySurface<TResult = unknown, TDetails = unknown>({
       }
 
       sessionRef.current = session;
+      session.onEvent((type, payload) => {
+        if (
+          type === "ready" ||
+          type === "result" ||
+          type === "cancel" ||
+          type === "bootstrap-error"
+        ) {
+          return;
+        }
+        void callbacksRef.current.onEvent?.(type, payload);
+      });
       logWebTimeline("routed-overlay.surface.open-native.success", { routeKey, requestId });
       const result = await session.result;
 

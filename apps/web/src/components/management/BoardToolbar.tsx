@@ -3,7 +3,10 @@ import { ChevronDownIcon, LayoutGridIcon, ListIcon, SearchIcon, XIcon } from "lu
 import { useCallback, useRef, useState } from "react";
 
 import type { BoardViewMode } from "../../uiStateStore";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { cn } from "~/lib/utils";
+import { OverlayRoutePopover, OverlayRoutePopoverPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   ALL_PRIORITIES,
@@ -52,6 +55,16 @@ function FilterCheck({ checked }: { checked: boolean }) {
   );
 }
 
+const BOARD_TOOLBAR_FILTER_ROUTE_KEY = "board-toolbar-filter";
+
+type BoardToolbarFilterKind = "status" | "priority" | "label";
+
+type BoardToolbarFilterAction =
+  | { action: "clear"; kind: BoardToolbarFilterKind }
+  | { action: "toggle"; id: string; kind: BoardToolbarFilterKind };
+
+type BoardToolbarLabel = { id: string; name: string; color: string };
+
 export function BoardToolbar({
   statusFilter,
   onStatusFilterChange,
@@ -98,6 +111,55 @@ export function BoardToolbar({
     [labelFilter, onLabelFilterChange],
   );
 
+  const handleOverlayFilterEvent = useCallback(
+    (type: string, payload: unknown) => {
+      if (type !== "filter-action") return;
+      const action = readBoardToolbarFilterAction(payload);
+      if (!action) return;
+
+      if (action.action === "clear") {
+        if (action.kind === "status") onStatusFilterChange(new Set());
+        else if (action.kind === "priority") onPriorityFilterChange(new Set());
+        else onLabelFilterChange(new Set());
+        return;
+      }
+
+      if (action.kind === "status") toggleStatus(action.id);
+      else if (action.kind === "priority") togglePriority(action.id);
+      else toggleLabel(action.id);
+    },
+    [
+      onLabelFilterChange,
+      onPriorityFilterChange,
+      onStatusFilterChange,
+      toggleLabel,
+      togglePriority,
+      toggleStatus,
+    ],
+  );
+
+  const routedStatusPopover = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: BOARD_TOOLBAR_FILTER_ROUTE_KEY,
+    params: { kind: "status", selected: [...statusFilter] },
+    side: "bottom",
+    align: "start",
+    onEvent: handleOverlayFilterEvent,
+  });
+  const routedPriorityPopover = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: BOARD_TOOLBAR_FILTER_ROUTE_KEY,
+    params: { kind: "priority", selected: [...priorityFilter] },
+    side: "bottom",
+    align: "start",
+    onEvent: handleOverlayFilterEvent,
+  });
+  const routedLabelPopover = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: BOARD_TOOLBAR_FILTER_ROUTE_KEY,
+    params: { kind: "label", labels: availableLabels, selected: [...labelFilter] },
+    side: "bottom",
+    align: "start",
+    onEvent: handleOverlayFilterEvent,
+  });
+
   const statusText =
     statusFilter.size === 0
       ? "Status"
@@ -120,8 +182,11 @@ export function BoardToolbar({
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 mr-1">
           filters
         </span>
-        <Popover>
+        <Popover open={routedStatusPopover.domOpen} onOpenChange={routedStatusPopover.onOpenChange}>
           <PopoverTrigger
+            ref={routedStatusPopover.triggerRef}
+            onFocusCapture={routedStatusPopover.updateAnchor}
+            onPointerDownCapture={routedStatusPopover.updateAnchor}
             className={cn(
               "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
               statusFilter.size > 0
@@ -133,40 +198,21 @@ export function BoardToolbar({
             <ChevronDownIcon className="size-3 opacity-50" />
           </PopoverTrigger>
           <PopoverPopup side="bottom" align="start" sideOffset={4} className="w-44">
-            <div className="-mx-4 -my-4 py-1">
-              {ALL_STATUSES.map((s) => {
-                const cfg = STATUS_CONFIG[s];
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
-                    onClick={() => toggleStatus(s)}
-                  >
-                    <FilterCheck checked={statusFilter.has(s)} />
-                    <div className={cn("size-2 rounded-full", cfg.dotClass)} />
-                    <span className="text-foreground">{cfg.label}</span>
-                  </button>
-                );
-              })}
-              {statusFilter.size > 0 && (
-                <>
-                  <div className="my-1 border-t border-border" />
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={() => onStatusFilterChange(new Set())}
-                  >
-                    <XIcon className="size-3" />
-                    Clear
-                  </button>
-                </>
-              )}
-            </div>
+            <BoardToolbarStatusFilterContent
+              selected={statusFilter}
+              onToggle={toggleStatus}
+              onClear={() => onStatusFilterChange(new Set())}
+            />
           </PopoverPopup>
         </Popover>
-        <Popover>
+        <Popover
+          open={routedPriorityPopover.domOpen}
+          onOpenChange={routedPriorityPopover.onOpenChange}
+        >
           <PopoverTrigger
+            ref={routedPriorityPopover.triggerRef}
+            onFocusCapture={routedPriorityPopover.updateAnchor}
+            onPointerDownCapture={routedPriorityPopover.updateAnchor}
             className={cn(
               "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
               priorityFilter.size > 0
@@ -178,40 +224,18 @@ export function BoardToolbar({
             <ChevronDownIcon className="size-3 opacity-50" />
           </PopoverTrigger>
           <PopoverPopup side="bottom" align="start" sideOffset={4} className="w-44">
-            <div className="-mx-4 -my-4 py-1">
-              {ALL_PRIORITIES.map((p) => {
-                const cfg = PRIORITY_CONFIG[p];
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
-                    onClick={() => togglePriority(p)}
-                  >
-                    <FilterCheck checked={priorityFilter.has(p)} />
-                    <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
-                    <span className="text-foreground">{cfg.label}</span>
-                  </button>
-                );
-              })}
-              {priorityFilter.size > 0 && (
-                <>
-                  <div className="my-1 border-t border-border" />
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={() => onPriorityFilterChange(new Set())}
-                  >
-                    <XIcon className="size-3" />
-                    Clear
-                  </button>
-                </>
-              )}
-            </div>
+            <BoardToolbarPriorityFilterContent
+              selected={priorityFilter}
+              onToggle={togglePriority}
+              onClear={() => onPriorityFilterChange(new Set())}
+            />
           </PopoverPopup>
         </Popover>
-        <Popover>
+        <Popover open={routedLabelPopover.domOpen} onOpenChange={routedLabelPopover.onOpenChange}>
           <PopoverTrigger
+            ref={routedLabelPopover.triggerRef}
+            onFocusCapture={routedLabelPopover.updateAnchor}
+            onPointerDownCapture={routedLabelPopover.updateAnchor}
             className={cn(
               "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
               labelFilter.size > 0
@@ -223,37 +247,12 @@ export function BoardToolbar({
             <ChevronDownIcon className="size-3 opacity-50" />
           </PopoverTrigger>
           <PopoverPopup side="bottom" align="start" sideOffset={4} className="w-48">
-            <div className="-mx-4 -my-4 py-1">
-              {availableLabels.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-muted-foreground">No labels</div>
-              ) : (
-                availableLabels.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
-                    onClick={() => toggleLabel(l.id)}
-                  >
-                    <FilterCheck checked={labelFilter.has(l.id)} />
-                    <div className="size-2 rounded-full" style={{ backgroundColor: l.color }} />
-                    <span className="truncate text-foreground">{l.name}</span>
-                  </button>
-                ))
-              )}
-              {labelFilter.size > 0 && (
-                <>
-                  <div className="my-1 border-t border-border" />
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={() => onLabelFilterChange(new Set())}
-                  >
-                    <XIcon className="size-3" />
-                    Clear
-                  </button>
-                </>
-              )}
-            </div>
+            <BoardToolbarLabelFilterContent
+              labels={availableLabels}
+              selected={labelFilter}
+              onToggle={toggleLabel}
+              onClear={() => onLabelFilterChange(new Set())}
+            />
           </PopoverPopup>
         </Popover>
       </div>
@@ -342,4 +341,228 @@ export function BoardToolbar({
       </div>
     </div>
   );
+}
+
+function BoardToolbarStatusFilterContent({
+  onClear,
+  onToggle,
+  selected,
+}: {
+  onClear: () => void;
+  onToggle: (status: string) => void;
+  selected: ReadonlySet<string>;
+}) {
+  return (
+    <div className="-mx-4 -my-4 py-1">
+      {ALL_STATUSES.map((s) => {
+        const cfg = STATUS_CONFIG[s];
+        return (
+          <button
+            key={s}
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
+            onClick={() => onToggle(s)}
+          >
+            <FilterCheck checked={selected.has(s)} />
+            <div className={cn("size-2 rounded-full", cfg.dotClass)} />
+            <span className="text-foreground">{cfg.label}</span>
+          </button>
+        );
+      })}
+      {selected.size > 0 && (
+        <>
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onClear}
+          >
+            <XIcon className="size-3" />
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BoardToolbarPriorityFilterContent({
+  onClear,
+  onToggle,
+  selected,
+}: {
+  onClear: () => void;
+  onToggle: (priority: string) => void;
+  selected: ReadonlySet<string>;
+}) {
+  return (
+    <div className="-mx-4 -my-4 py-1">
+      {ALL_PRIORITIES.map((p) => {
+        const cfg = PRIORITY_CONFIG[p];
+        return (
+          <button
+            key={p}
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
+            onClick={() => onToggle(p)}
+          >
+            <FilterCheck checked={selected.has(p)} />
+            <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
+            <span className="text-foreground">{cfg.label}</span>
+          </button>
+        );
+      })}
+      {selected.size > 0 && (
+        <>
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onClear}
+          >
+            <XIcon className="size-3" />
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BoardToolbarLabelFilterContent({
+  labels,
+  onClear,
+  onToggle,
+  selected,
+}: {
+  labels: readonly BoardToolbarLabel[];
+  onClear: () => void;
+  onToggle: (labelId: string) => void;
+  selected: ReadonlySet<string>;
+}) {
+  return (
+    <div className="-mx-4 -my-4 py-1">
+      {labels.length === 0 ? (
+        <div className="px-3 py-2 text-xs text-muted-foreground">No labels</div>
+      ) : (
+        labels.map((label) => (
+          <button
+            key={label.id}
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-1.5 text-xs transition-colors hover:bg-accent"
+            onClick={() => onToggle(label.id)}
+          >
+            <FilterCheck checked={selected.has(label.id)} />
+            <div className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+            <span className="truncate text-foreground">{label.name}</span>
+          </button>
+        ))
+      )}
+      {selected.size > 0 && (
+        <>
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            onClick={onClear}
+          >
+            <XIcon className="size-3" />
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+registerOverlayRoute<{
+  kind?: unknown;
+  labels?: unknown;
+  selected?: unknown;
+}>(
+  BOARD_TOOLBAR_FILTER_ROUTE_KEY,
+  function BoardToolbarFilterOverlayRoute({ message, controller }) {
+    const params = readBoardToolbarFilterParams(message.params);
+
+    if (!params) {
+      controller.fail(new Error("Board toolbar filter route requires filter params."));
+      return null;
+    }
+
+    const selected = new Set(params.selected);
+    const emitAction = (action: BoardToolbarFilterAction) => {
+      controller.bridge.emitEvent("filter-action", action);
+    };
+
+    return (
+      <OverlayRoutePopover>
+        <OverlayRoutePopoverPopup
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          className={params.kind === "label" ? "w-48" : "w-44"}
+        >
+          {params.kind === "status" ? (
+            <BoardToolbarStatusFilterContent
+              selected={selected}
+              onToggle={(id) => emitAction({ action: "toggle", id, kind: "status" })}
+              onClear={() => emitAction({ action: "clear", kind: "status" })}
+            />
+          ) : params.kind === "priority" ? (
+            <BoardToolbarPriorityFilterContent
+              selected={selected}
+              onToggle={(id) => emitAction({ action: "toggle", id, kind: "priority" })}
+              onClear={() => emitAction({ action: "clear", kind: "priority" })}
+            />
+          ) : (
+            <BoardToolbarLabelFilterContent
+              labels={params.labels}
+              selected={selected}
+              onToggle={(id) => emitAction({ action: "toggle", id, kind: "label" })}
+              onClear={() => emitAction({ action: "clear", kind: "label" })}
+            />
+          )}
+        </OverlayRoutePopoverPopup>
+      </OverlayRoutePopover>
+    );
+  },
+);
+
+function readBoardToolbarFilterParams(params: Record<string, unknown>): {
+  kind: BoardToolbarFilterKind;
+  labels: readonly BoardToolbarLabel[];
+  selected: readonly string[];
+} | null {
+  if (params.kind !== "status" && params.kind !== "priority" && params.kind !== "label") {
+    return null;
+  }
+  const selected = Array.isArray(params.selected)
+    ? params.selected.filter((value): value is string => typeof value === "string")
+    : [];
+  const labels =
+    params.kind === "label" && Array.isArray(params.labels)
+      ? params.labels.filter((label): label is BoardToolbarLabel => {
+          if (!label || typeof label !== "object") return false;
+          const candidate = label as { color?: unknown; id?: unknown; name?: unknown };
+          return (
+            typeof candidate.id === "string" &&
+            typeof candidate.name === "string" &&
+            typeof candidate.color === "string"
+          );
+        })
+      : [];
+  return { kind: params.kind, labels, selected };
+}
+
+function readBoardToolbarFilterAction(value: unknown): BoardToolbarFilterAction | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { action?: unknown; id?: unknown; kind?: unknown };
+  if (candidate.kind !== "status" && candidate.kind !== "priority" && candidate.kind !== "label") {
+    return null;
+  }
+  if (candidate.action === "clear") {
+    return { action: "clear", kind: candidate.kind };
+  }
+  if (candidate.action !== "toggle" || typeof candidate.id !== "string") return null;
+  return { action: "toggle", id: candidate.id, kind: candidate.kind };
 }

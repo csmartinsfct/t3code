@@ -32,6 +32,7 @@ export function useRoutedPopoverSurface<
   interaction = "click",
   kind = "popover",
   onResult,
+  onEvent,
   params,
   routeKey,
   side,
@@ -40,6 +41,7 @@ export function useRoutedPopoverSurface<
   enabled?: boolean | undefined;
   interaction?: PopoverPresentation["interaction"] | undefined;
   kind?: PopoverPresentation["kind"] | undefined;
+  onEvent?: ((type: string, payload: unknown) => void | Promise<void>) | undefined;
   onResult?: ((value: TResult) => void | Promise<void>) | undefined;
   params?: Record<string, unknown> | undefined;
   routeKey: string;
@@ -76,6 +78,7 @@ export function useRoutedPopoverSurface<
       ...(interaction ? { interaction } : {}),
     },
     enabled: enabled && state.anchor !== null,
+    onEvent,
     onResult,
   });
 
