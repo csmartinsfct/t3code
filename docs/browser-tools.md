@@ -690,6 +690,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `ManagedRunsControl` routes its Active Runs menu through the routed mini-app path because the menu contains arbitrary React content and actions: run cards, stop buttons, log drawer buttons, runtime service rows, and URL hover controls. The DOM fallback and overlay route both render the same extracted menu body; the overlay route uses `OverlayRouteMenu`/`OverlayRouteMenuPopup` so the Base UI menu styling and padding remain unchanged.
 
+`ProposeActionCard` routes its action icon picker through the same routed popover helper. The host and overlay render the same icon-grid content, and selection returns the chosen `ProjectScriptIcon` as a route result so the host card state remains authoritative.
+
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.

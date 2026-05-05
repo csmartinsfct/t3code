@@ -5,6 +5,7 @@ import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
 import "./components/ProjectScriptsControl";
 import "./components/chat/ContextWindowMeter";
+import "./components/chat/ProposeActionCard";
 import "./components/chat/RateLimitMeter";
 
 logWebTimeline("overlay-routes.loaded", {
@@ -16,6 +17,7 @@ logWebTimeline("overlay-routes.loaded", {
     "project-script-editor",
     "managed-runs-control",
     "context-window-meter",
+    "propose-action-icon-picker",
     "rate-limit-meter",
   ],
 });
