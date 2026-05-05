@@ -31,15 +31,6 @@ import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -52,6 +43,11 @@ import { TicketAcceptanceCriteria } from "../settings/TicketAcceptanceCriteria";
 import { TicketComments } from "../settings/TicketComments";
 import { TicketLabelPicker } from "./TicketLabelPicker";
 import { TicketHistory } from "../settings/TicketHistory";
+import {
+  SubTicketsArchiveConfirmDialog,
+  TicketArchiveConfirmDialog,
+  TicketDeleteConfirmDialog,
+} from "./TicketConfirmDialogs";
 import {
   ALL_PRIORITIES,
   ALL_STATUSES,
@@ -1178,88 +1174,30 @@ export function KanbanTicketDetail({
         pending={movingToBoard}
         onConfirm={() => void handleConfirmMoveToBoard()}
       />
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm">
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
-              Delete
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
-      {/* Archive confirmation */}
-      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive ticket?</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{ticket.identifier}: {ticket.title}" and any sub-tickets will be archived. You can
-              restore them from Settings → Archived tickets.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm">
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleArchive()}>
-              Archive
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <TicketDeleteConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        ticket={ticket}
+        onConfirm={handleDelete}
+      />
+      <TicketArchiveConfirmDialog
+        open={archiveDialogOpen}
+        onOpenChange={setArchiveDialogOpen}
+        ticket={ticket}
+        onConfirm={handleArchive}
+      />
       {/* Archive sub-tickets confirmation (multi-select / context-menu archive). */}
-      <AlertDialog
+      <SubTicketsArchiveConfirmDialog
         open={archiveSubTicketsDialog !== null}
         onOpenChange={(open) => {
           if (!open && !archivingSubTickets) {
             setArchiveSubTicketsDialog(null);
           }
         }}
-      >
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {(archiveSubTicketsDialog?.length ?? 0) === 1
-                ? "Archive this ticket?"
-                : `Archive ${archiveSubTicketsDialog?.length ?? 0} tickets?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Sub-tickets will also be archived. You can restore them from Settings → Archived
-              tickets.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm" disabled={archivingSubTickets}>
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void handleConfirmArchiveSubTickets()}
-              disabled={archivingSubTickets}
-            >
-              {archivingSubTickets ? "Archiving..." : "Archive"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+        count={archiveSubTicketsDialog?.length ?? 0}
+        pending={archivingSubTickets}
+        onConfirm={handleConfirmArchiveSubTickets}
+      />
     </div>
   );
 }

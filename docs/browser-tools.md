@@ -696,6 +696,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `MoveTicketToBoardDialog` routes the sub-ticket "move to board" confirmation through `OverlayRouteAlertDialog`. The host and overlay share the exact same AlertDialog content component; the overlay route submits only a confirm result, while the host keeps the ticket mutation and selection cleanup authoritative.
 
+`TicketConfirmDialogs` routes the Kanban board and ticket-detail delete/archive confirmations through the same AlertDialog adapter. These management surfaces are not browser-overlap testable in the current app layout because the embedded browser and ticket management views are mutually exclusive today, but the migrations keep DOM fallback and overlay content shared so the UI remains identical if those surfaces become browser-adjacent later.
+
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.
