@@ -129,6 +129,11 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const EMBEDDED_BROWSER_BACKGROUND_DARK = "#161616";
+const EMBEDDED_BROWSER_BACKGROUND_LIGHT = "#ffffff";
+const EMBEDDED_BROWSER_PUBLIC_BLANK_URL = "about:blank";
+const EMBEDDED_BROWSER_BLANK_DOCUMENT_MARKER = "t3-embedded-browser-blank";
+const EMBEDDED_BROWSER_BLANK_URLS = new Set(["", "about:blank", "about:newtab"]);
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type BrowserViewBounds = {
@@ -153,6 +158,8 @@ type EmbeddedBrowserTabState = {
   readonly subscriptions: Set<EmbeddedBrowserCdpSubscription>;
   reattachRetryTimer: ReturnType<typeof setTimeout> | null;
   devtoolsOpen: boolean;
+  isBlank: boolean;
+  readyForMount: Promise<void> | null;
   title: string;
   favicon: string | null;
 };
@@ -2130,8 +2137,10 @@ function listEmbeddedBrowserTabs(request: BrowserTabsBaseRequest): {
 
 async function newEmbeddedBrowserTab(request: BrowserNewTabRequest): Promise<number> {
   const { project, window } = findProjectAndWindowForBroker(request.viewId);
-  const url = request.url ? (normalizeBrowserUrl(request.url) ?? "about:blank") : "about:blank";
-  const tabId = openNewBrowserTab(project, url);
+  const url = request.url
+    ? (normalizeBrowserUrl(request.url) ?? EMBEDDED_BROWSER_PUBLIC_BLANK_URL)
+    : EMBEDDED_BROWSER_PUBLIC_BLANK_URL;
+  const tabId = openNewBrowserTab(project, url, { notify: false });
   await switchBrowserTab(project, tabId, window);
   return tabId;
 }
@@ -2236,6 +2245,93 @@ function parkEmbeddedBrowserView(view: WebContentsView): void {
     host.contentView.addChildView(view);
   } catch (error) {
     console.warn("[desktop/browser] failed to park view in offscreen host", { error });
+  }
+}
+
+function embeddedBrowserBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors
+    ? EMBEDDED_BROWSER_BACKGROUND_DARK
+    : EMBEDDED_BROWSER_BACKGROUND_LIGHT;
+}
+
+function isEmbeddedBrowserBlankUrl(url: string): boolean {
+  return (
+    EMBEDDED_BROWSER_BLANK_URLS.has(url) ||
+    (url.startsWith("data:text/html") && url.includes(EMBEDDED_BROWSER_BLANK_DOCUMENT_MARKER))
+  );
+}
+
+function publicEmbeddedBrowserUrl(url: string): string {
+  return isEmbeddedBrowserBlankUrl(url) ? EMBEDDED_BROWSER_PUBLIC_BLANK_URL : url;
+}
+
+function embeddedBrowserLoadUrl(url: string): string {
+  if (!isEmbeddedBrowserBlankUrl(url)) return url;
+  const color = embeddedBrowserBackgroundColor();
+  const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="${EMBEDDED_BROWSER_BLANK_DOCUMENT_MARKER}" content="true">
+    <title></title>
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: ${color};
+        color-scheme: ${nativeTheme.shouldUseDarkColors ? "dark" : "light"};
+      }
+    </style>
+  </head>
+  <body></body>
+</html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+async function applyEmbeddedBrowserBlankPageAppearance(
+  tab: EmbeddedBrowserTabState,
+): Promise<void> {
+  const color = embeddedBrowserBackgroundColor();
+  await tab.view.webContents.executeJavaScript(
+    `
+      (() => {
+        const color = ${JSON.stringify(color)};
+        document.title = "";
+        document.documentElement.style.backgroundColor = color;
+        if (document.body) {
+          document.body.style.margin = "0";
+          document.body.style.backgroundColor = color;
+        }
+      })();
+    `,
+    true,
+  );
+}
+
+function applyEmbeddedBrowserBackground(view: WebContentsView): void {
+  try {
+    view.setBackgroundColor(embeddedBrowserBackgroundColor());
+  } catch (error) {
+    console.warn("[desktop/browser] failed to set view background color", { error });
+  }
+}
+
+function applyEmbeddedBrowserBackgroundsToAllViews(): void {
+  for (const project of embeddedBrowserProjectsByProjectId.values()) {
+    for (const tab of project.tabs.values()) {
+      if (isEmbeddedBrowserDestroyed(tab)) continue;
+      applyEmbeddedBrowserBackground(tab.view);
+      if (tab.isBlank) {
+        void applyEmbeddedBrowserBlankPageAppearance(tab).catch((error: unknown) => {
+          console.warn("[desktop/browser] failed to update blank tab theme", {
+            projectId: tab.projectId,
+            tabId: tab.tabId,
+            error,
+          });
+        });
+      }
+    }
   }
 }
 
@@ -2396,7 +2492,7 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     lastActivityAt: Date.now(),
     suspended: false,
   };
-  const rootTab = createEmbeddedBrowserTab(project, 0, "about:blank");
+  const rootTab = createEmbeddedBrowserTab(project, 0, EMBEDDED_BROWSER_PUBLIC_BLANK_URL);
   project.tabs.set(0, rootTab);
   embeddedBrowserProjectsByProjectId.set(projectId, project);
   return project;
@@ -2409,6 +2505,8 @@ function createEmbeddedBrowserTab(
 ): EmbeddedBrowserTabState {
   const { projectId } = project;
   const partition = `persist:${projectId}`;
+  const isBlank = isEmbeddedBrowserBlankUrl(initialUrl);
+  const loadUrl = embeddedBrowserLoadUrl(initialUrl);
   const view = new WebContentsView({
     webPreferences: {
       session: session.fromPartition(partition),
@@ -2423,6 +2521,7 @@ function createEmbeddedBrowserTab(
       disableDialogs: true,
     },
   });
+  applyEmbeddedBrowserBackground(view);
   // Park the new view immediately so Chromium starts compositing — see
   // ensureOffscreenBrowserHost above. Mount paths use `addChildView` on a
   // real BrowserWindow which re-parents it; unmount paths re-park it here.
@@ -2443,6 +2542,8 @@ function createEmbeddedBrowserTab(
     subscriptions: new Set(),
     reattachRetryTimer: null,
     devtoolsOpen: false,
+    isBlank,
+    readyForMount: null,
     title: "",
     favicon: null,
   };
@@ -2466,6 +2567,10 @@ function createEmbeddedBrowserTab(
     });
   });
   view.webContents.on("page-title-updated", (_event, title) => {
+    if (tab.isBlank || isEmbeddedBrowserBlankUrl(view.webContents.getURL())) {
+      tab.title = "";
+      return;
+    }
     tab.title = title;
     notifyEmbeddedBrowserTabsChanged(project);
   });
@@ -2535,7 +2640,9 @@ function createEmbeddedBrowserTab(
     if (key === "t") {
       event.preventDefault();
       try {
-        const newTabId = openNewBrowserTab(project, "about:blank");
+        const newTabId = openNewBrowserTab(project, EMBEDDED_BROWSER_PUBLIC_BLANK_URL, {
+          notify: false,
+        });
         void switchBrowserTab(project, newTabId, owner);
       } catch (error) {
         console.warn("[desktop/browser] shortcut newTab failed", { projectId, error });
@@ -2609,6 +2716,10 @@ function createEmbeddedBrowserTab(
     }
   });
   view.webContents.on("page-favicon-updated", (_event, favicons) => {
+    if (tab.isBlank || isEmbeddedBrowserBlankUrl(view.webContents.getURL())) {
+      tab.favicon = null;
+      return;
+    }
     tab.favicon = favicons[0] ?? null;
     notifyEmbeddedBrowserTabsChanged(project);
   });
@@ -2618,7 +2729,15 @@ function createEmbeddedBrowserTab(
   view.webContents.on("did-start-loading", () => {
     preNavHadViewFocus = view.webContents.isFocused();
   });
-  view.webContents.on("did-finish-load", () => {
+  view.webContents.on("did-finish-load", async () => {
+    tab.isBlank = isEmbeddedBrowserBlankUrl(view.webContents.getURL());
+    if (tab.isBlank) {
+      tab.title = "";
+      tab.favicon = null;
+      await applyEmbeddedBrowserBlankPageAppearance(tab).catch((error: unknown) => {
+        console.warn("[desktop/browser] failed to style blank tab", { projectId, tabId, error });
+      });
+    }
     if (tab.devtoolsOpen) void resumeEmbeddedBrowser(tab);
     if (!preNavHadViewFocus && view.webContents.isFocused()) {
       const owner = findEmbeddedBrowserOwnerWindow(tab);
@@ -2637,12 +2756,12 @@ function createEmbeddedBrowserTab(
   });
 
   attachEmbeddedBrowserDebugger(tab);
-  void view.webContents.loadURL(initialUrl).catch((error) => {
+  tab.readyForMount = view.webContents.loadURL(loadUrl).catch((error) => {
     if (isBrowserNavigationAbortError(error)) {
       console.warn("[desktop/browser] embedded browser initial navigation canceled", {
         projectId,
         tabId,
-        requestedUrl: initialUrl,
+        requestedUrl: publicEmbeddedBrowserUrl(initialUrl),
         currentUrl: view.webContents.getURL(),
       });
       return;
@@ -2651,7 +2770,7 @@ function createEmbeddedBrowserTab(
     console.warn("[desktop/browser] failed to load embedded browser tab", {
       projectId,
       tabId,
-      url: initialUrl,
+      url: publicEmbeddedBrowserUrl(initialUrl),
       error,
     });
   });
@@ -2689,6 +2808,7 @@ async function mountActiveTabInWindow(
   const activeTab = project.tabs.get(project.activeTabId);
   if (!activeTab) return false;
   await resumeEmbeddedBrowser(activeTab);
+  if (activeTab.isBlank) await activeTab.readyForMount?.catch(() => {});
   const state = embeddedBrowserStateByWindow.get(window);
   if (state?.activeProjectId !== project.projectId) return false;
   activeTab.view.setBounds(bounds);
@@ -2699,7 +2819,11 @@ async function mountActiveTabInWindow(
   return true;
 }
 
-function openNewBrowserTab(project: EmbeddedBrowserProjectState, url: string): number {
+function openNewBrowserTab(
+  project: EmbeddedBrowserProjectState,
+  url: string,
+  options?: { notify?: boolean },
+): number {
   const liveTabs = Array.from(project.tabs.values()).filter(
     (tab) => !isEmbeddedBrowserDestroyed(tab),
   );
@@ -2714,10 +2838,10 @@ function openNewBrowserTab(project: EmbeddedBrowserProjectState, url: string): n
   console.log("[desktop/browser] tab opened", {
     projectId: project.projectId,
     tabId,
-    url,
+    url: publicEmbeddedBrowserUrl(url),
     tabCount: project.tabs.size,
   });
-  notifyEmbeddedBrowserTabsChanged(project);
+  if (options?.notify !== false) notifyEmbeddedBrowserTabsChanged(project);
   return tabId;
 }
 
@@ -2725,8 +2849,14 @@ async function switchBrowserTab(
   project: EmbeddedBrowserProjectState,
   tabId: number,
   window: BrowserWindow,
+  boundsOverride?: BrowserViewBounds | null,
 ): Promise<void> {
   if (project.activeTabId === tabId && project.mounted) {
+    if (boundsOverride) {
+      project.bounds = boundsOverride;
+      const activeTab = project.tabs.get(project.activeTabId);
+      if (activeTab) activeTab.view.setBounds(boundsOverride);
+    }
     notifyEmbeddedBrowserTabsChanged(project);
     return;
   }
@@ -2739,8 +2869,10 @@ async function switchBrowserTab(
   }
   project.mounted = false;
   project.activeTabId = tabId;
-  if (project.bounds) {
-    await mountActiveTabInWindow(project, window, project.bounds);
+  const targetBounds = boundsOverride ?? project.bounds;
+  if (targetBounds) {
+    project.bounds = targetBounds;
+    await mountActiveTabInWindow(project, window, targetBounds);
   }
   console.log("[desktop/browser] tab switched", {
     projectId: project.projectId,
@@ -2754,13 +2886,18 @@ async function closeBrowserTab(
   project: EmbeddedBrowserProjectState,
   tabId: number,
   window: BrowserWindow,
+  nextBounds?: BrowserViewBounds | null,
 ): Promise<void> {
   const tab = project.tabs.get(tabId);
   if (!tab) throw new Error(`unknown tab id ${tabId}`);
   if (project.tabs.size <= 1) {
     // Reset the root tab to about:blank rather than destroying the last tab —
     // the project always has at least one tab so the webview stays mounted.
-    await tab.view.webContents.loadURL("about:blank");
+    tab.isBlank = true;
+    tab.readyForMount = tab.view.webContents.loadURL(
+      embeddedBrowserLoadUrl(EMBEDDED_BROWSER_PUBLIC_BLANK_URL),
+    );
+    await tab.readyForMount;
     tab.title = "";
     tab.favicon = null;
     console.log("[desktop/browser] tab reset (root)", { projectId: project.projectId, tabId });
@@ -2779,7 +2916,7 @@ async function closeBrowserTab(
   if (wasActive) {
     const next = project.tabs.keys().next();
     if (!next.done) {
-      await switchBrowserTab(project, next.value, window);
+      await switchBrowserTab(project, next.value, window, nextBounds);
       return;
     }
   }
@@ -2798,11 +2935,13 @@ function summarizeEmbeddedBrowserTabs(
   }> = [];
   for (const [tabId, tab] of project.tabs) {
     if (isEmbeddedBrowserDestroyed(tab)) continue;
+    const url = publicEmbeddedBrowserUrl(tab.view.webContents.getURL());
+    const isBlank = isEmbeddedBrowserBlankUrl(url);
     summaries.push({
       id: tabId,
-      url: tab.view.webContents.getURL(),
-      title: tab.title || tab.view.webContents.getTitle(),
-      favicon: tab.favicon,
+      url,
+      title: isBlank ? "" : tab.title || tab.view.webContents.getTitle(),
+      favicon: isBlank ? null : tab.favicon,
       active: tabId === project.activeTabId,
     });
   }
@@ -2966,15 +3105,18 @@ function registerIpcHandlers(): void {
       if (!activeTab || !url) {
         throw new Error("invalid embedded browser navigation request");
       }
+      activeTab.isBlank = isEmbeddedBrowserBlankUrl(url);
+      const loadUrl = embeddedBrowserLoadUrl(url);
       try {
-        await activeTab.view.webContents.loadURL(url);
+        activeTab.readyForMount = activeTab.view.webContents.loadURL(loadUrl);
+        await activeTab.readyForMount;
       } catch (cause) {
         if (isBrowserNavigationAbortError(cause)) {
           console.warn("[desktop/browser] embedded browser navigation canceled", {
             projectId: activeTab.projectId,
             tabId: activeTab.tabId,
-            requestedUrl: url,
-            currentUrl: activeTab.view.webContents.getURL(),
+            requestedUrl: publicEmbeddedBrowserUrl(url),
+            currentUrl: publicEmbeddedBrowserUrl(activeTab.view.webContents.getURL()),
           });
           return;
         }
@@ -3026,7 +3168,7 @@ function registerIpcHandlers(): void {
       ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "getUrl")
       : null;
     const tab = project ? (project.tabs.get(project.activeTabId) ?? null) : null;
-    return tab?.view.webContents.getURL() ?? "";
+    return tab ? publicEmbeddedBrowserUrl(tab.view.webContents.getURL()) : "";
   });
 
   ipcMain.removeHandler(BROWSER_LIST_TABS_CHANNEL);
@@ -3040,22 +3182,29 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.removeHandler(BROWSER_NEW_TAB_CHANNEL);
-  ipcMain.handle(BROWSER_NEW_TAB_CHANNEL, async (event, rawProjectId: unknown, rawUrl: unknown) => {
-    const window = getIpcBrowserWindow(event);
-    const project = window
-      ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "newTab")
-      : null;
-    if (!window || !project) return 0;
-    const url = rawUrl == null ? "about:blank" : (normalizeBrowserUrl(rawUrl) ?? "about:blank");
-    const tabId = openNewBrowserTab(project, url);
-    await switchBrowserTab(project, tabId, window);
-    return tabId;
-  });
+  ipcMain.handle(
+    BROWSER_NEW_TAB_CHANNEL,
+    async (event, rawProjectId: unknown, rawUrl: unknown, rawBounds: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "newTab")
+        : null;
+      if (!window || !project) return 0;
+      const url =
+        rawUrl == null
+          ? EMBEDDED_BROWSER_PUBLIC_BLANK_URL
+          : (normalizeBrowserUrl(rawUrl) ?? EMBEDDED_BROWSER_PUBLIC_BLANK_URL);
+      const bounds = normalizeBrowserBounds(rawBounds);
+      const tabId = openNewBrowserTab(project, url, { notify: false });
+      await switchBrowserTab(project, tabId, window, bounds);
+      return tabId;
+    },
+  );
 
   ipcMain.removeHandler(BROWSER_SWITCH_TAB_CHANNEL);
   ipcMain.handle(
     BROWSER_SWITCH_TAB_CHANNEL,
-    async (event, rawProjectId: unknown, rawTabId: unknown) => {
+    async (event, rawProjectId: unknown, rawTabId: unknown, rawBounds: unknown) => {
       const window = getIpcBrowserWindow(event);
       const project = window
         ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "switchTab")
@@ -3063,21 +3212,21 @@ function registerIpcHandlers(): void {
       if (!window || !project) return;
       const tabId = Number(rawTabId);
       if (!project.tabs.has(tabId)) throw new Error(`unknown tab id ${rawTabId}`);
-      await switchBrowserTab(project, tabId, window);
+      await switchBrowserTab(project, tabId, window, normalizeBrowserBounds(rawBounds));
     },
   );
 
   ipcMain.removeHandler(BROWSER_CLOSE_TAB_CHANNEL);
   ipcMain.handle(
     BROWSER_CLOSE_TAB_CHANNEL,
-    async (event, rawProjectId: unknown, rawTabId: unknown) => {
+    async (event, rawProjectId: unknown, rawTabId: unknown, rawBounds: unknown) => {
       const window = getIpcBrowserWindow(event);
       const project = window
         ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "closeTab")
         : null;
       if (!window || !project) return 0;
       const tabId = Number(rawTabId);
-      await closeBrowserTab(project, tabId, window);
+      await closeBrowserTab(project, tabId, window, normalizeBrowserBounds(rawBounds));
       return project.activeTabId;
     },
   );
@@ -3189,6 +3338,7 @@ function registerIpcHandlers(): void {
     // Propagate theme change to all overlay views so they re-apply the class.
     const resolvedTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
     broadcastThemeToAllOverlays(resolvedTheme);
+    applyEmbeddedBrowserBackgroundsToAllViews();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);

@@ -278,9 +278,9 @@ export interface DesktopBrowserBridge {
   reload: (projectId: string) => Promise<void>;
   getUrl: (projectId: string) => Promise<string>;
   listTabs: (projectId: string) => Promise<BrowserTabListing>;
-  newTab: (projectId: string, url?: string) => Promise<number>;
-  switchTab: (projectId: string, tabId: number) => Promise<void>;
-  closeTab: (projectId: string, tabId: number) => Promise<number>;
+  newTab: (projectId: string, url?: string, bounds?: BrowserViewBounds) => Promise<number>;
+  switchTab: (projectId: string, tabId: number, bounds?: BrowserViewBounds) => Promise<void>;
+  closeTab: (projectId: string, tabId: number, bounds?: BrowserViewBounds) => Promise<number>;
   setViewport: (
     projectId: string,
     tabId: number,

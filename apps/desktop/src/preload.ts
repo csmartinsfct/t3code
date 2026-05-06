@@ -116,10 +116,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     reload: (projectId) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, projectId),
     getUrl: (projectId) => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL, projectId),
     listTabs: (projectId) => ipcRenderer.invoke(BROWSER_LIST_TABS_CHANNEL, projectId),
-    newTab: (projectId, url) => ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, projectId, url),
-    switchTab: (projectId, tabId) =>
-      ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId),
-    closeTab: (projectId, tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId),
+    newTab: (projectId, url, bounds) =>
+      ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, projectId, url, bounds),
+    switchTab: (projectId, tabId, bounds) =>
+      ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId, bounds),
+    closeTab: (projectId, tabId, bounds) =>
+      ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId, bounds),
     setViewport: (projectId, tabId, params) =>
       ipcRenderer.invoke(BROWSER_SET_VIEWPORT_CHANNEL, projectId, tabId, params),
     popoutOpen: (projectId) => ipcRenderer.invoke(BROWSER_POPOUT_OPEN_CHANNEL, projectId),
