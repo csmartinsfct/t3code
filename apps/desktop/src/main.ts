@@ -129,8 +129,6 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
-const EMBEDDED_BROWSER_BACKGROUND_DARK = "#161616";
-const EMBEDDED_BROWSER_BACKGROUND_LIGHT = "#ffffff";
 const EMBEDDED_BROWSER_PUBLIC_BLANK_URL = "about:blank";
 const EMBEDDED_BROWSER_BLANK_DOCUMENT_MARKER = "t3-embedded-browser-blank";
 const EMBEDDED_BROWSER_BLANK_URLS = new Set(["", "about:blank", "about:newtab"]);
@@ -2248,12 +2246,6 @@ function parkEmbeddedBrowserView(view: WebContentsView): void {
   }
 }
 
-function embeddedBrowserBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors
-    ? EMBEDDED_BROWSER_BACKGROUND_DARK
-    : EMBEDDED_BROWSER_BACKGROUND_LIGHT;
-}
-
 function isEmbeddedBrowserBlankUrl(url: string): boolean {
   return (
     EMBEDDED_BROWSER_BLANK_URLS.has(url) ||
@@ -2265,9 +2257,12 @@ function publicEmbeddedBrowserUrl(url: string): string {
   return isEmbeddedBrowserBlankUrl(url) ? EMBEDDED_BROWSER_PUBLIC_BLANK_URL : url;
 }
 
+// Blank tabs render a transparent document so the React rect div's
+// `bg-background` shows through the WebContentsView, guaranteeing a single
+// source of truth for the empty-tab background. Real pages still paint
+// normally on top of the transparent view.
 function embeddedBrowserLoadUrl(url: string): string {
   if (!isEmbeddedBrowserBlankUrl(url)) return url;
-  const color = embeddedBrowserBackgroundColor();
   const html = `<!doctype html>
 <html>
   <head>
@@ -2279,7 +2274,7 @@ function embeddedBrowserLoadUrl(url: string): string {
         margin: 0;
         width: 100%;
         height: 100%;
-        background: ${color};
+        background: transparent;
         color-scheme: ${nativeTheme.shouldUseDarkColors ? "dark" : "light"};
       }
     </style>
@@ -2289,49 +2284,13 @@ function embeddedBrowserLoadUrl(url: string): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-async function applyEmbeddedBrowserBlankPageAppearance(
-  tab: EmbeddedBrowserTabState,
-): Promise<void> {
-  const color = embeddedBrowserBackgroundColor();
-  await tab.view.webContents.executeJavaScript(
-    `
-      (() => {
-        const color = ${JSON.stringify(color)};
-        document.title = "";
-        document.documentElement.style.backgroundColor = color;
-        if (document.body) {
-          document.body.style.margin = "0";
-          document.body.style.backgroundColor = color;
-        }
-      })();
-    `,
-    true,
-  );
-}
-
 function applyEmbeddedBrowserBackground(view: WebContentsView): void {
   try {
-    view.setBackgroundColor(embeddedBrowserBackgroundColor());
+    // Transparent so the React `bg-background` rect div behind the view shows
+    // through for blank tabs. Real pages set their own opaque background.
+    view.setBackgroundColor("#00000000");
   } catch (error) {
     console.warn("[desktop/browser] failed to set view background color", { error });
-  }
-}
-
-function applyEmbeddedBrowserBackgroundsToAllViews(): void {
-  for (const project of embeddedBrowserProjectsByProjectId.values()) {
-    for (const tab of project.tabs.values()) {
-      if (isEmbeddedBrowserDestroyed(tab)) continue;
-      applyEmbeddedBrowserBackground(tab.view);
-      if (tab.isBlank) {
-        void applyEmbeddedBrowserBlankPageAppearance(tab).catch((error: unknown) => {
-          console.warn("[desktop/browser] failed to update blank tab theme", {
-            projectId: tab.projectId,
-            tabId: tab.tabId,
-            error,
-          });
-        });
-      }
-    }
   }
 }
 
@@ -2729,14 +2688,11 @@ function createEmbeddedBrowserTab(
   view.webContents.on("did-start-loading", () => {
     preNavHadViewFocus = view.webContents.isFocused();
   });
-  view.webContents.on("did-finish-load", async () => {
+  view.webContents.on("did-finish-load", () => {
     tab.isBlank = isEmbeddedBrowserBlankUrl(view.webContents.getURL());
     if (tab.isBlank) {
       tab.title = "";
       tab.favicon = null;
-      await applyEmbeddedBrowserBlankPageAppearance(tab).catch((error: unknown) => {
-        console.warn("[desktop/browser] failed to style blank tab", { projectId, tabId, error });
-      });
     }
     if (tab.devtoolsOpen) void resumeEmbeddedBrowser(tab);
     if (!preNavHadViewFocus && view.webContents.isFocused()) {
@@ -3257,11 +3213,15 @@ function registerIpcHandlers(): void {
         console.warn("[desktop/browser] setViewport called with invalid params", { rawParams });
         return;
       }
-      // Pure metrics override — no `viewport`, no `dontSetVisibleSize`.
-      // Chromium auto-sets its internal visible size to the metrics
-      // width/height so inner-page scrolling stays consistent with the
-      // page's CSS-px viewport. The renderer is responsible for sizing
-      // the WebContentsView to match (simulated × scale).
+      // `dontSetVisibleSize: true` is critical. Without it, Chromium
+      // auto-resizes the WebContentsView's rendering surface to the override
+      // width/height. When the renderer's React-side rect is clamped to fit
+      // the pane (`min(emulation.height, 100%)`) but the override carries the
+      // unclamped emulation height, Chromium's auto-resize fights the
+      // renderer's `setBounds` every frame — visible as the view's height
+      // flashing during a width drag. With this flag the override only
+      // touches the page's CSS viewport (window.innerWidth/innerHeight), and
+      // `setBounds` stays the sole authority for the view's screen-space size.
       // `scale` (deprecated but functional) zooms the rendered output —
       // matches Chrome DevTools' device-toolbar zoom dropdown.
       await sendBrowserCdp(tab, "Emulation.setDeviceMetricsOverride", {
@@ -3274,6 +3234,7 @@ function registerIpcHandlers(): void {
         positionX: 0,
         positionY: 0,
         scale: params.scale,
+        dontSetVisibleSize: true,
       });
       await sendBrowserCdp(tab, "Emulation.setTouchEmulationEnabled", { enabled: params.mobile });
       await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: params.userAgent });
@@ -3338,7 +3299,6 @@ function registerIpcHandlers(): void {
     // Propagate theme change to all overlay views so they re-apply the class.
     const resolvedTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
     broadcastThemeToAllOverlays(resolvedTheme);
-    applyEmbeddedBrowserBackgroundsToAllViews();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
