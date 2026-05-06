@@ -5,6 +5,7 @@ import "./components/file-explorer/FileSearchModal";
 import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
 import "./components/ProjectScriptsControl";
+import "./components/SystemPromptDialog";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/RateLimitMeter";
@@ -26,6 +27,7 @@ logWebTimeline("overlay-routes.loaded", {
     "git-default-branch-confirm",
     "git-tooltip",
     "project-script-editor",
+    "system-prompt-dialog",
     "label-editor",
     "template-editor",
     "managed-runs-control",
