@@ -710,6 +710,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `ScheduledTaskDetailPanel` routes its delete confirmation through `ScheduledTaskConfirmDialogs`, which shares the exact AlertDialog body between DOM fallback and `scheduled-task-delete-confirm`.
 
+`LabelEditorDialog` and `TemplateEditorDialog` route their settings forms through `OverlayRouteDialog`. The host and overlay share the exact form content, including controlled input state, validation, color swatches, markdown textarea styling, and `Saving...` button lifecycle; the overlay route runs the same `NativeApi` ticketing mutation and submits a saved result so the host refreshes its settings lists.
+
 Image attachment filename-extension warnings route through `ImageExtensionConfirmDialog`, sharing the exact AlertDialog content between the DOM fallback and `image-extension-confirm`.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.

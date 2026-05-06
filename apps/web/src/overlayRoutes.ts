@@ -13,7 +13,9 @@ import "./components/management/TicketDetailFieldSelectOverlay";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
+import "./components/settings/LabelEditorDialog";
 import "./components/settings/ScheduledTaskConfirmDialogs";
+import "./components/settings/TemplateEditorDialog";
 import "./components/settings/TicketComments";
 import "./components/terminal/TerminalTooltipOverlay";
 
@@ -24,6 +26,8 @@ logWebTimeline("overlay-routes.loaded", {
     "git-default-branch-confirm",
     "git-tooltip",
     "project-script-editor",
+    "label-editor",
+    "template-editor",
     "managed-runs-control",
     "context-window-meter",
     "propose-action-icon-picker",
