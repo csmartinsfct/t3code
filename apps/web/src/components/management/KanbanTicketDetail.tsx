@@ -35,7 +35,6 @@ import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
 import { buildTicketDetailLookupInput, useTicketPreviewCache } from "./ticketPreviewCache";
 import { SubTicketsTree } from "./SubTicketsTree";
@@ -49,14 +48,11 @@ import {
   TicketArchiveConfirmDialog,
   TicketDeleteConfirmDialog,
 } from "./TicketConfirmDialogs";
+import { STATUS_CONFIG, formatRelativeDate } from "../settings/ticketUtils";
 import {
-  ALL_PRIORITIES,
-  ALL_STATUSES,
-  PRIORITY_CONFIG,
-  STATUS_CONFIG,
-  formatRelativeDate,
-} from "../settings/ticketUtils";
-import { PriorityIcon } from "./PriorityIcon";
+  TicketDetailPrioritySelect,
+  TicketDetailStatusSelect,
+} from "./TicketDetailFieldSelectOverlay";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 export { buildTicketDetailLookupInput } from "./ticketPreviewCache";
@@ -939,8 +935,6 @@ export function KanbanTicketDetail({
     );
   }
 
-  const statusCfg = STATUS_CONFIG[ticket.status];
-
   return (
     <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
@@ -1025,49 +1019,14 @@ export function KanbanTicketDetail({
               </>
             )}
 
-            <Select
-              value={ticket.status}
-              onValueChange={(v) => void handleStatusChange(v as TicketStatus)}
-            >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <Badge size="sm" variant={statusCfg.badgeVariant}>
-                  <SelectValue />
-                </Badge>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {ALL_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    <div className="flex items-center gap-2">
-                      <Badge size="sm" variant={STATUS_CONFIG[s].badgeVariant}>
-                        {STATUS_CONFIG[s].label}
-                      </Badge>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <TicketDetailStatusSelect value={ticket.status} onValueChange={handleStatusChange} />
 
             <span className="text-border">|</span>
 
-            <Select
+            <TicketDetailPrioritySelect
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
-            >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <PriorityIcon priority={ticket.priority} className="size-4 text-muted-foreground" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {[...ALL_PRIORITIES].reverse().map((p) => (
-                  <SelectItem key={p} value={p}>
-                    <div className="flex items-center gap-2">
-                      <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
-                      {PRIORITY_CONFIG[p].label}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+              onValueChange={handlePriorityChange}
+            />
 
             <span className="text-border">|</span>
             <TicketLabelPicker

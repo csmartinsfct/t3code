@@ -9,6 +9,7 @@ import "./components/chat/ContextWindowMeter";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/RateLimitMeter";
 import "./components/management/BoardToolbar";
+import "./components/management/TicketDetailFieldSelectOverlay";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
@@ -28,6 +29,7 @@ logWebTimeline("overlay-routes.loaded", {
     "propose-action-icon-picker",
     "rate-limit-meter",
     "board-toolbar-filter",
+    "ticket-detail-field-select",
     "move-ticket-to-board",
     "ticket-selection-delete-confirm",
     "ticket-selection-archive-confirm",

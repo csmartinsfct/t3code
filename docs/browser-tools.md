@@ -706,6 +706,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `KanbanTicketDetail` routes its ticket action menu through the primitive menu adapter because its rows are command items/separators with discrete host callbacks. The delete-comment confirmation in `TicketComments` uses the routed AlertDialog adapter with shared content; its confirm button emits a non-dismissing `confirm-delete` event so the host keeps the same async `Deleting...` lifecycle before closing.
 
+`KanbanTicketDetail` status and priority selectors use the routed `ticket-detail-field-select` popover instead of the primitive select payload because their rows contain badges and custom priority icons. The DOM fallback still uses the original `Select`; the overlay route reuses the same option row components and submits the selected field value back to the host.
+
 `ScheduledTaskDetailPanel` routes its delete confirmation through `ScheduledTaskConfirmDialogs`, which shares the exact AlertDialog body between DOM fallback and `scheduled-task-delete-confirm`.
 
 Image attachment filename-extension warnings route through `ImageExtensionConfirmDialog`, sharing the exact AlertDialog content between the DOM fallback and `image-extension-confirm`.
