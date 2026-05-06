@@ -9,6 +9,8 @@ import {
 } from "~/lib/gitReactQuery";
 import { cn } from "~/lib/utils";
 import { parsePullRequestReference } from "~/pullRequestReference";
+import { registerOverlayRoute } from "./overlay/overlayRouteRegistry";
+import { useRoutedOverlaySurface } from "../routedOverlayAdapters";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -21,6 +23,13 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
+
+const PULL_REQUEST_THREAD_DIALOG_ROUTE_KEY = "pull-request-thread-dialog";
+
+type PullRequestThreadPreparedResult = {
+  branch: string;
+  worktreePath: string | null;
+};
 
 interface PullRequestThreadDialogProps {
   open: boolean;
@@ -37,6 +46,52 @@ export function PullRequestThreadDialog({
   onOpenChange,
   onPrepared,
 }: PullRequestThreadDialogProps) {
+  const [isPreparing, setIsPreparing] = useState(false);
+  const routed = useRoutedOverlaySurface<PullRequestThreadPreparedResult>({
+    open,
+    onOpenChange: (nextOpen) => {
+      if (!isPreparing) {
+        onOpenChange(nextOpen);
+      }
+    },
+    enabled: Boolean(cwd),
+    routeKey: PULL_REQUEST_THREAD_DIALOG_ROUTE_KEY,
+    params: { cwd, initialReference },
+    presentation: { kind: "dialog" },
+    onResult: onPrepared,
+  });
+
+  return (
+    <Dialog open={routed.domOpen} onOpenChange={routed.onDomOpenChange}>
+      <DialogPopup className="max-w-xl">
+        <PullRequestThreadDialogContent
+          cwd={cwd}
+          initialReference={initialReference}
+          onOpenChange={onOpenChange}
+          onPrepared={onPrepared}
+          onPendingChange={setIsPreparing}
+          open={routed.domOpen}
+        />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function PullRequestThreadDialogContent({
+  cwd,
+  initialReference,
+  onOpenChange,
+  onPrepared,
+  onPendingChange,
+  open,
+}: {
+  cwd: string | null;
+  initialReference: string | null;
+  onOpenChange: (open: boolean) => void;
+  onPrepared: (input: PullRequestThreadPreparedResult) => Promise<void> | void;
+  onPendingChange?: ((pending: boolean) => void) | undefined;
+  open: boolean;
+}) {
   const queryClient = useQueryClient();
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState(initialReference ?? "");
@@ -89,6 +144,10 @@ export function PullRequestThreadDialog({
   const preparePullRequestThreadMutation = useMutation(
     gitPreparePullRequestThreadMutationOptions({ cwd, queryClient }),
   );
+
+  useEffect(() => {
+    onPendingChange?.(preparePullRequestThreadMutation.isPending);
+  }, [onPendingChange, preparePullRequestThreadMutation.isPending]);
 
   const liveResolvedPullRequest =
     parsedReference !== null && parsedReference === parsedDebouncedReference
@@ -170,114 +229,148 @@ export function PullRequestThreadDialog({
           : null);
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!preparePullRequestThreadMutation.isPending) {
-          onOpenChange(nextOpen);
-        }
-      }}
-    >
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Checkout Pull Request</DialogTitle>
-          <DialogDescription>
-            Resolve a GitHub pull request, then create the draft thread in the main repo or in a
-            dedicated worktree.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="space-y-4">
-          <label className="grid gap-1.5">
-            <span className="text-xs font-medium text-foreground">Pull request</span>
-            <Input
-              ref={referenceInputRef}
-              placeholder="https://github.com/owner/repo/pull/42, gh pr checkout 42, or #42"
-              value={reference}
-              onChange={(event) => {
-                setReferenceDirty(true);
-                setReference(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") {
-                  return;
-                }
-                event.preventDefault();
-                if (!isResolving && !preparePullRequestThreadMutation.isPending) {
-                  void handleConfirm("local");
-                }
-              }}
-            />
-          </label>
+    <>
+      <DialogHeader>
+        <DialogTitle>Checkout Pull Request</DialogTitle>
+        <DialogDescription>
+          Resolve a GitHub pull request, then create the draft thread in the main repo or in a
+          dedicated worktree.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogPanel className="space-y-4">
+        <label className="grid gap-1.5">
+          <span className="text-xs font-medium text-foreground">Pull request</span>
+          <Input
+            ref={referenceInputRef}
+            placeholder="https://github.com/owner/repo/pull/42, gh pr checkout 42, or #42"
+            value={reference}
+            onChange={(event) => {
+              setReferenceDirty(true);
+              setReference(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") {
+                return;
+              }
+              event.preventDefault();
+              if (!isResolving && !preparePullRequestThreadMutation.isPending) {
+                void handleConfirm("local");
+              }
+            }}
+          />
+        </label>
 
-          {resolvedPullRequest ? (
-            <div className="rounded-xl border border-border/70 bg-muted/24 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-sm">{resolvedPullRequest.title}</p>
-                  <p className="truncate text-muted-foreground text-xs">
-                    #{resolvedPullRequest.number} · {resolvedPullRequest.headBranch} to{" "}
-                    {resolvedPullRequest.baseBranch}
-                  </p>
-                </div>
-                <span className={cn("shrink-0 text-xs capitalize", statusTone)}>
-                  {resolvedPullRequest.state}
-                </span>
+        {resolvedPullRequest ? (
+          <div className="rounded-xl border border-border/70 bg-muted/24 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-sm">{resolvedPullRequest.title}</p>
+                <p className="truncate text-muted-foreground text-xs">
+                  #{resolvedPullRequest.number} · {resolvedPullRequest.headBranch} to{" "}
+                  {resolvedPullRequest.baseBranch}
+                </p>
               </div>
+              <span className={cn("shrink-0 text-xs capitalize", statusTone)}>
+                {resolvedPullRequest.state}
+              </span>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {isResolving ? (
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <Spinner className="size-3.5" />
-              Resolving pull request...
-            </div>
-          ) : null}
+        {isResolving ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-xs">
+            <Spinner className="size-3.5" />
+            Resolving pull request...
+          </div>
+        ) : null}
 
-          {errorMessage ? <p className="text-destructive text-xs">{errorMessage}</p> : null}
-        </DialogPanel>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={preparePullRequestThreadMutation.isPending}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              void handleConfirm("local");
-            }}
-            disabled={
-              !cwd ||
-              !resolvedPullRequest ||
-              isResolving ||
-              preparePullRequestThreadMutation.isPending
-            }
-          >
-            {preparingMode === "local" ? "Preparing local..." : "Local"}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              void handleConfirm("worktree");
-            }}
-            disabled={
-              !cwd ||
-              !resolvedPullRequest ||
-              isResolving ||
-              preparePullRequestThreadMutation.isPending
-            }
-          >
-            {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+        {errorMessage ? <p className="text-destructive text-xs">{errorMessage}</p> : null}
+      </DialogPanel>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onOpenChange(false)}
+          disabled={preparePullRequestThreadMutation.isPending}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            void handleConfirm("local");
+          }}
+          disabled={
+            !cwd ||
+            !resolvedPullRequest ||
+            isResolving ||
+            preparePullRequestThreadMutation.isPending
+          }
+        >
+          {preparingMode === "local" ? "Preparing local..." : "Local"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            void handleConfirm("worktree");
+          }}
+          disabled={
+            !cwd ||
+            !resolvedPullRequest ||
+            isResolving ||
+            preparePullRequestThreadMutation.isPending
+          }
+        >
+          {preparingMode === "worktree" ? "Preparing worktree..." : "Worktree"}
+        </Button>
+      </DialogFooter>
+    </>
   );
+}
+
+registerOverlayRoute<{ cwd?: unknown; initialReference?: unknown }>(
+  PULL_REQUEST_THREAD_DIALOG_ROUTE_KEY,
+  function PullRequestThreadOverlayRoute({ message, controller }) {
+    const cwd = readStringParam(message.params.cwd);
+    const [isPreparing, setIsPreparing] = useState(false);
+
+    if (!cwd) {
+      controller.fail(new Error("Pull request thread dialog requires a workspace path."));
+      return null;
+    }
+
+    return (
+      <Dialog
+        open
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !isPreparing) controller.cancel("cancel");
+        }}
+      >
+        <DialogPopup className="max-w-xl">
+          <PullRequestThreadDialogContent
+            cwd={cwd}
+            initialReference={readNullableStringParam(message.params.initialReference)}
+            onOpenChange={(open) => {
+              if (!open) controller.cancel("cancel");
+            }}
+            onPrepared={(result) => controller.submit(result)}
+            onPendingChange={setIsPreparing}
+            open
+          />
+        </DialogPopup>
+      </Dialog>
+    );
+  },
+);
+
+function readStringParam(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readNullableStringParam(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }

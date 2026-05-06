@@ -5,9 +5,11 @@ import "./components/file-explorer/FileSearchModal";
 import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
 import "./components/ProjectScriptsControl";
+import "./components/PullRequestThreadDialog";
 import "./components/SystemPromptDialog";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ProposeActionCard";
+import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
 import "./components/management/BoardToolbar";
 import "./components/management/TicketDetailFieldSelectOverlay";
@@ -31,12 +33,14 @@ logWebTimeline("overlay-routes.loaded", {
     "git-default-branch-confirm",
     "git-tooltip",
     "project-script-editor",
+    "pull-request-thread-dialog",
     "system-prompt-dialog",
     "label-editor",
     "template-editor",
     "managed-runs-control",
     "context-window-meter",
     "propose-action-icon-picker",
+    "proposed-plan-save-dialog",
     "rate-limit-meter",
     "board-toolbar-filter",
     "ticket-detail-field-select",

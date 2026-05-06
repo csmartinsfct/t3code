@@ -1,4 +1,4 @@
-import { memo, useState, useId } from "react";
+import { memo, useCallback, useEffect, useId, useState } from "react";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -26,6 +26,15 @@ import {
 import { toastManager } from "../ui/toast";
 import { readNativeApi } from "~/nativeApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
+
+const PROPOSED_PLAN_SAVE_DIALOG_ROUTE_KEY = "proposed-plan-save-dialog";
+
+type ProposedPlanSaveDialogResult = {
+  action: "saved";
+  relativePath: string;
+};
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
@@ -87,7 +96,41 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     setIsSaveDialogOpen(true);
   };
 
-  const handleSaveToWorkspace = () => {
+  const routedSaveDialog = useRoutedOverlaySurface<ProposedPlanSaveDialogResult>({
+    open: isSaveDialogOpen,
+    onOpenChange: (open) => {
+      if (!isSavingToWorkspace) {
+        setIsSaveDialogOpen(open);
+      }
+    },
+    enabled: Boolean(workspaceRoot),
+    routeKey: PROPOSED_PLAN_SAVE_DIALOG_ROUTE_KEY,
+    params: {
+      workspaceRoot: workspaceRoot ?? "",
+      initialSavePath: savePath,
+      downloadFilename,
+      saveContents,
+    },
+    presentation: { kind: "dialog" },
+    onResult: (result) => {
+      setIsSaveDialogOpen(false);
+      setSavePath(result.relativePath);
+      toastManager.add({
+        type: "success",
+        title: "Plan saved to workspace",
+        description: result.relativePath,
+      });
+    },
+    onError: (message) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not save plan",
+        description: message,
+      });
+    },
+  });
+
+  const handleDomSaveToWorkspace = () => {
     const api = readNativeApi();
     const relativePath = savePath.trim();
     if (!api || !workspaceRoot) {
@@ -216,53 +259,183 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         ) : null}
       </div>
 
-      <Dialog
-        open={isSaveDialogOpen}
-        onOpenChange={(open) => {
-          if (!isSavingToWorkspace) {
-            setIsSaveDialogOpen(open);
-          }
-        }}
-      >
+      <Dialog open={routedSaveDialog.domOpen} onOpenChange={routedSaveDialog.onDomOpenChange}>
         <DialogPopup className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Save plan to workspace</DialogTitle>
-            <DialogDescription>
-              Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-3">
-            <label htmlFor={savePathInputId} className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Workspace path</span>
-              <Input
-                id={savePathInputId}
-                value={savePath}
-                onChange={(event) => setSavePath(event.target.value)}
-                placeholder={downloadFilename}
-                spellCheck={false}
-                disabled={isSavingToWorkspace}
-              />
-            </label>
-          </DialogPanel>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsSaveDialogOpen(false)}
-              disabled={isSavingToWorkspace}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void handleSaveToWorkspace()}
-              disabled={isSavingToWorkspace}
-            >
-              {isSavingToWorkspace ? "Saving..." : "Save"}
-            </Button>
-          </DialogFooter>
+          <ProposedPlanSaveDialogContent
+            dialogId={savePathInputId}
+            downloadFilename={downloadFilename}
+            isSaving={isSavingToWorkspace}
+            onCancel={() => setIsSaveDialogOpen(false)}
+            onSave={() => void handleDomSaveToWorkspace()}
+            savePath={savePath}
+            setSavePath={setSavePath}
+            workspaceRoot={workspaceRoot}
+          />
         </DialogPopup>
       </Dialog>
     </div>
   );
 });
+
+function ProposedPlanSaveDialogContent({
+  dialogId,
+  downloadFilename,
+  isSaving,
+  onCancel,
+  onSave,
+  savePath,
+  setSavePath,
+  workspaceRoot,
+}: {
+  dialogId: string;
+  downloadFilename: string;
+  isSaving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+  savePath: string;
+  setSavePath: (value: string) => void;
+  workspaceRoot: string | undefined;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Save plan to workspace</DialogTitle>
+        <DialogDescription>
+          Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogPanel className="space-y-3">
+        <label htmlFor={dialogId} className="grid gap-1.5">
+          <span className="text-xs font-medium text-foreground">Workspace path</span>
+          <Input
+            id={dialogId}
+            value={savePath}
+            onChange={(event) => setSavePath(event.target.value)}
+            placeholder={downloadFilename}
+            spellCheck={false}
+            disabled={isSaving}
+          />
+        </label>
+      </DialogPanel>
+      <DialogFooter>
+        <Button variant="outline" size="sm" onClick={onCancel} disabled={isSaving}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={onSave} disabled={isSaving}>
+          {isSaving ? "Saving..." : "Save"}
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+function ProposedPlanSaveOverlayRouteContent({
+  controller,
+  downloadFilename,
+  initialSavePath,
+  saveContents,
+  workspaceRoot,
+}: {
+  controller: {
+    cancel: (reason?: string) => void;
+    fail: (error: Error) => void;
+    submit: (value: ProposedPlanSaveDialogResult) => void;
+  };
+  downloadFilename: string;
+  initialSavePath: string;
+  saveContents: string;
+  workspaceRoot: string;
+}) {
+  const dialogId = useId();
+  const [savePath, setSavePath] = useState(initialSavePath);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setSavePath(initialSavePath);
+  }, [initialSavePath]);
+
+  const handleSave = useCallback(() => {
+    const api = readNativeApi();
+    const relativePath = savePath.trim();
+    if (!api || !workspaceRoot) {
+      return;
+    }
+    if (!relativePath) {
+      toastManager.add({
+        type: "warning",
+        title: "Enter a workspace path",
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    void api.projects
+      .writeFile({
+        cwd: workspaceRoot,
+        relativePath,
+        contents: saveContents,
+      })
+      .then((result) => {
+        controller.submit({ action: "saved", relativePath: result.relativePath });
+      })
+      .catch((error) => {
+        controller.fail(
+          error instanceof Error ? error : new Error("An error occurred while saving."),
+        );
+      })
+      .finally(() => {
+        setIsSaving(false);
+      });
+  }, [controller, saveContents, savePath, workspaceRoot]);
+
+  return (
+    <ProposedPlanSaveDialogContent
+      dialogId={dialogId}
+      downloadFilename={downloadFilename}
+      isSaving={isSaving}
+      onCancel={() => controller.cancel("cancel")}
+      onSave={handleSave}
+      savePath={savePath}
+      setSavePath={setSavePath}
+      workspaceRoot={workspaceRoot}
+    />
+  );
+}
+
+registerOverlayRoute<{
+  downloadFilename?: unknown;
+  initialSavePath?: unknown;
+  saveContents?: unknown;
+  workspaceRoot?: unknown;
+}>(
+  PROPOSED_PLAN_SAVE_DIALOG_ROUTE_KEY,
+  function ProposedPlanSaveOverlayRoute({ message, controller }) {
+    const workspaceRoot = readStringParam(message.params.workspaceRoot);
+    const downloadFilename = readStringParam(message.params.downloadFilename);
+    const initialSavePath = readStringParam(message.params.initialSavePath) || downloadFilename;
+    const saveContents = readStringParam(message.params.saveContents);
+
+    if (!workspaceRoot || !downloadFilename) {
+      controller.fail(new Error("Save-plan overlay requires a workspace path and filename."));
+      return null;
+    }
+
+    return (
+      <OverlayRouteDialog>
+        <DialogPopup className="max-w-xl">
+          <ProposedPlanSaveOverlayRouteContent
+            controller={controller}
+            downloadFilename={downloadFilename}
+            initialSavePath={initialSavePath}
+            saveContents={saveContents}
+            workspaceRoot={workspaceRoot}
+          />
+        </DialogPopup>
+      </OverlayRouteDialog>
+    );
+  },
+);
+
+function readStringParam(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}

@@ -277,7 +277,31 @@ const PlanSidebar = memo(function PlanSidebar({
         </div>
         <div className="flex items-center gap-1">
           {planMarkdown ? (
-            <Menu>
+            <Menu
+              overlayItems={[
+                { id: "copy", label: isCopied ? "Copied!" : "Copy to clipboard" },
+                { id: "download", label: "Download as markdown" },
+                {
+                  id: "save",
+                  label: "Save to workspace",
+                  disabled: !workspaceRoot || isSavingToWorkspace,
+                },
+              ]}
+              overlayMenuAlign="end"
+              overlayOnSelect={(id) => {
+                if (id === "copy") {
+                  handleCopyPlan();
+                  return;
+                }
+                if (id === "download") {
+                  handleDownload();
+                  return;
+                }
+                if (id === "save") {
+                  handleSaveToWorkspace();
+                }
+              }}
+            >
               <MenuTrigger
                 render={
                   <Button
