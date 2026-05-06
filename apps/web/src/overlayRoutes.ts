@@ -11,6 +11,7 @@ import "./components/management/BoardToolbar";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
+import "./components/settings/TicketComments";
 import "./components/terminal/TerminalTooltipOverlay";
 
 logWebTimeline("overlay-routes.loaded", {
@@ -32,6 +33,7 @@ logWebTimeline("overlay-routes.loaded", {
     "ticket-archive-confirm",
     "sub-tickets-archive-confirm",
     "ticket-label-picker",
+    "delete-comment-confirm",
     "terminal-tooltip",
   ],
 });

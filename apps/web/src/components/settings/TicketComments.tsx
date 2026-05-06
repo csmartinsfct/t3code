@@ -3,6 +3,8 @@ import { SendIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteAlertDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -32,6 +34,8 @@ export function getDeleteCommentConfirmationText(replyCount: number): string {
     ? `This will permanently delete this comment and its ${replyCount === 1 ? "reply" : `${replyCount} replies`}. This action cannot be undone.`
     : "This will permanently delete this comment. This action cannot be undone.";
 }
+
+const DELETE_COMMENT_OVERLAY_ROUTE_KEY = "delete-comment-confirm";
 
 // ---------------------------------------------------------------------------
 // Delete button (shared between top-level comments and replies)
@@ -64,31 +68,83 @@ function DeleteCommentDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   deleting: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   replyCount: number;
 }) {
+  const routed = useRoutedOverlaySurface({
+    open,
+    onOpenChange,
+    routeKey: DELETE_COMMENT_OVERLAY_ROUTE_KEY,
+    params: { deleting, replyCount },
+    presentation: { kind: "alert-dialog" },
+    onEvent: async (type) => {
+      if (type === "confirm-delete") await onConfirm();
+    },
+  });
+
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog open={routed.domOpen} onOpenChange={routed.onDomOpenChange}>
       <AlertDialogPopup>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete comment?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {getDeleteCommentConfirmationText(replyCount)}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogClose>
-            <Button variant="outline" size="sm">
-              Cancel
-            </Button>
-          </AlertDialogClose>
-          <Button variant="destructive" size="sm" disabled={deleting} onClick={onConfirm}>
-            {deleting ? "Deleting..." : "Delete"}
-          </Button>
-        </AlertDialogFooter>
+        <DeleteCommentDialogContent
+          deleting={deleting}
+          replyCount={replyCount}
+          onConfirm={onConfirm}
+        />
       </AlertDialogPopup>
     </AlertDialog>
   );
+}
+
+function DeleteCommentDialogContent({
+  deleting,
+  onConfirm,
+  replyCount,
+}: {
+  deleting: boolean;
+  onConfirm: () => void | Promise<void>;
+  replyCount: number;
+}) {
+  return (
+    <>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Delete comment?</AlertDialogTitle>
+        <AlertDialogDescription>
+          {getDeleteCommentConfirmationText(replyCount)}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogClose>
+          <Button variant="outline" size="sm">
+            Cancel
+          </Button>
+        </AlertDialogClose>
+        <Button variant="destructive" size="sm" disabled={deleting} onClick={onConfirm}>
+          {deleting ? "Deleting..." : "Delete"}
+        </Button>
+      </AlertDialogFooter>
+    </>
+  );
+}
+
+registerOverlayRoute<{ deleting?: unknown; replyCount?: unknown }>(
+  DELETE_COMMENT_OVERLAY_ROUTE_KEY,
+  function DeleteCommentOverlayRoute({ message, controller }) {
+    return (
+      <OverlayRouteAlertDialog>
+        <AlertDialogPopup>
+          <DeleteCommentDialogContent
+            deleting={message.params.deleting === true}
+            replyCount={readReplyCountParam(message.params.replyCount)}
+            onConfirm={() => controller.bridge.emitEvent("confirm-delete", {})}
+          />
+        </AlertDialogPopup>
+      </OverlayRouteAlertDialog>
+    );
+  },
+);
+
+function readReplyCountParam(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +206,7 @@ function ReplyBubble({ reply, onUpdated }: { reply: Comment; onUpdated: () => vo
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         deleting={deleting}
-        onConfirm={() => void handleDelete()}
+        onConfirm={handleDelete}
         replyCount={0}
       />
     </>
@@ -237,7 +293,7 @@ function CommentBubble({
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         deleting={deleting}
-        onConfirm={() => void handleDelete()}
+        onConfirm={handleDelete}
         replyCount={replies.length}
       />
 

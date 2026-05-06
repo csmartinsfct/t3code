@@ -4,6 +4,7 @@ import type {
   TicketDependency,
   TicketId,
   TicketLinkedThread,
+  OverlayMenuItem,
   TicketPriority,
   TicketStatus,
   TicketSummary,
@@ -188,9 +189,17 @@ function TicketDetailActionsMenu({
     onArchive,
     onDelete,
   });
+  const overlayItems = buildTicketDetailActionOverlayItems(actions);
+  const handleOverlaySelect = useCallback(
+    (id: string) => {
+      const action = actions.find((item) => item.kind === "item" && item.key === id);
+      if (action?.kind === "item") action.onSelect();
+    },
+    [actions],
+  );
 
   return (
-    <Menu>
+    <Menu overlayItems={overlayItems} overlayMenuAlign="end" overlayOnSelect={handleOverlaySelect}>
       <MenuTrigger
         render={
           <Button
@@ -229,6 +238,7 @@ type TicketDetailActionItem =
       kind: "item";
       label: string;
       icon: React.ReactNode;
+      iconName?: string | undefined;
       onSelect: () => void;
       variant?: "default" | "destructive";
     }
@@ -251,6 +261,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Orchestrate",
       icon: <PlayIcon className="size-3.5" />,
+      iconName: "Play",
       onSelect: () => input.onOrchestrate?.(input.ticket),
     },
     {
@@ -258,6 +269,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Decompose",
       icon: <ListTreeIcon className="size-3.5" />,
+      iconName: "ListTree",
       onSelect: input.onDecompose,
     },
     ...(input.ticket.parentId !== null && input.onMoveToBoard
@@ -280,6 +292,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Archive",
       icon: <ArchiveIcon className="size-3.5" />,
+      iconName: "Archive",
       onSelect: input.onArchive,
     },
     {
@@ -287,10 +300,26 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Delete",
       icon: <TrashIcon className="size-3.5" />,
+      iconName: "Trash",
       onSelect: input.onDelete,
       variant: "destructive",
     },
   ];
+}
+
+function buildTicketDetailActionOverlayItems(
+  actions: readonly TicketDetailActionItem[],
+): OverlayMenuItem[] {
+  return actions.map((action) =>
+    action.kind === "separator"
+      ? { id: action.key, label: "", separator: true }
+      : {
+          id: action.key,
+          label: action.label,
+          ...(action.iconName ? { icon: action.iconName } : {}),
+          ...(action.variant === "destructive" ? { destructive: true } : {}),
+        },
+  );
 }
 
 type TicketRowButtonProps = React.ComponentPropsWithoutRef<"button"> & {
