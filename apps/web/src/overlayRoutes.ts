@@ -1,5 +1,6 @@
 import { logWebTimeline } from "./timelineLogger";
 
+import "./components/attachments/ImageExtensionConfirmDialog";
 import "./components/file-explorer/FileSearchModal";
 import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
@@ -34,6 +35,7 @@ logWebTimeline("overlay-routes.loaded", {
     "ticket-archive-confirm",
     "sub-tickets-archive-confirm",
     "ticket-label-picker",
+    "image-extension-confirm",
     "scheduled-task-delete-confirm",
     "delete-comment-confirm",
     "terminal-tooltip",
