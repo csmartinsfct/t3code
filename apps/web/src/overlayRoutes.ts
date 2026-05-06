@@ -14,6 +14,7 @@ import "./components/management/TicketDetailFieldSelectOverlay";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
+import "./components/settings/DynamicChatUiPromptSection";
 import "./components/settings/LabelEditorDialog";
 import "./components/settings/PromptEditorDialog";
 import "./components/settings/ScheduledTaskConfirmDialogs";
@@ -47,6 +48,7 @@ logWebTimeline("overlay-routes.loaded", {
     "ticket-label-picker",
     "image-extension-confirm",
     "prompt-editor",
+    "dynamic-chat-ui-prompt-editor",
     "scheduled-task-delete-confirm",
     "scheduled-task-editor",
     "delete-comment-confirm",

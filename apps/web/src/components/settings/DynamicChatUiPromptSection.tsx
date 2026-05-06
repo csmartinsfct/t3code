@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { PencilIcon, RotateCcwIcon } from "lucide-react";
-import type { ServerSettingsPatch } from "@t3tools/contracts";
+import type { ServerSettings, ServerSettingsPatch } from "@t3tools/contracts";
 import {
   DYNAMIC_CHAT_UI_BUILDER_PROMPT_DEFAULT,
   validateDynamicChatUiBuilderPromptTemplate,
@@ -9,6 +9,8 @@ import {
 import defaultDesignLanguage from "../../../../../docs/design-language.md?raw";
 import { ensureNativeApi } from "../../nativeApi";
 import { applySettingsUpdated, useServerSettings } from "../../rpc/serverState";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -25,6 +27,13 @@ import { toastManager } from "../ui/toast";
 import { SettingsSection } from "./SettingsPanels";
 
 type DynamicUiEditable = "designGuide" | "builderPrompt";
+
+const DYNAMIC_CHAT_UI_PROMPT_EDITOR_OVERLAY_ROUTE_KEY = "dynamic-chat-ui-prompt-editor";
+
+type DynamicChatUiPromptEditorResult = {
+  action: "saved" | "reset";
+  settings: ServerSettings;
+};
 
 interface EditableConfig {
   readonly id: DynamicUiEditable;
@@ -56,6 +65,19 @@ function validateDraft(config: EditableConfig, draft: string): string | null {
   const missing = validateDynamicChatUiBuilderPromptTemplate(draft);
   if (missing.length === 0) return null;
   return `Missing required placeholder(s): ${missing.join(", ")}`;
+}
+
+async function persistEditable(
+  id: DynamicUiEditable,
+  value: string | null,
+): Promise<ServerSettings> {
+  const patch = {
+    dynamicChatUi:
+      id === "designGuide" ? { designGuideOverride: value } : { builderPromptOverride: value },
+  } satisfies ServerSettingsPatch;
+  const settings = await ensureNativeApi().server.updateSettings(patch);
+  applySettingsUpdated(settings);
+  return settings;
 }
 
 export function DynamicChatUiPromptSection() {
@@ -107,14 +129,20 @@ export function DynamicChatUiPromptSection() {
       : activeConfig.defaultValue
     : "";
 
-  const persistEditable = useCallback(async (id: DynamicUiEditable, value: string | null) => {
-    const patch = {
-      dynamicChatUi:
-        id === "designGuide" ? { designGuideOverride: value } : { builderPromptOverride: value },
-    } satisfies ServerSettingsPatch;
-    const settings = await ensureNativeApi().server.updateSettings(patch);
-    applySettingsUpdated(settings);
-  }, []);
+  const routed = useRoutedOverlaySurface<DynamicChatUiPromptEditorResult>({
+    open: editing !== null,
+    onOpenChange: (open) => {
+      if (!open) closeEditor();
+    },
+    routeKey: DYNAMIC_CHAT_UI_PROMPT_EDITOR_OVERLAY_ROUTE_KEY,
+    params: { config: activeConfig },
+    presentation: { kind: "dialog" },
+    enabled: activeConfig !== null,
+    onResult: (result) => {
+      applySettingsUpdated(result.settings);
+      setEditing(null);
+    },
+  });
 
   const openEditor = useCallback((config: EditableConfig) => {
     setDraft(hasTextOverride(config.overrideValue) ? config.overrideValue : config.defaultValue);
@@ -152,28 +180,25 @@ export function DynamicChatUiPromptSection() {
     } finally {
       setSaving(false);
     }
-  }, [activeConfig, draft, persistEditable]);
+  }, [activeConfig, draft]);
 
-  const resetToOriginal = useCallback(
-    async (config: EditableConfig) => {
-      setSaving(true);
-      try {
-        await persistEditable(config.id, null);
-        setDraft(config.defaultValue);
-        toastManager.add({ type: "success", title: config.resetTitle });
-        setEditing(null);
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: config.resetFailedTitle,
-          description: error instanceof Error ? error.message : "Unknown error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [persistEditable],
-  );
+  const resetToOriginal = useCallback(async (config: EditableConfig) => {
+    setSaving(true);
+    try {
+      await persistEditable(config.id, null);
+      setDraft(config.defaultValue);
+      toastManager.add({ type: "success", title: config.resetTitle });
+      setEditing(null);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: config.resetFailedTitle,
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
   const resetEditorToOriginal = useCallback(async () => {
     if (!activeConfig) return;
@@ -229,58 +254,216 @@ export function DynamicChatUiPromptSection() {
         })}
       </SettingsSection>
 
-      <Dialog open={editing !== null} onOpenChange={(open) => !open && closeEditor()}>
+      <Dialog open={routed.domOpen} onOpenChange={routed.onDomOpenChange}>
         <DialogPopup className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>{activeConfig?.dialogTitle ?? "Dynamic UI"}</DialogTitle>
-            <DialogDescription>
-              {activeConfig?.id === "builderPrompt"
-                ? "Keep the {{...}} placeholders and delimiter contract intact; reset restores the shipped template."
-                : "Edits here override docs/design-language.md for generated chat UI artifacts."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogPanel>
-            <Textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              className="h-[60vh] min-h-96 resize-none font-mono text-xs"
-              spellCheck={false}
-            />
-          </DialogPanel>
-
-          <DialogFooter>
-            <div className="flex w-full items-center justify-between">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={
-                  saving ||
-                  !activeConfig ||
-                  (draft === activeConfig.defaultValue &&
-                    !hasTextOverride(activeConfig.overrideValue))
-                }
-                onClick={() => void resetEditorToOriginal()}
-              >
-                <RotateCcwIcon className="size-3.5" />
-                Reset to original
-              </Button>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" disabled={saving} onClick={closeEditor}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={saving || !activeConfig || draft === activeEffectiveValue}
-                  onClick={() => void saveDraft()}
-                >
-                  {saving ? "Saving..." : "Save"}
-                </Button>
-              </div>
-            </div>
-          </DialogFooter>
+          <DynamicChatUiPromptEditorContent
+            activeConfig={activeConfig}
+            activeEffectiveValue={activeEffectiveValue}
+            draft={draft}
+            onCancel={closeEditor}
+            onDraftChange={setDraft}
+            onReset={resetEditorToOriginal}
+            onSave={saveDraft}
+            saving={saving}
+          />
         </DialogPopup>
       </Dialog>
     </>
   );
+}
+
+function DynamicChatUiPromptEditorContent({
+  activeConfig,
+  activeEffectiveValue,
+  draft,
+  onCancel,
+  onDraftChange,
+  onReset,
+  onSave,
+  saving,
+}: {
+  activeConfig: EditableConfig | null;
+  activeEffectiveValue: string;
+  draft: string;
+  onCancel: () => void;
+  onDraftChange: (draft: string) => void;
+  onReset: () => void | Promise<void>;
+  onSave: () => void | Promise<void>;
+  saving: boolean;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{activeConfig?.dialogTitle ?? "Dynamic UI"}</DialogTitle>
+        <DialogDescription>
+          {activeConfig?.id === "builderPrompt"
+            ? "Keep the {{...}} placeholders and delimiter contract intact; reset restores the shipped template."
+            : "Edits here override docs/design-language.md for generated chat UI artifacts."}
+        </DialogDescription>
+      </DialogHeader>
+
+      <DialogPanel>
+        <Textarea
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          className="h-[60vh] min-h-96 resize-none font-mono text-xs"
+          spellCheck={false}
+        />
+      </DialogPanel>
+
+      <DialogFooter>
+        <div className="flex w-full items-center justify-between">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={
+              saving ||
+              !activeConfig ||
+              (draft === activeConfig.defaultValue && !hasTextOverride(activeConfig.overrideValue))
+            }
+            onClick={() => void onReset()}
+          >
+            <RotateCcwIcon className="size-3.5" />
+            Reset to original
+          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={saving || !activeConfig || draft === activeEffectiveValue}
+              onClick={() => void onSave()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+      </DialogFooter>
+    </>
+  );
+}
+
+registerOverlayRoute<{ config?: unknown }>(
+  DYNAMIC_CHAT_UI_PROMPT_EDITOR_OVERLAY_ROUTE_KEY,
+  function DynamicChatUiPromptEditorOverlayRoute({ message, controller }) {
+    const activeConfig = readEditableConfigParam(message.params.config);
+    const [draft, setDraft] = useState(() =>
+      activeConfig
+        ? hasTextOverride(activeConfig.overrideValue)
+          ? activeConfig.overrideValue
+          : activeConfig.defaultValue
+        : "",
+    );
+    const [saving, setSaving] = useState(false);
+
+    const activeEffectiveValue = activeConfig
+      ? hasTextOverride(activeConfig.overrideValue)
+        ? activeConfig.overrideValue
+        : activeConfig.defaultValue
+      : "";
+
+    const saveDraft = useCallback(async () => {
+      if (!activeConfig) return;
+      const validationError = validateDraft(activeConfig, draft);
+      if (validationError) {
+        toastManager.add({
+          type: "error",
+          title: activeConfig.emptyTitle,
+          description: validationError,
+        });
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const settings = await persistEditable(
+          activeConfig.id,
+          draft === activeConfig.defaultValue ? null : draft,
+        );
+        toastManager.add({ type: "success", title: activeConfig.savedTitle });
+        controller.submit({ action: "saved", settings });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: activeConfig.saveFailedTitle,
+          description: error instanceof Error ? error.message : "Unknown error",
+        });
+      } finally {
+        setSaving(false);
+      }
+    }, [activeConfig, controller, draft]);
+
+    const resetEditorToOriginal = useCallback(async () => {
+      if (!activeConfig) return;
+      if (!hasTextOverride(activeConfig.overrideValue)) {
+        setDraft(activeConfig.defaultValue);
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const settings = await persistEditable(activeConfig.id, null);
+        setDraft(activeConfig.defaultValue);
+        toastManager.add({ type: "success", title: activeConfig.resetTitle });
+        controller.submit({ action: "reset", settings });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: activeConfig.resetFailedTitle,
+          description: error instanceof Error ? error.message : "Unknown error",
+        });
+      } finally {
+        setSaving(false);
+      }
+    }, [activeConfig, controller]);
+
+    return (
+      <OverlayRouteDialog>
+        <DialogPopup className="max-w-5xl">
+          <DynamicChatUiPromptEditorContent
+            activeConfig={activeConfig}
+            activeEffectiveValue={activeEffectiveValue}
+            draft={draft}
+            onCancel={() => controller.cancel("cancel")}
+            onDraftChange={setDraft}
+            onReset={resetEditorToOriginal}
+            onSave={saveDraft}
+            saving={saving}
+          />
+        </DialogPopup>
+      </OverlayRouteDialog>
+    );
+  },
+);
+
+function readEditableConfigParam(value: unknown): EditableConfig | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<EditableConfig>;
+  if (candidate.id !== "designGuide" && candidate.id !== "builderPrompt") return null;
+  if (typeof candidate.title !== "string") return null;
+  if (typeof candidate.dialogTitle !== "string") return null;
+  if (typeof candidate.description !== "string") return null;
+  if (typeof candidate.emptyTitle !== "string") return null;
+  if (typeof candidate.emptyDescription !== "string") return null;
+  if (typeof candidate.savedTitle !== "string") return null;
+  if (typeof candidate.resetTitle !== "string") return null;
+  if (typeof candidate.saveFailedTitle !== "string") return null;
+  if (typeof candidate.resetFailedTitle !== "string") return null;
+  if (typeof candidate.defaultValue !== "string") return null;
+  if (candidate.overrideValue !== null && typeof candidate.overrideValue !== "string") return null;
+  return {
+    id: candidate.id,
+    title: candidate.title,
+    dialogTitle: candidate.dialogTitle,
+    description: candidate.description,
+    emptyTitle: candidate.emptyTitle,
+    emptyDescription: candidate.emptyDescription,
+    savedTitle: candidate.savedTitle,
+    resetTitle: candidate.resetTitle,
+    saveFailedTitle: candidate.saveFailedTitle,
+    resetFailedTitle: candidate.resetFailedTitle,
+    defaultValue: candidate.defaultValue,
+    overrideValue: candidate.overrideValue,
+  };
 }

@@ -718,6 +718,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `PromptEditorDialog` routes through `prompt-editor` and shares the exact prompt block editor between DOM fallback and the overlay route, including block drag/reorder, condition selects, variable tooltips, debounced validation, preview expansion, revert/save controls, and toast handling. Server-backed prompt edits run the same prompt-management RPCs from the overlay. Run-local orchestration prompt overrides are returned to the host as a submitted result so the host can keep its local override state without serializing callbacks over IPC.
 
+`DynamicChatUiPromptSection` routes the design-language and builder-prompt editor dialog through `dynamic-chat-ui-prompt-editor`. The textarea dialog content is shared between DOM fallback and overlay, while save/reset still call the same settings RPC, show the same validation/toast states, and submit the updated `ServerSettings` back to the host so both renderer stores stay in sync.
+
 Image attachment filename-extension warnings route through `ImageExtensionConfirmDialog`, sharing the exact AlertDialog content between the DOM fallback and `image-extension-confirm`.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
