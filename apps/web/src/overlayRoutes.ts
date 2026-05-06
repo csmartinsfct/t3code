@@ -16,6 +16,7 @@ import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
 import "./components/settings/LabelEditorDialog";
 import "./components/settings/ScheduledTaskConfirmDialogs";
+import "./components/settings/ScheduledTaskDialog";
 import "./components/settings/TemplateEditorDialog";
 import "./components/settings/TicketComments";
 import "./components/terminal/TerminalTooltipOverlay";
@@ -45,6 +46,7 @@ logWebTimeline("overlay-routes.loaded", {
     "ticket-label-picker",
     "image-extension-confirm",
     "scheduled-task-delete-confirm",
+    "scheduled-task-editor",
     "delete-comment-confirm",
     "terminal-tooltip",
   ],

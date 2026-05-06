@@ -710,6 +710,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `ScheduledTaskDetailPanel` routes its delete confirmation through `ScheduledTaskConfirmDialogs`, which shares the exact AlertDialog body between DOM fallback and `scheduled-task-delete-confirm`.
 
+`ScheduledTaskDialog` routes add/edit scheduled-task forms through `scheduled-task-editor`. The entire form is shared between DOM fallback and the overlay route, including cron validation, project/type selects, skill chip/menu selection, auto-send switch, prompt textarea, and save/create loading state; the route performs the same scheduled-task RPC and returns the saved job to the host.
+
 `LabelEditorDialog` and `TemplateEditorDialog` route their settings forms through `OverlayRouteDialog`. The host and overlay share the exact form content, including controlled input state, validation, color swatches, markdown textarea styling, and `Saving...` button lifecycle; the overlay route runs the same `NativeApi` ticketing mutation and submits a saved result so the host refreshes its settings lists.
 
 `SystemPromptDialog` routes through `system-prompt-dialog` with the same dialog body, textarea, enhance button, spinner states, and save/cancel controls in DOM fallback and overlay. The overlay route calls the same project enhance and metadata update APIs, then submits a saved result so the sidebar host closes consistently.

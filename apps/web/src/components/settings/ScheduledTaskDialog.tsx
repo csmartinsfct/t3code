@@ -9,6 +9,8 @@ import { BookOpenIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -74,6 +76,10 @@ interface ScheduledTaskDialogProps {
   onUpdateJob: (input: ScheduledTaskUpdateInput) => Promise<ScheduledTask>;
 }
 
+const SCHEDULED_TASK_EDITOR_OVERLAY_ROUTE_KEY = "scheduled-task-editor";
+
+type ScheduledTaskDialogResult = { action: "saved"; job: ScheduledTask };
+
 export function ScheduledTaskDialog({
   open,
   onOpenChange,
@@ -83,6 +89,54 @@ export function ScheduledTaskDialog({
   onCreateJob,
   onUpdateJob,
 }: ScheduledTaskDialogProps) {
+  const routed = useRoutedOverlaySurface<ScheduledTaskDialogResult>({
+    open,
+    onOpenChange,
+    routeKey: SCHEDULED_TASK_EDITOR_OVERLAY_ROUTE_KEY,
+    params: { editingJob, projects },
+    presentation: { kind: "dialog" },
+    onResult: (result) => {
+      if (result.action === "saved") onSave(result.job);
+    },
+  });
+
+  return (
+    <Dialog open={routed.domOpen} onOpenChange={routed.onDomOpenChange}>
+      <DialogPopup className="w-full max-w-lg">
+        <ScheduledTaskDialogContent
+          editingJob={editingJob}
+          onCancel={() => onOpenChange(false)}
+          onCreateJob={onCreateJob}
+          onSaved={(job) => {
+            onSave(job);
+            onOpenChange(false);
+          }}
+          onUpdateJob={onUpdateJob}
+          open={routed.domOpen}
+          projects={projects}
+        />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function ScheduledTaskDialogContent({
+  editingJob,
+  onCancel,
+  onCreateJob,
+  onSaved,
+  onUpdateJob,
+  open,
+  projects,
+}: {
+  editingJob: ScheduledTask | null;
+  onCancel: () => void;
+  onCreateJob: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
+  onSaved: (job: ScheduledTask) => void;
+  onUpdateJob: (input: ScheduledTaskUpdateInput) => Promise<ScheduledTask>;
+  open: boolean;
+  projects: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>;
+}) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [cronExpression, setCronExpression] = useState("");
@@ -194,8 +248,7 @@ export function ScheduledTaskDialog({
             newThreadConfig,
           });
         }
-        onSave(job);
-        onOpenChange(false);
+        onSaved(job);
       } catch (error) {
         setValidationError(
           error instanceof Error ? error.message : "Failed to save scheduled task.",
@@ -217,156 +270,149 @@ export function ScheduledTaskDialog({
       editingJob,
       onCreateJob,
       onUpdateJob,
-      onSave,
-      onOpenChange,
+      onSaved,
     ],
   );
 
   const formId = "scheduled-task-dialog-form";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="w-full max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Scheduled Task" : "Add Scheduled Task"}</DialogTitle>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle>{isEditing ? "Edit Scheduled Task" : "Add Scheduled Task"}</DialogTitle>
+      </DialogHeader>
 
-        <DialogPanel>
-          <form
-            id={formId}
-            className="flex flex-col gap-4"
-            onSubmit={(event) => void handleSubmit(event)}
-          >
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-name" className="text-xs font-medium">
-                Name
-              </Label>
-              <Input
-                id="task-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="e.g. Update Fork vs Remote"
-                autoFocus
-              />
-            </div>
+      <DialogPanel>
+        <form
+          id={formId}
+          className="flex flex-col gap-4"
+          onSubmit={(event) => void handleSubmit(event)}
+        >
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="task-name" className="text-xs font-medium">
+              Name
+            </Label>
+            <Input
+              id="task-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Update Fork vs Remote"
+              autoFocus
+            />
+          </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-description" className="text-xs font-medium">
-                Description
-              </Label>
-              <Input
-                id="task-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Optional description"
-              />
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="task-description" className="text-xs font-medium">
+              Description
+            </Label>
+            <Input
+              id="task-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional description"
+            />
+          </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-expression" className="text-xs font-medium">
-                Schedule
-              </Label>
-              <Input
-                id="task-expression"
-                value={cronExpression}
-                onChange={(event) => setCronExpression(event.target.value)}
-                placeholder="0 9 * * * (every day at 9am)"
-                className="font-mono text-xs"
-              />
-              <span className="text-[11px] text-muted-foreground">
-                Standard 5-field cron: minute hour day-of-month month day-of-week
-              </span>
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="task-expression" className="text-xs font-medium">
+              Schedule
+            </Label>
+            <Input
+              id="task-expression"
+              value={cronExpression}
+              onChange={(event) => setCronExpression(event.target.value)}
+              placeholder="0 9 * * * (every day at 9am)"
+              className="font-mono text-xs"
+            />
+            <span className="text-[11px] text-muted-foreground">
+              Standard 5-field cron: minute hour day-of-month month day-of-week
+            </span>
+          </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium">Type</Label>
-              <Select value={jobType} onValueChange={(val) => setJobType(val as "new_thread")}>
-                <SelectTrigger size="sm" className="w-full">
-                  <SelectValue>
-                    {SCHEDULED_TASK_TYPES.find((t) => t.value === jobType)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  {SCHEDULED_TASK_TYPES.map((type) => (
-                    <SelectItem hideIndicator key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs font-medium">Type</Label>
+            <Select value={jobType} onValueChange={(val) => setJobType(val as "new_thread")}>
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue>
+                  {SCHEDULED_TASK_TYPES.find((t) => t.value === jobType)?.label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup alignItemWithTrigger={false}>
+                {SCHEDULED_TASK_TYPES.map((type) => (
+                  <SelectItem hideIndicator key={type.value} value={type.value}>
+                    {type.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
 
-            {jobType === "new_thread" && (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-xs font-medium">Project</Label>
-                  <Select
-                    value={projectId}
-                    onValueChange={(val) => {
-                      setProjectId(val ?? "");
-                      setSkillIds([]);
-                    }}
-                  >
-                    <SelectTrigger size="sm" className="w-full">
-                      <SelectValue>
-                        {projects.find((p) => p.id === projectId)?.title ?? "Select project"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup alignItemWithTrigger={false}>
-                      {projects.map((project) => (
-                        <SelectItem hideIndicator key={project.id} value={project.id}>
-                          {project.title}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
-                </div>
+          {jobType === "new_thread" && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-medium">Project</Label>
+                <Select
+                  value={projectId}
+                  onValueChange={(val) => {
+                    setProjectId(val ?? "");
+                    setSkillIds([]);
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-full">
+                    <SelectValue>
+                      {projects.find((p) => p.id === projectId)?.title ?? "Select project"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup alignItemWithTrigger={false}>
+                    {projects.map((project) => (
+                      <SelectItem hideIndicator key={project.id} value={project.id}>
+                        {project.title}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
 
-                {skills.length > 0 && (
-                  <SkillsMultiSelect
-                    skills={skills}
-                    selectedIds={skillIds}
-                    onChange={setSkillIds}
-                  />
-                )}
+              {skills.length > 0 && (
+                <SkillsMultiSelect skills={skills} selectedIds={skillIds} onChange={setSkillIds} />
+              )}
 
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="task-prompt" className="text-xs font-medium">
-                    Prompt
-                  </Label>
-                  <Textarea
-                    id="task-prompt"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Optional prompt to preload into the thread"
-                    rows={3}
-                    className="text-xs"
-                  />
-                </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-prompt" className="text-xs font-medium">
+                  Prompt
+                </Label>
+                <Textarea
+                  id="task-prompt"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Optional prompt to preload into the thread"
+                  rows={3}
+                  className="text-xs"
+                />
+              </div>
 
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="task-auto-send" className="text-xs font-medium">
-                    Auto send
-                  </Label>
-                  <Switch id="task-auto-send" checked={autoSend} onCheckedChange={setAutoSend} />
-                </div>
-              </>
-            )}
+              <div className="flex items-center justify-between">
+                <Label htmlFor="task-auto-send" className="text-xs font-medium">
+                  Auto send
+                </Label>
+                <Switch id="task-auto-send" checked={autoSend} onCheckedChange={setAutoSend} />
+              </div>
+            </>
+          )}
 
-            {validationError && <p className="text-xs text-destructive">{validationError}</p>}
-          </form>
-        </DialogPanel>
+          {validationError && <p className="text-xs text-destructive">{validationError}</p>}
+        </form>
+      </DialogPanel>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button form={formId} type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving..." : isEditing ? "Save changes" : "Create task"}
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+      <DialogFooter>
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button form={formId} type="submit" size="sm" disabled={saving}>
+          {saving ? "Saving..." : isEditing ? "Save changes" : "Create task"}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
@@ -503,4 +549,84 @@ function SkillsMultiSelect({
       </Menu>
     </div>
   );
+}
+
+registerOverlayRoute<{ editingJob?: unknown; projects?: unknown }>(
+  SCHEDULED_TASK_EDITOR_OVERLAY_ROUTE_KEY,
+  function ScheduledTaskEditorOverlayRoute({ message, controller }) {
+    return (
+      <OverlayRouteDialog>
+        <DialogPopup className="w-full max-w-lg">
+          <ScheduledTaskDialogContent
+            editingJob={readScheduledTaskParam(message.params.editingJob)}
+            onCancel={() => controller.cancel("cancel")}
+            onCreateJob={(input) => ensureNativeApi().scheduledTasks.create(input)}
+            onSaved={(job) => controller.submit({ action: "saved", job })}
+            onUpdateJob={(input) => ensureNativeApi().scheduledTasks.update(input)}
+            open
+            projects={readProjectsParam(message.params.projects)}
+          />
+        </DialogPopup>
+      </OverlayRouteDialog>
+    );
+  },
+);
+
+function readProjectsParam(
+  value: unknown,
+): ReadonlyArray<{ id: string; title: string; workspaceRoot: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (project): project is { id: string; title: string; workspaceRoot: string } => {
+      if (!project || typeof project !== "object") return false;
+      const candidate = project as { id?: unknown; title?: unknown; workspaceRoot?: unknown };
+      return (
+        typeof candidate.id === "string" &&
+        typeof candidate.title === "string" &&
+        typeof candidate.workspaceRoot === "string"
+      );
+    },
+  );
+}
+
+function readScheduledTaskParam(value: unknown): ScheduledTask | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<ScheduledTask>;
+  if (typeof candidate.jobId !== "string") return null;
+  if (typeof candidate.name !== "string") return null;
+  if (typeof candidate.cronExpression !== "string") return null;
+  if (candidate.jobType !== "new_thread") return null;
+
+  return {
+    jobId: candidate.jobId,
+    name: candidate.name,
+    description: typeof candidate.description === "string" ? candidate.description : null,
+    cronExpression: candidate.cronExpression,
+    enabled: candidate.enabled === true,
+    jobType: candidate.jobType,
+    newThreadConfig: readNewThreadConfigParam(candidate.newThreadConfig),
+    createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : "",
+    updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : "",
+    lastRunAt: typeof candidate.lastRunAt === "string" ? candidate.lastRunAt : null,
+    nextRunAt: typeof candidate.nextRunAt === "string" ? candidate.nextRunAt : null,
+  } as ScheduledTask;
+}
+
+function readNewThreadConfigParam(value: unknown): ScheduledTask["newThreadConfig"] {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as NonNullable<ScheduledTask["newThreadConfig"]>;
+  if (typeof candidate.projectId !== "string") return null;
+
+  return {
+    projectId: candidate.projectId,
+    ...(Array.isArray(candidate.skillIds)
+      ? {
+          skillIds: candidate.skillIds.filter(
+            (skillId): skillId is string => typeof skillId === "string",
+          ),
+        }
+      : {}),
+    ...(typeof candidate.prompt === "string" ? { prompt: candidate.prompt } : {}),
+    autoSend: candidate.autoSend === true,
+  } as NonNullable<ScheduledTask["newThreadConfig"]>;
 }
