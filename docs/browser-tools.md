@@ -720,6 +720,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `DynamicChatUiPromptSection` routes the design-language and builder-prompt editor dialog through `dynamic-chat-ui-prompt-editor`. The textarea dialog content is shared between DOM fallback and overlay, while save/reset still call the same settings RPC, show the same validation/toast states, and submit the updated `ServerSettings` back to the host so both renderer stores stay in sync.
 
+Settings confirmation flows that previously called `dialogs.confirm` directly use `SettingsConfirmOverlay` and the `settings-confirm` route when the embedded browser is mounted. Current non-browser settings layouts fall back to the existing native confirmation API, while browser-adjacent layouts get a typed `confirm` result through the overlay route for label/template deletion, restore-defaults, desktop update install confirmation, and archived thread/ticket bulk delete flows.
+
 Image attachment filename-extension warnings route through `ImageExtensionConfirmDialog`, sharing the exact AlertDialog content between the DOM fallback and `image-extension-confirm`.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.

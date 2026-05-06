@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
 import { LabelEditorDialog } from "./LabelEditorDialog";
+import { confirmSettingsAction } from "./SettingsConfirmOverlay";
 import { TemplateEditorDialog } from "./TemplateEditorDialog";
 
 type ScopeKind = "global" | "project";
@@ -98,9 +99,12 @@ export function TicketsPanel() {
   const handleDeleteLabel = useCallback(
     async (label: Label) => {
       const api = ensureNativeApi();
-      const confirmed = await api.dialogs.confirm(
-        `Delete label "${label.name}"?\n\nThis will remove the label from all tickets that use it.`,
-      );
+      const confirmed = await confirmSettingsAction({
+        title: `Delete label "${label.name}"?`,
+        description: "This will remove the label from all tickets that use it.",
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (confirmed) {
         await api.ticketing.deleteLabel({ id: label.id });
         void loadData();
@@ -112,7 +116,11 @@ export function TicketsPanel() {
   const handleDeleteTemplate = useCallback(
     async (template: Template) => {
       const api = ensureNativeApi();
-      const confirmed = await api.dialogs.confirm(`Delete template "${template.name}"?`);
+      const confirmed = await confirmSettingsAction({
+        title: `Delete template "${template.name}"?`,
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (confirmed) {
         await api.ticketing.deleteTemplate({ id: template.id });
         void loadData();

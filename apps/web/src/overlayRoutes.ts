@@ -19,6 +19,7 @@ import "./components/settings/LabelEditorDialog";
 import "./components/settings/PromptEditorDialog";
 import "./components/settings/ScheduledTaskConfirmDialogs";
 import "./components/settings/ScheduledTaskDialog";
+import "./components/settings/SettingsConfirmOverlay";
 import "./components/settings/TemplateEditorDialog";
 import "./components/settings/TicketComments";
 import "./components/terminal/TerminalTooltipOverlay";
@@ -51,6 +52,7 @@ logWebTimeline("overlay-routes.loaded", {
     "dynamic-chat-ui-prompt-editor",
     "scheduled-task-delete-confirm",
     "scheduled-task-editor",
+    "settings-confirm",
     "delete-comment-confirm",
     "terminal-tooltip",
   ],

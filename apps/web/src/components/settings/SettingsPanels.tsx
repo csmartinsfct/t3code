@@ -76,6 +76,7 @@ import {
   useServerProviders,
 } from "../../rpc/serverState";
 import { clampReviewIterations } from "./settingsPanelHelpers";
+import { confirmSettingsAction } from "./SettingsConfirmOverlay";
 
 const THEME_OPTIONS = [
   {
@@ -360,7 +361,7 @@ function AboutVersionSection() {
 
   const updateState = updateStateQuery.data ?? null;
 
-  const handleButtonClick = useCallback(() => {
+  const handleButtonClick = useCallback(async () => {
     const bridge = window.desktopBridge;
     if (!bridge) return;
 
@@ -383,11 +384,13 @@ function AboutVersionSection() {
     }
 
     if (action === "install") {
-      const confirmed = window.confirm(
-        getDesktopUpdateInstallConfirmationMessage(
+      const confirmed = await confirmSettingsAction({
+        title: "Install update?",
+        description: getDesktopUpdateInstallConfirmationMessage(
           updateState ?? { availableVersion: null, downloadedVersion: null },
         ),
-      );
+        confirmLabel: "Install",
+      });
       if (!confirmed) return;
       void bridge
         .installUpdate()
@@ -547,12 +550,11 @@ export function useSettingsRestore(onRestored?: () => void) {
 
   const restoreDefaults = useCallback(async () => {
     if (changedSettingLabels.length === 0) return;
-    const api = readNativeApi();
-    const confirmed = await (api ?? ensureNativeApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
-      ),
-    );
+    const confirmed = await confirmSettingsAction({
+      title: "Restore default settings?",
+      description: `This will reset: ${changedSettingLabels.join(", ")}.`,
+      confirmLabel: "Restore",
+    });
     if (!confirmed) return;
 
     setTheme("system");
@@ -2099,12 +2101,12 @@ export function ArchivedThreadsPanel() {
     const count = allArchivedThreadIds.length;
     if (count === 0) return;
 
-    const confirmed = await api.dialogs.confirm(
-      [
-        `Delete ${count} archived thread${count === 1 ? "" : "s"}?`,
-        "This permanently clears conversation history for these threads.",
-      ].join("\n"),
-    );
+    const confirmed = await confirmSettingsAction({
+      title: `Delete ${count} archived thread${count === 1 ? "" : "s"}?`,
+      description: "This permanently clears conversation history for these threads.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setIsDeletingAll(true);
@@ -2360,12 +2362,13 @@ export function ArchivedTicketsPanel() {
     async (ticket: TicketSummary) => {
       const api = readNativeApi();
       if (!api) return;
-      const confirmed = await api.dialogs.confirm(
-        [
-          `Delete "${ticket.identifier}: ${ticket.title}"?`,
+      const confirmed = await confirmSettingsAction({
+        title: `Delete "${ticket.identifier}: ${ticket.title}"?`,
+        description:
           "This permanently removes the ticket and its data. This action cannot be undone.",
-        ].join("\n"),
-      );
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (!confirmed) return;
       setBusyTicketId(ticket.id as string);
       try {
@@ -2389,12 +2392,13 @@ export function ArchivedTicketsPanel() {
     if (!api) return;
     const count = allArchivedIds.length;
     if (count === 0) return;
-    const confirmed = await api.dialogs.confirm(
-      [
-        `Delete ${count} archived ticket${count === 1 ? "" : "s"}?`,
+    const confirmed = await confirmSettingsAction({
+      title: `Delete ${count} archived ticket${count === 1 ? "" : "s"}?`,
+      description:
         "This permanently removes these tickets and their data. This action cannot be undone.",
-      ].join("\n"),
-    );
+      confirmLabel: "Delete",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setIsDeletingAll(true);
