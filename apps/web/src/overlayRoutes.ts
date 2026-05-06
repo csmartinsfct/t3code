@@ -15,6 +15,7 @@ import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
 import "./components/settings/LabelEditorDialog";
+import "./components/settings/PromptEditorDialog";
 import "./components/settings/ScheduledTaskConfirmDialogs";
 import "./components/settings/ScheduledTaskDialog";
 import "./components/settings/TemplateEditorDialog";
@@ -45,6 +46,7 @@ logWebTimeline("overlay-routes.loaded", {
     "sub-tickets-archive-confirm",
     "ticket-label-picker",
     "image-extension-confirm",
+    "prompt-editor",
     "scheduled-task-delete-confirm",
     "scheduled-task-editor",
     "delete-comment-confirm",

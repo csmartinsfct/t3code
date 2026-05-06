@@ -716,6 +716,8 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `SystemPromptDialog` routes through `system-prompt-dialog` with the same dialog body, textarea, enhance button, spinner states, and save/cancel controls in DOM fallback and overlay. The overlay route calls the same project enhance and metadata update APIs, then submits a saved result so the sidebar host closes consistently.
 
+`PromptEditorDialog` routes through `prompt-editor` and shares the exact prompt block editor between DOM fallback and the overlay route, including block drag/reorder, condition selects, variable tooltips, debounced validation, preview expansion, revert/save controls, and toast handling. Server-backed prompt edits run the same prompt-management RPCs from the overlay. Run-local orchestration prompt overrides are returned to the host as a submitted result so the host can keep its local override state without serializing callbacks over IPC.
+
 Image attachment filename-extension warnings route through `ImageExtensionConfirmDialog`, sharing the exact AlertDialog content between the DOM fallback and `image-extension-confirm`.
 
 The overlay preload intentionally does not expose the full desktop bridge. Routed components should use `NativeApi` for server-backed operations. Desktop-only actions such as folder pickers or external-open flows should either remain host-mediated through a route result/action event or receive a small explicit bridge capability in a later foundation extension. In packaged Electron, the overlay view resolves the backend WebSocket URL from `overlayBridge.getConfig().serverUrl`; in dev, the same config is supplied by the main process.
