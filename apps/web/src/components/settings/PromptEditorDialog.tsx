@@ -216,6 +216,24 @@ function SortableBlock({
                 if (value === null) return;
                 onUpdate(index, { when: selectValueToWhen(value) });
               }}
+              overlayItems={[
+                { value: ALWAYS_SENTINEL, label: "Always", hideIndicator: true },
+                ...(supportsExists
+                  ? supportedVariables.map((variable) => ({
+                      value: variable.key,
+                      label: `If exists: ${variable.key}`,
+                      hideIndicator: true,
+                    }))
+                  : []),
+                ...(supportsRuntime
+                  ? RUNTIME_MATCH_OPTIONS.map((option) => ({
+                      value: `${RUNTIME_PREFIX}${option.value}__`,
+                      label: option.label,
+                      hideIndicator: true,
+                    }))
+                  : []),
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger
                 className="h-6 w-auto min-w-28 gap-1 px-2 text-[11px]"

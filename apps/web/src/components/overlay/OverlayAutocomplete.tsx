@@ -51,6 +51,9 @@ export function OverlayAutocomplete({ message, anchorRef, bridge }: OverlayAutoc
       items={items}
       itemToStringValue={(item) => item.label}
       value={inputValue}
+      onOpenChange={(open) => {
+        if (!open) bridge.requestDismiss();
+      }}
       onValueChange={(value, details) => {
         setInputValue(value);
         if (details.reason === "item-press") {

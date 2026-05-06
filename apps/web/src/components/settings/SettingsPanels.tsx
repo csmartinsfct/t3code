@@ -984,6 +984,12 @@ export function GeneralSettingsPanel() {
                   setTheme(value);
                 }
               }}
+              overlayItems={THEME_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+                hideIndicator: true,
+              }))}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
                 <SelectValue>
@@ -1024,6 +1030,20 @@ export function GeneralSettingsPanel() {
                   updateSettings({ timestampFormat: value });
                 }
               }}
+              overlayItems={[
+                { value: "locale", label: TIMESTAMP_FORMAT_LABELS.locale, hideIndicator: true },
+                {
+                  value: "12-hour",
+                  label: TIMESTAMP_FORMAT_LABELS["12-hour"],
+                  hideIndicator: true,
+                },
+                {
+                  value: "24-hour",
+                  label: TIMESTAMP_FORMAT_LABELS["24-hour"],
+                  hideIndicator: true,
+                },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Timestamp format">
                 <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
@@ -1117,6 +1137,11 @@ export function GeneralSettingsPanel() {
                   updateSettings({ defaultThreadEnvMode: value });
                 }
               }}
+              overlayItems={[
+                { value: "local", label: "Local", hideIndicator: true },
+                { value: "worktree", label: "New worktree", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
                 <SelectValue>
@@ -1380,6 +1405,14 @@ export function GeneralSettingsPanel() {
             <Select
               value={String(settings.threadContentCacheMaxGB)}
               onValueChange={(value) => updateSettings({ threadContentCacheMaxGB: Number(value) })}
+              overlayItems={[
+                { value: "0", label: "Unlimited", hideIndicator: true },
+                { value: "1", label: "1 GB", hideIndicator: true },
+                { value: "2", label: "2 GB", hideIndicator: true },
+                { value: "4", label: "4 GB", hideIndicator: true },
+                { value: "8", label: "8 GB", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Conversation cache">
                 <SelectValue>
@@ -1431,6 +1464,14 @@ export function GeneralSettingsPanel() {
               onValueChange={(value) =>
                 updateSettings({ idleSessionTimeoutMinutes: Number(value) })
               }
+              overlayItems={[
+                { value: "0", label: "Never", hideIndicator: true },
+                { value: "30", label: "30 minutes", hideIndicator: true },
+                { value: "60", label: "1 hour", hideIndicator: true },
+                { value: "120", label: "2 hours", hideIndicator: true },
+                { value: "240", label: "4 hours", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Idle session timeout">
                 <SelectValue>
@@ -2552,6 +2593,15 @@ export function BrowserSettingsPanel() {
               onValueChange={(value) =>
                 updateSettings({ idleBrowserSuspendMinutes: Number(value) })
               }
+              overlayItems={[
+                { value: "0", label: "Never", hideIndicator: true },
+                { value: "5", label: "5 minutes", hideIndicator: true },
+                { value: "15", label: "15 minutes", hideIndicator: true },
+                { value: "30", label: "30 minutes", hideIndicator: true },
+                { value: "60", label: "1 hour", hideIndicator: true },
+                { value: "240", label: "4 hours", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Suspend idle browsers after">
                 <SelectValue>

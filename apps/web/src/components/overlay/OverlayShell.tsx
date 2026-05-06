@@ -47,6 +47,21 @@ function containsPoint(rect: DOMRect | OverlayAnchorRect, x: number, y: number):
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
+function overlayPositionKey(
+  message: OverlayRenderMessage | null,
+  anchor: OverlayAnchorRect | null,
+) {
+  if (!message) return "empty";
+  if (!anchor) return message.type;
+  return [
+    message.type,
+    Math.round(anchor.x),
+    Math.round(anchor.y),
+    Math.round(anchor.width),
+    Math.round(anchor.height),
+  ].join(":");
+}
+
 class OverlayErrorBoundary extends Component<
   { children: React.ReactNode; onError: (error: unknown) => void; resetKey: unknown },
   { hasError: boolean; resetKey: unknown }
@@ -145,6 +160,7 @@ export function OverlayShell() {
   };
 
   const messageAnchor = getMessageAnchor(message);
+  const positionKey = overlayPositionKey(message, messageAnchor);
 
   const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!isHoverRouteMessage(message)) return;
@@ -213,7 +229,12 @@ export function OverlayShell() {
             bridge.requestDismiss();
           }}
         >
-          <OverlayContent message={message} anchorRef={virtualAnchorRef} bridge={bridge} />
+          <OverlayContent
+            key={positionKey}
+            message={message}
+            anchorRef={virtualAnchorRef}
+            bridge={bridge}
+          />
         </OverlayErrorBoundary>
       )}
     </div>

@@ -32,6 +32,9 @@ export function OverlayCombobox({ message, anchorRef, bridge }: OverlayComboboxP
       open={true}
       value={message.value}
       inputValue={inputValue}
+      onOpenChange={(open) => {
+        if (!open) bridge.requestDismiss();
+      }}
       onInputValueChange={handleInputChange}
       onValueChange={(value) => {
         if (value !== null) {

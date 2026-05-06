@@ -10,6 +10,7 @@ import {
   app,
   BaseWindow,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -70,6 +71,7 @@ syncShellEnvironment();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
+const CLIPBOARD_WRITE_TEXT_CHANNEL = "desktop:clipboard-write-text";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
@@ -2894,10 +2896,11 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(BROWSER_UNMOUNT_CHANNEL);
   ipcMain.handle(BROWSER_UNMOUNT_CHANNEL, async (event, rawProjectId: unknown) => {
     const window = getIpcBrowserWindow(event);
+    const state = window ? getEmbeddedBrowserWindowState(window) : null;
     const project = window
       ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "unmount")
       : null;
-    if (!window || !project) return;
+    if (!window || !state || !project) return;
 
     const wasMounted = project.mounted;
     const activeTab = project.tabs.get(project.activeTabId);
@@ -2907,6 +2910,10 @@ function registerIpcHandlers(): void {
     }
     project.mounted = false;
     project.suspendedForModal = false;
+    if (state.activeProjectId === project.projectId) {
+      state.activeProjectId = null;
+      state.mountRequestId += 1;
+    }
     // Reset the idle clock so a freshly-unmounted project gets a full
     // grace period before the reaper considers suspending it.
     markEmbeddedBrowserActive(project);
@@ -3160,6 +3167,15 @@ function registerIpcHandlers(): void {
 
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     return showDesktopConfirmDialog(message, owner);
+  });
+
+  ipcMain.removeHandler(CLIPBOARD_WRITE_TEXT_CHANNEL);
+  ipcMain.handle(CLIPBOARD_WRITE_TEXT_CHANNEL, async (_event, text: unknown) => {
+    if (typeof text !== "string") {
+      throw new Error("Clipboard text must be a string.");
+    }
+
+    clipboard.writeText(text);
   });
 
   ipcMain.removeHandler(SET_THEME_CHANNEL);

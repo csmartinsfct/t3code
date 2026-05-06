@@ -4,10 +4,19 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { CheckIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
-import type { OverlayComboboxItem } from "@t3tools/contracts";
+import type {
+  OverlayAnchorRect,
+  OverlayComboboxItem,
+  OverlayComboboxMessage,
+} from "@t3tools/contracts";
 
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
-import { acquireNativeOverlay, useNativeOverlayActive } from "~/nativeOverlayBridge";
+import {
+  acquireNativeOverlay,
+  getElementOverlayAnchor,
+  trackNativeOverlayAnchor,
+  useNativeOverlayActive,
+} from "~/nativeOverlayBridge";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -15,7 +24,7 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 const ComboboxContext = React.createContext<{
   chipsRef: React.RefObject<Element | null> | null;
   multiple: boolean;
-  openNative?: (anchorRect: { x: number; y: number; width: number; height: number }) => void;
+  openNative?: (anchorElement: HTMLElement) => void;
 }>({
   chipsRef: null,
   multiple: false,
@@ -60,15 +69,16 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
   const useNative = nativeActive && overlayItems !== undefined && !nativeAcquireFailed;
 
   const openNative = React.useCallback(
-    (rect: { x: number; y: number; width: number; height: number }) => {
+    (anchorElement: HTMLElement) => {
       if (!overlayItems) return;
 
       const makeMessage = (
+        anchor: OverlayAnchorRect,
         items: OverlayComboboxItem[],
         inputValue: string,
-      ): import("@t3tools/contracts").OverlayComboboxMessage => ({
+      ): OverlayComboboxMessage => ({
         type: "combobox",
-        anchor: rect,
+        anchor,
         items,
         value: String(rootValue ?? ""),
         inputValue,
@@ -80,57 +90,78 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
         ...(overlayComboboxAlign !== undefined ? { align: overlayComboboxAlign } : {}),
       });
 
-      void acquireNativeOverlay(makeMessage(overlayItems, overlayInputValue ?? "")).then(
-        (handle) => {
-          if (!handle) {
-            setNativeAcquireFailed(true);
-            onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+      const initialAnchor = getElementOverlayAnchor(anchorElement);
+      if (!initialAnchor) return;
+      void acquireNativeOverlay(
+        makeMessage(initialAnchor, overlayItems, overlayInputValue ?? ""),
+      ).then((handle) => {
+        if (!handle) {
+          setNativeAcquireFailed(true);
+          onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+          return;
+        }
+
+        onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        let searchVersion = 0;
+        let currentItems = overlayItems;
+        let currentInputValue = overlayInputValue ?? "";
+        const stopTracking = trackNativeOverlayAnchor(
+          handle,
+          () => getElementOverlayAnchor(anchorElement),
+          (anchor) => makeMessage(anchor, currentItems, currentInputValue),
+          anchorElement,
+        );
+
+        handle.onEvent((type, payload) => {
+          if (type === "search") {
+            const query = String((payload as { query?: unknown })?.query ?? "");
+            currentInputValue = query;
+            const version = ++searchVersion;
+            void (
+              overlayOnSearch
+                ? overlayOnSearch(query)
+                : Promise.resolve(
+                    overlayItems.filter((item) =>
+                      item.label.toLowerCase().includes(query.trim().toLowerCase()),
+                    ),
+                  )
+            ).then((items) => {
+              if (version !== searchVersion) return;
+              currentItems = items;
+              const anchor = getElementOverlayAnchor(anchorElement);
+              if (!anchor) {
+                stopTracking();
+                handle.release();
+                onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+                return;
+              }
+              void handle.render(makeMessage(anchor, items, query));
+            });
             return;
           }
 
-          onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
-          let searchVersion = 0;
-
-          handle.onEvent((type, payload) => {
-            if (type === "search") {
-              const query = String((payload as { query?: unknown })?.query ?? "");
-              const version = ++searchVersion;
-              void (
-                overlayOnSearch
-                  ? overlayOnSearch(query)
-                  : Promise.resolve(
-                      overlayItems.filter((item) =>
-                        item.label.toLowerCase().includes(query.trim().toLowerCase()),
-                      ),
-                    )
-              ).then((items) => {
-                if (version !== searchVersion) return;
-                void handle.render(makeMessage(items, query));
-              });
-              return;
+          if (type === "select") {
+            const selectedValue = (payload as { value?: unknown })?.value;
+            if (typeof selectedValue !== "string") return;
+            overlayOnSelect?.(selectedValue);
+            if (!overlayOnSelect && onValueChange) {
+              onValueChange(
+                selectedValue as Parameters<NonNullable<typeof onValueChange>>[0],
+                {} as Parameters<NonNullable<typeof onValueChange>>[1],
+              );
             }
-
-            if (type === "select") {
-              const selectedValue = (payload as { value?: unknown })?.value;
-              if (typeof selectedValue !== "string") return;
-              overlayOnSelect?.(selectedValue);
-              if (!overlayOnSelect && onValueChange) {
-                onValueChange(
-                  selectedValue as Parameters<NonNullable<typeof onValueChange>>[0],
-                  {} as Parameters<NonNullable<typeof onValueChange>>[1],
-                );
-              }
-              handle.release();
-              onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
-            }
-          });
-
-          handle.onDismiss(() => {
+            stopTracking();
             handle.release();
             onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
-          });
-        },
-      );
+          }
+        });
+
+        handle.onDismiss(() => {
+          stopTracking();
+          handle.release();
+          onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        });
+      });
     },
     [
       onOpenChange,
@@ -292,8 +323,7 @@ function ComboboxTrigger({
     ? (event: Parameters<NonNullable<ComboboxPrimitive.Trigger.Props["onClick"]>>[0]) => {
         event.preventDefault();
         event.preventBaseUIHandler();
-        const rect = event.currentTarget.getBoundingClientRect();
-        openNative({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+        openNative(event.currentTarget);
       }
     : onClick;
 

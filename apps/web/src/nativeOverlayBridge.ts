@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type {
+  OverlayAnchorRect,
   OverlayRouteContext,
   OverlayRouteMessage,
   OverlayRoutePresentation,
@@ -11,6 +12,10 @@ import {
   isEmbeddedBrowserMounted,
   subscribeEmbeddedBrowserMounted,
 } from "./embeddedBrowserModalSuspension";
+import {
+  isEmbeddedBrowserOverlayRelevant,
+  isFullPageSurfaceOverEmbeddedBrowser,
+} from "./overlaySurfaceVisibility";
 import { logWebTimeline, warnWebTimeline } from "./timelineLogger";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +47,12 @@ export function isNativeOverlayAvailable(): boolean {
   return getOverlayBridge() !== null;
 }
 
+export function shouldUseNativeOverlay(): boolean {
+  return (
+    isNativeOverlayAvailable() && isEmbeddedBrowserMounted() && isEmbeddedBrowserOverlayRelevant()
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Handle — wraps the acquire/render/release lifecycle for a single overlay.
 // ---------------------------------------------------------------------------
@@ -67,6 +78,97 @@ export interface NativeOverlayOpenOptions<TResult> {
     payload: unknown,
   ) => NativeOverlayEventResolution<TResult> | null | undefined;
   dismissValue?: TResult;
+}
+
+export type NativeOverlayAnchorProvider = () => OverlayAnchorRect | null;
+
+export function getElementOverlayAnchor(element: Element | null): OverlayAnchorRect | null {
+  if (!element?.isConnected) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function anchorSignature(rect: OverlayAnchorRect): string {
+  return `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
+}
+
+export function trackNativeOverlayAnchor(
+  handle: NativeOverlayHandle,
+  getAnchor: NativeOverlayAnchorProvider,
+  buildMessage: (anchor: OverlayAnchorRect) => OverlayRenderMessage | null,
+  observeElement?: Element | null,
+): () => void {
+  let disposed = false;
+  let frame: number | null = null;
+  let lastSignature = "";
+  let resizeObserver: ResizeObserver | null = null;
+
+  const dispose = () => {
+    disposed = true;
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+      frame = null;
+    }
+    resizeObserver?.disconnect();
+    window.removeEventListener("resize", scheduleRender);
+    window.removeEventListener("scroll", scheduleRender, true);
+    window.visualViewport?.removeEventListener("resize", scheduleRender);
+    window.visualViewport?.removeEventListener("scroll", scheduleRender);
+  };
+
+  const sampleCurrentAnchor = () => {
+    if (disposed) return;
+    const anchor = getAnchor();
+    if (!anchor) {
+      dispose();
+      handle.release();
+      return;
+    }
+    const signature = anchorSignature(anchor);
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+    const message = buildMessage(anchor);
+    if (!message) {
+      dispose();
+      handle.release();
+      return;
+    }
+    void handle.render(message);
+  };
+
+  const tick = () => {
+    frame = null;
+    sampleCurrentAnchor();
+    scheduleRender();
+  };
+
+  const scheduleRender = () => {
+    if (disposed || frame !== null) return;
+    frame = window.requestAnimationFrame(tick);
+  };
+
+  const anchor = getAnchor();
+  if (anchor) {
+    lastSignature = anchorSignature(anchor);
+  }
+  resizeObserver =
+    typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleRender) : null;
+  if (observeElement) {
+    resizeObserver?.observe(observeElement);
+  }
+
+  window.addEventListener("resize", scheduleRender);
+  window.addEventListener("scroll", scheduleRender, true);
+  window.visualViewport?.addEventListener("resize", scheduleRender);
+  window.visualViewport?.addEventListener("scroll", scheduleRender);
+  scheduleRender();
+
+  return dispose;
 }
 
 export type NativeOverlayRouteResult<TResult = unknown> =
@@ -97,6 +199,14 @@ export function createOverlayRouteMessage(input: NativeOverlayRouteInput): Overl
 }
 
 async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null> {
+  if (isFullPageSurfaceOverEmbeddedBrowser()) {
+    warnWebTimeline("native-overlay.acquire.suppressed", {
+      reason: "full-page-surface",
+      pathname: window.location.pathname,
+    });
+    return null;
+  }
+
   const bridge = getOverlayBridge();
   if (!bridge) {
     warnWebTimeline("native-overlay.acquire.unavailable");
@@ -296,7 +406,8 @@ export async function openNativeOverlayRoute<TResult = unknown>(
 
 // ---------------------------------------------------------------------------
 // React hook — true when the native overlay system should be used instead
-// of DOM rendering. Conditional: Electron AND embedded browser mounted.
+// of DOM rendering. Conditional: Electron AND embedded browser mounted AND
+// the current route leaves that browser visually relevant.
 // ---------------------------------------------------------------------------
 
 export function useNativeOverlayActive(): boolean {
@@ -310,5 +421,5 @@ export function useNativeOverlayActive(): boolean {
     });
   }, [available]);
 
-  return available && mounted;
+  return available && mounted && isEmbeddedBrowserOverlayRelevant();
 }

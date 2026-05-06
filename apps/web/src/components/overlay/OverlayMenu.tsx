@@ -211,6 +211,13 @@ function renderMenuItems(items: OverlayMenuItem[], bridge: OverlayBridgeHandle):
   });
 }
 
+export function renderOverlayMenuItemsForTests(
+  items: OverlayMenuItem[],
+  bridge: OverlayBridgeHandle,
+): React.ReactNode {
+  return renderMenuItems(items, bridge);
+}
+
 function statusToneClass(item: OverlayMenuItem): string {
   switch (item.statusTone) {
     case "success":

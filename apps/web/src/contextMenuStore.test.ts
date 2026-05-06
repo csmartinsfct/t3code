@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DesktopBridge, DesktopOverlayBridge } from "@t3tools/contracts";
 
 import { useContextMenuStore } from "./contextMenuStore";
 import {
@@ -6,6 +7,51 @@ import {
   getTrackedEmbeddedBrowserOverlayCountForTests,
   setEmbeddedBrowserMountedForModalSuspension,
 } from "./embeddedBrowserModalSuspension";
+
+function navigateForTest(pathname: string) {
+  const current =
+    typeof window === "undefined"
+      ? {}
+      : (window as Window & { desktopBridge?: Partial<DesktopBridge> });
+  vi.stubGlobal("window", {
+    ...current,
+    location: { pathname },
+  });
+}
+
+function installDesktopBridge() {
+  if (typeof window === "undefined") {
+    navigateForTest("/");
+  }
+  let eventHandler: ((type: string, payload: unknown) => void) | null = null;
+  const overlay = {
+    acquire: vi.fn(async () => "overlay-test"),
+    release: vi.fn(async () => undefined),
+    render: vi.fn(async () => undefined),
+    onEvent: vi.fn((_id: string, handler: (type: string, payload: unknown) => void) => {
+      eventHandler = handler;
+      return () => {
+        eventHandler = null;
+      };
+    }),
+    onDismiss: vi.fn(() => () => undefined),
+  } satisfies DesktopOverlayBridge;
+  const browser = {
+    suspendForModal: vi.fn(async () => undefined),
+    resumeFromModal: vi.fn(async () => undefined),
+  };
+
+  (window as any).desktopBridge = {
+    overlay,
+    browser,
+  };
+
+  return {
+    overlay,
+    browser,
+    emitOverlayEvent: (type: string, payload: unknown) => eventHandler?.(type, payload),
+  };
+}
 
 afterEach(() => {
   const { releaseBrowserOverlay, resolve } = useContextMenuStore.getState();
@@ -21,6 +67,9 @@ afterEach(() => {
     releaseBrowserOverlay: null,
   });
   __resetEmbeddedBrowserModalSuspensionForTests();
+  if (typeof window !== "undefined") {
+    delete (window as any).desktopBridge;
+  }
   vi.unstubAllGlobals();
 });
 
@@ -72,6 +121,48 @@ describe("show", () => {
     await expect(promise).resolves.toBeNull();
     expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(0);
     await vi.waitFor(() => expect(resumeFromModal).toHaveBeenCalledTimes(1));
+  });
+
+  it("uses the native overlay path without modal suspension when the browser is relevant", async () => {
+    navigateForTest("/_chat/thread-1");
+    const { browser, emitOverlayEvent, overlay } = installDesktopBridge();
+    setEmbeddedBrowserMountedForModalSuspension(true);
+
+    const promise = useContextMenuStore.getState().show([{ id: "a", label: "A" }], {
+      x: 10,
+      y: 20,
+    });
+
+    await vi.waitFor(() => expect(overlay.render).toHaveBeenCalledTimes(1));
+    expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(0);
+    expect(browser.suspendForModal).not.toHaveBeenCalled();
+
+    emitOverlayEvent("select", { id: "a" });
+
+    await expect(promise).resolves.toBe("a");
+    expect(overlay.acquire).toHaveBeenCalledTimes(1);
+    expect(overlay.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps settings context menus on the DOM path without native acquire or suspension", async () => {
+    navigateForTest("/settings/general");
+    const { browser, overlay } = installDesktopBridge();
+    setEmbeddedBrowserMountedForModalSuspension(true);
+
+    const promise = useContextMenuStore.getState().show([{ id: "a", label: "A" }], {
+      x: 10,
+      y: 20,
+    });
+
+    expect(overlay.acquire).not.toHaveBeenCalled();
+    expect(useContextMenuStore.getState().open).toBe(true);
+    expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(browser.suspendForModal).not.toHaveBeenCalled();
+
+    useContextMenuStore.getState().dismiss();
+    await expect(promise).resolves.toBeNull();
   });
 });
 

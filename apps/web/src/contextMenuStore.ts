@@ -1,11 +1,8 @@
 import type { ContextMenuItem, OverlayMenuItem } from "@t3tools/contracts";
 import { create } from "zustand";
 
-import {
-  isEmbeddedBrowserMounted,
-  registerEmbeddedBrowserOverlay,
-} from "./embeddedBrowserModalSuspension";
-import { isNativeOverlayAvailable, openNativeOverlay } from "./nativeOverlayBridge";
+import { registerEmbeddedBrowserOverlay } from "./embeddedBrowserModalSuspension";
+import { openNativeOverlay, shouldUseNativeOverlay } from "./nativeOverlayBridge";
 
 function toOverlayMenuItems(items: readonly ContextMenuItem<string>[]): OverlayMenuItem[] {
   return items.map((item) => ({
@@ -55,7 +52,7 @@ export const useContextMenuStore = create<ContextMenuState & ContextMenuActions>
 
     // Native overlay path: render in a transparent WebContentsView positioned
     // above the embedded Chromium browser. No suspension required.
-    if (isNativeOverlayAvailable() && isEmbeddedBrowserMounted()) {
+    if (shouldUseNativeOverlay()) {
       return openNativeOverlay<T | null>(
         {
           type: "context-menu",

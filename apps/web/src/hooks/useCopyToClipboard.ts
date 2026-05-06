@@ -1,5 +1,22 @@
 import * as React from "react";
 
+function writeClipboardText(value: string): Promise<void> {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Clipboard API unavailable."));
+  }
+
+  const desktopWriteText = window.desktopBridge?.clipboard?.writeText;
+  if (desktopWriteText) {
+    return desktopWriteText(value);
+  }
+
+  if (!navigator.clipboard?.writeText) {
+    return Promise.reject(new Error("Clipboard API unavailable."));
+  }
+
+  return navigator.clipboard.writeText(value);
+}
+
 export function useCopyToClipboard<TContext = void>({
   timeout = 2000,
   onCopy,
@@ -20,14 +37,9 @@ export function useCopyToClipboard<TContext = void>({
   timeoutRef.current = timeout;
 
   const copyToClipboard = React.useCallback((value: string, ctx: TContext): void => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      onErrorRef.current?.(new Error("Clipboard API unavailable."), ctx);
-      return;
-    }
-
     if (!value) return;
 
-    navigator.clipboard.writeText(value).then(
+    writeClipboardText(value).then(
       () => {
         if (timeoutIdRef.current) {
           clearTimeout(timeoutIdRef.current);

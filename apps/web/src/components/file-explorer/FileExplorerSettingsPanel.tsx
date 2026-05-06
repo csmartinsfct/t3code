@@ -139,6 +139,12 @@ export function FileExplorerSettingsPanel() {
                       updateSettings({ theme: value as EditorTheme });
                     }
                   }}
+                  overlayItems={THEME_OPTIONS.map((theme) => ({
+                    value: theme,
+                    label: THEME_LABELS[theme],
+                    hideIndicator: true,
+                  }))}
+                  overlayAlignItemWithTrigger={false}
                 >
                   <SelectTrigger className="w-full sm:w-44" aria-label="Editor theme">
                     <SelectValue>{THEME_LABELS[settings.theme]}</SelectValue>
@@ -175,6 +181,12 @@ export function FileExplorerSettingsPanel() {
                       updateSettings({ fontSize: n });
                     }
                   }}
+                  overlayItems={FONT_SIZE_OPTIONS.map((size) => ({
+                    value: String(size),
+                    label: FONT_SIZE_LABELS[size],
+                    hideIndicator: true,
+                  }))}
+                  overlayAlignItemWithTrigger={false}
                 >
                   <SelectTrigger className="w-full sm:w-28" aria-label="Editor font size">
                     <SelectValue>{FONT_SIZE_LABELS[settings.fontSize]}</SelectValue>
@@ -212,6 +224,12 @@ export function FileExplorerSettingsPanel() {
                       updateSettings({ fontFamily: value as EditorFontFamily });
                     }
                   }}
+                  overlayItems={FONT_FAMILY_OPTIONS.map((family) => ({
+                    value: family,
+                    label: FONT_FAMILY_LABELS[family],
+                    hideIndicator: true,
+                  }))}
+                  overlayAlignItemWithTrigger={false}
                 >
                   <SelectTrigger className="w-full sm:w-44" aria-label="Editor font family">
                     <SelectValue>{FONT_FAMILY_LABELS[settings.fontFamily]}</SelectValue>

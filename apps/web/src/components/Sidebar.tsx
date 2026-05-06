@@ -51,6 +51,7 @@ import {
   EDITORS,
   type EditorId,
   type ModelSelection,
+  type OverlayMenuItem,
   ProjectId,
   providerDisplayName,
   type ProviderKind,
@@ -760,8 +761,43 @@ function ProjectSortMenu({
   onProjectSortOrderChange: (sortOrder: SidebarProjectSortOrder) => void;
   onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
 }) {
+  const overlayItems = useMemo<OverlayMenuItem[]>(
+    () => [
+      { id: "project-label", label: "Sort projects", labelOnly: true },
+      ...(Object.entries(SIDEBAR_SORT_LABELS) as Array<[SidebarProjectSortOrder, string]>).map(
+        ([value, label]) => ({
+          id: `project:${value}`,
+          label,
+          checked: value === projectSortOrder,
+        }),
+      ),
+      { id: "thread-separator", label: "", separator: true },
+      { id: "thread-label", label: "Sort threads", labelOnly: true },
+      ...(
+        Object.entries(SIDEBAR_THREAD_SORT_LABELS) as Array<[SidebarThreadSortOrder, string]>
+      ).map(([value, label]) => ({
+        id: `thread:${value}`,
+        label,
+        checked: value === threadSortOrder,
+      })),
+    ],
+    [projectSortOrder, threadSortOrder],
+  );
+
+  const handleOverlaySelect = useCallback(
+    (id: string) => {
+      const [kind, value] = id.split(":");
+      if (kind === "project" && value) {
+        onProjectSortOrderChange(value as SidebarProjectSortOrder);
+      } else if (kind === "thread" && value) {
+        onThreadSortOrderChange(value as SidebarThreadSortOrder);
+      }
+    },
+    [onProjectSortOrderChange, onThreadSortOrderChange],
+  );
+
   return (
-    <Menu>
+    <Menu overlayItems={overlayItems} overlayMenuAlign="end" overlayOnSelect={handleOverlaySelect}>
       <Tooltip>
         <TooltipTrigger
           render={

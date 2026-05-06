@@ -14,10 +14,13 @@ import {
 import type * as React from "react";
 
 import type { OverlayMenuItem, OverlayMenuMessage } from "@t3tools/contracts";
+import type { OverlayAnchorRect } from "@t3tools/contracts";
 
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
 import {
+  getElementOverlayAnchor,
   openNativeOverlay,
+  trackNativeOverlayAnchor,
   useNativeOverlayActive,
   type NativeOverlaySession,
 } from "~/nativeOverlayBridge";
@@ -29,11 +32,10 @@ const MenuCreateHandle = MenuPrimitive.createHandle;
 // MenuTrigger reads this to intercept its click and call openNative() with
 // its own getBoundingClientRect() before Base UI tries to open the DOM popup.
 interface NativeMenuContextValue {
-  openNative?: (anchorRect: { x: number; y: number; width: number; height: number }) => void;
+  openNative?: (anchorElement: HTMLElement) => void;
 }
 const NativeMenuContext = createContext<NativeMenuContextValue>({});
 
-type NativeMenuAnchorRect = { x: number; y: number; width: number; height: number };
 type MenuOpenDetails = Parameters<NonNullable<MenuPrimitive.Root.Props["onOpenChange"]>>[1];
 
 function Menu({
@@ -61,7 +63,8 @@ function Menu({
   const nativeActive = useNativeOverlayActive();
   const [nativeAcquireFailed, setNativeAcquireFailed] = useState(false);
   const nativeSessionRef = useRef<NativeOverlaySession<string | null> | null>(null);
-  const nativeAnchorRectRef = useRef<NativeMenuAnchorRect | null>(null);
+  const nativeAnchorElementRef = useRef<HTMLElement | null>(null);
+  const nativeAnchorTrackingStopRef = useRef<(() => void) | null>(null);
   const overlayOnSelectRef = useRef(overlayOnSelect);
   const overlayOnActionRef = useRef(overlayOnAction);
 
@@ -80,7 +83,7 @@ function Menu({
     !nativeAcquireFailed;
 
   const buildNativeMessage = useCallback(
-    (rect: NativeMenuAnchorRect): OverlayMenuMessage | null => {
+    (rect: OverlayAnchorRect): OverlayMenuMessage | null => {
       if (!overlayItems) return null;
       return {
         type: "menu",
@@ -93,19 +96,26 @@ function Menu({
     [overlayItems, overlayMenuSide, overlayMenuAlign],
   );
 
+  const stopNativeAnchorTracking = useCallback(() => {
+    nativeAnchorTrackingStopRef.current?.();
+    nativeAnchorTrackingStopRef.current = null;
+  }, []);
+
   const openNative = useCallback(
-    (rect: NativeMenuAnchorRect) => {
-      const message = buildNativeMessage(rect);
+    (anchorElement: HTMLElement) => {
+      const rect = getElementOverlayAnchor(anchorElement);
+      const message = rect ? buildNativeMessage(rect) : null;
       if (!message) return;
 
       if (nativeSessionRef.current) {
+        stopNativeAnchorTracking();
         nativeSessionRef.current.release();
         nativeSessionRef.current = null;
         onOpenChange?.(false, {} as MenuOpenDetails);
         return;
       }
 
-      nativeAnchorRectRef.current = rect;
+      nativeAnchorElementRef.current = anchorElement;
       onOpenChange?.(true, {} as MenuOpenDetails);
       void openNativeOverlay<string | null>(message, {
         dismissValue: null,
@@ -126,11 +136,18 @@ function Menu({
           return;
         }
         nativeSessionRef.current = session;
+        nativeAnchorTrackingStopRef.current = trackNativeOverlayAnchor(
+          session,
+          () => getElementOverlayAnchor(anchorElement),
+          buildNativeMessage,
+          anchorElement,
+        );
         void session.result
           .then((id) => {
             if (id) overlayOnSelectRef.current?.(id);
           })
           .finally(() => {
+            stopNativeAnchorTracking();
             if (nativeSessionRef.current === session) {
               nativeSessionRef.current = null;
             }
@@ -138,28 +155,31 @@ function Menu({
           });
       });
     },
-    [buildNativeMessage, onOpenChange],
+    [buildNativeMessage, onOpenChange, stopNativeAnchorTracking],
   );
 
   useEffect(() => {
     const session = nativeSessionRef.current;
-    const rect = nativeAnchorRectRef.current;
+    const anchorElement = nativeAnchorElementRef.current;
+    const rect = getElementOverlayAnchor(anchorElement);
     if (!session || !rect) return;
     const message = buildNativeMessage(rect);
     if (!message) {
+      stopNativeAnchorTracking();
       session.release();
       nativeSessionRef.current = null;
       return;
     }
     void session.render(message);
-  }, [buildNativeMessage]);
+  }, [buildNativeMessage, stopNativeAnchorTracking]);
 
   useEffect(
     () => () => {
+      stopNativeAnchorTracking();
       nativeSessionRef.current?.release();
       nativeSessionRef.current = null;
     },
-    [],
+    [stopNativeAnchorTracking],
   );
 
   const handleOpenChange = useTrackedOverlayOpen({
@@ -203,8 +223,7 @@ function MenuTrigger({ className, children, onClick, ...props }: MenuPrimitive.T
     ? (e: Parameters<NonNullable<MenuPrimitive.Trigger.Props["onClick"]>>[0]) => {
         e.preventDefault();
         e.preventBaseUIHandler();
-        const rect = e.currentTarget.getBoundingClientRect();
-        openNative({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+        openNative(e.currentTarget);
       }
     : onClick;
 

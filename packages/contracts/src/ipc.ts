@@ -546,6 +546,10 @@ export interface DesktopOverlayBridge {
   onDismiss(id: string, handler: () => void): () => void;
 }
 
+export interface DesktopClipboardBridge {
+  writeText(text: string): Promise<void>;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -562,6 +566,7 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  clipboard: DesktopClipboardBridge;
   browser: DesktopBrowserBridge;
   overlay: DesktopOverlayBridge;
 }

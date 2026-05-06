@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import type { Label, ProjectId, Template } from "@t3tools/contracts";
 
@@ -33,6 +33,17 @@ export function TicketsPanel() {
 
   const scopeProjectId = scopeKind === "project" && selectedProjectId ? selectedProjectId : null;
   const scopeValue = scopeProjectId ?? "global";
+  const scopeOverlayItems = useMemo(
+    () => [
+      { value: "global", label: "Global", hideIndicator: true },
+      ...projects.map((project) => ({
+        value: project.id,
+        label: project.name,
+        hideIndicator: true,
+      })),
+    ],
+    [projects],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -152,7 +163,12 @@ export function TicketsPanel() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-foreground">Scope</span>
-          <Select value={scopeValue} onValueChange={handleScopeChange}>
+          <Select
+            value={scopeValue}
+            onValueChange={handleScopeChange}
+            overlayItems={scopeOverlayItems}
+            overlayAlignItemWithTrigger={false}
+          >
             <SelectTrigger className="w-full sm:w-48" aria-label="Ticket settings scope">
               <SelectValue>
                 {scopeKind === "global"

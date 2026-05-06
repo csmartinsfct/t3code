@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isEmbeddedBrowserOverlayRelevant } from "./overlaySurfaceVisibility";
 import { warnWebTimeline } from "./timelineLogger";
 
 type OpenChangeHandler<TDetails> = (open: boolean, eventDetails: TDetails) => void;
@@ -26,7 +27,7 @@ function readBrowserBridge() {
 }
 
 function updateDesiredSuspension(): void {
-  desiredSuspended = trackedOverlayCount > 0;
+  desiredSuspended = trackedOverlayCount > 0 && isEmbeddedBrowserOverlayRelevant();
   applyDesiredSuspension();
 }
 
@@ -158,7 +159,14 @@ function hasOpenOverlayElement(): boolean {
 }
 
 function maybeWarnForUntrackedOverlay(): void {
-  if (!embeddedBrowserMounted || trackedOverlayCount > 0 || !hasOpenOverlayElement()) return;
+  if (
+    !embeddedBrowserMounted ||
+    !isEmbeddedBrowserOverlayRelevant() ||
+    trackedOverlayCount > 0 ||
+    !hasOpenOverlayElement()
+  ) {
+    return;
+  }
 
   const now = Date.now();
   if (now - lastFallbackWarningAt < 1000) return;
