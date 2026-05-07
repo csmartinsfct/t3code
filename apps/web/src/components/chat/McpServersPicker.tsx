@@ -155,7 +155,7 @@ export const McpServersPicker = memo(function McpServersPicker({
             size="sm"
             variant="ghost"
             className={cn(
-              "shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80",
+              "shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80 not-hover:data-pressed:bg-transparent! not-hover:data-popup-open:bg-transparent!",
               isInitialLoading &&
                 "cursor-default text-muted-foreground/35 hover:text-muted-foreground/35",
               isError && "text-amber-500/85 hover:text-amber-400",
@@ -244,7 +244,7 @@ function McpServersMenuContent({
               type="button"
               variant="ghost"
               size="icon"
-              className="size-6 text-muted-foreground/65 hover:text-foreground"
+              className="size-6 text-muted-foreground/65 hover:text-foreground focus-visible:ring-offset-transparent"
               title="Refresh MCP status"
               aria-label="Refresh MCP status"
               onClick={(event) => {

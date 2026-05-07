@@ -170,7 +170,7 @@ export const SkillsPicker = memo(function SkillsPicker({
           <Button
             size="sm"
             variant="ghost"
-            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
+            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80 not-hover:data-pressed:bg-transparent! not-hover:data-popup-open:bg-transparent!"
             aria-label="Skills"
           />
         }
