@@ -419,7 +419,7 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 - **Navigate:** \`goto\`, \`back\`, \`forward\`, \`reload\`, \`url\`
 - **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
 - **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
-- **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`focus\`, \`status\`, \`ux-audit\`
+- **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`status\`, \`ux-audit\`
 - **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
 
 ### Known issues
@@ -434,10 +434,7 @@ const BROWSER_ELECTRON_TEXT = `### Embedded browser (desktop build)
 
 The browser this tool drives is the **embedded WebContentsView** in the T3 Code chat shell — the same pane the user can see and interact with. There is no separate Playwright instance. Side effects (navigation, scrolling, typing, dialog interception, viewport emulation) are visible to the user in real time, so the agent's actions and the user's expectations stay in sync.
 
-A handful of tools require a standalone Playwright context and are not available in this mode:
-
-- **Deferred** (returns "tool X is not yet supported in native (Electron) mode"): \`cookie-import-browser\`, \`responsive\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
-- **Permanently unsupported** (returns "tool X is not supported in native (Electron) mode"): \`focus\`, \`visibility\`. These are Playwright-context concepts that don't map onto the embedded view.
+A couple of tools haven't been ported to this mode yet and return "tool X is not yet supported in native (Electron) mode" if called: \`cookie-import-browser\`, \`responsive\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
 
 Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
 
