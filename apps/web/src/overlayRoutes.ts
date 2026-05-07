@@ -6,6 +6,7 @@ import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
 import "./components/ProjectScriptsControl";
 import "./components/PullRequestThreadDialog";
+import "./components/SidebarSortMenu";
 import "./components/SystemPromptDialog";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ComposerPrimaryActions";
@@ -39,6 +40,7 @@ logWebTimeline("overlay-routes.loaded", {
     "git-tooltip",
     "project-script-editor",
     "project-script-menu",
+    "sidebar-sort-menu",
     "pull-request-thread-dialog",
     "system-prompt-dialog",
     "label-editor",
