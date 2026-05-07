@@ -23,7 +23,7 @@ export function unsupportedPermanentNativeToolMessage(tool: string): string {
   return `tool ${tool} is not supported in native (Electron) mode for this project. This tool requires a standalone Playwright browser context and is not meaningful in the embedded browser.`;
 }
 
-const DEFERRED_TOOLS = new Set(["eval", "cookie-import-browser", "responsive"]);
+const DEFERRED_TOOLS = new Set(["cookie-import-browser"]);
 const UNSUPPORTED_NATIVE_TOOLS = new Set(["focus", "visibility"]);
 
 interface RuntimeEvaluateResponse<T> {
@@ -73,6 +73,11 @@ interface CapturedDialog {
   readonly type?: string;
   readonly message?: string;
   readonly url?: string;
+  readonly defaultPrompt?: string;
+  // What the page actually saw returned. `null` for a dismissed prompt;
+  // string for an accepted prompt; "true"/"false" for confirm; absent for
+  // alert (no return value).
+  readonly response?: string | null;
   readonly handled: "accepted" | "dismissed";
 }
 
@@ -173,15 +178,12 @@ function parseKeyEventDescriptor(raw: string): KeyEventDescriptor {
   throw new Error(`press: unsupported key '${keyToken}'`);
 }
 
+const DIALOG_BINDING_NAME = "__t3_dialog_emit";
+
 // Injected into every page to replace window.alert/confirm/prompt. The native
 // dialog path is suppressed via `webPreferences.disableDialogs` in the desktop
-// main; the shim captures each call into `window.__t3_captured_dialogs[]` and
+// main; the shim emits each call through a `Runtime.addBinding` channel and
 // returns a synchronous value driven by `window.__t3_dialog_policy`.
-//
-// We use a page-side buffer (drained on demand via Runtime.evaluate) rather
-// than Runtime.addBinding + Runtime.bindingCalled because Runtime.* event
-// subscriptions are not currently delivered through the Electron debugger
-// channel — see T3CO-7. Runtime.evaluate (command channel) works.
 //
 // Policy is one-shot: reset to the accept default after every dialog so stale
 // decisions cannot leak across unrelated pages or interactions.
@@ -189,23 +191,24 @@ const DIALOG_OVERRIDE_SCRIPT = `(function(){
   if (window.__t3_dialog_installed) return;
   window.__t3_dialog_installed = true;
   window.__t3_dialog_policy = { accept: true };
-  window.__t3_captured_dialogs = window.__t3_captured_dialogs || [];
   const consumePolicy = () => {
     const policy = window.__t3_dialog_policy || { accept: true };
     window.__t3_dialog_policy = { accept: true };
     return policy;
   };
-  const capture = (entry, policy) => {
+  const emit = (entry, policy) => {
     try {
-      window.__t3_captured_dialogs.push({
+      const fn = window.${DIALOG_BINDING_NAME};
+      if (typeof fn !== "function") return;
+      fn(JSON.stringify({
         ...entry,
         handled: policy.accept ? "accepted" : "dismissed",
-      });
+      }));
     } catch (e) {}
   };
   window.alert = function(message) {
     const policy = consumePolicy();
-    capture({
+    emit({
       at: new Date().toISOString(),
       type: "alert",
       message: String(message == null ? "" : message),
@@ -213,33 +216,29 @@ const DIALOG_OVERRIDE_SCRIPT = `(function(){
   };
   window.confirm = function(message) {
     const policy = consumePolicy();
-    capture({
+    const response = !!policy.accept;
+    emit({
       at: new Date().toISOString(),
       type: "confirm",
       message: String(message == null ? "" : message),
+      response: response ? "true" : "false",
     }, policy);
-    return !!policy.accept;
+    return response;
   };
   window.prompt = function(message, defaultValue) {
     const policy = consumePolicy();
-    capture({
+    const fallback = defaultValue == null ? "" : String(defaultValue);
+    const response = !policy.accept ? null : (policy.text != null ? String(policy.text) : fallback);
+    emit({
       at: new Date().toISOString(),
       type: "prompt",
       message: String(message == null ? "" : message),
-      defaultPrompt: String(defaultValue == null ? "" : defaultValue),
+      defaultPrompt: fallback,
+      response,
     }, policy);
-    if (!policy.accept) return null;
-    if (policy.text != null) return String(policy.text);
-    return defaultValue == null ? "" : String(defaultValue);
+    return response;
   };
 })();`;
-
-// Drain + clear the page-side dialog buffer in one evaluate roundtrip.
-const DIALOG_DRAIN_SCRIPT = `(function(){
-  const captured = (window.__t3_captured_dialogs || []).slice();
-  window.__t3_captured_dialogs = [];
-  return captured;
-})()`;
 
 function dialogPolicyScript(policy: { accept: boolean; text?: string }): string {
   return `window.__t3_dialog_policy = ${JSON.stringify({
@@ -365,6 +364,8 @@ export class ElectronWebContentsBrowserHost {
       case "js":
       case "evaluate":
         return this.evaluateText(args[0] ?? "");
+      case "eval":
+        return this.evalFile(requiredArg(args, "eval", "file"));
       case "css":
         return this.css(args[0], args[1]);
       case "attrs":
@@ -376,7 +377,6 @@ export class ElectronWebContentsBrowserHost {
       case "network":
         return this.bufferedEvents("network", this.networkEvents);
       case "dialog":
-        await this.drainCapturedDialogs();
         return this.dialogHistory();
       case "cookies":
         return this.cookies();
@@ -449,6 +449,8 @@ export class ElectronWebContentsBrowserHost {
         return this.snapshot(args);
       case "screenshot":
         return this.screenshot(args);
+      case "responsive":
+        return this.responsive(args);
       case "pdf":
         return this.pdf(args[0]);
       case "diff":
@@ -496,11 +498,31 @@ export class ElectronWebContentsBrowserHost {
 
   private async primeEventDomains(): Promise<void> {
     try {
+      // `Target.setAutoAttach` with `flatten: true` is what makes
+      // `Runtime.*` / `Network.*` events reach our debugger.on('message')
+      // listener at all on the embedded host. Without it, events from any
+      // sub-target (OOPIFs, cross-origin iframes, service workers, and in
+      // newer Electron the main frame itself when site-isolation is on)
+      // never make it to the connection. With `flatten: true`, all attached
+      // session events flow over the same root debugger pipe — Playwright's
+      // CDPSession does this automatically; we have to ask for it. Must be
+      // sent before Runtime/Network/Page.enable so events from the very
+      // first navigation (including the HTML document request) are caught.
+      await this.send("Target.setAutoAttach", {
+        autoAttach: true,
+        flatten: true,
+        waitForDebuggerOnStart: false,
+      });
       await Promise.all([
         this.send("Runtime.enable"),
         this.send("Network.enable"),
         this.send("Page.enable"),
       ]);
+      // Bind the dialog channel before installing the page-side override so
+      // the shim can find `window.__t3_dialog_emit` on its first call. Adding
+      // a binding without an `executionContextId` makes it survive reloads
+      // and apply to all current and future contexts in the page.
+      await this.send("Runtime.addBinding", { name: DIALOG_BINDING_NAME });
       await this.installDialogInterceptor();
     } catch (cause) {
       // The host may be constructed before the desktop bridge is fully re-announced.
@@ -537,48 +559,6 @@ export class ElectronWebContentsBrowserHost {
     }).catch(() => {});
   }
 
-  // Reads captured dialogs out of the page-side buffer and merges them into
-  // the server-side history. Called on demand from the `dialog` tool — pulling
-  // (rather than listening) sidesteps the unreliable Runtime.bindingCalled
-  // delivery path. Dialogs survive navigation only if drained before the
-  // navigation; not-yet-drained dialogs on the old document are lost. That is
-  // acceptable for agent use — a dialog immediately before a navigation is
-  // rare, and the agent can call `dialog` between the click and the navigate.
-  private async drainCapturedDialogs(): Promise<void> {
-    if (!this.client) return;
-    try {
-      const response = await this.client.sendCommand<
-        RuntimeEvaluateResponse<
-          Array<{
-            at?: string;
-            type?: string;
-            message?: string;
-            defaultPrompt?: string;
-            handled?: "accepted" | "dismissed";
-          }>
-        >
-      >("Runtime.evaluate", {
-        expression: DIALOG_DRAIN_SCRIPT,
-        returnByValue: true,
-      });
-      const captured = response.result?.value;
-      if (!Array.isArray(captured)) return;
-      for (const entry of captured) {
-        this.recordCapturedDialog({
-          at: entry.at ?? new Date().toISOString(),
-          ...(entry.type === undefined ? {} : { type: entry.type }),
-          ...(entry.message === undefined ? {} : { message: entry.message }),
-          ...(entry.defaultPrompt === undefined ? {} : { defaultPrompt: entry.defaultPrompt }),
-          ...(entry.handled === undefined ? {} : { handled: entry.handled }),
-        });
-      }
-    } catch {
-      // Failures here are non-fatal; dialogs will still be captured on the
-      // next drain attempt as long as the page's __t3_captured_dialogs
-      // buffer hasn't been wiped by a navigation.
-    }
-  }
-
   private startEventSubscriptions(): void {
     this.subscribeTo("Runtime.consoleAPICalled", (event) => {
       this.pushBuffered(this.consoleEvents, event);
@@ -593,6 +573,30 @@ export class ElectronWebContentsBrowserHost {
         this.pushBuffered(this.networkEvents, event);
       });
     }
+    this.subscribeTo("Runtime.bindingCalled", (event) => {
+      const params = event.params as { name?: string; payload?: string };
+      if (params.name !== DIALOG_BINDING_NAME || typeof params.payload !== "string") return;
+      try {
+        const dialog = JSON.parse(params.payload) as {
+          at?: string;
+          type?: string;
+          message?: string;
+          defaultPrompt?: string;
+          response?: string | null;
+          handled?: "accepted" | "dismissed";
+        };
+        this.recordCapturedDialog({
+          at: dialog.at ?? new Date().toISOString(),
+          ...(dialog.type === undefined ? {} : { type: dialog.type }),
+          ...(dialog.message === undefined ? {} : { message: dialog.message }),
+          ...(dialog.defaultPrompt === undefined ? {} : { defaultPrompt: dialog.defaultPrompt }),
+          ...(dialog.response === undefined ? {} : { response: dialog.response }),
+          ...(dialog.handled === undefined ? {} : { handled: dialog.handled }),
+        });
+      } catch {
+        // Malformed payload — ignore. The shim always JSON.stringify()s the entry.
+      }
+    });
     this.subscribeTo("Page.javascriptDialogOpening", (event) => {
       // Safety net for the unlikely case that a dialog slips past the page-side
       // override (for example, during the brief window before the script is
@@ -607,6 +611,7 @@ export class ElectronWebContentsBrowserHost {
     type?: string;
     message?: string;
     defaultPrompt?: string;
+    response?: string | null;
     handled?: "accepted" | "dismissed";
   }): void {
     // Prefer the `handled` value stamped by the shim at the moment the dialog
@@ -619,6 +624,8 @@ export class ElectronWebContentsBrowserHost {
       at: dialog.at,
       ...(dialog.type === undefined ? {} : { type: dialog.type }),
       ...(dialog.message === undefined ? {} : { message: dialog.message }),
+      ...(dialog.defaultPrompt === undefined ? {} : { defaultPrompt: dialog.defaultPrompt }),
+      ...(dialog.response === undefined ? {} : { response: dialog.response }),
       handled,
     });
     if (dialog.handled === undefined) this.nextDialogAction = undefined;
@@ -677,11 +684,22 @@ export class ElectronWebContentsBrowserHost {
     }).catch((cause) => {
       console.warn("ElectronWebContentsBrowserHost failed to handle JavaScript dialog", cause);
     });
+    const response: string | null | undefined = (() => {
+      if (params.type === "alert") return undefined;
+      if (params.type === "confirm") return policy.accept ? "true" : "false";
+      if (params.type === "prompt") {
+        if (!policy.accept) return null;
+        return policy.text ?? params.defaultPrompt ?? "";
+      }
+      return undefined;
+    })();
     this.dialogs.push({
       at: event.at,
       ...(params.type === undefined ? {} : { type: params.type }),
       ...(params.message === undefined ? {} : { message: params.message }),
       ...(params.url === undefined ? {} : { url: params.url }),
+      ...(params.defaultPrompt === undefined ? {} : { defaultPrompt: params.defaultPrompt }),
+      ...(response === undefined ? {} : { response }),
       handled: policy.accept ? "accepted" : "dismissed",
     });
     this.nextDialogAction = undefined;
@@ -779,6 +797,28 @@ export class ElectronWebContentsBrowserHost {
 
   private async evaluateJson(expression: string): Promise<string> {
     return JSON.stringify(await this.evaluate(expression), null, 2);
+  }
+
+  private async evalFile(filePath: string): Promise<string> {
+    // Reuse the vendored gstack path validator so the embedded host enforces
+    // the same SAFE_DIRECTORIES allow-list (project cwd + temp dir) the
+    // Playwright host does. Dynamic import keeps `core/**` out of T3's
+    // typecheck graph (the vendored code does not satisfy our strict
+    // compiler settings); see apps/server/src/browser/NOTICE.
+    const { validateReadPath } = (await import("../../core/path-security.ts" as string)) as {
+      readonly validateReadPath: (path: string) => void;
+    };
+    validateReadPath(filePath);
+    let code: string;
+    try {
+      code = await fs.readFile(filePath, "utf-8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`File not found: ${filePath}`, { cause });
+      }
+      throw cause;
+    }
+    return this.evaluateText(code);
   }
 
   /**
@@ -1079,6 +1119,80 @@ export class ElectronWebContentsBrowserHost {
       null,
       2,
     );
+  }
+
+  // Captures three full-page screenshots at fixed mobile/tablet/desktop
+  // viewport sizes — the Electron-host port of the gstack `responsive`
+  // meta-tool (apps/server/src/browser/core/meta-commands.ts:211). Drives
+  // CDP `Emulation.setDeviceMetricsOverride` per viewport, then clears the
+  // override at the end. The renderer's per-tab viewport-emulator state
+  // (`emulationByTab` in EmbeddedBrowser.tsx) is unaffected and re-issues
+  // its `setViewport` IPC on the next user interaction (tab activate, drag,
+  // preset change), so the embedded UI re-syncs without explicit help.
+  private async responsive(args: readonly string[]): Promise<string> {
+    // Dynamic-import gstack helpers; same pattern as `evalFile` (T3CO-343).
+    // Keeps `core/**` out of T3's typecheck graph (vendored code does not
+    // satisfy strict compiler settings; see apps/server/src/browser/NOTICE).
+    const { validateOutputPath } = (await import("../../core/path-security.ts" as string)) as {
+      readonly validateOutputPath: (path: string) => void;
+    };
+    const { TEMP_DIR } = (await import("../../core/platform.ts" as string)) as {
+      readonly TEMP_DIR: string;
+    };
+
+    const prefix = args[0] ?? nodePath.join(TEMP_DIR, "browse-responsive");
+    const viewports = [
+      { name: "mobile", width: 375, height: 812 },
+      { name: "tablet", width: 768, height: 1024 },
+      { name: "desktop", width: 1280, height: 720 },
+    ] as const;
+
+    const lines: string[] = [];
+    try {
+      for (const vp of viewports) {
+        const screenshotPath = `${prefix}-${vp.name}.png`;
+        validateOutputPath(screenshotPath);
+        // Match the gstack `responsive` (and our native `viewport`) call
+        // shape — pure metrics override. Note: this *does* visibly stretch
+        // the embedded WebContentsView for the duration of the call, even
+        // with `dontSetVisibleSize: true` and a fully-pinned screen-field
+        // shape. The deterministic fix is the per-tab maintenance overlay
+        // tracked in T3CO-442 (park the view + render a "Resizing browser…"
+        // spinner while this runs). Until that lands, expect a brief
+        // overflow on calls.
+        await this.send("Emulation.setDeviceMetricsOverride", {
+          width: vp.width,
+          height: vp.height,
+          deviceScaleFactor: 0,
+          mobile: false,
+        });
+        const buffer = await this.captureFullPageScreenshot();
+        await fs.writeFile(screenshotPath, buffer);
+        lines.push(`${vp.name} (${vp.width}x${vp.height}): ${screenshotPath}`);
+      }
+    } finally {
+      await this.send("Emulation.clearDeviceMetricsOverride", {}).catch(() => {});
+    }
+    return lines.join("\n");
+  }
+
+  // Full-page (entire scrollable document) variant of the per-viewport
+  // capture in `cdpHost.captureScreenshot()`. Uses Page.getLayoutMetrics to
+  // size the clip rectangle and `captureBeyondViewport: true` so Chromium
+  // renders content past the visible viewport into the output PNG.
+  private async captureFullPageScreenshot(): Promise<Buffer> {
+    const layout = await this.send<{
+      readonly cssContentSize?: { width: number; height: number };
+      readonly contentSize?: { width: number; height: number };
+    }>("Page.getLayoutMetrics");
+    const size = layout.cssContentSize ?? layout.contentSize;
+    if (!size) throw new Error("responsive: Page.getLayoutMetrics returned no content size");
+    const result = await this.send<ScreenshotResponse>("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
+    });
+    return Buffer.from(result.data, "base64");
   }
 
   private async pdf(outputPath = nodePath.join(os.tmpdir(), "browse-page.pdf")): Promise<string> {

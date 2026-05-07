@@ -51,7 +51,7 @@
 | `--destructive`          | `var(--color-red-500)`                                                 | `color-mix(in srgb, var(--color-red-500) 90%, var(--color-white))`     |
 | `--border`               | `--alpha(var(--color-black) / 8%)`                                     | `--alpha(var(--color-white) / 6%)`                                     |
 | `--input`                | `--alpha(var(--color-black) / 10%)`                                    | `--alpha(var(--color-white) / 8%)`                                     |
-| `--ring`                 | `oklch(0.488 0.217 264)`                                               | `oklch(0.588 0.217 264)`                                               |
+| `--ring`                 | `transparent`                                                          | `transparent`                                                          |
 
 ### Status Colors
 
@@ -816,13 +816,13 @@ Cards: `rounded-md border px-2.5 py-2 flex flex-col gap-1.5`.
 
 ### Focus
 
-Keyboard-only focus ring:
+Keyboard-only focus ring classes may remain in component markup for accessibility compatibility, but `--ring` resolves to `transparent` in the app shell:
 
 ```
 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background
 ```
 
-Inputs use a 3px ring: `has-focus-visible:ring-[3px] ring-ring/24`.
+Inputs may keep `has-focus-visible:ring-[3px] ring-ring/24` in their primitive class list, but the token is transparent. The app shell also suppresses the browser default `outline` for `:focus` / `:focus-visible`, so do not replace focus rings with native black outlines, primary/blue rings, or dark neutral rings for ordinary controls.
 
 ### Active / Pressed
 

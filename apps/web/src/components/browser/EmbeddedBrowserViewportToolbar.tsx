@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useMemo } from "react";
 
 import { Input } from "../ui/input";
 import {
@@ -54,6 +54,28 @@ export function EmbeddedBrowserViewportToolbar({
   const effective = effectiveDimensions(emulation);
   const zoomValue = String(effectiveZoom(emulation));
   const isCustom = emulation.kind === "custom";
+  const presetOverlayItems = useMemo(
+    () => [
+      ...DEVICE_PRESETS.map((preset) => ({
+        value: preset.id,
+        label: preset.label,
+        hideIndicator: true,
+      })),
+      { value: "__preset-separator", label: "", separator: true },
+      { value: CUSTOM_VALUE, label: "Custom", hideIndicator: true },
+      { value: NO_EMULATION_VALUE, label: "No emulation", hideIndicator: true },
+    ],
+    [],
+  );
+  const zoomOverlayItems = useMemo(
+    () =>
+      ZOOM_OPTIONS.map((zoom) => ({
+        value: String(zoom),
+        label: formatZoomLabel(zoom),
+        hideIndicator: true,
+      })),
+    [],
+  );
 
   const handlePresetChange = (value: string | null) => {
     if (value === null || value === NO_EMULATION_VALUE) {
@@ -122,7 +144,13 @@ export function EmbeddedBrowserViewportToolbar({
 
   return (
     <div className="flex shrink-0 items-center gap-2">
-      <Select value={presetValue} onValueChange={handlePresetChange}>
+      <Select
+        value={presetValue}
+        onValueChange={handlePresetChange}
+        overlayItems={presetOverlayItems}
+        overlaySelectAlign="start"
+        overlayAlignItemWithTrigger={false}
+      >
         <SelectTrigger size="sm" className="w-44 text-xs sm:text-xs" aria-label="Device preset">
           <SelectValue>{renderPresetLabel(presetValue)}</SelectValue>
         </SelectTrigger>
@@ -172,7 +200,13 @@ export function EmbeddedBrowserViewportToolbar({
         aria-label="Viewport height"
       />
 
-      <Select value={zoomValue} onValueChange={handleZoomChange}>
+      <Select
+        value={zoomValue}
+        onValueChange={handleZoomChange}
+        overlayItems={zoomOverlayItems}
+        overlaySelectAlign="start"
+        overlayAlignItemWithTrigger={false}
+      >
         <SelectTrigger size="sm" className="w-20 text-xs sm:text-xs" aria-label="Zoom">
           <SelectValue>{formatZoomLabel(Number(zoomValue))}</SelectValue>
         </SelectTrigger>

@@ -6,6 +6,7 @@ import {
   LayoutListIcon,
   SearchCheckIcon,
 } from "lucide-react";
+import type { OverlayMenuItem } from "@t3tools/contracts";
 
 import type { OrchestrationSwitcherItem } from "../../hooks/useOrchestrationSwitcher";
 import { cn } from "~/lib/utils";
@@ -33,6 +34,35 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
 }: ThreadSwitcherDropdownProps) {
   const timelineItem = useMemo(() => items.find((i) => i.kind === "timeline"), [items]);
   const threadItems = useMemo(() => items.filter((i) => i.kind !== "timeline"), [items]);
+  const overlayItems = useMemo<OverlayMenuItem[]>(
+    () =>
+      items.map((item) => ({
+        id: item.id,
+        label: item.label,
+        ...(item.sublabel ? { description: item.sublabel } : {}),
+        icon:
+          item.kind === "timeline"
+            ? "LayoutList"
+            : item.kind === "review-thread"
+              ? "SearchCheck"
+              : "FileCode2",
+        iconClassName: item.kind === "review-thread" ? "size-3 text-info-foreground" : "size-3",
+        ...(item.isActive
+          ? { badge: "Current" }
+          : item.kind === "review-thread"
+            ? { badge: "Review" }
+            : {}),
+      })),
+    [items],
+  );
+
+  const handleOverlaySelect = useCallback(
+    (id: string) => {
+      const item = items.find((entry) => entry.id === id);
+      if (item) onNavigate(item.threadId);
+    },
+    [items, onNavigate],
+  );
 
   // Scroll the active item into view when the menu mounts it
   const activeRefCallback = useCallback((node: HTMLDivElement | null) => {
@@ -45,7 +75,11 @@ export const ThreadSwitcherDropdown = memo(function ThreadSwitcherDropdown({
   }, []);
 
   return (
-    <Menu>
+    <Menu
+      overlayItems={overlayItems}
+      overlayMenuAlign="start"
+      overlayOnSelect={handleOverlaySelect}
+    >
       <MenuTrigger
         render={
           <button

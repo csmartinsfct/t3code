@@ -379,7 +379,7 @@ When the user asks about tickets, tasks, issues, or project tracking:
 
 const BROWSER_DEFAULT_TEXT = `## T3 Browser Automation
 
-This project has T3 browser automation via the \`/api/browser\` REST endpoint — a per-project headless Chromium context with plaintext output and stable element references (@refs). Prefer this over any chrome-devtools or other browser MCP: it is faster, per-project isolated, and the default endpoint the T3 server provides.
+This project has T3 browser automation via the \`/api/browser\` REST endpoint — a per-project Chromium context with plaintext output and stable element references (@refs). In the desktop build it drives the visible embedded browser pane in T3 Code; in the server-only build it drives a headless Playwright Chromium. Prefer this over any chrome-devtools or other browser MCP: it is faster, per-project isolated, and the default endpoint the T3 server provides.
 
 ### When to use it
 
@@ -419,7 +419,7 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 - **Navigate:** \`goto\`, \`back\`, \`forward\`, \`reload\`, \`url\`
 - **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
 - **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
-- **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`focus\`, \`status\`, \`ux-audit\`
+- **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`status\`, \`ux-audit\`
 - **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
 
 ### Known issues
@@ -429,6 +429,14 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 ### Per-project isolation
 
 Each project has its own Chromium profile at \`<dataDir>/browser/<projectId>/chromium-profile/\`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed between projects.`;
+
+const BROWSER_ELECTRON_TEXT = `### Embedded browser (desktop build)
+
+The browser this tool drives is the **embedded WebContentsView** in the T3 Code chat shell — the same pane the user can see and interact with. There is no separate Playwright instance. Side effects (navigation, scrolling, typing, dialog interception, viewport emulation) are visible to the user in real time, so the agent's actions and the user's expectations stay in sync.
+
+One tool hasn't been ported to this mode yet and returns "tool X is not yet supported in native (Electron) mode" if called: \`cookie-import-browser\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
+
+Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
 
 const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
 
@@ -479,7 +487,10 @@ export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   },
   browser: {
     version: PROMPT_TEMPLATE_VERSION,
-    blocks: [{ when: null, text: BROWSER_DEFAULT_TEXT }],
+    blocks: [
+      { when: null, text: BROWSER_DEFAULT_TEXT },
+      { when: { type: "runtime", match: "anyElectron" }, text: BROWSER_ELECTRON_TEXT },
+    ],
   },
   dynamicChatUi: {
     version: PROMPT_TEMPLATE_VERSION,

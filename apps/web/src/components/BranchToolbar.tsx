@@ -129,6 +129,15 @@ export default function BranchToolbar({
           value={effectiveEnvMode}
           onValueChange={(value) => onEnvModeChange(value as EnvMode)}
           items={envModeItems}
+          overlayItems={[
+            { value: "local", label: "Local", icon: "Folder", iconClassName: "size-3" },
+            {
+              value: "worktree",
+              label: "New worktree",
+              icon: "GitFork",
+              iconClassName: "size-3",
+            },
+          ]}
         >
           <SelectTrigger variant="ghost" size="xs" className="font-medium">
             {effectiveEnvMode === "worktree" ? (

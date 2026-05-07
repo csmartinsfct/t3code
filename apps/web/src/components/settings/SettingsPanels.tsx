@@ -76,6 +76,7 @@ import {
   useServerProviders,
 } from "../../rpc/serverState";
 import { clampReviewIterations } from "./settingsPanelHelpers";
+import { confirmSettingsAction } from "./SettingsConfirmOverlay";
 
 const THEME_OPTIONS = [
   {
@@ -360,7 +361,7 @@ function AboutVersionSection() {
 
   const updateState = updateStateQuery.data ?? null;
 
-  const handleButtonClick = useCallback(() => {
+  const handleButtonClick = useCallback(async () => {
     const bridge = window.desktopBridge;
     if (!bridge) return;
 
@@ -383,11 +384,13 @@ function AboutVersionSection() {
     }
 
     if (action === "install") {
-      const confirmed = window.confirm(
-        getDesktopUpdateInstallConfirmationMessage(
+      const confirmed = await confirmSettingsAction({
+        title: "Install update?",
+        description: getDesktopUpdateInstallConfirmationMessage(
           updateState ?? { availableVersion: null, downloadedVersion: null },
         ),
-      );
+        confirmLabel: "Install",
+      });
       if (!confirmed) return;
       void bridge
         .installUpdate()
@@ -547,12 +550,11 @@ export function useSettingsRestore(onRestored?: () => void) {
 
   const restoreDefaults = useCallback(async () => {
     if (changedSettingLabels.length === 0) return;
-    const api = readNativeApi();
-    const confirmed = await (api ?? ensureNativeApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
-      ),
-    );
+    const confirmed = await confirmSettingsAction({
+      title: "Restore default settings?",
+      description: `This will reset: ${changedSettingLabels.join(", ")}.`,
+      confirmLabel: "Restore",
+    });
     if (!confirmed) return;
 
     setTheme("system");
@@ -982,6 +984,12 @@ export function GeneralSettingsPanel() {
                   setTheme(value);
                 }
               }}
+              overlayItems={THEME_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+                hideIndicator: true,
+              }))}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
                 <SelectValue>
@@ -1022,6 +1030,20 @@ export function GeneralSettingsPanel() {
                   updateSettings({ timestampFormat: value });
                 }
               }}
+              overlayItems={[
+                { value: "locale", label: TIMESTAMP_FORMAT_LABELS.locale, hideIndicator: true },
+                {
+                  value: "12-hour",
+                  label: TIMESTAMP_FORMAT_LABELS["12-hour"],
+                  hideIndicator: true,
+                },
+                {
+                  value: "24-hour",
+                  label: TIMESTAMP_FORMAT_LABELS["24-hour"],
+                  hideIndicator: true,
+                },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Timestamp format">
                 <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
@@ -1115,6 +1137,11 @@ export function GeneralSettingsPanel() {
                   updateSettings({ defaultThreadEnvMode: value });
                 }
               }}
+              overlayItems={[
+                { value: "local", label: "Local", hideIndicator: true },
+                { value: "worktree", label: "New worktree", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
                 <SelectValue>
@@ -1378,6 +1405,14 @@ export function GeneralSettingsPanel() {
             <Select
               value={String(settings.threadContentCacheMaxGB)}
               onValueChange={(value) => updateSettings({ threadContentCacheMaxGB: Number(value) })}
+              overlayItems={[
+                { value: "0", label: "Unlimited", hideIndicator: true },
+                { value: "1", label: "1 GB", hideIndicator: true },
+                { value: "2", label: "2 GB", hideIndicator: true },
+                { value: "4", label: "4 GB", hideIndicator: true },
+                { value: "8", label: "8 GB", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Conversation cache">
                 <SelectValue>
@@ -1429,6 +1464,14 @@ export function GeneralSettingsPanel() {
               onValueChange={(value) =>
                 updateSettings({ idleSessionTimeoutMinutes: Number(value) })
               }
+              overlayItems={[
+                { value: "0", label: "Never", hideIndicator: true },
+                { value: "30", label: "30 minutes", hideIndicator: true },
+                { value: "60", label: "1 hour", hideIndicator: true },
+                { value: "120", label: "2 hours", hideIndicator: true },
+                { value: "240", label: "4 hours", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Idle session timeout">
                 <SelectValue>
@@ -2099,12 +2142,12 @@ export function ArchivedThreadsPanel() {
     const count = allArchivedThreadIds.length;
     if (count === 0) return;
 
-    const confirmed = await api.dialogs.confirm(
-      [
-        `Delete ${count} archived thread${count === 1 ? "" : "s"}?`,
-        "This permanently clears conversation history for these threads.",
-      ].join("\n"),
-    );
+    const confirmed = await confirmSettingsAction({
+      title: `Delete ${count} archived thread${count === 1 ? "" : "s"}?`,
+      description: "This permanently clears conversation history for these threads.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setIsDeletingAll(true);
@@ -2360,12 +2403,13 @@ export function ArchivedTicketsPanel() {
     async (ticket: TicketSummary) => {
       const api = readNativeApi();
       if (!api) return;
-      const confirmed = await api.dialogs.confirm(
-        [
-          `Delete "${ticket.identifier}: ${ticket.title}"?`,
+      const confirmed = await confirmSettingsAction({
+        title: `Delete "${ticket.identifier}: ${ticket.title}"?`,
+        description:
           "This permanently removes the ticket and its data. This action cannot be undone.",
-        ].join("\n"),
-      );
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (!confirmed) return;
       setBusyTicketId(ticket.id as string);
       try {
@@ -2389,12 +2433,13 @@ export function ArchivedTicketsPanel() {
     if (!api) return;
     const count = allArchivedIds.length;
     if (count === 0) return;
-    const confirmed = await api.dialogs.confirm(
-      [
-        `Delete ${count} archived ticket${count === 1 ? "" : "s"}?`,
+    const confirmed = await confirmSettingsAction({
+      title: `Delete ${count} archived ticket${count === 1 ? "" : "s"}?`,
+      description:
         "This permanently removes these tickets and their data. This action cannot be undone.",
-      ].join("\n"),
-    );
+      confirmLabel: "Delete",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setIsDeletingAll(true);
@@ -2548,6 +2593,15 @@ export function BrowserSettingsPanel() {
               onValueChange={(value) =>
                 updateSettings({ idleBrowserSuspendMinutes: Number(value) })
               }
+              overlayItems={[
+                { value: "0", label: "Never", hideIndicator: true },
+                { value: "5", label: "5 minutes", hideIndicator: true },
+                { value: "15", label: "15 minutes", hideIndicator: true },
+                { value: "30", label: "30 minutes", hideIndicator: true },
+                { value: "60", label: "1 hour", hideIndicator: true },
+                { value: "240", label: "4 hours", hideIndicator: true },
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger className="w-full sm:w-36" aria-label="Suspend idle browsers after">
                 <SelectValue>

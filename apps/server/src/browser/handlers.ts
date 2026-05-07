@@ -717,10 +717,18 @@ const SPECS: Record<string, CommandSpec> = {
   responsive: {
     command: "responsive",
     category: "meta",
-    argsFromInput: () => [],
+    argsFromInput: (i) => {
+      const prefix = optString(i, "prefix");
+      return prefix ? [prefix] : [];
+    },
     title: "Responsive screenshots",
-    description: "Capture screenshots at multiple viewport sizes.",
-    inputSchema: {},
+    description:
+      "Capture full-page screenshots at mobile (375x812), tablet (768x1024), and desktop (1280x720) viewports. Saves to `<prefix>-mobile.png`, `<prefix>-tablet.png`, `<prefix>-desktop.png`. Default prefix `<TEMP_DIR>/browse-responsive`. Prefix must be inside a safe directory (TEMP_DIR or cwd).",
+    inputSchema: {
+      prefix: s.optStr(
+        "Output path prefix; final files are `<prefix>-{mobile,tablet,desktop}.png`.",
+      ),
+    },
   },
   diff: {
     command: "diff",

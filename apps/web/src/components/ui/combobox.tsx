@@ -4,7 +4,19 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { CheckIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
+import type {
+  OverlayAnchorRect,
+  OverlayComboboxItem,
+  OverlayComboboxMessage,
+} from "@t3tools/contracts";
+
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
+import {
+  acquireNativeOverlay,
+  getElementOverlayAnchor,
+  trackNativeOverlayAnchor,
+  useNativeOverlayActive,
+} from "~/nativeOverlayBridge";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -12,27 +24,191 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 const ComboboxContext = React.createContext<{
   chipsRef: React.RefObject<Element | null> | null;
   multiple: boolean;
+  openNative?: (anchorElement: HTMLElement) => void;
 }>({
   chipsRef: null,
   multiple: false,
 });
 
 function Combobox<Value, Multiple extends boolean | undefined = false>(
-  props: ComboboxPrimitive.Root.Props<Value, Multiple>,
+  props: ComboboxPrimitive.Root.Props<Value, Multiple> & {
+    /** Opt-in: when provided AND the native overlay system is active, the
+     *  dropdown renders in a WebContentsView above the embedded browser.
+     *  `overlayOnSearch` may return an updated serialized item list. */
+    overlayItems?: OverlayComboboxItem[];
+    overlayOnSearch?: (query: string) => Promise<OverlayComboboxItem[]>;
+    overlayOnSelect?: (value: string) => void;
+    overlayInputValue?: string;
+    overlayPlaceholder?: string;
+    overlayEmptyText?: string;
+    overlayStatusText?: string | null;
+    overlayComboboxSide?: "top" | "bottom";
+    overlayComboboxAlign?: "start" | "center" | "end";
+  },
 ) {
+  const {
+    overlayItems,
+    overlayOnSearch,
+    overlayOnSelect,
+    overlayInputValue,
+    overlayPlaceholder,
+    overlayEmptyText,
+    overlayStatusText,
+    overlayComboboxSide,
+    overlayComboboxAlign,
+    open,
+    defaultOpen,
+    onOpenChange,
+    onValueChange,
+    value: rootValue,
+    ...rest
+  } = props;
   const chipsRef = React.useRef<Element | null>(null);
-  const value = React.useMemo(() => ({ chipsRef, multiple: !!props.multiple }), [props.multiple]);
+  const nativeActive = useNativeOverlayActive();
+  const [nativeAcquireFailed, setNativeAcquireFailed] = React.useState(false);
+  const useNative = nativeActive && overlayItems !== undefined && !nativeAcquireFailed;
+
+  const openNative = React.useCallback(
+    (anchorElement: HTMLElement) => {
+      if (!overlayItems) return;
+
+      const makeMessage = (
+        anchor: OverlayAnchorRect,
+        items: OverlayComboboxItem[],
+        inputValue: string,
+      ): OverlayComboboxMessage => ({
+        type: "combobox",
+        anchor,
+        items,
+        value: String(rootValue ?? ""),
+        inputValue,
+        multiple: !!props.multiple,
+        ...(overlayPlaceholder !== undefined ? { placeholder: overlayPlaceholder } : {}),
+        ...(overlayEmptyText !== undefined ? { emptyText: overlayEmptyText } : {}),
+        ...(overlayStatusText ? { statusText: overlayStatusText } : {}),
+        ...(overlayComboboxSide !== undefined ? { side: overlayComboboxSide } : {}),
+        ...(overlayComboboxAlign !== undefined ? { align: overlayComboboxAlign } : {}),
+      });
+
+      const initialAnchor = getElementOverlayAnchor(anchorElement);
+      if (!initialAnchor) return;
+      void acquireNativeOverlay(
+        makeMessage(initialAnchor, overlayItems, overlayInputValue ?? ""),
+      ).then((handle) => {
+        if (!handle) {
+          setNativeAcquireFailed(true);
+          onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+          return;
+        }
+
+        onOpenChange?.(true, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        let searchVersion = 0;
+        let currentItems = overlayItems;
+        let currentInputValue = overlayInputValue ?? "";
+        const stopTracking = trackNativeOverlayAnchor(
+          handle,
+          () => getElementOverlayAnchor(anchorElement),
+          (anchor) => makeMessage(anchor, currentItems, currentInputValue),
+          anchorElement,
+        );
+
+        handle.onEvent((type, payload) => {
+          if (type === "search") {
+            const query = String((payload as { query?: unknown })?.query ?? "");
+            currentInputValue = query;
+            const version = ++searchVersion;
+            void (
+              overlayOnSearch
+                ? overlayOnSearch(query)
+                : Promise.resolve(
+                    overlayItems.filter((item) =>
+                      item.label.toLowerCase().includes(query.trim().toLowerCase()),
+                    ),
+                  )
+            ).then((items) => {
+              if (version !== searchVersion) return;
+              currentItems = items;
+              const anchor = getElementOverlayAnchor(anchorElement);
+              if (!anchor) {
+                stopTracking();
+                handle.release();
+                onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+                return;
+              }
+              void handle.render(makeMessage(anchor, items, query));
+            });
+            return;
+          }
+
+          if (type === "select") {
+            const selectedValue = (payload as { value?: unknown })?.value;
+            if (typeof selectedValue !== "string") return;
+            overlayOnSelect?.(selectedValue);
+            if (!overlayOnSelect && onValueChange) {
+              onValueChange(
+                selectedValue as Parameters<NonNullable<typeof onValueChange>>[0],
+                {} as Parameters<NonNullable<typeof onValueChange>>[1],
+              );
+            }
+            stopTracking();
+            handle.release();
+            onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+          }
+        });
+
+        handle.onDismiss(() => {
+          stopTracking();
+          handle.release();
+          onOpenChange?.(false, {} as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        });
+      });
+    },
+    [
+      onOpenChange,
+      onValueChange,
+      overlayComboboxAlign,
+      overlayComboboxSide,
+      overlayEmptyText,
+      overlayInputValue,
+      overlayItems,
+      overlayOnSearch,
+      overlayOnSelect,
+      overlayPlaceholder,
+      overlayStatusText,
+      props.multiple,
+      rootValue,
+    ],
+  );
+
+  const value = React.useMemo(
+    () => ({ chipsRef, multiple: !!props.multiple, ...(useNative ? { openNative } : {}) }),
+    [openNative, props.multiple, useNative],
+  );
   const handleOpenChange = useTrackedOverlayOpen({
-    open: props.open,
-    defaultOpen: props.defaultOpen,
-    onOpenChange: props.onOpenChange,
-    enabled: true,
+    open: useNative ? false : open,
+    defaultOpen: useNative ? false : defaultOpen,
+    onOpenChange: useNative
+      ? undefined
+      : (nextOpen, details) => {
+          if (!nextOpen) {
+            setNativeAcquireFailed(false);
+          }
+          onOpenChange?.(nextOpen, details as Parameters<NonNullable<typeof onOpenChange>>[1]);
+        },
+    enabled: !useNative,
     source: "combobox",
   });
 
   return (
     <ComboboxContext.Provider value={value}>
-      <ComboboxPrimitive.Root {...props} onOpenChange={handleOpenChange} />
+      <ComboboxPrimitive.Root
+        {...rest}
+        defaultOpen={useNative ? false : defaultOpen}
+        onOpenChange={useNative ? undefined : handleOpenChange}
+        onValueChange={onValueChange}
+        open={useNative ? false : open}
+        value={rootValue}
+      />
     </ComboboxContext.Provider>
   );
 }
@@ -136,9 +312,28 @@ function ComboboxInput({
   );
 }
 
-function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Trigger.Props) {
+function ComboboxTrigger({
+  className,
+  children,
+  onClick,
+  ...props
+}: ComboboxPrimitive.Trigger.Props) {
+  const { openNative } = React.useContext(ComboboxContext);
+  const handleClick = openNative
+    ? (event: Parameters<NonNullable<ComboboxPrimitive.Trigger.Props["onClick"]>>[0]) => {
+        event.preventDefault();
+        event.preventBaseUIHandler();
+        openNative(event.currentTarget);
+      }
+    : onClick;
+
   return (
-    <ComboboxPrimitive.Trigger className={className} data-slot="combobox-trigger" {...props}>
+    <ComboboxPrimitive.Trigger
+      className={className}
+      data-slot="combobox-trigger"
+      onClick={handleClick}
+      {...props}
+    >
       {children}
     </ComboboxPrimitive.Trigger>
   );

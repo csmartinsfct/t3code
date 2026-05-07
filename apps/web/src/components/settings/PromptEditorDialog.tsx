@@ -32,6 +32,8 @@ import type {
 } from "@t3tools/contracts";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -66,6 +68,12 @@ interface PromptEditorDialogProps {
   /** When provided, Save writes locally instead of calling the prompt update API. */
   onLocalSave?: (promptId: PromptId, document: PromptDocumentV1) => void;
 }
+
+const PROMPT_EDITOR_OVERLAY_ROUTE_KEY = "prompt-editor";
+
+type PromptEditorDialogResult =
+  | { action: "saved" }
+  | { action: "local-saved"; promptId: PromptId; document: PromptDocumentV1 };
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -208,6 +216,24 @@ function SortableBlock({
                 if (value === null) return;
                 onUpdate(index, { when: selectValueToWhen(value) });
               }}
+              overlayItems={[
+                { value: ALWAYS_SENTINEL, label: "Always", hideIndicator: true },
+                ...(supportsExists
+                  ? supportedVariables.map((variable) => ({
+                      value: variable.key,
+                      label: `If exists: ${variable.key}`,
+                      hideIndicator: true,
+                    }))
+                  : []),
+                ...(supportsRuntime
+                  ? RUNTIME_MATCH_OPTIONS.map((option) => ({
+                      value: `${RUNTIME_PREFIX}${option.value}__`,
+                      label: option.label,
+                      hideIndicator: true,
+                    }))
+                  : []),
+              ]}
+              overlayAlignItemWithTrigger={false}
             >
               <SelectTrigger
                 className="h-6 w-auto min-w-28 gap-1 px-2 text-[11px]"
@@ -282,6 +308,56 @@ export function PromptEditorDialog({
   scopeInput,
   onLocalSave,
 }: PromptEditorDialogProps) {
+  const routed = useRoutedOverlaySurface<PromptEditorDialogResult>({
+    open,
+    onOpenChange: (nextOpen) => {
+      if (!nextOpen) onClose();
+    },
+    routeKey: PROMPT_EDITOR_OVERLAY_ROUTE_KEY,
+    params: { documentState, scopeInput, localSave: Boolean(onLocalSave) },
+    presentation: { kind: "dialog" },
+    enabled: documentState !== null,
+    onResult: (result) => {
+      if (result.action === "local-saved") {
+        onLocalSave?.(result.promptId, result.document);
+        onSaved();
+        return;
+      }
+      if (result.action === "saved") onSaved();
+    },
+  });
+
+  return (
+    <Dialog open={routed.domOpen} onOpenChange={routed.onDomOpenChange}>
+      <DialogPopup className="max-w-3xl">
+        <PromptEditorDialogContent
+          documentState={documentState}
+          onCancel={onClose}
+          onLocalSave={onLocalSave}
+          onSaved={onSaved}
+          open={routed.domOpen}
+          scopeInput={scopeInput}
+        />
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function PromptEditorDialogContent({
+  documentState,
+  onCancel,
+  onLocalSave,
+  onSaved,
+  open,
+  scopeInput,
+}: {
+  documentState: PromptDocumentState | null;
+  onCancel: () => void;
+  onSaved: () => void;
+  open: boolean;
+  scopeInput: PromptManagementScope;
+  onLocalSave: ((promptId: PromptId, document: PromptDocumentV1) => void) | undefined;
+}) {
   const [blocks, setBlocks] = useState<EditorBlock[]>([]);
   const [validation, setValidation] = useState<PromptDocumentValidationResult | null>(null);
   const [preview, setPreview] = useState<PreviewPromptDocumentResult | null>(null);
@@ -486,160 +562,210 @@ export function PromptEditorDialog({
   const scopeLabel = scopeInput.scope === "global" ? "Global" : `Project override`;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogPopup className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{definition?.label ?? "Edit Prompt"}</DialogTitle>
-          <DialogDescription>
-            {scopeLabel} &middot; {definition?.description ?? ""}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle>{definition?.label ?? "Edit Prompt"}</DialogTitle>
+        <DialogDescription>
+          {scopeLabel} &middot; {definition?.description ?? ""}
+        </DialogDescription>
+      </DialogHeader>
 
-        <DialogPanel>
-          <div className="space-y-4">
-            {/* Supported variables reference */}
-            {supportedVariables.length > 0 ? (
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                  Available variables
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {supportedVariables.map((v) => (
-                    <Tooltip key={v.key}>
-                      <TooltipTrigger
-                        render={
-                          <Badge variant="outline" size="sm" className="font-mono">
-                            {"${" + v.key + "}"}
-                          </Badge>
-                        }
-                      />
-                      <TooltipPopup side="top" className="max-w-64">
-                        <div className="space-y-0.5">
-                          <p className="font-medium">{v.label}</p>
-                          <p className="text-muted-foreground">{v.description}</p>
-                        </div>
-                      </TooltipPopup>
-                    </Tooltip>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {/* Block list with DnD */}
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext items={blockIds} strategy={verticalListSortingStrategy}>
-                <div className="space-y-2">
-                  {blocks.map((block, index) => (
-                    <SortableBlock
-                      key={block.id}
-                      block={block}
-                      index={index}
-                      supportedVariables={supportedVariables}
-                      supportedConditionTypes={supportedConditionTypes}
-                      blockErrors={blockErrorMap.get(index) ?? []}
-                      onUpdate={handleUpdateBlock}
-                      onRemove={handleRemoveBlock}
-                      canRemove={blocks.length > 1}
+      <DialogPanel>
+        <div className="space-y-4">
+          {/* Supported variables reference */}
+          {supportedVariables.length > 0 ? (
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                Available variables
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {supportedVariables.map((v) => (
+                  <Tooltip key={v.key}>
+                    <TooltipTrigger
+                      render={
+                        <Badge variant="outline" size="sm" className="font-mono">
+                          {"${" + v.key + "}"}
+                        </Badge>
+                      }
                     />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-
-            <Button size="xs" variant="outline" onClick={handleAddBlock}>
-              <PlusIcon className="size-3" />
-              Add block
-            </Button>
-
-            {/* Global validation errors */}
-            {globalErrors.length > 0 ? (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
-                {globalErrors.map((error) => (
-                  <p key={error} className="text-xs text-destructive">
-                    {error}
-                  </p>
+                    <TooltipPopup side="top" className="max-w-64">
+                      <div className="space-y-0.5">
+                        <p className="font-medium">{v.label}</p>
+                        <p className="text-muted-foreground">{v.description}</p>
+                      </div>
+                    </TooltipPopup>
+                  </Tooltip>
                 ))}
               </div>
-            ) : null}
-
-            {/* Preview section */}
-            <Collapsible open={previewOpen} onOpenChange={() => void handleTogglePreview()}>
-              <button
-                type="button"
-                className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-muted-foreground hover:text-foreground"
-                onClick={() => void handleTogglePreview()}
-              >
-                <ChevronDownIcon
-                  className={`size-3 transition-transform ${previewOpen ? "rotate-0" : "-rotate-90"}`}
-                />
-                <span>Preview</span>
-              </button>
-              <CollapsibleContent>
-                {preview ? (
-                  <div className="mt-2 space-y-2">
-                    {preview.previewVariables.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {preview.previewVariables.map((pv) => (
-                          <Tooltip key={pv.key}>
-                            <TooltipTrigger
-                              render={
-                                <Badge variant="secondary" size="sm" className="font-mono">
-                                  {pv.key}
-                                </Badge>
-                              }
-                            />
-                            <TooltipPopup side="top" className="max-w-80">
-                              <p className="break-all font-mono text-[11px]">{pv.value}</p>
-                            </TooltipPopup>
-                          </Tooltip>
-                        ))}
-                      </div>
-                    ) : null}
-                    <pre className="overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 font-mono text-xs text-foreground">
-                      {preview.previewText}
-                    </pre>
-                  </div>
-                ) : previewOpen ? (
-                  <p className="mt-2 text-xs text-muted-foreground">Loading preview...</p>
-                ) : null}
-              </CollapsibleContent>
-            </Collapsible>
-          </div>
-        </DialogPanel>
-
-        <DialogFooter>
-          <div className="flex w-full items-center justify-between">
-            <div>
-              {canRevert ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void handleRevert()}
-                  disabled={reverting}
-                >
-                  {reverting ? "Reverting..." : revertLabel}
-                </Button>
-              ) : null}
             </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
+          ) : null}
+
+          {/* Block list with DnD */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={blockIds} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {blocks.map((block, index) => (
+                  <SortableBlock
+                    key={block.id}
+                    block={block}
+                    index={index}
+                    supportedVariables={supportedVariables}
+                    supportedConditionTypes={supportedConditionTypes}
+                    blockErrors={blockErrorMap.get(index) ?? []}
+                    onUpdate={handleUpdateBlock}
+                    onRemove={handleRemoveBlock}
+                    canRemove={blocks.length > 1}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <Button size="xs" variant="outline" onClick={handleAddBlock}>
+            <PlusIcon className="size-3" />
+            Add block
+          </Button>
+
+          {/* Global validation errors */}
+          {globalErrors.length > 0 ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+              {globalErrors.map((error) => (
+                <p key={error} className="text-xs text-destructive">
+                  {error}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Preview section */}
+          <Collapsible open={previewOpen} onOpenChange={() => void handleTogglePreview()}>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => void handleTogglePreview()}
+            >
+              <ChevronDownIcon
+                className={`size-3 transition-transform ${previewOpen ? "rotate-0" : "-rotate-90"}`}
+              />
+              <span>Preview</span>
+            </button>
+            <CollapsibleContent>
+              {preview ? (
+                <div className="mt-2 space-y-2">
+                  {preview.previewVariables.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {preview.previewVariables.map((pv) => (
+                        <Tooltip key={pv.key}>
+                          <TooltipTrigger
+                            render={
+                              <Badge variant="secondary" size="sm" className="font-mono">
+                                {pv.key}
+                              </Badge>
+                            }
+                          />
+                          <TooltipPopup side="top" className="max-w-80">
+                            <p className="break-all font-mono text-[11px]">{pv.value}</p>
+                          </TooltipPopup>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  ) : null}
+                  <pre className="overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 font-mono text-xs text-foreground">
+                    {preview.previewText}
+                  </pre>
+                </div>
+              ) : previewOpen ? (
+                <p className="mt-2 text-xs text-muted-foreground">Loading preview...</p>
+              ) : null}
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
+      </DialogPanel>
+
+      <DialogFooter>
+        <div className="flex w-full items-center justify-between">
+          <div>
+            {canRevert ? (
               <Button
                 size="sm"
-                disabled={!isDirty || !isValid || saving}
-                onClick={() => void handleSave()}
+                variant="outline"
+                onClick={() => void handleRevert()}
+                disabled={reverting}
               >
-                {saving ? "Saving..." : "Save"}
+                {reverting ? "Reverting..." : revertLabel}
               </Button>
-            </div>
+            ) : null}
           </div>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!isDirty || !isValid || saving}
+              onClick={() => void handleSave()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+      </DialogFooter>
+    </>
   );
+}
+
+registerOverlayRoute<{
+  documentState?: unknown;
+  localSave?: unknown;
+  scopeInput?: unknown;
+}>(PROMPT_EDITOR_OVERLAY_ROUTE_KEY, function PromptEditorOverlayRoute({ message, controller }) {
+  return (
+    <OverlayRouteDialog>
+      <DialogPopup className="max-w-3xl">
+        <PromptEditorDialogContent
+          documentState={readPromptDocumentStateParam(message.params.documentState)}
+          onCancel={() => controller.cancel("cancel")}
+          onLocalSave={
+            message.params.localSave === true
+              ? (promptId, document) =>
+                  controller.submit({ action: "local-saved", promptId, document })
+              : undefined
+          }
+          onSaved={() => controller.submit({ action: "saved" })}
+          open
+          scopeInput={readPromptManagementScopeParam(message.params.scopeInput)}
+        />
+      </DialogPopup>
+    </OverlayRouteDialog>
+  );
+});
+
+function readPromptManagementScopeParam(value: unknown): PromptManagementScope {
+  if (!value || typeof value !== "object") return { scope: "global" };
+  const candidate = value as Partial<PromptManagementScope>;
+  if (candidate.scope === "project" && typeof candidate.projectId === "string") {
+    return { scope: "project", projectId: candidate.projectId };
+  }
+  if (candidate.scope === "orchestration-run" && typeof candidate.orchestrationRunId === "string") {
+    return { scope: "orchestration-run", orchestrationRunId: candidate.orchestrationRunId };
+  }
+  return { scope: "global" };
+}
+
+function readPromptDocumentStateParam(value: unknown): PromptDocumentState | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<PromptDocumentState>;
+  if (!candidate.definition || typeof candidate.definition !== "object") return null;
+  const definition = candidate.definition as { promptId?: unknown };
+  if (typeof definition.promptId !== "string") return null;
+  if (!candidate.effectiveDocument || typeof candidate.effectiveDocument !== "object") return null;
+  if (!candidate.shippedDefaultDocument || typeof candidate.shippedDefaultDocument !== "object") {
+    return null;
+  }
+  if (!candidate.globalDocument || typeof candidate.globalDocument !== "object") return null;
+  return candidate as PromptDocumentState;
 }

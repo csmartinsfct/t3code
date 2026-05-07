@@ -12,6 +12,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from "react";
 
 import type { ViewportEmulationParams } from "@t3tools/contracts";
@@ -44,6 +45,11 @@ interface BrowserRect {
 const MAX_TABS = 5;
 const BLANK_URLS = new Set(["about:blank", "about:newtab"]);
 const EMULATION_STORAGE_PREFIX = "embeddedBrowser.emulation.";
+const OFF_EMULATION: TabEmulation = { kind: "off" };
+const EMULATED_PANE_PADDING_X = 24;
+const EMULATED_PANE_PADDING_TOP = 96;
+const EMULATED_PANE_PADDING_BOTTOM = 24;
+const OPTIMISTIC_NEW_TAB_ID = -1;
 
 // Per-project localStorage persistence for the device-emulator state. Tab
 // IDs are stable across renderer mount/unmount cycles (the main process
@@ -119,6 +125,36 @@ function readElementRect(element: HTMLElement): BrowserRect {
   };
 }
 
+function readBrowserRectForEmulation(
+  pane: HTMLElement,
+  emulation: TabEmulation,
+): BrowserRect | null {
+  const params = paramsFromState(emulation);
+  if (!params) return readElementRect(pane);
+
+  const rect = pane.getBoundingClientRect();
+  // Predict the final emulated layout, not the pane's current classes. During
+  // tab close/switch the current tab may be non-emulated, but the incoming tab
+  // will render with `px-6 pt-24 pb-6`; using current computed padding would
+  // mount the WebContentsView one frame too high/left.
+  const paddingLeft = EMULATED_PANE_PADDING_X;
+  const paddingRight = EMULATED_PANE_PADDING_X;
+  const paddingTop = EMULATED_PANE_PADDING_TOP;
+  const paddingBottom = EMULATED_PANE_PADDING_BOTTOM;
+  const contentWidth = Math.max(0, rect.width - paddingLeft - paddingRight);
+  const contentHeight = Math.max(0, rect.height - paddingTop - paddingBottom);
+  const width = Math.min(params.width * params.scale, contentWidth);
+  const height = Math.min(params.height * params.scale, contentHeight);
+  if (width <= 0 || height <= 0) return null;
+
+  return {
+    x: rect.x + paddingLeft + Math.max(0, (contentWidth - width) / 2),
+    y: rect.y + paddingTop,
+    width,
+    height,
+  };
+}
+
 function normalizeUrlInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -126,8 +162,9 @@ function normalizeUrlInput(value: string): string {
 }
 
 function tabDisplayName(tab: BrowserTabSummary): string {
+  if (BLANK_URLS.has(tab.url)) return "New Tab";
   if (tab.title.trim()) return tab.title;
-  if (!tab.url || tab.url === "about:blank") return "New Tab";
+  if (!tab.url) return "New Tab";
   try {
     return new URL(tab.url).hostname.replace(/^www\./, "");
   } catch {
@@ -159,6 +196,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(
     () => readProjectCache(projectId).emulationByTab,
   );
+  const [isOpeningNewTab, setIsOpeningNewTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -227,7 +265,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     saveEmulationByTab(projectId, emulationByTab);
   }, [projectId, url, tabs, activeTabId, emulationByTab]);
 
-  const activeEmulation = emulationByTab.get(activeTabId) ?? { kind: "off" as const };
+  const activeEmulation = emulationByTab.get(activeTabId) ?? OFF_EMULATION;
   const effectiveDimensions = useMemo<{ width: number; height: number } | null>(() => {
     const params = paramsFromState(activeEmulation);
     if (!params) return null;
@@ -309,7 +347,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   // device (or the system default), and disables it on a second click.
   const toggleEmulation = useCallback(() => {
     const tabId = activeTabId;
-    const current = emulationByTab.get(tabId) ?? { kind: "off" as const };
+    const current = emulationByTab.get(tabId) ?? OFF_EMULATION;
     if (current.kind !== "off") {
       handleEmulationChange({ kind: "off" }, tabId);
       return;
@@ -411,6 +449,13 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [browserBridge, isCurrentLifecycle, projectId, refreshTabs]);
+
+  const readBoundsForEmulation = useCallback((emulation: TabEmulation): BrowserRect | null => {
+    const pane = paneRef.current;
+    if (pane) return readBrowserRectForEmulation(pane, emulation);
+    const element = rectRef.current;
+    return element ? readElementRect(element) : null;
+  }, []);
 
   const scheduleBoundsSync = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
@@ -518,10 +563,31 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   );
 
   const openNewTab = useCallback(async () => {
-    if (!browserBridge) return;
+    if (!browserBridge || isOpeningNewTab) return;
     const lifecycleId = lifecycleIdRef.current;
+    const previousTabs = tabs;
+    const previousActiveTabId = activeTabId;
+    const previousUrl = url;
+    const optimisticTabs: BrowserTabSummary[] = [
+      ...tabs.map((tab) => ({ ...tab, active: false })),
+      {
+        id: OPTIMISTIC_NEW_TAB_ID,
+        url: "about:blank",
+        title: "",
+        favicon: null,
+        active: true,
+      },
+    ];
+    flushSync(() => {
+      setIsOpeningNewTab(true);
+      setTabs(optimisticTabs);
+      setActiveTabId(OPTIMISTIC_NEW_TAB_ID);
+      setUrl("");
+      setError(null);
+    });
+    const bounds = readBoundsForEmulation(OFF_EMULATION);
     try {
-      await browserBridge.newTab(projectId);
+      await browserBridge.newTab(projectId, undefined, bounds ?? undefined);
       if (!isCurrentLifecycle(lifecycleId)) return;
       await refreshTabs();
       // Focus the URL input after the DOM has rendered the empty state so the
@@ -532,32 +598,76 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       });
     } catch (cause) {
       if (!isCurrentLifecycle(lifecycleId)) return;
+      setTabs(previousTabs);
+      setActiveTabId(previousActiveTabId);
+      setUrl(previousUrl);
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (isCurrentLifecycle(lifecycleId)) setIsOpeningNewTab(false);
     }
-  }, [browserBridge, isCurrentLifecycle, projectId, refreshTabs]);
+  }, [
+    activeTabId,
+    browserBridge,
+    isCurrentLifecycle,
+    isOpeningNewTab,
+    projectId,
+    readBoundsForEmulation,
+    refreshTabs,
+    tabs,
+    url,
+  ]);
 
   const activateTab = useCallback(
     async (tabId: number) => {
       if (!browserBridge || tabId === activeTabId) return;
       const lifecycleId = lifecycleIdRef.current;
+      const targetTab = tabs.find((tab) => tab.id === tabId);
+      const bounds = readBoundsForEmulation(emulationByTab.get(tabId) ?? OFF_EMULATION);
+      flushSync(() => {
+        setActiveTabId(tabId);
+        if (targetTab) setUrl(displayUrl(targetTab.url));
+      });
       try {
-        await browserBridge.switchTab(projectId, tabId);
+        await browserBridge.switchTab(projectId, tabId, bounds ?? undefined);
         if (!isCurrentLifecycle(lifecycleId)) return;
         await refreshTabs();
       } catch (cause) {
         if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
+        await refreshTabs();
       }
     },
-    [activeTabId, browserBridge, isCurrentLifecycle, projectId, refreshTabs],
+    [
+      activeTabId,
+      browserBridge,
+      emulationByTab,
+      isCurrentLifecycle,
+      projectId,
+      readBoundsForEmulation,
+      refreshTabs,
+      tabs,
+    ],
   );
 
   const closeTab = useCallback(
     async (tabId: number) => {
       if (!browserBridge) return;
       const lifecycleId = lifecycleIdRef.current;
+      const wasActive = tabId === activeTabId;
+      const remainingTabs = tabs.filter((tab) => tab.id !== tabId);
+      const nextActiveTab = wasActive ? remainingTabs[0] : null;
+      const bounds = nextActiveTab
+        ? readBoundsForEmulation(emulationByTab.get(nextActiveTab.id) ?? OFF_EMULATION)
+        : null;
+      flushSync(() => {
+        setTabs(remainingTabs);
+        if (nextActiveTab) {
+          setActiveTabId(nextActiveTab.id);
+          setUrl(displayUrl(nextActiveTab.url));
+        }
+      });
       try {
-        await browserBridge.closeTab(projectId, tabId);
+        await browserBridge.closeTab(projectId, tabId, bounds ?? undefined);
         if (!isCurrentLifecycle(lifecycleId)) return;
         await refreshTabs();
         // Drop persisted emulation for the closed tab — its tab id is
@@ -572,9 +682,19 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       } catch (cause) {
         if (!isCurrentLifecycle(lifecycleId)) return;
         setError(cause instanceof Error ? cause.message : String(cause));
+        await refreshTabs();
       }
     },
-    [browserBridge, isCurrentLifecycle, projectId, refreshTabs],
+    [
+      activeTabId,
+      browserBridge,
+      emulationByTab,
+      isCurrentLifecycle,
+      projectId,
+      readBoundsForEmulation,
+      refreshTabs,
+      tabs,
+    ],
   );
 
   // Tab keyboard shortcuts (Cmd/Ctrl+T, Cmd/Ctrl+W) are handled
@@ -622,7 +742,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <form
         className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2"
         onSubmit={handleSubmit}
@@ -722,7 +842,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           <button
             type="button"
             onClick={() => void openNewTab()}
-            disabled={atTabCap}
+            disabled={atTabCap || isOpeningNewTab}
             className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             aria-label={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab"}
             title={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab (⌘T)"}
@@ -756,11 +876,10 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       */}
       <div
         ref={paneRef}
-        className={
-          effectiveDimensions
-            ? "relative flex min-h-0 flex-1 items-start justify-center bg-black/80 px-6 pt-24 pb-6"
-            : "min-h-0 flex-1 bg-background"
-        }
+        className={cn(
+          "relative min-h-0 flex-1 bg-background",
+          effectiveDimensions && "flex items-start justify-center px-6 pt-24 pb-6",
+        )}
       >
         {effectiveDimensions && browserBridge ? (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center gap-2">

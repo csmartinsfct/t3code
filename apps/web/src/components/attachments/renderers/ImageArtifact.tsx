@@ -2,17 +2,8 @@ import { Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../../../nativeApi";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../../ui/alert-dialog";
-import { Button } from "../../ui/button";
 import { resolveInlineEditBlurAction } from "../../management/KanbanTicketDetail";
+import { ImageExtensionConfirmDialog } from "../ImageExtensionConfirmDialog";
 import { extensionFromMimeType, extractExtension } from "../extension";
 import type { AttachmentRendererProps } from "./index";
 
@@ -204,30 +195,16 @@ export function ImageArtifact({ artifact, onDelete }: AttachmentRendererProps) {
           />
         </div>
       ) : null}
-      <AlertDialog
+      <ImageExtensionConfirmDialog
         open={pendingExtChange !== null}
         onOpenChange={(open) => {
           if (!open) setPendingExtChange(null);
         }}
-      >
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Use "{pendingExtChange?.to}"?</AlertDialogTitle>
-            <AlertDialogDescription>
-              If you change the filename extension from "{pendingExtChange?.from}" to "
-              {pendingExtChange?.to}", your file may open in a different application.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" onClick={handleKeep}>
-                Keep "{pendingExtChange?.from}"
-              </Button>
-            </AlertDialogClose>
-            <Button onClick={handleUse}>Use "{pendingExtChange?.to}"</Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+        from={pendingExtChange?.from ?? ""}
+        to={pendingExtChange?.to ?? ""}
+        onKeep={handleKeep}
+        onUse={handleUse}
+      />
     </>
   );
 }

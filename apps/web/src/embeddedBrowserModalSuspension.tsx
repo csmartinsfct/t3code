@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isEmbeddedBrowserOverlayRelevant } from "./overlaySurfaceVisibility";
 import { warnWebTimeline } from "./timelineLogger";
 
 type OpenChangeHandler<TDetails> = (open: boolean, eventDetails: TDetails) => void;
@@ -14,6 +15,7 @@ interface TrackedOverlayOpenInput<TDetails> {
 
 let trackedOverlayCount = 0;
 let embeddedBrowserMounted = false;
+const mountListeners = new Set<() => void>();
 let desiredSuspended = false;
 let appliedSuspended = false;
 let applyingSuspension = false;
@@ -25,7 +27,7 @@ function readBrowserBridge() {
 }
 
 function updateDesiredSuspension(): void {
-  desiredSuspended = trackedOverlayCount > 0;
+  desiredSuspended = trackedOverlayCount > 0 && isEmbeddedBrowserOverlayRelevant();
   applyDesiredSuspension();
 }
 
@@ -94,9 +96,19 @@ export function setEmbeddedBrowserMountedForModalSuspension(mounted: boolean): v
   embeddedBrowserMounted = mounted;
   if (!mounted) {
     appliedSuspended = false;
-    return;
+  } else {
+    applyDesiredSuspension();
   }
-  applyDesiredSuspension();
+  for (const fn of mountListeners) fn();
+}
+
+export function isEmbeddedBrowserMounted(): boolean {
+  return embeddedBrowserMounted;
+}
+
+export function subscribeEmbeddedBrowserMounted(fn: () => void): () => void {
+  mountListeners.add(fn);
+  return () => mountListeners.delete(fn);
 }
 
 export function useEmbeddedBrowserOverlayLifecycle(open: boolean, _source: string): void {
@@ -147,7 +159,14 @@ function hasOpenOverlayElement(): boolean {
 }
 
 function maybeWarnForUntrackedOverlay(): void {
-  if (!embeddedBrowserMounted || trackedOverlayCount > 0 || !hasOpenOverlayElement()) return;
+  if (
+    !embeddedBrowserMounted ||
+    !isEmbeddedBrowserOverlayRelevant() ||
+    trackedOverlayCount > 0 ||
+    !hasOpenOverlayElement()
+  ) {
+    return;
+  }
 
   const now = Date.now();
   if (now - lastFallbackWarningAt < 1000) return;

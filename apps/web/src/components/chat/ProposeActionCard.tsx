@@ -2,6 +2,9 @@ import { useState, useCallback, memo } from "react";
 import type { DeclaredService, ProjectScriptIcon } from "@t3tools/contracts";
 import { CheckIcon, XIcon } from "lucide-react";
 
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRoutePopover, OverlayRoutePopoverPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { ScriptIcon, SCRIPT_ICONS } from "../ProjectScriptsControl";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -24,6 +27,8 @@ export interface ProposeActionCardProps {
   onReject: () => void;
 }
 
+const PROPOSE_ACTION_ICON_PICKER_ROUTE_KEY = "propose-action-icon-picker";
+
 function ProposeActionCard({
   name: initialName,
   command: initialCommand,
@@ -36,10 +41,20 @@ function ProposeActionCard({
   const [name, setName] = useState(initialName);
   const [command, setCommand] = useState(initialCommand);
   const [icon, setIcon] = useState<ProjectScriptIcon>(initialIcon);
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [status, setStatus] = useState<"pending" | "accepted" | "rejected">("pending");
 
   const disabled = isStreaming || status !== "pending";
+  const routedIconPicker = useRoutedPopoverSurface<HTMLButtonElement, ProjectScriptIcon>({
+    routeKey: PROPOSE_ACTION_ICON_PICKER_ROUTE_KEY,
+    params: { icon },
+    side: "bottom",
+    align: "start",
+    enabled: !disabled,
+    onResult: (nextIcon) => {
+      setIcon(nextIcon);
+    },
+  });
+
   // Composite when every declared service has its own command — the run is
   // launched by the per-service commands, not a top-level one.
   const compositeMode =
@@ -89,13 +104,19 @@ function ProposeActionCard({
       <div className="space-y-2">
         {/* Name + Icon */}
         <div className="flex items-center gap-2">
-          <Popover open={iconPickerOpen && !disabled} onOpenChange={setIconPickerOpen}>
+          <Popover
+            open={routedIconPicker.domOpen && !disabled}
+            onOpenChange={routedIconPicker.onOpenChange}
+          >
             <PopoverTrigger
               render={
                 <button
                   type="button"
                   disabled={disabled}
                   className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  onFocusCapture={routedIconPicker.updateAnchor}
+                  onPointerDownCapture={routedIconPicker.updateAnchor}
+                  ref={routedIconPicker.triggerRef}
                 >
                   <ScriptIcon icon={icon} className="size-3.5" />
                 </button>
@@ -106,24 +127,13 @@ function ProposeActionCard({
               align="start"
               className="z-50 rounded-md border border-border bg-popover p-1.5 shadow-md"
             >
-              <div className="grid grid-cols-3 gap-1">
-                {SCRIPT_ICONS.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-muted ${
-                      icon === entry.id ? "bg-primary/10 text-primary" : "text-muted-foreground"
-                    }`}
-                    onClick={() => {
-                      setIcon(entry.id);
-                      setIconPickerOpen(false);
-                    }}
-                  >
-                    <ScriptIcon icon={entry.id} className="size-3" />
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
+              <ProposeActionIconPickerContent
+                icon={icon}
+                onSelect={(nextIcon) => {
+                  setIcon(nextIcon);
+                  routedIconPicker.onOpenChange(false);
+                }}
+              />
             </PopoverPopup>
           </Popover>
           <Input
@@ -199,3 +209,61 @@ function ProposeActionCard({
 }
 
 export default memo(ProposeActionCard);
+
+function ProposeActionIconPickerContent({
+  icon,
+  onSelect,
+}: {
+  icon: ProjectScriptIcon;
+  onSelect: (icon: ProjectScriptIcon) => void;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {SCRIPT_ICONS.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs hover:bg-muted ${
+            icon === entry.id ? "bg-primary/10 text-primary" : "text-muted-foreground"
+          }`}
+          onClick={() => onSelect(entry.id)}
+        >
+          <ScriptIcon icon={entry.id} className="size-3" />
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+registerOverlayRoute<{ icon?: unknown }>(
+  PROPOSE_ACTION_ICON_PICKER_ROUTE_KEY,
+  function ProposeActionIconPickerOverlayRoute({ message, controller }) {
+    const icon = readProjectScriptIcon(message.params.icon);
+
+    if (!icon) {
+      controller.fail(new Error("Proposed action icon picker route requires an icon param."));
+      return null;
+    }
+
+    return (
+      <OverlayRoutePopover>
+        <OverlayRoutePopoverPopup
+          side="bottom"
+          align="start"
+          className="z-50 rounded-md border border-border bg-popover p-1.5 shadow-md"
+        >
+          <ProposeActionIconPickerContent
+            icon={icon}
+            onSelect={(nextIcon) => controller.submit(nextIcon)}
+          />
+        </OverlayRoutePopoverPopup>
+      </OverlayRoutePopover>
+    );
+  },
+);
+
+function readProjectScriptIcon(value: unknown): ProjectScriptIcon | null {
+  if (typeof value !== "string") return null;
+  return SCRIPT_ICONS.some((entry) => entry.id === value) ? (value as ProjectScriptIcon) : null;
+}

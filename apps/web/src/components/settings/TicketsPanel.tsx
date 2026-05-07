@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import type { Label, ProjectId, Template } from "@t3tools/contracts";
 
@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
 import { LabelEditorDialog } from "./LabelEditorDialog";
+import { confirmSettingsAction } from "./SettingsConfirmOverlay";
 import { TemplateEditorDialog } from "./TemplateEditorDialog";
 
 type ScopeKind = "global" | "project";
@@ -32,6 +33,17 @@ export function TicketsPanel() {
 
   const scopeProjectId = scopeKind === "project" && selectedProjectId ? selectedProjectId : null;
   const scopeValue = scopeProjectId ?? "global";
+  const scopeOverlayItems = useMemo(
+    () => [
+      { value: "global", label: "Global", hideIndicator: true },
+      ...projects.map((project) => ({
+        value: project.id,
+        label: project.name,
+        hideIndicator: true,
+      })),
+    ],
+    [projects],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -98,9 +110,12 @@ export function TicketsPanel() {
   const handleDeleteLabel = useCallback(
     async (label: Label) => {
       const api = ensureNativeApi();
-      const confirmed = await api.dialogs.confirm(
-        `Delete label "${label.name}"?\n\nThis will remove the label from all tickets that use it.`,
-      );
+      const confirmed = await confirmSettingsAction({
+        title: `Delete label "${label.name}"?`,
+        description: "This will remove the label from all tickets that use it.",
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (confirmed) {
         await api.ticketing.deleteLabel({ id: label.id });
         void loadData();
@@ -112,7 +127,11 @@ export function TicketsPanel() {
   const handleDeleteTemplate = useCallback(
     async (template: Template) => {
       const api = ensureNativeApi();
-      const confirmed = await api.dialogs.confirm(`Delete template "${template.name}"?`);
+      const confirmed = await confirmSettingsAction({
+        title: `Delete template "${template.name}"?`,
+        confirmLabel: "Delete",
+        destructive: true,
+      });
       if (confirmed) {
         await api.ticketing.deleteTemplate({ id: template.id });
         void loadData();
@@ -144,7 +163,12 @@ export function TicketsPanel() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-foreground">Scope</span>
-          <Select value={scopeValue} onValueChange={handleScopeChange}>
+          <Select
+            value={scopeValue}
+            onValueChange={handleScopeChange}
+            overlayItems={scopeOverlayItems}
+            overlayAlignItemWithTrigger={false}
+          >
             <SelectTrigger className="w-full sm:w-48" aria-label="Ticket settings scope">
               <SelectValue>
                 {scopeKind === "global"

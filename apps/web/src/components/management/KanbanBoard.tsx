@@ -39,15 +39,6 @@ import { Button } from "../ui/button";
 import { EmbeddedBrowser } from "../browser/EmbeddedBrowser";
 import { CollapsedSidebarTrigger } from "../ui/sidebar";
 import { ALL_STATUSES } from "../settings/ticketUtils";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { BoardToolbar } from "./BoardToolbar";
 import type { EpicProgress } from "./KanbanCard";
 import { KanbanColumn } from "./KanbanColumn";
@@ -55,6 +46,10 @@ import { KanbanListView } from "./KanbanListView";
 import { KanbanSelectionBar } from "./KanbanSelectionBar";
 import { KanbanTicketDetail } from "./KanbanTicketDetail";
 import { OrchestrationSubpage } from "./OrchestrationSubpage";
+import {
+  TicketSelectionArchiveConfirmDialog,
+  TicketSelectionDeleteConfirmDialog,
+} from "./TicketConfirmDialogs";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 interface KanbanBoardProps {
@@ -949,12 +944,12 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       </div>
 
       {/* Board body */}
-      {loading ? (
+      {browserVisible ? (
+        <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
+      ) : loading ? (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
-      ) : browserVisible ? (
-        <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
       ) : orchestrationSubpage ? (
         <OrchestrationSubpage
           selectedTickets={orchestrationSubpage.tickets}
@@ -1028,63 +1023,24 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
               />
             )}
           </div>
-          <AlertDialog
+          <TicketSelectionDeleteConfirmDialog
             open={pendingDeleteIds !== null}
             onOpenChange={(open) => {
               if (!open) setPendingDeleteIds(null);
             }}
-          >
-            <AlertDialogPopup>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {(pendingDeleteIds?.length ?? 0) === 1
-                    ? "Delete this ticket?"
-                    : `Delete ${pendingDeleteIds?.length ?? 0} tickets?`}
-                </AlertDialogTitle>
-                <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-                <Button
-                  variant="destructive"
-                  onClick={handleConfirmDeleteSelection}
-                  disabled={deletingSelection}
-                >
-                  {deletingSelection ? "Deleting..." : "Delete"}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogPopup>
-          </AlertDialog>
-          <AlertDialog
+            count={pendingDeleteIds?.length ?? 0}
+            pending={deletingSelection}
+            onConfirm={handleConfirmDeleteSelection}
+          />
+          <TicketSelectionArchiveConfirmDialog
             open={pendingArchiveIds !== null}
             onOpenChange={(open) => {
               if (!open) setPendingArchiveIds(null);
             }}
-          >
-            <AlertDialogPopup>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {(pendingArchiveIds?.length ?? 0) === 1
-                    ? "Archive this ticket?"
-                    : `Archive ${pendingArchiveIds?.length ?? 0} tickets?`}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  Sub-tickets will also be archived. You can restore them from Settings → Archived
-                  tickets.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-                <Button
-                  variant="destructive"
-                  onClick={handleConfirmArchiveSelection}
-                  disabled={archivingSelection}
-                >
-                  {archivingSelection ? "Archiving..." : "Archive"}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogPopup>
-          </AlertDialog>
+            count={pendingArchiveIds?.length ?? 0}
+            pending={archivingSelection}
+            onConfirm={handleConfirmArchiveSelection}
+          />
         </>
       )}
     </div>

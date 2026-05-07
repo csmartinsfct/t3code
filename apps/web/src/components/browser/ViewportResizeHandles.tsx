@@ -44,6 +44,20 @@ export function ViewportResizeHandles({ emulation, onChange }: ViewportResizeHan
       if (event.button !== 0 || emulation.kind === "off") return;
       const dims = effectiveDimensions(emulation);
       if (dims.width === null || dims.height === null) return;
+      // Use the *actually displayed* rect dimensions (read from the wrapper,
+      // which is the handle's offset parent) rather than the unclamped state
+      // value. When the simulated viewport is larger than the pane, the rect
+      // is clamped on screen via `min(emulation, 100%)` but the state still
+      // carries the full value — capturing the state value here would put the
+      // handle's drag origin off the visible bottom/right by the clamp delta,
+      // producing a dead-zone before the cursor "catches up" to the rect.
+      const zoom = effectiveZoom(emulation);
+      const wrapper = event.currentTarget.parentElement;
+      const wrapperRect = wrapper?.getBoundingClientRect();
+      const startWidth =
+        wrapperRect && zoom > 0 ? Math.round(wrapperRect.width / zoom) : dims.width;
+      const startHeight =
+        wrapperRect && zoom > 0 ? Math.round(wrapperRect.height / zoom) : dims.height;
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -52,10 +66,10 @@ export function ViewportResizeHandles({ emulation, onChange }: ViewportResizeHan
         axis,
         startX: event.clientX,
         startY: event.clientY,
-        startWidth: dims.width,
-        startHeight: dims.height,
+        startWidth,
+        startHeight,
         mobile: effectiveMobile(emulation),
-        zoom: effectiveZoom(emulation),
+        zoom,
       };
       document.body.style.cursor =
         axis === "right" ? "ew-resize" : axis === "bottom" ? "ns-resize" : "nwse-resize";

@@ -4,6 +4,7 @@ import type {
   TicketDependency,
   TicketId,
   TicketLinkedThread,
+  OverlayMenuItem,
   TicketPriority,
   TicketStatus,
   TicketSummary,
@@ -31,19 +32,9 @@ import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SharedTicketPreviewPopup, useTicketPreviewHoverTarget } from "./TicketPreviewPopup";
 import { buildTicketDetailLookupInput, useTicketPreviewCache } from "./ticketPreviewCache";
 import { SubTicketsTree } from "./SubTicketsTree";
@@ -53,13 +44,15 @@ import { TicketComments } from "../settings/TicketComments";
 import { TicketLabelPicker } from "./TicketLabelPicker";
 import { TicketHistory } from "../settings/TicketHistory";
 import {
-  ALL_PRIORITIES,
-  ALL_STATUSES,
-  PRIORITY_CONFIG,
-  STATUS_CONFIG,
-  formatRelativeDate,
-} from "../settings/ticketUtils";
-import { PriorityIcon } from "./PriorityIcon";
+  SubTicketsArchiveConfirmDialog,
+  TicketArchiveConfirmDialog,
+  TicketDeleteConfirmDialog,
+} from "./TicketConfirmDialogs";
+import { STATUS_CONFIG, formatRelativeDate } from "../settings/ticketUtils";
+import {
+  TicketDetailPrioritySelect,
+  TicketDetailStatusSelect,
+} from "./TicketDetailFieldSelectOverlay";
 import { handleTicketMultiSelectGesture } from "./ticketMultiSelect";
 
 export { buildTicketDetailLookupInput } from "./ticketPreviewCache";
@@ -192,9 +185,17 @@ function TicketDetailActionsMenu({
     onArchive,
     onDelete,
   });
+  const overlayItems = buildTicketDetailActionOverlayItems(actions);
+  const handleOverlaySelect = useCallback(
+    (id: string) => {
+      const action = actions.find((item) => item.kind === "item" && item.key === id);
+      if (action?.kind === "item") action.onSelect();
+    },
+    [actions],
+  );
 
   return (
-    <Menu>
+    <Menu overlayItems={overlayItems} overlayMenuAlign="end" overlayOnSelect={handleOverlaySelect}>
       <MenuTrigger
         render={
           <Button
@@ -233,6 +234,7 @@ type TicketDetailActionItem =
       kind: "item";
       label: string;
       icon: React.ReactNode;
+      iconName?: string | undefined;
       onSelect: () => void;
       variant?: "default" | "destructive";
     }
@@ -255,6 +257,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Orchestrate",
       icon: <PlayIcon className="size-3.5" />,
+      iconName: "Play",
       onSelect: () => input.onOrchestrate?.(input.ticket),
     },
     {
@@ -262,6 +265,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Decompose",
       icon: <ListTreeIcon className="size-3.5" />,
+      iconName: "ListTree",
       onSelect: input.onDecompose,
     },
     ...(input.ticket.parentId !== null && input.onMoveToBoard
@@ -284,6 +288,7 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Archive",
       icon: <ArchiveIcon className="size-3.5" />,
+      iconName: "Archive",
       onSelect: input.onArchive,
     },
     {
@@ -291,10 +296,26 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Delete",
       icon: <TrashIcon className="size-3.5" />,
+      iconName: "Trash",
       onSelect: input.onDelete,
       variant: "destructive",
     },
   ];
+}
+
+function buildTicketDetailActionOverlayItems(
+  actions: readonly TicketDetailActionItem[],
+): OverlayMenuItem[] {
+  return actions.map((action) =>
+    action.kind === "separator"
+      ? { id: action.key, label: "", separator: true }
+      : {
+          id: action.key,
+          label: action.label,
+          ...(action.iconName ? { icon: action.iconName } : {}),
+          ...(action.variant === "destructive" ? { destructive: true } : {}),
+        },
+  );
 }
 
 type TicketRowButtonProps = React.ComponentPropsWithoutRef<"button"> & {
@@ -914,8 +935,6 @@ export function KanbanTicketDetail({
     );
   }
 
-  const statusCfg = STATUS_CONFIG[ticket.status];
-
   return (
     <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
@@ -1000,49 +1019,14 @@ export function KanbanTicketDetail({
               </>
             )}
 
-            <Select
-              value={ticket.status}
-              onValueChange={(v) => void handleStatusChange(v as TicketStatus)}
-            >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <Badge size="sm" variant={statusCfg.badgeVariant}>
-                  <SelectValue />
-                </Badge>
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {ALL_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    <div className="flex items-center gap-2">
-                      <Badge size="sm" variant={STATUS_CONFIG[s].badgeVariant}>
-                        {STATUS_CONFIG[s].label}
-                      </Badge>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <TicketDetailStatusSelect value={ticket.status} onValueChange={handleStatusChange} />
 
             <span className="text-border">|</span>
 
-            <Select
+            <TicketDetailPrioritySelect
               value={ticket.priority}
-              onValueChange={(v) => void handlePriorityChange(v as TicketPriority)}
-            >
-              <SelectTrigger size="xs" variant="ghost" className="h-auto gap-1.5 px-1.5 py-1">
-                <PriorityIcon priority={ticket.priority} className="size-4 text-muted-foreground" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup alignItemWithTrigger={false}>
-                {[...ALL_PRIORITIES].reverse().map((p) => (
-                  <SelectItem key={p} value={p}>
-                    <div className="flex items-center gap-2">
-                      <PriorityIcon priority={p} className="size-4 text-muted-foreground" />
-                      {PRIORITY_CONFIG[p].label}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+              onValueChange={handlePriorityChange}
+            />
 
             <span className="text-border">|</span>
             <TicketLabelPicker
@@ -1178,88 +1162,30 @@ export function KanbanTicketDetail({
         pending={movingToBoard}
         onConfirm={() => void handleConfirmMoveToBoard()}
       />
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete ticket?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete "{ticket.identifier}: {ticket.title}" and all its data.
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm">
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
-              Delete
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
-      {/* Archive confirmation */}
-      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive ticket?</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{ticket.identifier}: {ticket.title}" and any sub-tickets will be archived. You can
-              restore them from Settings → Archived tickets.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm">
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleArchive()}>
-              Archive
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <TicketDeleteConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        ticket={ticket}
+        onConfirm={handleDelete}
+      />
+      <TicketArchiveConfirmDialog
+        open={archiveDialogOpen}
+        onOpenChange={setArchiveDialogOpen}
+        ticket={ticket}
+        onConfirm={handleArchive}
+      />
       {/* Archive sub-tickets confirmation (multi-select / context-menu archive). */}
-      <AlertDialog
+      <SubTicketsArchiveConfirmDialog
         open={archiveSubTicketsDialog !== null}
         onOpenChange={(open) => {
           if (!open && !archivingSubTickets) {
             setArchiveSubTicketsDialog(null);
           }
         }}
-      >
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {(archiveSubTicketsDialog?.length ?? 0) === 1
-                ? "Archive this ticket?"
-                : `Archive ${archiveSubTicketsDialog?.length ?? 0} tickets?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Sub-tickets will also be archived. You can restore them from Settings → Archived
-              tickets.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm" disabled={archivingSubTickets}>
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void handleConfirmArchiveSubTickets()}
-              disabled={archivingSubTickets}
-            >
-              {archivingSubTickets ? "Archiving..." : "Archive"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+        count={archiveSubTicketsDialog?.length ?? 0}
+        pending={archivingSubTickets}
+        onConfirm={handleConfirmArchiveSubTickets}
+      />
     </div>
   );
 }

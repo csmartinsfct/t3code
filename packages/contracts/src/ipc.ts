@@ -19,6 +19,7 @@ import type {
   GitStatusResult,
 } from "./git";
 import type {
+  ProjectEntry,
   ProjectListDirectoryInput,
   ProjectListDirectoryResult,
   ProjectReadFileInput,
@@ -171,7 +172,9 @@ import type {
   OrchestrationRun,
   OrchestrationRunSummary,
   OrchestrationStartRunInput,
+  ProviderKind,
 } from "./orchestration";
+import type { ProjectId, ThreadId } from "./baseSchemas";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
 
@@ -275,9 +278,9 @@ export interface DesktopBrowserBridge {
   reload: (projectId: string) => Promise<void>;
   getUrl: (projectId: string) => Promise<string>;
   listTabs: (projectId: string) => Promise<BrowserTabListing>;
-  newTab: (projectId: string, url?: string) => Promise<number>;
-  switchTab: (projectId: string, tabId: number) => Promise<void>;
-  closeTab: (projectId: string, tabId: number) => Promise<number>;
+  newTab: (projectId: string, url?: string, bounds?: BrowserViewBounds) => Promise<number>;
+  switchTab: (projectId: string, tabId: number, bounds?: BrowserViewBounds) => Promise<void>;
+  closeTab: (projectId: string, tabId: number, bounds?: BrowserViewBounds) => Promise<number>;
   setViewport: (
     projectId: string,
     tabId: number,
@@ -297,6 +300,256 @@ export interface DesktopBrowserBridge {
   ) => () => void;
 }
 
+// ---------------------------------------------------------------------------
+// Overlay view types — used by the native-overlay-views system that renders
+// menus, selects, and other floating UI in a transparent WebContentsView
+// positioned above the embedded Chromium browser.
+// ---------------------------------------------------------------------------
+
+export interface OverlayAnchorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface OverlayMenuItem {
+  id: string;
+  label: string;
+  icon?: string | undefined;
+  iconClassName?: string | undefined;
+  description?: string | undefined;
+  badge?: string | undefined;
+  statusTone?: "success" | "warning" | "danger" | "muted" | undefined;
+  shortcut?: string | undefined;
+  disabled?: boolean | undefined;
+  selectDisabled?: boolean | undefined;
+  destructive?: boolean | undefined;
+  separator?: boolean | undefined;
+  labelOnly?: boolean | undefined;
+  checked?: boolean | undefined;
+  actions?: OverlayMenuAction[] | undefined;
+  secondaryAction?: OverlayMenuAction | undefined;
+  children?: OverlayMenuItem[] | undefined;
+}
+
+export interface OverlayMenuAction {
+  id: string;
+  label?: string | undefined;
+  ariaLabel?: string | undefined;
+  icon?: string | undefined;
+  iconClassName?: string | undefined;
+  disabled?: boolean | undefined;
+  loading?: boolean | undefined;
+  /** Defaults to false so menu-local buttons can behave like DOM buttons that
+   * stop propagation and keep the menu open while the host refreshes state. */
+  dismissOnAction?: boolean | undefined;
+}
+
+export interface OverlaySelectItem {
+  value: string;
+  label: string;
+  icon?: string | undefined;
+  iconClassName?: string | undefined;
+  disabled?: boolean;
+  separator?: boolean;
+  hideIndicator?: boolean;
+}
+
+export interface OverlayComboboxItem {
+  value: string;
+  label: string;
+  description?: string | undefined;
+  badge?: string | undefined;
+  disabled?: boolean;
+}
+
+export interface OverlayImageItem {
+  src: string;
+  name: string;
+}
+
+export interface OverlayContextMenuMessage {
+  type: "context-menu";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlayMenuItem[];
+}
+
+export interface OverlayMenuMessage {
+  type: "menu";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlayMenuItem[];
+  side?: "top" | "bottom" | "left" | "right";
+  align?: "start" | "center" | "end";
+}
+
+export interface OverlaySelectMessage {
+  type: "select";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlaySelectItem[];
+  value: string;
+  side?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+  alignItemWithTrigger?: boolean;
+}
+
+export interface OverlayComboboxMessage {
+  type: "combobox";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlayComboboxItem[];
+  value: string;
+  inputValue: string;
+  multiple: boolean;
+  selectedValues?: string[];
+  placeholder?: string | undefined;
+  emptyText?: string | undefined;
+  statusText?: string | undefined;
+  side?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+}
+
+export interface OverlayAutocompleteMessage {
+  type: "autocomplete";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlayComboboxItem[];
+  value: string;
+  placeholder?: string | undefined;
+  emptyText?: string | undefined;
+  statusText?: string | undefined;
+  inputSize?: "sm" | "default" | "lg" | undefined;
+  side?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+}
+
+export type OverlayComposerCommandItem =
+  | {
+      id: string;
+      type: "path";
+      path: string;
+      pathKind: ProjectEntry["kind"];
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "slash-command";
+      command: "model" | "plan" | "plan-accept" | "default";
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "model";
+      provider: ProviderKind;
+      model: string;
+      label: string;
+      description: string;
+    };
+
+export interface OverlayComposerCommandMessage {
+  type: "composer-command";
+  anchor: OverlayAnchorRect;
+  items: readonly OverlayComposerCommandItem[];
+  resolvedTheme: "light" | "dark";
+  isLoading: boolean;
+  triggerKind: "path" | "slash-command" | "slash-model" | null;
+  activeItemId: string | null;
+}
+
+export interface OverlayAlertDialogMessage {
+  type: "alert-dialog";
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+}
+
+export interface OverlayImagePreviewMessage {
+  type: "image-preview";
+  images: OverlayImageItem[];
+  initialIndex: number;
+}
+
+export interface OverlayRouteContext {
+  projectId?: ProjectId | undefined;
+  threadId?: ThreadId | undefined;
+  cwd?: string | undefined;
+}
+
+export type OverlayRoutePresentation =
+  | {
+      kind: "dialog" | "alert-dialog" | "command-dialog";
+    }
+  | {
+      kind: "sheet";
+      side: "left" | "right" | "top" | "bottom";
+    }
+  | {
+      kind: "popover" | "menu";
+      anchor: OverlayAnchorRect;
+      side?: "top" | "bottom" | "left" | "right" | undefined;
+      align?: "start" | "center" | "end" | undefined;
+      interaction?: "click" | "hover" | undefined;
+    };
+
+export interface OverlayRouteMessage {
+  type: "route";
+  routeKey: string;
+  params: Record<string, unknown>;
+  context?: OverlayRouteContext | undefined;
+  presentation: OverlayRoutePresentation;
+}
+
+// Legacy Phase 2 placeholders. New arbitrary-content work should prefer the
+// generic `route` message so all routed overlays share one lifecycle/result
+// protocol, regardless of whether they present as a dialog, sheet, command
+// dialog, popover, or rich menu.
+export interface OverlayDialogMessage {
+  type: "dialog";
+  dialogKey: string;
+  params: Record<string, unknown>;
+}
+
+export interface OverlaySheetMessage {
+  type: "sheet";
+  side: "left" | "right" | "top" | "bottom";
+  sheetKey: string;
+  params: Record<string, unknown>;
+}
+
+export interface OverlayCommandMessage {
+  type: "command";
+  commandKey: string;
+  params: Record<string, unknown>;
+}
+
+export type OverlayRenderMessage =
+  | OverlayContextMenuMessage
+  | OverlayMenuMessage
+  | OverlaySelectMessage
+  | OverlayComboboxMessage
+  | OverlayAutocompleteMessage
+  | OverlayComposerCommandMessage
+  | OverlayAlertDialogMessage
+  | OverlayImagePreviewMessage
+  | OverlayRouteMessage
+  | OverlayDialogMessage
+  | OverlaySheetMessage
+  | OverlayCommandMessage;
+
+export interface DesktopOverlayBridge {
+  acquire(): Promise<string>;
+  release(id: string): Promise<void>;
+  render(id: string, message: OverlayRenderMessage): Promise<void>;
+  onEvent(id: string, handler: (type: string, payload: unknown) => void): () => void;
+  onDismiss(id: string, handler: () => void): () => void;
+}
+
+export interface DesktopClipboardBridge {
+  writeText(text: string): Promise<void>;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -313,7 +566,9 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  clipboard: DesktopClipboardBridge;
   browser: DesktopBrowserBridge;
+  overlay: DesktopOverlayBridge;
 }
 
 export interface NativeApi {

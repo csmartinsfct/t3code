@@ -3,6 +3,7 @@ import type { DesktopBridge } from "@t3tools/contracts";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
+const CLIPBOARD_WRITE_TEXT_CHANNEL = "desktop:clipboard-write-text";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
@@ -32,6 +33,11 @@ const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
 const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
+const OVERLAY_ACQUIRE_CHANNEL = "overlay:acquire";
+const OVERLAY_RELEASE_CHANNEL = "overlay:release";
+const OVERLAY_RENDER_CHANNEL = "overlay:render";
+const OVERLAY_EVENT_CHANNEL = "overlay:event";
+const OVERLAY_DISMISS_CHANNEL = "overlay:dismiss";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -40,6 +46,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
+  clipboard: {
+    writeText: (text: string) => ipcRenderer.invoke(CLIPBOARD_WRITE_TEXT_CHANNEL, text),
+  },
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
@@ -69,6 +78,31 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
     };
   },
+  overlay: {
+    acquire: () => ipcRenderer.invoke(OVERLAY_ACQUIRE_CHANNEL),
+    release: (id: string) => ipcRenderer.invoke(OVERLAY_RELEASE_CHANNEL, id),
+    render: (id: string, msg: import("@t3tools/contracts").OverlayRenderMessage) =>
+      ipcRenderer.invoke(OVERLAY_RENDER_CHANNEL, id, msg),
+    onEvent: (id: string, listener: (type: string, payload: unknown) => void) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        receivedId: unknown,
+        type: unknown,
+        payload: unknown,
+      ) => {
+        if (receivedId === id) listener(type as string, payload);
+      };
+      ipcRenderer.on(OVERLAY_EVENT_CHANNEL, wrapped);
+      return () => ipcRenderer.removeListener(OVERLAY_EVENT_CHANNEL, wrapped);
+    },
+    onDismiss: (id: string, listener: () => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, receivedId: unknown) => {
+        if (receivedId === id) listener();
+      };
+      ipcRenderer.on(OVERLAY_DISMISS_CHANNEL, wrapped);
+      return () => ipcRenderer.removeListener(OVERLAY_DISMISS_CHANNEL, wrapped);
+    },
+  },
   browser: {
     mount: (projectId, bounds) => ipcRenderer.invoke(BROWSER_MOUNT_CHANNEL, projectId, bounds),
     setBounds: (projectId, bounds) =>
@@ -82,10 +116,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     reload: (projectId) => ipcRenderer.invoke(BROWSER_RELOAD_CHANNEL, projectId),
     getUrl: (projectId) => ipcRenderer.invoke(BROWSER_GET_URL_CHANNEL, projectId),
     listTabs: (projectId) => ipcRenderer.invoke(BROWSER_LIST_TABS_CHANNEL, projectId),
-    newTab: (projectId, url) => ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, projectId, url),
-    switchTab: (projectId, tabId) =>
-      ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId),
-    closeTab: (projectId, tabId) => ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId),
+    newTab: (projectId, url, bounds) =>
+      ipcRenderer.invoke(BROWSER_NEW_TAB_CHANNEL, projectId, url, bounds),
+    switchTab: (projectId, tabId, bounds) =>
+      ipcRenderer.invoke(BROWSER_SWITCH_TAB_CHANNEL, projectId, tabId, bounds),
+    closeTab: (projectId, tabId, bounds) =>
+      ipcRenderer.invoke(BROWSER_CLOSE_TAB_CHANNEL, projectId, tabId, bounds),
     setViewport: (projectId, tabId, params) =>
       ipcRenderer.invoke(BROWSER_SET_VIEWPORT_CHANNEL, projectId, tabId, params),
     popoutOpen: (projectId) => ipcRenderer.invoke(BROWSER_POPOUT_OPEN_CHANNEL, projectId),

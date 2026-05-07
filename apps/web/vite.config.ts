@@ -81,6 +81,12 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      rollupOptions: {
+        input: {
+          main: "./index.html",
+          overlay: "./overlay.html",
+        },
+      },
       outDir: "dist",
       emptyOutDir: true,
       sourcemap: buildSourcemap,

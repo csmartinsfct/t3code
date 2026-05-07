@@ -5,18 +5,10 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 
 import { useOrchestrationProjectOptions } from "../../hooks/useOrchestrationProjectOptions";
 import { ensureNativeApi } from "../../nativeApi";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
+import { ScheduledTaskDeleteConfirmDialog } from "./ScheduledTaskConfirmDialogs";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog";
 
 function formatDate(iso: string): string {
@@ -254,27 +246,12 @@ export function ScheduledTaskDetailPanel() {
       />
 
       {/* Delete confirmation */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete scheduled task?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete "{task.name}" and all its run history. This action cannot
-              be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose>
-              <Button variant="outline" size="sm">
-                Cancel
-              </Button>
-            </AlertDialogClose>
-            <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
-              Delete
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <ScheduledTaskDeleteConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        taskName={task.name}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
