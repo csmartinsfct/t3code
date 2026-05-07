@@ -25,7 +25,7 @@ import {
   type ElectronWebContentsHarness,
 } from "./hosts/ElectronWebContentsHost/__test__/harness.ts";
 
-const DEFERRED_NATIVE_TOOLS = ["eval", "cookie-import-browser", "responsive"] as const;
+const DEFERRED_NATIVE_TOOLS = ["cookie-import-browser", "responsive"] as const;
 const PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS = ["focus", "visibility"] as const;
 const DAY_1_TOOLS = BROWSER_HOST_TOOL_NAMES.filter(
   (tool) =>
@@ -575,6 +575,18 @@ describe("ElectronWebContentsBrowserHost", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.include(await invoke("console"), "native-console");
       await invoke("evaluate", ["fetch('/api/data').then((r) => r.json()).then((r) => r.ok)"]);
+      // The vendored `validateReadPath` only allows files under `/tmp`
+      // (gstack's TEMP_DIR) or the current working directory; macOS
+      // `os.tmpdir()` resolves to `/var/folders/...` which is outside that
+      // allow-list, so use a separate `/tmp`-backed scratch dir for `eval`.
+      const evalTmp = await mkdtemp("/tmp/t3-native-eval-");
+      try {
+        const evalSnippetPath = join(evalTmp, "snippet.js");
+        await writeFile(evalSnippetPath, "21 + 21", "utf8");
+        assert.equal(await invoke("eval", [evalSnippetPath]), "42");
+      } finally {
+        await rm(evalTmp, { recursive: true, force: true });
+      }
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.include(await invoke("network"), "Network.");
       await invoke("css", ["#target", "position"]);

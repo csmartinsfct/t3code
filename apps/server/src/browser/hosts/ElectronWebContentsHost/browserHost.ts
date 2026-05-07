@@ -23,7 +23,7 @@ export function unsupportedPermanentNativeToolMessage(tool: string): string {
   return `tool ${tool} is not supported in native (Electron) mode for this project. This tool requires a standalone Playwright browser context and is not meaningful in the embedded browser.`;
 }
 
-const DEFERRED_TOOLS = new Set(["eval", "cookie-import-browser", "responsive"]);
+const DEFERRED_TOOLS = new Set(["cookie-import-browser", "responsive"]);
 const UNSUPPORTED_NATIVE_TOOLS = new Set(["focus", "visibility"]);
 
 interface RuntimeEvaluateResponse<T> {
@@ -364,6 +364,8 @@ export class ElectronWebContentsBrowserHost {
       case "js":
       case "evaluate":
         return this.evaluateText(args[0] ?? "");
+      case "eval":
+        return this.evalFile(requiredArg(args, "eval", "file"));
       case "css":
         return this.css(args[0], args[1]);
       case "attrs":
@@ -793,6 +795,28 @@ export class ElectronWebContentsBrowserHost {
 
   private async evaluateJson(expression: string): Promise<string> {
     return JSON.stringify(await this.evaluate(expression), null, 2);
+  }
+
+  private async evalFile(filePath: string): Promise<string> {
+    // Reuse the vendored gstack path validator so the embedded host enforces
+    // the same SAFE_DIRECTORIES allow-list (project cwd + temp dir) the
+    // Playwright host does. Dynamic import keeps `core/**` out of T3's
+    // typecheck graph (the vendored code does not satisfy our strict
+    // compiler settings); see apps/server/src/browser/NOTICE.
+    const { validateReadPath } = (await import("../../core/path-security.ts" as string)) as {
+      readonly validateReadPath: (path: string) => void;
+    };
+    validateReadPath(filePath);
+    let code: string;
+    try {
+      code = await fs.readFile(filePath, "utf-8");
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`File not found: ${filePath}`, { cause });
+      }
+      throw cause;
+    }
+    return this.evaluateText(code);
   }
 
   /**
