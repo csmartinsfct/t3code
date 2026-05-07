@@ -13,6 +13,7 @@ import "./components/chat/OrchestrationProgressHeader";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
+import "./components/chat/ThreadSwitcherDropdown";
 import "./components/management/BoardToolbar";
 import "./components/management/TicketDetailFieldSelectOverlay";
 import "./components/management/KanbanTicketDetail";
@@ -50,6 +51,7 @@ logWebTimeline("overlay-routes.loaded", {
     "propose-action-icon-picker",
     "proposed-plan-save-dialog",
     "rate-limit-meter",
+    "thread-switcher-menu",
     "board-toolbar-filter",
     "ticket-detail-field-select",
     "ticket-detail-actions-menu",

@@ -100,7 +100,7 @@ Host callsites should use `useRoutedOverlaySurface()` from `apps/web/src/routedO
 
 Routes can emit non-dismissing events for controls that update host state while the popup remains open. The host then re-renders the same overlay session with refreshed params.
 
-Action menus that require exact parity, including the Git actions menu, project-script actions menu, plan action menus, orchestration resume menu, composer implement split-button menu, and Kanban ticket detail actions menu, use routed menu overlays rather than serialized `overlayItems`. Their DOM path and native route share a single content component; the route should only adapt transport concerns such as result submission, anchor positioning, and overlay dismissal.
+Action menus that require exact parity, including the Git actions menu, project-script actions menu, plan action menus, orchestration resume menu, orchestration thread switcher, composer implement split-button menu, and Kanban ticket detail actions menu, use routed menu overlays rather than serialized `overlayItems`. Their DOM path and native route share a single content component; the route should only adapt transport concerns such as result submission, anchor positioning, and overlay dismissal.
 
 ## Positioning
 
