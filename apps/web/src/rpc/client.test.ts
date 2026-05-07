@@ -135,8 +135,10 @@ describe("WsRpcAtomClient", () => {
           enabled: false,
         },
         gemini: DEFAULT_SERVER_SETTINGS.providers.gemini,
+        cursor: DEFAULT_SERVER_SETTINGS.providers.cursor,
         codexProfiles: [],
         claudeProfiles: [],
+        cursorProfiles: [],
       },
     };
     const requestPromise = runRpc((client) => client(WS_METHODS.serverGetSettings, {}));
@@ -188,8 +190,10 @@ describe("WsRpcAtomClient", () => {
           enabled: false,
         },
         gemini: DEFAULT_SERVER_SETTINGS.providers.gemini,
+        cursor: DEFAULT_SERVER_SETTINGS.providers.cursor,
         codexProfiles: [],
         claudeProfiles: [],
+        cursorProfiles: [],
       },
     };
     const registry = AtomRegistry.make();

@@ -1,9 +1,11 @@
 export function resolveInitialManagementProjectId(input: {
   orderedProjectIds: readonly string[];
-  managementBoardProjectId: string | null;
+  latestManagementBoardProjectId: string | null;
 }): string | null {
   return (
-    input.orderedProjectIds.find((projectId) => projectId === input.managementBoardProjectId) ??
+    input.orderedProjectIds.find(
+      (projectId) => projectId === input.latestManagementBoardProjectId,
+    ) ??
     input.orderedProjectIds[0] ??
     null
   );

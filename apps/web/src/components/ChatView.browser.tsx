@@ -1729,7 +1729,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       projectOrder: [],
       threadLastVisitedAtById: {},
       startupRecoveryStateByThreadId: {},
-      managementBoardContext: null,
+      managementBoardContextByProjectId: {},
       viewMode: "chat",
     });
   });
@@ -4991,11 +4991,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     useUiStateStore.setState((state) => ({
       ...state,
-      managementBoardContext: {
-        projectId: PROJECT_ID,
-        ticketStack: [ORCHESTRATION_TICKET_ID],
-        boardScrollLeft: 24,
-        updatedAt: NOW_ISO,
+      managementBoardContextByProjectId: {
+        [PROJECT_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [ORCHESTRATION_TICKET_ID],
+          boardScrollLeft: 24,
+          updatedAt: NOW_ISO,
+        },
       },
     }));
 
@@ -5076,7 +5078,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => path === expectedForkPath,
         "Route should navigate to the forked thread path.",
       );
-      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
+      expect(
+        useUiStateStore.getState().managementBoardContextByProjectId[PROJECT_ID],
+      ).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [ORCHESTRATION_TICKET_ID],
         boardScrollLeft: 24,
@@ -5138,11 +5142,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("keeps the global board context unchanged when creating a same-project draft thread", async () => {
     const ticketId = "ticket-current-context" as TicketId;
     useUiStateStore.setState({
-      managementBoardContext: {
-        projectId: PROJECT_ID,
-        ticketStack: [ticketId],
-        boardScrollLeft: 144,
-        updatedAt: NOW_ISO,
+      managementBoardContextByProjectId: {
+        [PROJECT_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [ticketId],
+          boardScrollLeft: 144,
+          updatedAt: NOW_ISO,
+        },
       },
     });
 
@@ -5160,14 +5166,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await newThreadButton.click();
 
-      const newThreadPath = await waitForURL(
+      await waitForURL(
         mounted.router,
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID.",
       );
-      const newThreadId = newThreadPath.slice(1) as ThreadId;
 
-      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
+      expect(
+        useUiStateStore.getState().managementBoardContextByProjectId[PROJECT_ID],
+      ).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [ticketId],
         boardScrollLeft: 144,
@@ -5198,11 +5205,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
     useUiStateStore.setState({
-      managementBoardContext: {
-        projectId: PROJECT_ID,
-        ticketStack: [draftTicketId],
-        boardScrollLeft: 220,
-        updatedAt: NOW_ISO,
+      managementBoardContextByProjectId: {
+        [PROJECT_ID]: {
+          projectId: PROJECT_ID,
+          ticketStack: [draftTicketId],
+          boardScrollLeft: 220,
+          updatedAt: NOW_ISO,
+        },
       },
     });
 
@@ -5226,7 +5235,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "New-thread should reuse the existing project draft thread.",
       );
 
-      expect(useUiStateStore.getState().managementBoardContext).toMatchObject({
+      expect(
+        useUiStateStore.getState().managementBoardContextByProjectId[PROJECT_ID],
+      ).toMatchObject({
         projectId: PROJECT_ID,
         ticketStack: [draftTicketId],
         boardScrollLeft: 220,

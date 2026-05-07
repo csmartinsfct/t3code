@@ -29,7 +29,11 @@ import { isElectron } from "../../env";
 import { useTicketing } from "../../hooks/useTicketing";
 import { useProjectById } from "../../storeSelectors";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
-import { DEFAULT_BOARD_FILTERS, useUiStateStore } from "../../uiStateStore";
+import {
+  DEFAULT_BOARD_FILTERS,
+  getManagementBoardContextForProject,
+  useUiStateStore,
+} from "../../uiStateStore";
 import { ensureNativeApi } from "../../nativeApi";
 import { logWebTimeline } from "../../timelineLogger";
 import { toastManager } from "../ui/toast";
@@ -194,7 +198,7 @@ export async function launchBoardOrchestration(input: {
 }
 
 export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(function KanbanBoard(
-  { threadId, projectId, onDropOnChat },
+  { threadId: _threadId, projectId, onDropOnChat },
   ref,
 ) {
   const typedProjectId = projectId as ProjectId;
@@ -204,7 +208,9 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const toggleTicket = useTicketSelectionStore((s) => s.toggleTicket);
   const rangeSelectTo = useTicketSelectionStore((s) => s.rangeSelectTo);
   const clearSelection = useTicketSelectionStore((s) => s.clearSelection);
-  const managementBoardContext = useUiStateStore((store) => store.managementBoardContext);
+  const managementBoardContext = useUiStateStore((store) =>
+    getManagementBoardContextForProject(store, typedProjectId),
+  );
   const setManagementBoardRoot = useUiStateStore((store) => store.setManagementBoardRoot);
   const pushManagementBoardTicket = useUiStateStore((store) => store.pushManagementBoardTicket);
   const popManagementBoardTicket = useUiStateStore((store) => store.popManagementBoardTicket);
@@ -217,9 +223,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   const project = useProjectById(typedProjectId);
   const boardBodyRef = useRef<HTMLDivElement | null>(null);
   const selectedTicketId =
-    managementBoardContext?.projectId === typedProjectId
-      ? (managementBoardContext.ticketStack[managementBoardContext.ticketStack.length - 1] ?? null)
-      : null;
+    managementBoardContext?.ticketStack[managementBoardContext.ticketStack.length - 1] ?? null;
 
   const navigate = useNavigate();
 
@@ -273,7 +277,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   );
 
   useEffect(() => {
-    if (!managementBoardContext || managementBoardContext.projectId !== typedProjectId) {
+    if (!managementBoardContext) {
       setManagementBoardRoot(typedProjectId);
     }
   }, [managementBoardContext, setManagementBoardRoot, typedProjectId]);
@@ -427,10 +431,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     const element = boardBodyRef.current;
     if (!element) return;
 
-    const targetScrollLeft =
-      managementBoardContext?.projectId === typedProjectId
-        ? managementBoardContext.boardScrollLeft
-        : 0;
+    const targetScrollLeft = managementBoardContext?.boardScrollLeft ?? 0;
     if (Math.abs(element.scrollLeft - targetScrollLeft) > 1) {
       element.scrollLeft = targetScrollLeft;
     }
@@ -447,7 +448,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         window.cancelAnimationFrame(frameId);
       }
       frameId = window.requestAnimationFrame(() => {
-        setManagementBoardScrollLeft(element.scrollLeft);
+        setManagementBoardScrollLeft(typedProjectId, element.scrollLeft);
       });
     };
 
@@ -458,7 +459,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [selectedTicketId, setManagementBoardScrollLeft]);
+  }, [selectedTicketId, setManagementBoardScrollLeft, typedProjectId]);
 
   const handleTicketMultiSelectClick = useCallback(
     (e: React.MouseEvent, ticket: TicketSummary) => {
@@ -867,8 +868,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
 
   const handleBack = useCallback(() => {
     clearSelection();
-    popManagementBoardTicket();
-  }, [clearSelection, popManagementBoardTicket]);
+    popManagementBoardTicket(typedProjectId);
+  }, [clearSelection, popManagementBoardTicket, typedProjectId]);
 
   const handleBackToBoard = useCallback(() => {
     clearSelection();
@@ -946,7 +947,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
       {/* Board body */}
       {browserVisible ? (
         <EmbeddedBrowser key={typedProjectId} projectId={typedProjectId} />
-      ) : loading ? (
+      ) : loading && tickets.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-xs text-muted-foreground">Loading...</p>
         </div>

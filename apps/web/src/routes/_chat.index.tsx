@@ -6,14 +6,14 @@ import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { ManagementView } from "../components/management/ManagementView";
 import { CollapsedSidebarTrigger } from "../components/ui/sidebar";
 import { useStore } from "../store";
-import { useUiStateStore } from "../uiStateStore";
+import { getLatestManagementBoardProjectId, useUiStateStore } from "../uiStateStore";
 import { resolveInitialManagementProjectId } from "./chatIndex";
 
 export function ChatIndexRouteView() {
   const viewMode = useUiStateStore((store) => store.viewMode);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const managementBoardProjectId = useUiStateStore(
-    (store) => store.managementBoardContext?.projectId ?? null,
+  const latestManagementBoardProjectId = useUiStateStore((store) =>
+    getLatestManagementBoardProjectId(store),
   );
   const projects = useStore((store) => store.projects);
   const orderedProjects = useMemo(
@@ -27,7 +27,7 @@ export function ChatIndexRouteView() {
   );
   const initialProjectId = resolveInitialManagementProjectId({
     orderedProjectIds: orderedProjects.map((project) => project.id),
-    managementBoardProjectId,
+    latestManagementBoardProjectId,
   });
 
   if (viewMode === "management" && initialProjectId) {

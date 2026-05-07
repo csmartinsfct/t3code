@@ -109,6 +109,28 @@ Each thread's memory footprint is estimated from:
 - Per checkpoint: 256 + 128 per file
 - Per activity: 512 + metadata size
 
+## Board Ticket Summary Cache
+
+Board mode keeps ticket summaries in a client-side, RAM-only cache keyed by project ID.
+
+This cache is intentionally separate from the thread content cache:
+
+- It stores only `TicketSummary` data used by the board columns and list view.
+- It does **not** store ticket bodies, comments, artifacts, history, or criteria.
+- It is cleared on app reload and is not persisted to localStorage or SQLite.
+- It has no eviction policy in v1; ticket summaries are small enough that UX smoothness is preferred until profiling shows a real memory problem.
+
+### Board Loading Behavior
+
+When a project board is opened:
+
+1. If that project has no cached ticket summaries, the board shows its normal loading state and calls `ticketing.list`.
+2. If that project is cached, the board renders immediately from RAM.
+3. Cached projects refresh in the background after a short freshness window, but refreshing never blanks the board.
+4. Ticket stream events patch cached projects in place. Events for uncached projects are ignored because those projects will load fresh when opened.
+
+This means switching between already-loaded projects in Board mode does not repeatedly clear and reload the visible board.
+
 ## Idle Session Timeout
 
 Provider sessions (Codex app-server processes, Claude SDK connections, Gemini ACP processes) consume system resources: child processes, MCP server connections, memory.

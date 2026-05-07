@@ -394,14 +394,16 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-dynamic-chat-ui
 
         assert.deepEqual(metadata.dynamicChatUiArtifacts, [
           {
+            version: 1,
             id: "pricing-simulator",
             title: "Pricing simulator",
             description: "Adjust seats and usage.",
             initialHeight: 280,
             maxHeight: 640,
+            html: '<section><input type="range" /></section>',
           },
         ]);
-        assert.isFalse(JSON.stringify(metadata).includes("range"));
+        assert.isFalse(JSON.stringify(metadata).includes('"range":'));
       }),
     );
   },

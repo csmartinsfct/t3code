@@ -12,7 +12,7 @@ import { readNativeApi } from "../nativeApi";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import { useStore } from "../store";
 import { useThreadById } from "../storeSelectors";
-import { useUiStateStore } from "../uiStateStore";
+import { getManagementBoardContextForProject, useUiStateStore } from "../uiStateStore";
 
 export function useHandleNewThread() {
   const projectIds = useStore(useShallow((store) => store.projects.map((project) => project.id)));
@@ -113,8 +113,11 @@ export function useHandleNewThread() {
           params: { threadId },
         });
 
-        const boardContext = useUiStateStore.getState().managementBoardContext;
-        if (boardContext && boardContext.projectId === projectId) {
+        const boardContext = getManagementBoardContextForProject(
+          useUiStateStore.getState(),
+          projectId,
+        );
+        if (boardContext) {
           const viewedTicketId = boardContext.ticketStack[boardContext.ticketStack.length - 1];
           if (viewedTicketId) {
             const api = readNativeApi();

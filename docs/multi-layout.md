@@ -49,31 +49,30 @@ Board mode still lives inside the chat routes, so the active thread remains the 
 
 - In `/_chat/$threadId`, the board project is derived from the selected thread's `projectId`.
 - In `/_chat/`, Board mode restores the persisted board project when it is still valid and otherwise falls back to the first ordered project.
-- Board context is stored once as a **global management board context**.
+- Board context is stored per project, so each project keeps its own drill-down and scroll state.
 - Same-project thread switches do **not** change board routing, scroll, or ticket detail.
-- Cross-project thread switches while Board mode is open reset the board to the new thread's project root.
+- Cross-project thread switches while Board mode is open switch to the new thread's project and restore that project's previous board state when one exists.
 - Thread creation, fork, decompose, and managed-run `Ask AI` flows do not clone board context anymore.
 - If a project has no saved board context, the board opens at that project's root.
 
 This means the board and the right-hand chat panel are intentionally coupled:
 
 - the chat thread chooses the active project
-- the board restores the last relevant board state for the active project
+- the board restores the active project's own board state
 - the board must never render a ticket from a different project than the active thread
 - assistant-authored ticket links like `[T3CO-191](t3://ticket/T3CO-191)` use one shared navigation path that switches to Board mode when needed and opens that ticket's detail panel
 
 ## Board Context Model
 
-Board mode persists a small global management context in `uiStateStore`:
+Board mode persists a small management context per project in `uiStateStore`:
 
-- `projectId` — the project the saved board state belongs to
 - `ticketStack` — ordered drill-down path for ticket detail navigation
 - `boardScrollLeft` — horizontal scroll position for the root board columns view
 - `updatedAt` — timestamp for the most recent board-context write
 
 Sanitization rules:
 
-- if the saved `projectId` does not match the active thread's project, the saved context is discarded and replaced with that project's board root
+- if the active project has no saved context, one is created at that project's board root
 - if a ticket in `ticketStack` no longer exists, it is removed
 - if the top ticket becomes invalid, the stack collapses back to the nearest valid ancestor, or to the board root if none remain
 - no-thread Board mode does not restore ticket detail
@@ -82,8 +81,8 @@ Sanitization rules:
 
 - **Route** owns the active thread identity.
 - **Route** derives the active board project from that thread.
-- **`uiStateStore`** owns the persisted global management board context.
-- **`useTicketing`** owns ticket fetches, project-scoped ticket lists, and live ticket stream updates.
+- **`uiStateStore`** owns the persisted per-project management board context.
+- **`useTicketing`** owns a RAM-only per-project ticket summary cache, ticket fetches, and live ticket stream updates.
 - **`KanbanBoard`** renders from route context, project ticket data, and the saved board context.
 - **`KanbanTicketDetail`** is only valid when the top-of-stack ticket still belongs to the active project.
 
@@ -130,16 +129,19 @@ The `SidebarRail` resize logic includes a guard (`sidebar.tsx`) that skips `Resi
 
 Tickets are fetched and managed by the `useTicketing` hook:
 
-- **Fetch:** `api.ticketing.list({ projectId })` on mount and when `projectId` changes.
-- **Real-time:** Subscribes to `api.ticketing.onEvent()` stream, filters by `selectedProjectId`, applies `ticket_upserted` and `ticket_deleted` events.
+- **Fetch:** `api.ticketing.list({ projectId })` on cold project load. If that project is already cached in RAM, the board renders immediately and refreshes in the background when the cache is stale.
+- **Real-time:** Subscribes to `api.ticketing.onEvent()` stream and applies `ticket_upserted` / `ticket_deleted` events to cached matching projects.
 - **Project sync:** A `useEffect` syncs the hook's internal `selectedProjectId` when the caller-supplied `projectId` prop changes (handles TanStack Router keeping components mounted across thread switches).
 - **Optimistic reorder:** `applyLocalReorder()` updates local ticket sort orders and statuses immediately, since the server's `reorder` endpoint does not emit stream events.
+- **Hover preload:** While in Board mode, hovering a thread row can preload that thread's project tickets when the project is not already cached.
 
-Board state itself is **not** owned by `useTicketing`. `KanbanBoard` reads ticket data from `useTicketing`, then overlays the global management board context from `uiStateStore`:
+The ticket cache stores only ticket summaries. Ticket bodies, comments, artifacts, history, and criteria remain lazy and are fetched by detail views as needed.
+
+Board state itself is **not** owned by `useTicketing`. `KanbanBoard` reads ticket data from `useTicketing`, then overlays the per-project management board context from `uiStateStore`:
 
 - root board view uses the saved `boardScrollLeft`
 - ticket detail uses the saved `ticketStack`
-- same-project thread switches preserve the board context
+- same-project and cross-project thread switches preserve each project's own board context
 - invalid stored context is sanitized against the current project's ticket list before detail renders
 
 ### Sub-ticket Promotion

@@ -42,7 +42,7 @@ describe("subscribeOrchestrationRunStatusSync", () => {
       startupRecoveryStateByThreadId: {
         [THREAD_LIVE]: "active",
       },
-      managementBoardContext: null,
+      managementBoardContextByProjectId: {},
       viewMode: "chat",
     });
   });

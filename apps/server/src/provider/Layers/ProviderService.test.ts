@@ -369,7 +369,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("ProviderServiceLive does not reuse resume cursors across Codex profiles", () =>
+it.effect("ProviderServiceLive reuses resume cursors across Codex profile aliases", () =>
   Effect.gen(function* () {
     const codex = makeFakeCodexAdapter();
     const registry: typeof ProviderAdapterRegistry.Service = {
@@ -419,7 +419,7 @@ it.effect("ProviderServiceLive does not reuse resume cursors across Codex profil
         | ProviderSessionStartInput
         | undefined;
       assert.equal(startInput?.provider, "codex:metric");
-      assert.equal(startInput && "resumeCursor" in startInput, false);
+      assert.deepEqual(startInput?.resumeCursor, { opaque: "default-account-resume" });
 
       yield* directory.upsert({
         provider: "codex:metric" as ProviderKind,

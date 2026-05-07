@@ -124,7 +124,7 @@ describe("useManagedRunCompletionToasts", () => {
       projectOrder: [],
       threadLastVisitedAtById: {},
       startupRecoveryStateByThreadId: {},
-      managementBoardContext: null,
+      managementBoardContextByProjectId: {},
       viewMode: "chat",
     });
     toastAddSpy.mockReset();

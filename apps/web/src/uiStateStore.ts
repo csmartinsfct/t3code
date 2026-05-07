@@ -60,6 +60,14 @@ interface PersistedUiState {
       collapsedStatuses?: string[];
     }
   >;
+  managementBoardContextByProjectId?: Record<
+    string,
+    {
+      ticketStack?: string[];
+      boardScrollLeft?: number;
+      updatedAt?: string;
+    }
+  >;
   managementBoardContext?: {
     projectId?: string;
     ticketStack?: string[];
@@ -92,7 +100,7 @@ export interface UiThreadState {
 }
 
 export interface UiBoardState {
-  managementBoardContext: BoardContext | null;
+  managementBoardContextByProjectId: Record<string, BoardContext>;
   boardViewMode: BoardViewMode;
   browserVisibleByProjectId: Record<string, boolean>;
   boardFiltersByProjectId: Record<string, BoardFilters>;
@@ -127,7 +135,7 @@ const initialState: UiState = {
   projectOrder: [],
   threadLastVisitedAtById: {},
   startupRecoveryStateByThreadId: {},
-  managementBoardContext: null,
+  managementBoardContextByProjectId: {},
   boardViewMode: "cards",
   browserVisibleByProjectId: {},
   boardFiltersByProjectId: {},
@@ -142,7 +150,7 @@ let persistedViewMode: ViewMode = "chat";
 let persistedBoardViewMode: BoardViewMode = "cards";
 let persistedBrowserVisibleByProjectId: Record<string, boolean> = {};
 let persistedBoardFiltersByProjectId: Record<string, BoardFilters> = {};
-let persistedManagementBoardContext: BoardContext | null = null;
+let persistedManagementBoardContextByProjectId: Record<string, BoardContext> = {};
 let persistedCollapsedTicketOrder: TicketId[] = [];
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
@@ -168,7 +176,7 @@ function readPersistedState(): UiState {
           boardViewMode: persistedBoardViewMode,
           browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
           boardFiltersByProjectId: persistedBoardFiltersByProjectId,
-          managementBoardContext: persistedManagementBoardContext,
+          managementBoardContextByProjectId: persistedManagementBoardContextByProjectId,
           collapsedTicketIds: Object.fromEntries(
             persistedCollapsedTicketOrder.map((id) => [id, true] as const),
           ),
@@ -184,7 +192,7 @@ function readPersistedState(): UiState {
       boardViewMode: persistedBoardViewMode,
       browserVisibleByProjectId: persistedBrowserVisibleByProjectId,
       boardFiltersByProjectId: persistedBoardFiltersByProjectId,
-      managementBoardContext: persistedManagementBoardContext,
+      managementBoardContextByProjectId: persistedManagementBoardContextByProjectId,
       collapsedTicketIds: Object.fromEntries(
         persistedCollapsedTicketOrder.map((id) => [id, true] as const),
       ),
@@ -198,7 +206,7 @@ function readPersistedState(): UiState {
 function hydratePersistedUiState(parsed: PersistedUiState): void {
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
-  persistedManagementBoardContext = null;
+  persistedManagementBoardContextByProjectId = {};
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -260,13 +268,20 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
     }
   }
 
-  const context = parsed.managementBoardContext;
-  if (typeof context?.projectId === "string" && context.projectId.length > 0) {
+  const parseBoardContext = (
+    projectId: string,
+    context: {
+      ticketStack?: string[];
+      boardScrollLeft?: number;
+      updatedAt?: string;
+    },
+  ): BoardContext | null => {
+    if (projectId.length === 0) return null;
     const ticketStack = (context.ticketStack ?? []).filter(
       (ticketId): ticketId is TicketId => typeof ticketId === "string" && ticketId.length > 0,
     );
-    persistedManagementBoardContext = {
-      projectId: context.projectId as ProjectId,
+    return {
+      projectId: projectId as ProjectId,
       ticketStack,
       boardScrollLeft:
         typeof context.boardScrollLeft === "number" && Number.isFinite(context.boardScrollLeft)
@@ -277,6 +292,27 @@ function hydratePersistedUiState(parsed: PersistedUiState): void {
           ? context.updatedAt
           : nowIso(),
     };
+  };
+
+  if (
+    parsed.managementBoardContextByProjectId &&
+    typeof parsed.managementBoardContextByProjectId === "object"
+  ) {
+    for (const [projectId, context] of Object.entries(parsed.managementBoardContextByProjectId)) {
+      if (!context || typeof context !== "object") continue;
+      const parsedContext = parseBoardContext(projectId, context);
+      if (parsedContext) {
+        persistedManagementBoardContextByProjectId[projectId] = parsedContext;
+      }
+    }
+  } else {
+    const context = parsed.managementBoardContext;
+    if (typeof context?.projectId === "string" && context.projectId.length > 0) {
+      const parsedContext = parseBoardContext(context.projectId, context);
+      if (parsedContext) {
+        persistedManagementBoardContextByProjectId[context.projectId] = parsedContext;
+      }
+    }
   }
 }
 
@@ -304,7 +340,7 @@ function persistState(state: UiState): void {
         boardViewMode: state.boardViewMode,
         browserVisibleByProjectId: state.browserVisibleByProjectId,
         boardFiltersByProjectId: state.boardFiltersByProjectId,
-        managementBoardContext: state.managementBoardContext,
+        managementBoardContextByProjectId: state.managementBoardContextByProjectId,
         collapsedTicketIds: state.collapsedTicketOrder.slice(-COLLAPSED_TICKET_LIMIT),
       } satisfies PersistedUiState),
     );
@@ -345,7 +381,10 @@ function ticketStacksEqual(left: readonly TicketId[], right: readonly TicketId[]
   return left.length === right.length && left.every((ticketId, index) => ticketId === right[index]);
 }
 
-function boardContextEqual(left: BoardContext | null, right: BoardContext | null): boolean {
+function boardContextEqual(
+  left: BoardContext | null | undefined,
+  right: BoardContext | null | undefined,
+): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
   return (
@@ -368,13 +407,47 @@ function buildBoardContext(
   };
 }
 
-function setManagementBoardContext(state: UiState, nextContext: BoardContext | null): UiState {
-  if (boardContextEqual(state.managementBoardContext, nextContext)) {
+function boardContextRecordsEqual(
+  left: Record<string, BoardContext>,
+  right: Record<string, BoardContext>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every(([projectId, context]) => boardContextEqual(context, right[projectId]));
+}
+
+export function getManagementBoardContextForProject(
+  state: Pick<UiState, "managementBoardContextByProjectId">,
+  projectId: ProjectId | string | null | undefined,
+): BoardContext | null {
+  if (!projectId) return null;
+  return state.managementBoardContextByProjectId[projectId] ?? null;
+}
+
+export function getLatestManagementBoardProjectId(
+  state: Pick<UiState, "managementBoardContextByProjectId">,
+): ProjectId | null {
+  let latest: BoardContext | null = null;
+  for (const context of Object.values(state.managementBoardContextByProjectId)) {
+    if (!latest || Date.parse(context.updatedAt) > Date.parse(latest.updatedAt)) {
+      latest = context;
+    }
+  }
+  return latest?.projectId ?? null;
+}
+
+function setManagementBoardContext(state: UiState, nextContext: BoardContext): UiState {
+  const current = state.managementBoardContextByProjectId[nextContext.projectId];
+  if (boardContextEqual(current, nextContext)) {
     return state;
   }
   return {
     ...state,
-    managementBoardContext: nextContext,
+    managementBoardContextByProjectId: {
+      ...state.managementBoardContextByProjectId,
+      [nextContext.projectId]: nextContext,
+    },
   };
 }
 
@@ -461,26 +534,32 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
           })
           .map((project) => project.id);
 
-  const nextManagementBoardContext = (() => {
-    const current = state.managementBoardContext;
-    if (!current) {
-      return null;
+  const nextManagementBoardContextByProjectId = (() => {
+    const next: Record<string, BoardContext> = {};
+    const nextProjectIdByCwd = new Map(
+      mappedProjects.map((project) => [project.cwd, project.id] as const),
+    );
+    for (const context of Object.values(state.managementBoardContextByProjectId)) {
+      if (currentProjectCwdById.has(context.projectId)) {
+        next[context.projectId] = context;
+        continue;
+      }
+      const previousCwd = previousProjectCwdById.get(context.projectId);
+      const recreatedProjectId = previousCwd ? nextProjectIdByCwd.get(previousCwd) : undefined;
+      if (recreatedProjectId) {
+        next[recreatedProjectId] = buildBoardContext(recreatedProjectId, context);
+      }
     }
-    if (currentProjectCwdById.has(current.projectId)) {
-      return current;
-    }
-    const previousCwd = previousProjectCwdById.get(current.projectId);
-    if (!previousCwd) {
-      return null;
-    }
-    const recreatedProjectId = mappedProjects.find((project) => project.cwd === previousCwd)?.id;
-    return recreatedProjectId ? buildBoardContext(recreatedProjectId, current) : null;
+    return next;
   })();
 
   if (
     recordsEqual(state.projectExpandedById, nextExpandedById) &&
     projectOrdersEqual(state.projectOrder, nextProjectOrder) &&
-    boardContextEqual(state.managementBoardContext, nextManagementBoardContext) &&
+    boardContextRecordsEqual(
+      state.managementBoardContextByProjectId,
+      nextManagementBoardContextByProjectId,
+    ) &&
     !cwdMappingChanged
   ) {
     return state;
@@ -490,7 +569,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
     ...state,
     projectExpandedById: nextExpandedById,
     projectOrder: nextProjectOrder,
-    managementBoardContext: nextManagementBoardContext,
+    managementBoardContextByProjectId: nextManagementBoardContextByProjectId,
   };
 }
 
@@ -633,9 +712,8 @@ export function removeStartupRecoveryState(state: UiState, threadId: ThreadId): 
 }
 
 export function setManagementBoardRoot(state: UiState, projectId: ProjectId): UiState {
-  const currentContext = state.managementBoardContext;
-  const boardScrollLeft =
-    currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0;
+  const currentContext = state.managementBoardContextByProjectId[projectId];
+  const boardScrollLeft = currentContext?.boardScrollLeft ?? 0;
   return setManagementBoardContext(state, buildBoardContext(projectId, { boardScrollLeft }));
 }
 
@@ -644,8 +722,8 @@ export function pushManagementBoardTicket(
   projectId: ProjectId,
   ticketId: TicketId,
 ): UiState {
-  const currentContext = state.managementBoardContext;
-  const currentStack = currentContext?.projectId === projectId ? currentContext.ticketStack : [];
+  const currentContext = state.managementBoardContextByProjectId[projectId];
+  const currentStack = currentContext?.ticketStack ?? [];
   if (currentStack[currentStack.length - 1] === ticketId) {
     return state;
   }
@@ -653,13 +731,13 @@ export function pushManagementBoardTicket(
     state,
     buildBoardContext(projectId, {
       ticketStack: [...currentStack, ticketId],
-      boardScrollLeft: currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0,
+      boardScrollLeft: currentContext?.boardScrollLeft ?? 0,
     }),
   );
 }
 
-export function popManagementBoardTicket(state: UiState): UiState {
-  const currentContext = state.managementBoardContext;
+export function popManagementBoardTicket(state: UiState, projectId: ProjectId): UiState {
+  const currentContext = state.managementBoardContextByProjectId[projectId];
   if (!currentContext || currentContext.ticketStack.length === 0) {
     return state;
   }
@@ -677,18 +755,22 @@ export function replaceManagementBoardStack(
   projectId: ProjectId,
   ticketStack: readonly TicketId[],
 ): UiState {
-  const currentContext = state.managementBoardContext;
+  const currentContext = state.managementBoardContextByProjectId[projectId];
   return setManagementBoardContext(
     state,
     buildBoardContext(projectId, {
       ticketStack: [...ticketStack],
-      boardScrollLeft: currentContext?.projectId === projectId ? currentContext.boardScrollLeft : 0,
+      boardScrollLeft: currentContext?.boardScrollLeft ?? 0,
     }),
   );
 }
 
-export function setManagementBoardScrollLeft(state: UiState, scrollLeft: number): UiState {
-  const currentContext = state.managementBoardContext;
+export function setManagementBoardScrollLeft(
+  state: UiState,
+  projectId: ProjectId,
+  scrollLeft: number,
+): UiState {
+  const currentContext = state.managementBoardContextByProjectId[projectId];
   if (!currentContext) {
     return state;
   }
@@ -705,8 +787,15 @@ export function setManagementBoardScrollLeft(state: UiState, scrollLeft: number)
   );
 }
 
-export function clearManagementBoardContext(state: UiState): UiState {
-  return setManagementBoardContext(state, null);
+export function clearManagementBoardContext(state: UiState, projectId?: ProjectId): UiState {
+  if (!projectId) {
+    if (Object.keys(state.managementBoardContextByProjectId).length === 0) return state;
+    return { ...state, managementBoardContextByProjectId: {} };
+  }
+  if (!(projectId in state.managementBoardContextByProjectId)) return state;
+  const next = { ...state.managementBoardContextByProjectId };
+  delete next[projectId];
+  return { ...state, managementBoardContextByProjectId: next };
 }
 
 export function sanitizeManagementBoardContext(
@@ -714,8 +803,8 @@ export function sanitizeManagementBoardContext(
   projectId: ProjectId,
   validTicketIds: ReadonlySet<TicketId>,
 ): UiState {
-  const currentContext = state.managementBoardContext;
-  if (!currentContext || currentContext.projectId !== projectId) {
+  const currentContext = state.managementBoardContextByProjectId[projectId];
+  if (!currentContext) {
     return setManagementBoardRoot(state, projectId);
   }
 
@@ -874,10 +963,10 @@ interface UiStateStore extends UiState {
   clearThreadUi: (threadId: ThreadId) => void;
   setManagementBoardRoot: (projectId: ProjectId) => void;
   pushManagementBoardTicket: (projectId: ProjectId, ticketId: TicketId) => void;
-  popManagementBoardTicket: () => void;
+  popManagementBoardTicket: (projectId: ProjectId) => void;
   replaceManagementBoardStack: (projectId: ProjectId, ticketStack: readonly TicketId[]) => void;
-  setManagementBoardScrollLeft: (scrollLeft: number) => void;
-  clearManagementBoardContext: () => void;
+  setManagementBoardScrollLeft: (projectId: ProjectId, scrollLeft: number) => void;
+  clearManagementBoardContext: (projectId?: ProjectId) => void;
   sanitizeManagementBoardContext: (
     projectId: ProjectId,
     validTicketIds: ReadonlySet<TicketId>,
@@ -911,12 +1000,14 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setManagementBoardRoot: (projectId) => set((state) => setManagementBoardRoot(state, projectId)),
   pushManagementBoardTicket: (projectId, ticketId) =>
     set((state) => pushManagementBoardTicket(state, projectId, ticketId)),
-  popManagementBoardTicket: () => set((state) => popManagementBoardTicket(state)),
+  popManagementBoardTicket: (projectId) =>
+    set((state) => popManagementBoardTicket(state, projectId)),
   replaceManagementBoardStack: (projectId, ticketStack) =>
     set((state) => replaceManagementBoardStack(state, projectId, ticketStack)),
-  setManagementBoardScrollLeft: (scrollLeft) =>
-    set((state) => setManagementBoardScrollLeft(state, scrollLeft)),
-  clearManagementBoardContext: () => set((state) => clearManagementBoardContext(state)),
+  setManagementBoardScrollLeft: (projectId, scrollLeft) =>
+    set((state) => setManagementBoardScrollLeft(state, projectId, scrollLeft)),
+  clearManagementBoardContext: (projectId) =>
+    set((state) => clearManagementBoardContext(state, projectId)),
   sanitizeManagementBoardContext: (projectId, validTicketIds) =>
     set((state) => sanitizeManagementBoardContext(state, projectId, validTicketIds)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),

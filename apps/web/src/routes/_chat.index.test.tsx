@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { resolveInitialManagementProjectId } from "./chatIndex";
 
 describe("_chat.index", () => {
-  it("restores managementBoardProjectId when it still exists in the ordered project list", () => {
+  it("restores latestManagementBoardProjectId when it still exists in the ordered project list", () => {
     expect(
       resolveInitialManagementProjectId({
         orderedProjectIds: ["project-2", "project-1", "project-3"],
-        managementBoardProjectId: "project-1",
+        latestManagementBoardProjectId: "project-1",
       }),
     ).toBe("project-1");
   });
@@ -16,7 +16,7 @@ describe("_chat.index", () => {
     expect(
       resolveInitialManagementProjectId({
         orderedProjectIds: ["project-2", "project-1"],
-        managementBoardProjectId: "project-9",
+        latestManagementBoardProjectId: "project-9",
       }),
     ).toBe("project-2");
   });
@@ -25,7 +25,7 @@ describe("_chat.index", () => {
     expect(
       resolveInitialManagementProjectId({
         orderedProjectIds: [],
-        managementBoardProjectId: "project-1",
+        latestManagementBoardProjectId: "project-1",
       }),
     ).toBeNull();
   });

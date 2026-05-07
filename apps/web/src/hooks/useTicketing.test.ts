@@ -1,7 +1,11 @@
 import type { TicketSummary } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { fetchTicketingState, resolveTicketingProjectResyncState } from "./useTicketing";
+import {
+  fetchTicketingState,
+  resolveTicketingLoadingState,
+  resolveTicketingProjectResyncState,
+} from "./useTicketing";
 
 // Audit traceability: 4973c83.
 
@@ -86,6 +90,26 @@ describe("resolveTicketingProjectResyncState", () => {
       shouldResync: false,
       nextProjectId: "project-1",
     });
+  });
+});
+
+describe("resolveTicketingLoadingState", () => {
+  it("shows full loading only when a resolved project has no tickets yet", () => {
+    expect(
+      resolveTicketingLoadingState({
+        tickets: [],
+        status: "loading",
+        hasResolvedProject: true,
+      }),
+    ).toEqual({ loading: true, refreshing: false });
+
+    expect(
+      resolveTicketingLoadingState({
+        tickets: [makeTicket()],
+        status: "refreshing",
+        hasResolvedProject: true,
+      }),
+    ).toEqual({ loading: false, refreshing: true });
   });
 });
 

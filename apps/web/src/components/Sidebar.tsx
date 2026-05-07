@@ -161,6 +161,7 @@ import { openInPreferredEditor, resolvePreferredEditor } from "../editorPreferen
 import { projectScriptCwd } from "../projectScripts";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { isUserVisibleProvider } from "../providerVisibility";
+import { preloadTicketingProject } from "../lib/ticketingCacheStore";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -454,6 +455,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
   const clearStartupWasWorkingThread = useUiStateStore(
     (state) => state.clearStartupWasWorkingThread,
   );
+  const viewMode = useUiStateStore((state) => state.viewMode);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[props.threadId]);
   const startupRecoveryState = useUiStateStore(
     (state) => state.startupRecoveryStateByThreadId[props.threadId] ?? null,
@@ -528,6 +530,11 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
         onClick={(event) => {
           clearStartupWasWorkingThread(thread.id);
           props.handleThreadClick(event, thread.id, props.orderedProjectThreadIds);
+        }}
+        onPointerEnter={() => {
+          if (viewMode === "management") {
+            preloadTicketingProject(thread.projectId);
+          }
         }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;

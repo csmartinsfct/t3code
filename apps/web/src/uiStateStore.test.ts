@@ -26,7 +26,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectOrder: [],
     threadLastVisitedAtById: {},
     startupRecoveryStateByThreadId: {},
-    managementBoardContext: null,
+    managementBoardContextByProjectId: {},
     boardViewMode: "cards",
     browserVisibleByProjectId: {},
     boardFiltersByProjectId: {},
@@ -98,17 +98,19 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectExpandedById[project2]).toBe(false);
   });
 
-  it("syncProjects remaps the global management board context by cwd when the project id changes", () => {
+  it("syncProjects remaps management board contexts by cwd when the project id changes", () => {
     const oldProjectId = ProjectId.makeUnsafe("project-1");
     const recreatedProjectId = ProjectId.makeUnsafe("project-1b");
     const ticketId = TicketId.makeUnsafe("ticket-1");
     const initialState = syncProjects(
       makeUiState({
-        managementBoardContext: {
-          projectId: oldProjectId,
-          ticketStack: [ticketId],
-          boardScrollLeft: 120,
-          updatedAt: "2026-02-25T12:35:00.000Z",
+        managementBoardContextByProjectId: {
+          [oldProjectId]: {
+            projectId: oldProjectId,
+            ticketStack: [ticketId],
+            boardScrollLeft: 120,
+            updatedAt: "2026-02-25T12:35:00.000Z",
+          },
         },
       }),
       [{ id: oldProjectId, cwd: "/tmp/project-1" }],
@@ -116,7 +118,7 @@ describe("uiStateStore pure functions", () => {
 
     const next = syncProjects(initialState, [{ id: recreatedProjectId, cwd: "/tmp/project-1" }]);
 
-    expect(next.managementBoardContext).toMatchObject({
+    expect(next.managementBoardContextByProjectId[recreatedProjectId]).toMatchObject({
       projectId: recreatedProjectId,
       ticketStack: [ticketId],
       boardScrollLeft: 120,
@@ -137,11 +139,13 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "active",
         [thread2]: "dismissed",
       },
-      managementBoardContext: {
-        projectId: project1,
-        ticketStack: [ticket1],
-        boardScrollLeft: 120,
-        updatedAt: "2026-02-25T12:35:00.000Z",
+      managementBoardContextByProjectId: {
+        [project1]: {
+          projectId: project1,
+          ticketStack: [ticket1],
+          boardScrollLeft: 120,
+          updatedAt: "2026-02-25T12:35:00.000Z",
+        },
       },
     });
 
@@ -153,7 +157,9 @@ describe("uiStateStore pure functions", () => {
     expect(next.startupRecoveryStateByThreadId).toEqual({
       [thread1]: "active",
     });
-    expect(next.managementBoardContext).toEqual(initialState.managementBoardContext);
+    expect(next.managementBoardContextByProjectId).toEqual(
+      initialState.managementBoardContextByProjectId,
+    );
   });
 
   it("syncThreads seeds visit state for unseen snapshot threads", () => {
@@ -197,11 +203,13 @@ describe("uiStateStore pure functions", () => {
       startupRecoveryStateByThreadId: {
         [thread1]: "active",
       },
-      managementBoardContext: {
-        projectId: project1,
-        ticketStack: [],
-        boardScrollLeft: 48,
-        updatedAt: "2026-02-25T12:35:00.000Z",
+      managementBoardContextByProjectId: {
+        [project1]: {
+          projectId: project1,
+          ticketStack: [],
+          boardScrollLeft: 48,
+          updatedAt: "2026-02-25T12:35:00.000Z",
+        },
       },
     });
 
@@ -209,7 +217,9 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.threadLastVisitedAtById).toEqual({});
     expect(next.startupRecoveryStateByThreadId).toEqual({});
-    expect(next.managementBoardContext).toEqual(initialState.managementBoardContext);
+    expect(next.managementBoardContextByProjectId).toEqual(
+      initialState.managementBoardContextByProjectId,
+    );
   });
 
   it("tracks startup Was working markers separately from persisted thread ui", () => {
@@ -249,12 +259,12 @@ describe("uiStateStore pure functions", () => {
     expect(clearStartupWasWorkingThread(dismissedState, thread1)).toBe(dismissedState);
   });
 
-  it("setManagementBoardRoot initializes the global board context", () => {
+  it("setManagementBoardRoot initializes a project board context", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
 
     const next = setManagementBoardRoot(makeUiState(), project1);
 
-    expect(next.managementBoardContext).toMatchObject({
+    expect(next.managementBoardContextByProjectId[project1]).toMatchObject({
       projectId: project1,
       ticketStack: [],
       boardScrollLeft: 0,
@@ -273,7 +283,27 @@ describe("uiStateStore pure functions", () => {
       ticket2,
     );
 
-    expect(next.managementBoardContext?.ticketStack).toEqual([ticket1, ticket2]);
+    expect(next.managementBoardContextByProjectId[project1]?.ticketStack).toEqual([
+      ticket1,
+      ticket2,
+    ]);
+  });
+
+  it("pushManagementBoardTicket preserves other project board contexts", () => {
+    const project1 = ProjectId.makeUnsafe("project-1");
+    const project2 = ProjectId.makeUnsafe("project-2");
+    const ticket1 = TicketId.makeUnsafe("ticket-1");
+    const ticket2 = TicketId.makeUnsafe("ticket-2");
+    const initialState = pushManagementBoardTicket(
+      setManagementBoardRoot(setManagementBoardRoot(makeUiState(), project1), project2),
+      project1,
+      ticket1,
+    );
+
+    const next = pushManagementBoardTicket(initialState, project2, ticket2);
+
+    expect(next.managementBoardContextByProjectId[project1]?.ticketStack).toEqual([ticket1]);
+    expect(next.managementBoardContextByProjectId[project2]?.ticketStack).toEqual([ticket2]);
   });
 
   it("popManagementBoardTicket returns to the previous ticket in the stack", () => {
@@ -286,9 +316,9 @@ describe("uiStateStore pure functions", () => {
       ticket2,
     );
 
-    const next = popManagementBoardTicket(initialState);
+    const next = popManagementBoardTicket(initialState, project1);
 
-    expect(next.managementBoardContext?.ticketStack).toEqual([ticket1]);
+    expect(next.managementBoardContextByProjectId[project1]?.ticketStack).toEqual([ticket1]);
   });
 
   it("sanitizeManagementBoardContext removes tickets that no longer belong to the active project", () => {
@@ -296,52 +326,45 @@ describe("uiStateStore pure functions", () => {
     const ticket1 = TicketId.makeUnsafe("ticket-1");
     const invalidTicket = TicketId.makeUnsafe("ticket-2");
     const initialState = makeUiState({
-      managementBoardContext: {
-        projectId: project1,
-        ticketStack: [ticket1, invalidTicket],
-        boardScrollLeft: 32,
-        updatedAt: "2026-02-25T12:35:00.000Z",
+      managementBoardContextByProjectId: {
+        [project1]: {
+          projectId: project1,
+          ticketStack: [ticket1, invalidTicket],
+          boardScrollLeft: 32,
+          updatedAt: "2026-02-25T12:35:00.000Z",
+        },
       },
     });
 
     const next = sanitizeManagementBoardContext(initialState, project1, new Set([ticket1]));
 
-    expect(next.managementBoardContext).toMatchObject({
+    expect(next.managementBoardContextByProjectId[project1]).toMatchObject({
       projectId: project1,
       ticketStack: [ticket1],
       boardScrollLeft: 32,
     });
   });
 
-  it("sanitizeManagementBoardContext resets mismatched projects to the board root", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
+  it("sanitizeManagementBoardContext creates a missing project context at the board root", () => {
     const project2 = ProjectId.makeUnsafe("project-2");
-    const ticket1 = TicketId.makeUnsafe("ticket-1");
-    const initialState = makeUiState({
-      managementBoardContext: {
-        projectId: project1,
-        ticketStack: [ticket1],
-        boardScrollLeft: 32,
-        updatedAt: "2026-02-25T12:35:00.000Z",
-      },
-    });
+    const initialState = makeUiState();
 
     const next = sanitizeManagementBoardContext(initialState, project2, new Set());
 
-    expect(next.managementBoardContext).toMatchObject({
+    expect(next.managementBoardContextByProjectId[project2]).toMatchObject({
       projectId: project2,
       ticketStack: [],
       boardScrollLeft: 0,
     });
   });
 
-  it("setManagementBoardScrollLeft preserves the root board scroll globally", () => {
+  it("setManagementBoardScrollLeft preserves the root board scroll for one project", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const initialState = setManagementBoardRoot(makeUiState(), project1);
 
-    const next = setManagementBoardScrollLeft(initialState, 240);
+    const next = setManagementBoardScrollLeft(initialState, project1, 240);
 
-    expect(next.managementBoardContext?.boardScrollLeft).toBe(240);
+    expect(next.managementBoardContextByProjectId[project1]?.boardScrollLeft).toBe(240);
   });
 
   it("toggleTicketCollapsed marks a ticket collapsed and toggles back to open", () => {

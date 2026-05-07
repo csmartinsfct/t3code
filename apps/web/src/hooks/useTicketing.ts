@@ -1,8 +1,15 @@
-import type { NativeApi, TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { NativeApi, ProjectId, TicketSummary, TicketingStreamEvent } from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
+import {
+  applyLocalTicketUpdates,
+  applyTicketEvent,
+  fetchTicketingProject,
+  getCachedTickets,
+  useTicketingCacheStore,
+} from "../lib/ticketingCacheStore";
 import { logWebTimeline, warnWebTimeline } from "../timelineLogger";
 
 function summarizeTicketSet(tickets: ReadonlyArray<TicketSummary>): Record<string, number> {
@@ -42,6 +49,7 @@ export interface UseTicketingReturn {
   tickets: ReadonlyArray<TicketSummary>;
   projects: ReadonlyArray<{ id: string; title: string; workspaceRoot: string }>;
   loading: boolean;
+  refreshing: boolean;
   selectedProjectId: string | null;
   setSelectedProjectId: (id: string | null) => void;
   refetch: () => Promise<void>;
@@ -77,6 +85,17 @@ export function resolveTicketingProjectResyncState(input: {
     shouldResync:
       input.requestedProjectId !== undefined && nextProjectId !== input.selectedProjectId,
     nextProjectId,
+  };
+}
+
+export function resolveTicketingLoadingState(input: {
+  tickets: ReadonlyArray<TicketSummary>;
+  status: "loading" | "ready" | "refreshing" | "error" | null;
+  hasResolvedProject: boolean;
+}): { loading: boolean; refreshing: boolean } {
+  return {
+    loading: input.hasResolvedProject && input.tickets.length === 0 && input.status !== "ready",
+    refreshing: input.tickets.length > 0 && input.status === "refreshing",
   };
 }
 
@@ -117,12 +136,29 @@ export async function fetchTicketingState(input: {
 }
 
 export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn {
-  const [tickets, setTickets] = useState<ReadonlyArray<TicketSummary>>([]);
   const storeProjects = useStore((s) => s.projects);
-  const [loading, setLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     options?.projectId ?? null,
   );
+  const projects: ReadonlyArray<TicketingProjectSnapshot> = useMemo(
+    () =>
+      storeProjects.map((p) => ({
+        id: p.id,
+        title: p.name,
+        workspaceRoot: p.cwd,
+      })),
+    [storeProjects],
+  );
+  const resolvedProjectId = options?.projectId ?? selectedProjectId ?? projects[0]?.id ?? null;
+  const cacheEntry = useTicketingCacheStore((state) =>
+    resolvedProjectId ? state.entries[resolvedProjectId] : undefined,
+  );
+  const tickets = cacheEntry?.tickets ?? [];
+  const loadingState = resolveTicketingLoadingState({
+    tickets,
+    status: cacheEntry?.status ?? null,
+    hasResolvedProject: resolvedProjectId !== null,
+  });
 
   // Sync internal state when the caller-supplied projectId changes.
   // Handles TanStack Router keeping components mounted across param-only
@@ -133,8 +169,6 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
       selectedProjectId,
     });
     if (resync.shouldResync) {
-      setLoading(true);
-      setTickets([]);
       setSelectedProjectId(resync.nextProjectId);
     }
     // Only react to prop changes, not internal state changes
@@ -142,69 +176,56 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   }, [options?.projectId]);
 
   const fetchIdRef = useRef(0);
-  const selectedProjectIdRef = useRef(selectedProjectId);
-  selectedProjectIdRef.current = selectedProjectId;
 
-  const fetchData = useCallback(async () => {
-    const currentFetchId = ++fetchIdRef.current;
-    try {
-      const api = ensureNativeApi();
-      const requestedProjectId = options?.projectId ?? undefined;
-      // Use the prop-supplied projectId directly to avoid a stale fetch when
-      // the resync effect hasn't updated selectedProjectId yet.
-      // Read from ref to always get the latest value without adding it as a dep.
-      const effectiveProjectId = options?.projectId ?? selectedProjectIdRef.current;
+  const fetchData = useCallback(
+    async (input?: { force?: boolean }) => {
+      const currentFetchId = ++fetchIdRef.current;
+      const effectiveProjectId = options?.projectId ?? selectedProjectId ?? projects[0]?.id ?? null;
+      try {
+        const api = ensureNativeApi();
+        const requestedProjectId = options?.projectId ?? undefined;
 
-      logWebTimeline("ticketing.fetch.start", {
-        fetchId: currentFetchId,
-        selectedProjectId: effectiveProjectId,
-        requestedProjectId: requestedProjectId ?? null,
-        resolvedProjectId: effectiveProjectId ?? requestedProjectId ?? null,
-      });
+        logWebTimeline("ticketing.fetch.start", {
+          fetchId: currentFetchId,
+          selectedProjectId: effectiveProjectId,
+          requestedProjectId: requestedProjectId ?? null,
+          resolvedProjectId: effectiveProjectId ?? requestedProjectId ?? null,
+        });
 
-      const result = await fetchTicketingState({
-        api,
-        storeProjects,
-        requestedProjectId,
-        selectedProjectId: effectiveProjectId,
-        currentFetchId,
-        isCurrentFetch: (fetchId) => fetchIdRef.current === fetchId,
-      });
-      if (!result) return;
+        if (!effectiveProjectId) {
+          logWebTimeline("ticketing.fetch.empty", { fetchId: currentFetchId });
+          return;
+        }
 
-      // If no project selected yet and there are projects, select the first one.
-      if (result.shouldSelectResolvedProject && result.resolvedProjectId) {
-        setSelectedProjectId(result.resolvedProjectId);
+        if (selectedProjectId === null && options?.projectId === undefined) {
+          setSelectedProjectId(effectiveProjectId);
+        }
+
+        await fetchTicketingProject({
+          api,
+          projectId: effectiveProjectId as ProjectId,
+          ...(input?.force !== undefined ? { force: input.force } : {}),
+        });
+        if (fetchIdRef.current !== currentFetchId) return;
+
+        const resultTickets = getCachedTickets(effectiveProjectId as ProjectId)?.tickets ?? [];
+        logWebTimeline("ticketing.fetch.success", {
+          fetchId: currentFetchId,
+          projectId: effectiveProjectId,
+          ticketCount: resultTickets.length,
+          ...summarizeTicketSet(resultTickets),
+        });
+      } catch (error) {
+        if (fetchIdRef.current !== currentFetchId) return;
+        warnWebTimeline("ticketing.fetch.failed", {
+          fetchId: currentFetchId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        console.error("Failed to fetch tickets:", error);
       }
-
-      if (!result.resolvedProjectId) {
-        setTickets([]);
-        logWebTimeline("ticketing.fetch.empty", { fetchId: currentFetchId });
-        return;
-      }
-
-      setTickets(result.tickets);
-      logWebTimeline("ticketing.fetch.success", {
-        fetchId: currentFetchId,
-        projectId: result.resolvedProjectId,
-        ticketCount: result.tickets.length,
-        ...summarizeTicketSet(result.tickets),
-      });
-    } catch (error) {
-      if (fetchIdRef.current !== currentFetchId) return;
-      warnWebTimeline("ticketing.fetch.failed", {
-        fetchId: currentFetchId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      console.error("Failed to fetch tickets:", error);
-    } finally {
-      if (fetchIdRef.current === currentFetchId) {
-        setLoading(false);
-      }
-    }
-    // selectedProjectId intentionally omitted — effectiveProjectId reads it
-    // synchronously via ref to avoid stale double-fetches.
-  }, [options?.projectId, storeProjects]);
+    },
+    [options?.projectId, projects, selectedProjectId],
+  );
 
   useEffect(() => {
     void fetchData();
@@ -214,62 +235,29 @@ export function useTicketing(options?: UseTicketingOptions): UseTicketingReturn 
   useEffect(() => {
     const api = ensureNativeApi();
     const unsubscribe = api.ticketing.onEvent((event: TicketingStreamEvent) => {
-      if (event.type === "ticket_upserted") {
-        if (selectedProjectId && event.projectId !== selectedProjectId) return;
-        setTickets((current) => {
-          const idx = current.findIndex((t) => t.id === event.ticket.id);
-          // Archived tickets are never surfaced on the board; drop them on upsert.
-          if (event.ticket.isArchived) {
-            return idx >= 0 ? current.filter((_, i) => i !== idx) : current;
-          }
-          if (idx >= 0) {
-            const next = [...current];
-            next[idx] = event.ticket;
-            return next;
-          }
-          return [event.ticket, ...current];
-        });
-      } else if (event.type === "ticket_deleted") {
-        setTickets((current) => current.filter((t) => t.id !== event.ticketId));
-      }
+      applyTicketEvent(event);
     });
     return unsubscribe;
-  }, [selectedProjectId]);
+  }, []);
 
   const refetch = useCallback(async () => {
-    setLoading(true);
-    await fetchData();
+    await fetchData({ force: true });
   }, [fetchData]);
 
   const applyLocalReorder = useCallback(
     (updates: ReadonlyArray<{ id: string; sortOrder: number; status?: string }>) => {
-      setTickets((current) => {
-        const updateMap = new Map(updates.map((u) => [u.id, u]));
-        return current.map((t) => {
-          const u = updateMap.get(t.id);
-          if (!u) return t;
-          return {
-            ...t,
-            sortOrder: u.sortOrder,
-            ...(u.status ? { status: u.status as TicketSummary["status"] } : {}),
-          };
-        });
-      });
+      if (!resolvedProjectId) return;
+      applyLocalTicketUpdates(resolvedProjectId as ProjectId, updates);
     },
-    [],
+    [resolvedProjectId],
   );
-
-  const projects: ReadonlyArray<TicketingProjectSnapshot> = storeProjects.map((p) => ({
-    id: p.id,
-    title: p.name,
-    workspaceRoot: p.cwd,
-  }));
 
   return {
     tickets,
     projects,
-    loading,
-    selectedProjectId,
+    loading: loadingState.loading,
+    refreshing: loadingState.refreshing,
+    selectedProjectId: resolvedProjectId,
     setSelectedProjectId,
     refetch,
     applyLocalReorder,

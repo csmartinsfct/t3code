@@ -96,12 +96,15 @@ const selectionStoreState = {
 };
 
 const uiStateStoreState = {
-  managementBoardContext: null as {
-    projectId: TicketSummary["projectId"];
-    ticketStack: TicketSummary["id"][];
-    boardScrollLeft: number;
-    updatedAt: string;
-  } | null,
+  managementBoardContextByProjectId: {} as Record<
+    string,
+    {
+      projectId: TicketSummary["projectId"];
+      ticketStack: TicketSummary["id"][];
+      boardScrollLeft: number;
+      updatedAt: string;
+    }
+  >,
   boardViewMode: "cards" as "cards" | "list",
   browserVisibleByProjectId: {} as Record<string, boolean>,
   boardFiltersByProjectId: {},
@@ -164,9 +167,12 @@ vi.mock("../../uiStateStore", () => ({
   DEFAULT_BOARD_FILTERS: {
     priorityFilter: [],
     labelFilter: [],
+    statusFilter: [],
     searchQuery: "",
     collapsedStatuses: [],
   },
+  getManagementBoardContextForProject: (state: typeof uiStateStoreState, projectId: string) =>
+    state.managementBoardContextByProjectId[projectId] ?? null,
   useUiStateStore: (selector: (state: typeof uiStateStoreState) => unknown) =>
     selector(uiStateStoreState),
 }));
@@ -302,6 +308,8 @@ async function renderBoard({
   electron = false,
   threadId = null,
   tickets = [],
+  loading = false,
+  refreshing = false,
   managementBoardContext = null,
   boardViewMode = "cards",
   browserVisible = false,
@@ -309,7 +317,11 @@ async function renderBoard({
   electron?: boolean;
   threadId?: ThreadId | null;
   tickets?: ReadonlyArray<TicketSummary>;
-  managementBoardContext?: typeof uiStateStoreState.managementBoardContext;
+  loading?: boolean;
+  refreshing?: boolean;
+  managementBoardContext?:
+    | (typeof uiStateStoreState.managementBoardContextByProjectId)[string]
+    | null;
   boardViewMode?: typeof uiStateStoreState.boardViewMode;
   browserVisible?: boolean;
 } = {}) {
@@ -318,7 +330,9 @@ async function renderBoard({
 
   selectionStoreState.selectedTicketIds = new Set();
   selectionStoreState.selectedTickets = new Map();
-  uiStateStoreState.managementBoardContext = managementBoardContext;
+  uiStateStoreState.managementBoardContextByProjectId = managementBoardContext
+    ? { [managementBoardContext.projectId]: managementBoardContext }
+    : {};
   uiStateStoreState.boardViewMode = boardViewMode;
   uiStateStoreState.browserVisibleByProjectId = browserVisible ? { "project-1": true } : {};
   detailMockState.lastProps = null;
@@ -342,7 +356,8 @@ async function renderBoard({
   mockUseTicketing.mockReturnValue({
     tickets,
     projects: [],
-    loading: false,
+    loading,
+    refreshing,
     selectedProjectId: "project-1",
     setSelectedProjectId: vi.fn(),
     refetch: vi.fn(),
@@ -394,6 +409,19 @@ describe("KanbanBoard", () => {
     expect(markup).toContain("Top-level blocked");
     expect(markup).not.toContain("Child task should stay off-board");
     expect(markup).not.toContain("T3CO-12");
+  });
+
+  it("shows full loading only for cold ticket loads", async () => {
+    const coldMarkup = await renderBoard({ loading: true, tickets: [] });
+    expect(coldMarkup).toContain("Loading...");
+
+    const refreshingMarkup = await renderBoard({
+      loading: false,
+      refreshing: true,
+      tickets: [makeTicket({ title: "Cached while refreshing" })],
+    });
+    expect(refreshingMarkup).toContain("Cached while refreshing");
+    expect(refreshingMarkup).not.toContain("Loading...");
   });
 
   it("renders blocked tickets in the blocked column with the expected label treatment", async () => {
@@ -488,7 +516,7 @@ describe("KanbanBoard", () => {
     expect(detailMockState.lastProps?.ticketId).toBe("child-ticket");
 
     detailMockState.lastProps?.onBack();
-    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith();
+    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith("project-1");
 
     const parentDetailMarkup = await renderBoard({
       threadId,
@@ -508,7 +536,7 @@ describe("KanbanBoard", () => {
     // renderBoard() clears mocks between renders, so this assertion is scoped to the second back step.
     detailMockState.lastProps?.onBack();
     expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledOnce();
-    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith();
+    expect(uiStateStoreState.popManagementBoardTicket).toHaveBeenCalledWith("project-1");
 
     const restoredBoardMarkup = await renderBoard({
       threadId,
