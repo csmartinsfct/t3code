@@ -1,5 +1,5 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { useContextMenuStore } from "~/contextMenuStore";
@@ -49,16 +49,37 @@ function ContextMenuItems({
   items: readonly ContextMenuItem<string>[];
   onSelect: (id: string) => void;
 }) {
+  const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
+
   return items.map((item) => {
     if (item.id === "---") {
       return <MenuSeparator key={item.id} />;
     }
 
     if (item.children && item.children.length > 0) {
+      const open = openSubmenuId === item.id;
+
       return (
-        <MenuSub key={item.id}>
-          <MenuSubTrigger disabled={item.disabled}>{item.label}</MenuSubTrigger>
-          <MenuSubPopup>
+        <MenuSub
+          key={item.id}
+          open={open}
+          onOpenChange={(nextOpen) => {
+            if (nextOpen && !item.disabled) setOpenSubmenuId(item.id);
+          }}
+        >
+          <MenuSubTrigger
+            disabled={item.disabled}
+            onPointerEnter={() => {
+              if (!item.disabled) setOpenSubmenuId(item.id);
+            }}
+          >
+            {item.label}
+          </MenuSubTrigger>
+          <MenuSubPopup
+            onPointerEnter={() => {
+              if (!item.disabled) setOpenSubmenuId(item.id);
+            }}
+          >
             <ContextMenuItems items={item.children} onSelect={onSelect} />
           </MenuSubPopup>
         </MenuSub>
@@ -70,6 +91,7 @@ function ContextMenuItems({
         key={item.id}
         disabled={item.disabled}
         variant={item.destructive ? "destructive" : "default"}
+        onPointerEnter={() => setOpenSubmenuId(null)}
         onClick={() => onSelect(item.id)}
       >
         {item.label}

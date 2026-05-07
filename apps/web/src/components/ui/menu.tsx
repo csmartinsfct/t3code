@@ -257,6 +257,7 @@ function MenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
 
 function MenuSubTrigger({
   className,
+  closeDelay = 180,
   inset,
   children,
   ...props
@@ -271,6 +272,7 @@ function MenuSubTrigger({
       )}
       data-inset={inset}
       data-slot="menu-sub-trigger"
+      closeDelay={closeDelay}
       {...props}
     >
       {children}
