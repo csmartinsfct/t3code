@@ -1,4 +1,5 @@
 import { ArrowUpDownIcon } from "lucide-react";
+import { useRef } from "react";
 
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 
@@ -138,21 +139,38 @@ registerOverlayRoute<{
   function SidebarSortMenuOverlayRoute({ message, controller }) {
     const projectSortOrder = readProjectSortOrderParam(message.params.projectSortOrder);
     const threadSortOrder = readThreadSortOrderParam(message.params.threadSortOrder);
+    const suppressSelectionCloseRef = useRef(false);
+
+    const emitSortChange = (result: SidebarSortMenuResult) => {
+      suppressSelectionCloseRef.current = true;
+      controller.bridge.emitEvent("sort-change", result);
+    };
 
     return (
-      <Menu open trackEmbeddedBrowserOverlay={false}>
+      <Menu
+        open
+        trackEmbeddedBrowserOverlay={false}
+        onOpenChange={(open) => {
+          if (open) return;
+          if (suppressSelectionCloseRef.current) {
+            suppressSelectionCloseRef.current = false;
+            return;
+          }
+          controller.cancel("dismissed");
+        }}
+      >
         <OverlayRouteMenuPopup align="end" side="bottom" className="min-w-44">
           <SidebarSortMenuContent
             projectSortOrder={projectSortOrder}
             threadSortOrder={threadSortOrder}
             onProjectSortOrderChange={(sortOrder) =>
-              controller.bridge.emitEvent("sort-change", {
+              emitSortChange({
                 kind: "project",
                 sortOrder,
               } satisfies SidebarSortMenuResult)
             }
             onThreadSortOrderChange={(sortOrder) =>
-              controller.bridge.emitEvent("sort-change", {
+              emitSortChange({
                 kind: "thread",
                 sortOrder,
               } satisfies SidebarSortMenuResult)
