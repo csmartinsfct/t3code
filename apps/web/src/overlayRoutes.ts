@@ -8,6 +8,7 @@ import "./components/ProjectScriptsControl";
 import "./components/PullRequestThreadDialog";
 import "./components/SystemPromptDialog";
 import "./components/chat/ContextWindowMeter";
+import "./components/chat/OrchestrationProgressHeader";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
@@ -41,6 +42,7 @@ logWebTimeline("overlay-routes.loaded", {
     "template-editor",
     "managed-runs-control",
     "context-window-meter",
+    "orchestration-resume-menu",
     "plan-actions-menu",
     "propose-action-icon-picker",
     "proposed-plan-save-dialog",
