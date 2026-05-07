@@ -8,7 +8,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  EllipsisIcon,
   LoaderIcon,
   PanelRightCloseIcon,
 } from "lucide-react";
@@ -23,7 +22,6 @@ import {
   downloadPlanAsTextFile,
   stripDisplayedPlanMarkdown,
 } from "../proposedPlan";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readNativeApi } from "~/nativeApi";
 import { toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -35,6 +33,7 @@ import {
   writeMigratedPersistedPanelWidth,
   writePersistedPanelWidth,
 } from "~/lib/persistedPanelWidth";
+import { PlanActionsMenu } from "./PlanActionsMenu";
 
 function stepStatusIcon(status: string): React.ReactNode {
   if (status === "completed") {
@@ -277,56 +276,16 @@ const PlanSidebar = memo(function PlanSidebar({
         </div>
         <div className="flex items-center gap-1">
           {planMarkdown ? (
-            <Menu
-              overlayItems={[
-                { id: "copy", label: isCopied ? "Copied!" : "Copy to clipboard" },
-                { id: "download", label: "Download as markdown" },
-                {
-                  id: "save",
-                  label: "Save to workspace",
-                  disabled: !workspaceRoot || isSavingToWorkspace,
-                },
-              ]}
-              overlayMenuAlign="end"
-              overlayOnSelect={(id) => {
-                if (id === "copy") {
-                  handleCopyPlan();
-                  return;
-                }
-                if (id === "download") {
-                  handleDownload();
-                  return;
-                }
-                if (id === "save") {
-                  handleSaveToWorkspace();
-                }
-              }}
-            >
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground/50 hover:text-foreground/70"
-                    aria-label="Plan actions"
-                  />
-                }
-              >
-                <EllipsisIcon className="size-3.5" />
-              </MenuTrigger>
-              <MenuPopup align="end">
-                <MenuItem onClick={handleCopyPlan}>
-                  {isCopied ? "Copied!" : "Copy to clipboard"}
-                </MenuItem>
-                <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-                <MenuItem
-                  onClick={handleSaveToWorkspace}
-                  disabled={!workspaceRoot || isSavingToWorkspace}
-                >
-                  Save to workspace
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
+            <PlanActionsMenu
+              buttonClassName="text-muted-foreground/50 hover:text-foreground/70"
+              buttonVariant="ghost"
+              iconClassName="size-3.5"
+              isCopied={isCopied}
+              isSaveDisabled={!workspaceRoot || isSavingToWorkspace}
+              onCopy={handleCopyPlan}
+              onDownload={handleDownload}
+              onSave={handleSaveToWorkspace}
+            />
           ) : null}
           <Button
             size="icon-xs"

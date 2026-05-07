@@ -41,6 +41,7 @@ logWebTimeline("overlay-routes.loaded", {
     "template-editor",
     "managed-runs-control",
     "context-window-meter",
+    "plan-actions-menu",
     "propose-action-icon-picker",
     "proposed-plan-save-dialog",
     "rate-limit-meter",

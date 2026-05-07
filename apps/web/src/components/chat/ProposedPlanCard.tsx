@@ -8,10 +8,8 @@ import {
   stripDisplayedPlanMarkdown,
 } from "../../proposedPlan";
 import ChatMarkdown from "../ChatMarkdown";
-import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import {
@@ -28,6 +26,7 @@ import { readNativeApi } from "~/nativeApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
+import { PlanActionsMenu } from "../PlanActionsMenu";
 
 const PROPOSED_PLAN_SAVE_DIALOG_ROUTE_KEY = "proposed-plan-save-dialog";
 
@@ -183,46 +182,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <Badge variant={status === "ready" ? "secondary" : "outline"}>{statusLabel}</Badge>
           <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
-        <Menu
-          overlayItems={[
-            { id: "copy", label: isCopied ? "Copied!" : "Copy to clipboard" },
-            { id: "download", label: "Download as markdown" },
-            {
-              id: "save",
-              label: "Save to workspace",
-              disabled: !workspaceRoot || isSavingToWorkspace,
-            },
-          ]}
-          overlayMenuAlign="end"
-          overlayOnSelect={(id) => {
-            if (id === "copy") {
-              handleCopyPlan();
-              return;
-            }
-            if (id === "download") {
-              handleDownload();
-              return;
-            }
-            if (id === "save" && workspaceRoot && !isSavingToWorkspace) {
-              openSaveDialog();
-            }
-          }}
-        >
-          <MenuTrigger
-            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
-          >
-            <EllipsisIcon aria-hidden="true" className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
-            </MenuItem>
-            <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
-              Save to workspace
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
+        <PlanActionsMenu
+          isCopied={isCopied}
+          isSaveDisabled={!workspaceRoot || isSavingToWorkspace}
+          onCopy={handleCopyPlan}
+          onDownload={handleDownload}
+          onSave={openSaveDialog}
+        />
       </div>
       <div className="mt-4">
         <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
