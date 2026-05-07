@@ -23,7 +23,7 @@ export function unsupportedPermanentNativeToolMessage(tool: string): string {
   return `tool ${tool} is not supported in native (Electron) mode for this project. This tool requires a standalone Playwright browser context and is not meaningful in the embedded browser.`;
 }
 
-const DEFERRED_TOOLS = new Set(["cookie-import-browser", "responsive"]);
+const DEFERRED_TOOLS = new Set(["cookie-import-browser"]);
 const UNSUPPORTED_NATIVE_TOOLS = new Set(["focus", "visibility"]);
 
 interface RuntimeEvaluateResponse<T> {
@@ -449,6 +449,8 @@ export class ElectronWebContentsBrowserHost {
         return this.snapshot(args);
       case "screenshot":
         return this.screenshot(args);
+      case "responsive":
+        return this.responsive(args);
       case "pdf":
         return this.pdf(args[0]);
       case "diff":
@@ -1117,6 +1119,77 @@ export class ElectronWebContentsBrowserHost {
       null,
       2,
     );
+  }
+
+  // Captures three full-page screenshots at fixed mobile/tablet/desktop
+  // viewport sizes — the Electron-host port of the gstack `responsive`
+  // meta-tool (apps/server/src/browser/core/meta-commands.ts:211). Drives
+  // CDP `Emulation.setDeviceMetricsOverride` per viewport, then clears the
+  // override at the end. The renderer's per-tab viewport-emulator state
+  // (`emulationByTab` in EmbeddedBrowser.tsx) is unaffected and re-issues
+  // its `setViewport` IPC on the next user interaction (tab activate, drag,
+  // preset change), so the embedded UI re-syncs without explicit help.
+  private async responsive(args: readonly string[]): Promise<string> {
+    // Dynamic-import gstack helpers; same pattern as `evalFile` (T3CO-343).
+    // Keeps `core/**` out of T3's typecheck graph (vendored code does not
+    // satisfy strict compiler settings; see apps/server/src/browser/NOTICE).
+    const { validateOutputPath } = (await import("../../core/path-security.ts" as string)) as {
+      readonly validateOutputPath: (path: string) => void;
+    };
+    const { TEMP_DIR } = (await import("../../core/platform.ts" as string)) as {
+      readonly TEMP_DIR: string;
+    };
+
+    const prefix = args[0] ?? nodePath.join(TEMP_DIR, "browse-responsive");
+    const viewports = [
+      { name: "mobile", width: 375, height: 812 },
+      { name: "tablet", width: 768, height: 1024 },
+      { name: "desktop", width: 1280, height: 720 },
+    ] as const;
+
+    const lines: string[] = [];
+    try {
+      for (const vp of viewports) {
+        const screenshotPath = `${prefix}-${vp.name}.png`;
+        validateOutputPath(screenshotPath);
+        await this.send("Emulation.setDeviceMetricsOverride", {
+          width: vp.width,
+          height: vp.height,
+          deviceScaleFactor: 0,
+          mobile: false,
+        });
+        const buffer = await this.captureFullPageScreenshot();
+        await fs.writeFile(screenshotPath, buffer);
+        lines.push(`${vp.name} (${vp.width}x${vp.height}): ${screenshotPath}`);
+      }
+    } finally {
+      await this.send("Emulation.clearDeviceMetricsOverride", {}).catch(() => {});
+    }
+    return lines.join("\n");
+  }
+
+  // Full-page (entire scrollable document) variant of the per-viewport
+  // capture in `cdpHost.captureScreenshot()`. Uses Page.getLayoutMetrics to
+  // size the clip rectangle and `captureBeyondViewport: true` so Chromium
+  // renders content past the visible viewport into the output PNG. We
+  // intentionally do *not* pass `dontSetVisibleSize` to the prior
+  // `setDeviceMetricsOverride` call (different from the embedded emulator's
+  // setViewport in apps/desktop/src/main.ts) — we want the rendering surface
+  // to match the override so the captured frame matches the simulated
+  // viewport exactly.
+  private async captureFullPageScreenshot(): Promise<Buffer> {
+    const layout = await this.send<{
+      readonly cssContentSize?: { width: number; height: number };
+      readonly contentSize?: { width: number; height: number };
+    }>("Page.getLayoutMetrics");
+    const size = layout.cssContentSize ?? layout.contentSize;
+    if (!size) throw new Error("responsive: Page.getLayoutMetrics returned no content size");
+    const result = await this.send<ScreenshotResponse>("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
+    });
+    return Buffer.from(result.data, "base64");
   }
 
   private async pdf(outputPath = nodePath.join(os.tmpdir(), "browse-page.pdf")): Promise<string> {
