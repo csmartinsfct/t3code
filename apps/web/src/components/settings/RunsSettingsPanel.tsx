@@ -284,15 +284,7 @@ export function RunsSettingsPanel() {
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
-          <Select
-            value={projectFilter}
-            onValueChange={(value) => setProjectFilter(value ?? "all")}
-            overlayItems={projectOptions.map((option) => ({
-              value: option,
-              label: option === "all" ? "All projects" : option,
-            }))}
-            overlayAlignItemWithTrigger={false}
-          >
+          <Select value={projectFilter} onValueChange={(value) => setProjectFilter(value ?? "all")}>
             <SelectTrigger className="w-[180px]">
               <SelectValue>{projectFilter === "all" ? "All projects" : projectFilter}</SelectValue>
             </SelectTrigger>
@@ -305,15 +297,7 @@ export function RunsSettingsPanel() {
             </SelectPopup>
           </Select>
 
-          <Select
-            value={scriptFilter}
-            onValueChange={(value) => setScriptFilter(value ?? "all")}
-            overlayItems={scriptOptions.map((option) => ({
-              value: option,
-              label: option === "all" ? "All actions" : option,
-            }))}
-            overlayAlignItemWithTrigger={false}
-          >
+          <Select value={scriptFilter} onValueChange={(value) => setScriptFilter(value ?? "all")}>
             <SelectTrigger className="w-[200px]">
               <SelectValue>{scriptFilter === "all" ? "All actions" : scriptFilter}</SelectValue>
             </SelectTrigger>
@@ -331,13 +315,6 @@ export function RunsSettingsPanel() {
             onValueChange={(value) =>
               setStatusFilter((value ?? "all") as "all" | "ready" | "failed" | "ungrounded")
             }
-            overlayItems={[
-              { value: "all", label: "All statuses" },
-              { value: "ready", label: "Ready" },
-              { value: "failed", label: "Failed" },
-              { value: "ungrounded", label: "Ungrounded" },
-            ]}
-            overlayAlignItemWithTrigger={false}
           >
             <SelectTrigger className="w-[160px]">
               <SelectValue>{statusFilter === "all" ? "All statuses" : statusFilter}</SelectValue>

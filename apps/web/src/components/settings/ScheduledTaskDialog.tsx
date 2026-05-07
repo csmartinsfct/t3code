@@ -331,16 +331,7 @@ function ScheduledTaskDialogContent({
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs font-medium">Type</Label>
-            <Select
-              value={jobType}
-              onValueChange={(val) => setJobType(val as "new_thread")}
-              overlayItems={SCHEDULED_TASK_TYPES.map((type) => ({
-                value: type.value,
-                label: type.label,
-                hideIndicator: true,
-              }))}
-              overlayAlignItemWithTrigger={false}
-            >
+            <Select value={jobType} onValueChange={(val) => setJobType(val as "new_thread")}>
               <SelectTrigger size="sm" className="w-full">
                 <SelectValue>
                   {SCHEDULED_TASK_TYPES.find((t) => t.value === jobType)?.label}
@@ -366,12 +357,6 @@ function ScheduledTaskDialogContent({
                     setProjectId(val ?? "");
                     setSkillIds([]);
                   }}
-                  overlayItems={projects.map((project) => ({
-                    value: project.id,
-                    label: project.title,
-                    hideIndicator: true,
-                  }))}
-                  overlayAlignItemWithTrigger={false}
                 >
                   <SelectTrigger size="sm" className="w-full">
                     <SelectValue>

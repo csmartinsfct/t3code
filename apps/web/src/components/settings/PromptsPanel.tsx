@@ -56,28 +56,6 @@ export function PromptsPanel() {
         ? selectedProjectId
         : "global";
 
-  const scopeOverlayItems = useMemo(
-    () => [
-      { value: "global", label: "Global", hideIndicator: true },
-      ...projects.map((project) => ({
-        value: project.id,
-        label: project.name,
-        hideIndicator: true,
-      })),
-      ...(activeRuns.length > 0
-        ? [
-            { value: "__orch_separator", label: "", separator: true },
-            ...activeRuns.map((run) => ({
-              value: `run:${run.id}`,
-              label: runLabel(run, projects),
-              hideIndicator: true,
-            })),
-          ]
-        : []),
-    ],
-    [activeRuns, projects],
-  );
-
   const orchScopeInput = useMemo(
     () =>
       scopeKind === "orchestration-run" && selectedRunId
@@ -234,12 +212,7 @@ export function PromptsPanel() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-foreground">Scope</span>
-              <Select
-                value={scopeValue}
-                onValueChange={handleScopeChange}
-                overlayItems={scopeOverlayItems}
-                overlayAlignItemWithTrigger={false}
-              >
+              <Select value={scopeValue} onValueChange={handleScopeChange}>
                 <SelectTrigger className="w-full sm:w-56" aria-label="Prompt scope">
                   <SelectValue>
                     {scopeKind === "orchestration-run"
