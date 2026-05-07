@@ -1,8 +1,48 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-04T16:12:16.314Z",
-  "lastProcessedCommit": "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b",
+  "generatedAt": "2026-05-04T22:51:41.594Z",
+  "lastProcessedCommit": "129277594eb7efb16b0d3de461356d7dd8f360b1",
   "groups": [
+    {
+      "date": "2026-05-05",
+      "entries": [
+        {
+          "id": "ed5b18743e0d83c0",
+          "title": "Improved markdown table rendering",
+          "summary": "Markdown tables now display more cleanly across chat and tickets, with better spacing and wrapping for easier reading.",
+          "category": "improvement",
+          "commitShas": ["129277594eb7efb16b0d3de461356d7dd8f360b1"]
+        },
+        {
+          "id": "cad90a542593233c",
+          "title": "Embedded browser gets a redesigned viewport toolbar and resize controls",
+          "summary": "The embedded browser now has a cleaner floating viewport toolbar with faster access to device, size, zoom, rotate, and reset controls, plus drag-to-resize handles for adjusting the viewport directly.",
+          "category": "improvement",
+          "commitShas": ["305bc5cc44af304a13ba66baf5985ccd90693ecc"]
+        },
+        {
+          "id": "754bfdc0c7b8c96d",
+          "title": "Embedded browser navigation is more intuitive and polished",
+          "summary": "Navigation controls now use dedicated back, forward, and reload buttons, the address bar no longer shows a placeholder site on load, and submitting an empty address does nothing instead of triggering a navigation.",
+          "category": "improvement",
+          "commitShas": ["305bc5cc44af304a13ba66baf5985ccd90693ecc"]
+        },
+        {
+          "id": "b78457375f9cb2cd",
+          "title": "Embedded browser state now persists more reliably",
+          "summary": "Returning to a project or thread restores browser state more smoothly, including open tabs, the active page, and viewport emulation settings, reducing empty flashes and preserving context across restarts.",
+          "category": "fix",
+          "commitShas": ["305bc5cc44af304a13ba66baf5985ccd90693ecc"]
+        },
+        {
+          "id": "7670a56827e139c0",
+          "title": "Embedded browser behaves better around overlays",
+          "summary": "When image previews open in chat, the embedded browser now suspends behind the overlay instead of continuing to render underneath it.",
+          "category": "fix",
+          "commitShas": ["305bc5cc44af304a13ba66baf5985ccd90693ecc"]
+        }
+      ]
+    },
     {
       "date": "2026-05-04",
       "entries": [
@@ -3116,6 +3156,26 @@
           "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b"
         ],
         "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T22:41:49.732Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ccc0b1a5adf75f891fc0d3e8592db1e2a69b0b5b",
+        "toInclusiveCommit": "305bc5cc44af304a13ba66baf5985ccd90693ecc",
+        "commitShas": ["305bc5cc44af304a13ba66baf5985ccd90693ecc"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-04T22:51:41.589Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "305bc5cc44af304a13ba66baf5985ccd90693ecc",
+        "toInclusiveCommit": "129277594eb7efb16b0d3de461356d7dd8f360b1",
+        "commitShas": ["129277594eb7efb16b0d3de461356d7dd8f360b1"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }
