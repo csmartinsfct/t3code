@@ -379,7 +379,7 @@ When the user asks about tickets, tasks, issues, or project tracking:
 
 const BROWSER_DEFAULT_TEXT = `## T3 Browser Automation
 
-This project has T3 browser automation via the \`/api/browser\` REST endpoint — a per-project headless Chromium context with plaintext output and stable element references (@refs). Prefer this over any chrome-devtools or other browser MCP: it is faster, per-project isolated, and the default endpoint the T3 server provides.
+This project has T3 browser automation via the \`/api/browser\` REST endpoint — a per-project Chromium context with plaintext output and stable element references (@refs). In the desktop build it drives the visible embedded browser pane in T3 Code; in the server-only build it drives a headless Playwright Chromium. Prefer this over any chrome-devtools or other browser MCP: it is faster, per-project isolated, and the default endpoint the T3 server provides.
 
 ### When to use it
 
@@ -430,6 +430,17 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 
 Each project has its own Chromium profile at \`<dataDir>/browser/<projectId>/chromium-profile/\`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed between projects.`;
 
+const BROWSER_ELECTRON_TEXT = `### Embedded browser (desktop build)
+
+The browser this tool drives is the **embedded WebContentsView** in the T3 Code chat shell — the same pane the user can see and interact with. There is no separate Playwright instance. Side effects (navigation, scrolling, typing, dialog interception, viewport emulation) are visible to the user in real time, so the agent's actions and the user's expectations stay in sync.
+
+A handful of tools require a standalone Playwright context and are not available in this mode:
+
+- **Deferred** (returns "tool X is not yet supported in native (Electron) mode"): \`cookie-import-browser\`, \`responsive\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
+- **Permanently unsupported** (returns "tool X is not supported in native (Electron) mode"): \`focus\`, \`visibility\`. These are Playwright-context concepts that don't map onto the embedded view.
+
+Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
+
 const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
 
 T3 can generate interactive, durable UI artifacts directly inside the chat timeline through the \`/api/dynamic-chat-ui\` REST endpoint.
@@ -479,7 +490,10 @@ export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
   },
   browser: {
     version: PROMPT_TEMPLATE_VERSION,
-    blocks: [{ when: null, text: BROWSER_DEFAULT_TEXT }],
+    blocks: [
+      { when: null, text: BROWSER_DEFAULT_TEXT },
+      { when: { type: "runtime", match: "anyElectron" }, text: BROWSER_ELECTRON_TEXT },
+    ],
   },
   dynamicChatUi: {
     version: PROMPT_TEMPLATE_VERSION,
