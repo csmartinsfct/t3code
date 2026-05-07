@@ -65,6 +65,8 @@ describe("overlay primitive parity", () => {
     );
 
     expect(html).toContain("Dev Server");
+    expect(html).toContain("opacity-0");
+    expect(html).toContain("group-hover:opacity-100");
     expect(html).not.toContain("min-w-[15rem]");
     expect(html).not.toContain("max-w-[22rem]");
   });

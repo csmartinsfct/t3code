@@ -48,6 +48,7 @@ function Menu({
   overlayMenuAlign,
   overlayOnSelect,
   overlayOnAction,
+  highlightItemOnHover,
   ...props
 }: MenuPrimitive.Root.Props & {
   trackEmbeddedBrowserOverlay?: boolean;
@@ -93,9 +94,10 @@ function Menu({
         items: overlayItems,
         ...(overlayMenuSide !== undefined && { side: overlayMenuSide }),
         ...(overlayMenuAlign !== undefined && { align: overlayMenuAlign }),
+        ...(highlightItemOnHover !== undefined && { highlightItemOnHover }),
       };
     },
-    [overlayItems, overlayMenuSide, overlayMenuAlign],
+    [highlightItemOnHover, overlayItems, overlayMenuSide, overlayMenuAlign],
   );
 
   const stopNativeAnchorTracking = useCallback(() => {
@@ -214,6 +216,7 @@ function Menu({
     <NativeMenuContext.Provider value={nativeCtx}>
       <MenuPrimitive.Root
         defaultOpen={useNative ? false : defaultOpen}
+        highlightItemOnHover={highlightItemOnHover}
         onOpenChange={useNative ? undefined : handleOpenChange}
         open={useNative ? false : domOpen}
         {...props}

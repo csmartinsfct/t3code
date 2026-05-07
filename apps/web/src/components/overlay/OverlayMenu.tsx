@@ -55,6 +55,9 @@ export function OverlayMenu({ message, anchorRef, bridge }: OverlayMenuProps) {
   return (
     <MenuPrimitive.Root
       open={true}
+      highlightItemOnHover={
+        "highlightItemOnHover" in message ? message.highlightItemOnHover : undefined
+      }
       onOpenChange={(open) => {
         if (!open) bridge.requestDismiss();
       }}
@@ -117,6 +120,11 @@ function renderMenuItems(items: OverlayMenuItem[], bridge: OverlayBridgeHandle):
       );
     }
 
+    const secondaryActionHiddenUntilHover =
+      item.secondaryAction !== undefined &&
+      !item.secondaryAction.loading &&
+      !item.secondaryAction.label?.trim();
+
     return (
       <React.Fragment key={item.id}>
         {item.children && item.children.length > 0 ? (
@@ -147,6 +155,7 @@ function renderMenuItems(items: OverlayMenuItem[], bridge: OverlayBridgeHandle):
             className={cn(
               item.checked === undefined ? ITEM_CLASSES : CHECKED_ITEM_CLASSES,
               item.selectDisabled && "opacity-64",
+              secondaryActionHiddenUntilHover && "group",
             )}
             data-variant={item.destructive ? "destructive" : undefined}
             disabled={item.disabled}
@@ -201,8 +210,25 @@ function renderMenuItems(items: OverlayMenuItem[], bridge: OverlayBridgeHandle):
               </>
             )}
             {item.badge && <span className={BADGE_CLASSES}>{item.badge}</span>}
-            {item.shortcut && <span className={SHORTCUT_CLASSES}>{item.shortcut}</span>}
-            {item.secondaryAction && renderActionButton(item.secondaryAction, bridge)}
+            {item.shortcut && (
+              <span
+                className={cn(
+                  SHORTCUT_CLASSES,
+                  secondaryActionHiddenUntilHover &&
+                    "transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0",
+                )}
+              >
+                {item.shortcut}
+              </span>
+            )}
+            {item.secondaryAction &&
+              renderActionButton(
+                item.secondaryAction,
+                bridge,
+                secondaryActionHiddenUntilHover
+                  ? "pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
+                  : undefined,
+              )}
           </MenuPrimitive.Item>
         )}
       </React.Fragment>
@@ -231,7 +257,11 @@ function statusToneClass(item: OverlayMenuItem): string {
   }
 }
 
-function renderActionButton(action: OverlayMenuAction, bridge: OverlayBridgeHandle) {
+function renderActionButton(
+  action: OverlayMenuAction,
+  bridge: OverlayBridgeHandle,
+  className?: string,
+) {
   const iconName = action.loading ? "LoaderCircle" : action.icon;
   const label = action.label?.trim();
 
@@ -239,7 +269,7 @@ function renderActionButton(action: OverlayMenuAction, bridge: OverlayBridgeHand
     <button
       key={action.id}
       type="button"
-      className={label ? ACTION_CLASSES : ICON_ACTION_CLASSES}
+      className={cn(label ? ACTION_CLASSES : ICON_ACTION_CLASSES, className)}
       aria-label={action.ariaLabel ?? label}
       title={action.ariaLabel ?? label}
       disabled={action.disabled}

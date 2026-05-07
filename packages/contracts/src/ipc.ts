@@ -381,6 +381,7 @@ export interface OverlayMenuMessage {
   items: readonly OverlayMenuItem[];
   side?: "top" | "bottom" | "left" | "right";
   align?: "start" | "center" | "end";
+  highlightItemOnHover?: boolean | undefined;
 }
 
 export interface OverlaySelectMessage {
