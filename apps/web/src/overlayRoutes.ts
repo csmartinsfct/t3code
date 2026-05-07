@@ -13,6 +13,7 @@ import "./components/SystemPromptDialog";
 import "./components/browser/EmbeddedBrowserViewportToolbar";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ComposerPrimaryActions";
+import "./components/chat/McpServersPicker";
 import "./components/chat/OpenInPicker";
 import "./components/chat/OrchestrationProgressHeader";
 import "./components/chat/ProposeActionCard";
@@ -57,6 +58,7 @@ logWebTimeline("overlay-routes.loaded", {
     "managed-runs-control",
     "context-window-meter",
     "composer-implement-menu",
+    "mcp-servers-picker-menu",
     "open-in-picker-menu",
     "orchestration-resume-menu",
     "plan-actions-menu",

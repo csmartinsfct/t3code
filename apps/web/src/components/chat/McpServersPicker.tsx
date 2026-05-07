@@ -7,19 +7,48 @@ import {
   PlugIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import type {
-  ManageMcpServerAction,
-  OverlayMenuAction,
-  OverlayMenuItem,
-  ResolvedMcpServer,
-} from "@t3tools/contracts";
+import type { ManageMcpServerAction, ResolvedMcpServer } from "@t3tools/contracts";
 
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { cn } from "~/lib/utils";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 const EMPTY_PENDING_MCP_ACTIONS: Readonly<Record<string, ManageMcpServerAction>> = {};
 const EMPTY_MCP_SERVERS: readonly ResolvedMcpServer[] = [];
+const MCP_SERVERS_PICKER_OVERLAY_ROUTE_KEY = "mcp-servers-picker-menu";
+
+type McpServersPickerRouteEvent =
+  | { type: "approve-all" }
+  | { type: "refresh" }
+  | { type: "server-action"; serverName: string; action: ManageMcpServerAction };
+
+interface McpServersMenuContentProps {
+  actionError?: string | null | undefined;
+  approvingAll: boolean;
+  canManageServers?: boolean | undefined;
+  error?: string | null | undefined;
+  groupedServers: readonly McpServerGroup[];
+  hasLiveServers: boolean;
+  hasServers: boolean;
+  isError: boolean;
+  isLoading: boolean;
+  onApproveAll?: (() => void) | undefined;
+  onRetry?: (() => void) | undefined;
+  onServerAction?:
+    | ((serverName: string, action: ManageMcpServerAction) => Promise<void> | void)
+    | undefined;
+  pendingActionsByServerName: Readonly<Record<string, ManageMcpServerAction>>;
+  refreshing?: boolean | undefined;
+  serverNames: readonly string[];
+}
+
+type McpServerGroup = {
+  scope: string;
+  servers: ResolvedMcpServer[];
+};
 
 /**
  * Read-only popover that lists the MCP server names available for the current
@@ -50,7 +79,6 @@ export const McpServersPicker = memo(function McpServersPicker({
   onRetry?: () => void;
   onServerAction?: (serverName: string, action: ManageMcpServerAction) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
   const [approvingAll, setApprovingAll] = useState(false);
   const liveServers = servers ?? EMPTY_MCP_SERVERS;
   const hasLiveServers = liveServers.length > 0;
@@ -83,164 +111,44 @@ export const McpServersPicker = memo(function McpServersPicker({
     }
   }, [approvalCandidates, onServerAction, pendingActionsByServerName]);
 
-  const { overlayItems, overlaySelectionById } = useMemo(() => {
-    const items: OverlayMenuItem[] = [];
-    const selectionById = new Map<string, () => void>();
-    const headerActions: OverlayMenuAction[] = [];
-
-    if (approvalCandidates.length > 1) {
-      const approveAllId = "mcp:approve-all";
-      headerActions.push({
-        id: approveAllId,
-        label: "Approve all",
-        ariaLabel: "Approve all pending Cursor MCP servers",
-        icon: approvingAll ? "LoaderCircle" : "CheckCheck",
-        iconClassName: "size-3",
-        disabled: approvingAll,
-        loading: approvingAll,
-      });
-      selectionById.set(approveAllId, () => void approveAll());
-    }
-
-    if (onRetry) {
-      const refreshId = "mcp:refresh";
-      headerActions.push({
-        id: refreshId,
-        ariaLabel: "Refresh MCP status",
-        icon: "RefreshCw",
-        iconClassName: cn("size-3.5", refreshing && "animate-spin opacity-70"),
-        disabled: refreshing === true,
-      });
-      selectionById.set(refreshId, () => onRetry());
-    }
-
-    items.push({
-      id: "mcp-header",
-      label: "MCP Servers",
-      labelOnly: true,
-      actions: headerActions,
-    });
-
-    if (actionError) {
-      items.push({
-        id: "mcp-action-error",
-        label: actionError,
-        statusTone: "warning",
-        selectDisabled: true,
-      });
-    }
-
-    if (isError) {
-      items.push({
-        id: "mcp-error",
-        label: error?.trim() || "Unable to load MCP status.",
-        statusTone: "warning",
-        selectDisabled: true,
-      });
-    } else if (hasLiveServers) {
-      groupedServers.forEach((group) => {
-        items.push({
-          id: `mcp-scope-${group.scope}`,
-          label: group.scope,
-          labelOnly: true,
-        });
-
-        for (const server of group.servers) {
-          const healthy = isHealthyMcpStatus(server.status);
-          const action = canManageServers ? actionForMcpServer(server) : null;
-          const pendingAction = pendingActionsByServerName[server.name];
-          const statusLabel = server.status && !healthy && action === null ? server.status : null;
-          const toolCount =
-            typeof server.toolCount === "number" && server.toolCount > 0
-              ? `${server.toolCount} tools`
-              : undefined;
-          const needsAttention = action !== null || pendingAction !== undefined;
-          const secondaryAction = action
-            ? createMcpOverlayAction({
-                serverName: server.name,
-                action,
-                pendingAction,
-                onServerAction,
-              })
-            : undefined;
-
-          if (secondaryAction && action && onServerAction && pendingAction === undefined) {
-            selectionById.set(secondaryAction.id, () => {
-              void onServerAction(server.name, action).catch(() => undefined);
-            });
-          }
-
-          items.push({
-            id: `mcp-server-${server.name}`,
-            label: server.name,
-            description: server.error || toolCount,
-            badge: statusLabel ?? undefined,
-            statusTone: healthy ? "success" : needsAttention ? "warning" : "danger",
-            selectDisabled: true,
-            secondaryAction,
-          });
-        }
-      });
-    } else if (hasServers) {
-      for (const name of serverNames) {
-        items.push({
-          id: `mcp-server-name-${name}`,
-          label: name,
-          selectDisabled: true,
-        });
+  const handleRouteEvent = useCallback(
+    (type: string, payload: unknown) => {
+      const event = readMcpServersPickerRouteEvent(type, payload);
+      if (!event) return;
+      if (event.type === "approve-all") {
+        void approveAll();
+        return;
       }
-    } else if (isLoading) {
-      items.push({
-        id: "mcp-loading",
-        label: "Loading",
-        statusTone: "muted",
-        selectDisabled: true,
-        secondaryAction: {
-          id: "mcp-loading-spinner",
-          ariaLabel: "Loading MCP status",
-          icon: "LoaderCircle",
-          iconClassName: "size-3.5",
-          loading: true,
-          disabled: true,
-        },
-      });
-    } else {
-      items.push({
-        id: "mcp-empty",
-        label: "No MCP servers",
-        selectDisabled: true,
-      });
-    }
-
-    return { overlayItems: items, overlaySelectionById: selectionById };
-  }, [
-    approvalCandidates.length,
-    approveAll,
-    approvingAll,
-    actionError,
-    canManageServers,
-    error,
-    groupedServers,
-    hasLiveServers,
-    hasServers,
-    isError,
-    isLoading,
-    onRetry,
-    onServerAction,
-    pendingActionsByServerName,
-    refreshing,
-    serverNames,
-  ]);
+      if (event.type === "refresh") {
+        onRetry?.();
+        return;
+      }
+      void onServerAction?.(event.serverName, event.action).catch(() => undefined);
+    },
+    [approveAll, onRetry, onServerAction],
+  );
+  const route = useRoutedPopoverSurface<HTMLButtonElement>({
+    routeKey: MCP_SERVERS_PICKER_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    params: {
+      actionError,
+      approvingAll,
+      canManageServers,
+      error,
+      hasRetry: onRetry !== undefined,
+      hasServerAction: onServerAction !== undefined,
+      pendingActionsByServerName,
+      refreshing,
+      serverNames,
+      servers: liveServers,
+      status,
+    },
+    onEvent: handleRouteEvent,
+  });
 
   return (
-    <Menu
-      open={open}
-      onOpenChange={setOpen}
-      overlayItems={overlayItems}
-      overlayMenuAlign="start"
-      overlayOnSelect={(id) => overlaySelectionById.get(id)?.()}
-      overlayOnAction={(id) => overlaySelectionById.get(id)?.()}
-    >
+    <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
       <MenuTrigger
         render={
           <Button
@@ -256,110 +164,150 @@ export const McpServersPicker = memo(function McpServersPicker({
             title={isInitialLoading ? "Loading MCP status" : "MCP servers"}
           />
         }
+        onFocusCapture={route.updateAnchor}
+        onMouseOverCapture={route.updateAnchor}
+        ref={route.triggerRef}
       >
         <PlugIcon aria-hidden="true" className="size-4" />
         {!compact ? <span className="sr-only sm:not-sr-only">MCP</span> : null}
       </MenuTrigger>
       <MenuPopup align="start">
-        <div className="flex items-center justify-between gap-3 px-2 py-1.5">
-          <div className="font-medium text-muted-foreground text-xs">MCP Servers</div>
-          <div className="flex items-center gap-1">
-            {approvalCandidates.length > 1 ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                className="h-6 gap-1 px-1.5 text-muted-foreground/85 hover:text-foreground"
-                title="Approve all pending Cursor MCP servers"
-                aria-label="Approve all pending Cursor MCP servers"
-                disabled={approvingAll}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void approveAll();
-                }}
-              >
-                {approvingAll ? (
-                  <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
-                ) : (
-                  <CheckCheckIcon aria-hidden="true" className="size-3" />
-                )}
-                <span>Approve all</span>
-              </Button>
-            ) : null}
-            {onRetry ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-6 text-muted-foreground/65 hover:text-foreground"
-                title="Refresh MCP status"
-                aria-label="Refresh MCP status"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onRetry();
-                }}
-              >
-                <RefreshCwIcon
-                  aria-hidden="true"
-                  className={cn("size-3.5", refreshing && "animate-spin opacity-70")}
-                />
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        {actionError ? (
-          <div className="max-w-[22rem] px-2 pb-1.5 text-amber-500/90 text-xs">{actionError}</div>
-        ) : null}
-        {isError ? (
-          <div className="max-w-[22rem] px-2 py-1.5 text-amber-500/90 text-sm">
-            {error?.trim() || "Unable to load MCP status."}
-          </div>
-        ) : hasLiveServers ? (
-          <div className="space-y-2 py-0.5">
-            {groupedServers.map((group) => (
-              <div key={group.scope}>
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55">
-                  {group.scope}
-                </div>
-                <div className="space-y-0.5">
-                  {group.servers.map((server) => (
-                    <McpServerStatusRow
-                      key={`${group.scope}:${server.name}`}
-                      server={server}
-                      canManage={canManageServers === true}
-                      pendingAction={pendingActionsByServerName[server.name]}
-                      onServerAction={onServerAction}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : hasServers ? (
-          serverNames.map((name) => (
-            <div key={name} className="px-2 py-1.5 text-sm">
-              {name}
-            </div>
-          ))
-        ) : isLoading ? (
-          <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-sm">
-            <span>Loading</span>
-            <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
-          </div>
-        ) : (
-          <div className="px-2 py-1.5 text-muted-foreground text-sm">No MCP servers</div>
-        )}
+        <McpServersMenuContent
+          actionError={actionError}
+          approvingAll={approvingAll}
+          canManageServers={canManageServers}
+          error={error}
+          groupedServers={groupedServers}
+          hasLiveServers={hasLiveServers}
+          hasServers={hasServers}
+          isError={isError}
+          isLoading={isLoading}
+          onApproveAll={approvalCandidates.length > 1 ? approveAll : undefined}
+          onRetry={onRetry}
+          onServerAction={onServerAction}
+          pendingActionsByServerName={pendingActionsByServerName}
+          refreshing={refreshing}
+          serverNames={serverNames}
+        />
       </MenuPopup>
     </Menu>
   );
 });
 
-function groupMcpServersByScope(servers: readonly ResolvedMcpServer[]): Array<{
-  scope: string;
-  servers: ResolvedMcpServer[];
-}> {
+function McpServersMenuContent({
+  actionError,
+  approvingAll,
+  canManageServers,
+  error,
+  groupedServers,
+  hasLiveServers,
+  hasServers,
+  isError,
+  isLoading,
+  onApproveAll,
+  onRetry,
+  onServerAction,
+  pendingActionsByServerName,
+  refreshing,
+  serverNames,
+}: McpServersMenuContentProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+        <div className="font-medium text-muted-foreground text-xs">MCP Servers</div>
+        <div className="flex items-center gap-1">
+          {onApproveAll ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="h-6 gap-1 px-1.5 text-muted-foreground/85 hover:text-foreground"
+              title="Approve all pending Cursor MCP servers"
+              aria-label="Approve all pending Cursor MCP servers"
+              disabled={approvingAll}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onApproveAll();
+              }}
+            >
+              {approvingAll ? (
+                <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
+              ) : (
+                <CheckCheckIcon aria-hidden="true" className="size-3" />
+              )}
+              <span>Approve all</span>
+            </Button>
+          ) : null}
+          {onRetry ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground/65 hover:text-foreground"
+              title="Refresh MCP status"
+              aria-label="Refresh MCP status"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onRetry();
+              }}
+            >
+              <RefreshCwIcon
+                aria-hidden="true"
+                className={cn("size-3.5", refreshing && "animate-spin opacity-70")}
+              />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {actionError ? (
+        <div className="max-w-[22rem] px-2 pb-1.5 text-amber-500/90 text-xs">{actionError}</div>
+      ) : null}
+      {isError ? (
+        <div className="max-w-[22rem] px-2 py-1.5 text-amber-500/90 text-sm">
+          {error?.trim() || "Unable to load MCP status."}
+        </div>
+      ) : hasLiveServers ? (
+        <div className="space-y-2 py-0.5">
+          {groupedServers.map((group) => (
+            <div key={group.scope}>
+              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55">
+                {group.scope}
+              </div>
+              <div className="space-y-0.5">
+                {group.servers.map((server) => (
+                  <McpServerStatusRow
+                    key={`${group.scope}:${server.name}`}
+                    server={server}
+                    canManage={canManageServers === true}
+                    pendingAction={pendingActionsByServerName[server.name]}
+                    onServerAction={onServerAction}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : hasServers ? (
+        serverNames.map((name) => (
+          <div key={name} className="px-2 py-1.5 text-sm">
+            {name}
+          </div>
+        ))
+      ) : isLoading ? (
+        <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-sm">
+          <span>Loading</span>
+          <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
+        </div>
+      ) : (
+        <div className="px-2 py-1.5 text-muted-foreground text-sm">No MCP servers</div>
+      )}
+    </>
+  );
+}
+
+function groupMcpServersByScope(servers: readonly ResolvedMcpServer[]): McpServerGroup[] {
   const byScope = new Map<string, ResolvedMcpServer[]>();
   for (const server of servers) {
     const scope = server.scope?.trim() || "session";
@@ -398,7 +346,7 @@ function McpServerStatusRow(props: {
   canManage: boolean;
   pendingAction: ManageMcpServerAction | undefined;
   onServerAction:
-    | ((serverName: string, action: ManageMcpServerAction) => Promise<void>)
+    | ((serverName: string, action: ManageMcpServerAction) => Promise<void> | void)
     | undefined;
 }) {
   const { pendingAction, server } = props;
@@ -439,7 +387,9 @@ function McpServerStatusRow(props: {
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void props.onServerAction?.(server.name, action).catch(() => undefined);
+            void Promise.resolve(props.onServerAction?.(server.name, action)).catch(
+              () => undefined,
+            );
           }}
         >
           {pendingAction ? (
@@ -459,29 +409,6 @@ function McpServerStatusRow(props: {
 function isHealthyMcpStatus(status: string | undefined): boolean {
   const normalized = status?.toLowerCase().trim() ?? "";
   return normalized === "connected" || normalized === "ready" || normalized === "loaded";
-}
-
-function createMcpOverlayAction(props: {
-  serverName: string;
-  action: ManageMcpServerAction;
-  pendingAction: ManageMcpServerAction | undefined;
-  onServerAction:
-    | ((serverName: string, action: ManageMcpServerAction) => Promise<void>)
-    | undefined;
-}): OverlayMenuAction {
-  const pending = props.pendingAction !== undefined;
-  const isLogin = props.action === "login";
-  const label = isLogin ? "Login" : "Approve";
-
-  return {
-    id: `mcp-server-action:${props.serverName}:${props.action}`,
-    label,
-    ariaLabel: isLogin ? `Log in to ${props.serverName}` : `Approve ${props.serverName}`,
-    icon: pending ? "LoaderCircle" : isLogin ? "LogIn" : "Check",
-    iconClassName: "size-3",
-    disabled: pending || props.onServerAction === undefined,
-    loading: pending,
-  };
 }
 
 function actionForMcpServer(server: ResolvedMcpServer): ManageMcpServerAction | null {
@@ -510,3 +437,146 @@ function actionForMcpServer(server: ResolvedMcpServer): ManageMcpServerAction | 
   }
   return null;
 }
+
+function isManageMcpServerAction(value: unknown): value is ManageMcpServerAction {
+  return value === "approve" || value === "login" || value === "disable";
+}
+
+function readMcpServersPickerRouteEvent(
+  type: string,
+  payload: unknown,
+): McpServersPickerRouteEvent | null {
+  if (type === "approve-all") return { type };
+  if (type === "refresh") return { type };
+  if (type !== "server-action" || !payload || typeof payload !== "object") return null;
+  const candidate = payload as { action?: unknown; serverName?: unknown };
+  if (typeof candidate.serverName !== "string" || !isManageMcpServerAction(candidate.action)) {
+    return null;
+  }
+  return {
+    type,
+    action: candidate.action,
+    serverName: candidate.serverName,
+  };
+}
+
+function readBooleanParam(value: unknown): boolean {
+  return value === true;
+}
+
+function readOptionalStringParam(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readMcpStatusParam(value: unknown): "loading" | "ready" | "error" {
+  return value === "loading" || value === "error" ? value : "ready";
+}
+
+function readStringArrayParam(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function readResolvedMcpServersParam(value: unknown): ResolvedMcpServer[] {
+  if (!Array.isArray(value)) return [];
+  const servers: ResolvedMcpServer[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Partial<ResolvedMcpServer>;
+    if (typeof candidate.name !== "string") continue;
+    servers.push({
+      name: candidate.name,
+      ...(typeof candidate.status === "string" ? { status: candidate.status } : {}),
+      ...(typeof candidate.scope === "string" ? { scope: candidate.scope } : {}),
+      ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
+      ...(typeof candidate.toolCount === "number" ? { toolCount: candidate.toolCount } : {}),
+      ...(candidate.serverInfo !== undefined ? { serverInfo: candidate.serverInfo } : {}),
+      ...(candidate.config !== undefined ? { config: candidate.config } : {}),
+      ...(Array.isArray(candidate.tools) ? { tools: candidate.tools } : {}),
+    });
+  }
+  return servers;
+}
+
+function readPendingMcpActionsParam(value: unknown): Record<string, ManageMcpServerAction> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const pendingActions: Record<string, ManageMcpServerAction> = {};
+  for (const [serverName, action] of Object.entries(value)) {
+    if (isManageMcpServerAction(action)) pendingActions[serverName] = action;
+  }
+  return pendingActions;
+}
+
+registerOverlayRoute<{
+  actionError?: unknown;
+  approvingAll?: unknown;
+  canManageServers?: unknown;
+  error?: unknown;
+  hasRetry?: unknown;
+  hasServerAction?: unknown;
+  pendingActionsByServerName?: unknown;
+  refreshing?: unknown;
+  serverNames?: unknown;
+  servers?: unknown;
+  status?: unknown;
+}>(
+  MCP_SERVERS_PICKER_OVERLAY_ROUTE_KEY,
+  function McpServersPickerOverlayRoute({ controller, message }) {
+    const status = readMcpStatusParam(message.params.status);
+    const refreshing = readBooleanParam(message.params.refreshing);
+    const serverNames = readStringArrayParam(message.params.serverNames);
+    const liveServers = readResolvedMcpServersParam(message.params.servers);
+    const hasLiveServers = liveServers.length > 0;
+    const hasServers = serverNames.length > 0 || hasLiveServers;
+    const groupedServers = groupMcpServersByScope(liveServers);
+    const pendingActionsByServerName = readPendingMcpActionsParam(
+      message.params.pendingActionsByServerName,
+    );
+    const canManageServers = readBooleanParam(message.params.canManageServers);
+    const hasServerAction = readBooleanParam(message.params.hasServerAction);
+    const approvalCandidates =
+      canManageServers && hasServerAction
+        ? liveServers.filter((server) => actionForMcpServer(server) === "approve")
+        : [];
+    const isLoading = status === "loading" || refreshing;
+    const isError = status === "error";
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="start">
+          <McpServersMenuContent
+            actionError={readOptionalStringParam(message.params.actionError)}
+            approvingAll={readBooleanParam(message.params.approvingAll)}
+            canManageServers={canManageServers}
+            error={readOptionalStringParam(message.params.error)}
+            groupedServers={groupedServers}
+            hasLiveServers={hasLiveServers}
+            hasServers={hasServers}
+            isError={isError}
+            isLoading={isLoading}
+            onApproveAll={
+              approvalCandidates.length > 1
+                ? () => controller.bridge.emitEvent("approve-all", {})
+                : undefined
+            }
+            onRetry={
+              readBooleanParam(message.params.hasRetry)
+                ? () => controller.bridge.emitEvent("refresh", {})
+                : undefined
+            }
+            onServerAction={
+              hasServerAction
+                ? (serverName, action) =>
+                    controller.bridge.emitEvent("server-action", { serverName, action })
+                : undefined
+            }
+            pendingActionsByServerName={pendingActionsByServerName}
+            refreshing={refreshing}
+            serverNames={serverNames}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);
