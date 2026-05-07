@@ -485,6 +485,20 @@ export function resolveTicketDetailStreamEventAction(
   return "ignore";
 }
 
+export function mergeTicketDetailMetadataUpdate(
+  currentTicket: Ticket | null,
+  updated: Ticket,
+): Ticket {
+  if (!currentTicket || currentTicket.id !== updated.id) {
+    return updated;
+  }
+
+  return {
+    ...updated,
+    description: updated.description ?? currentTicket.description,
+  };
+}
+
 function linkedThreadSignature(thread: TicketLinkedThread | null): string {
   return thread
     ? [
@@ -642,8 +656,9 @@ export function KanbanTicketDetail({
       try {
         const api = ensureNativeApi();
         const updated = await api.ticketing.update({ id: ticketId, status });
-        ticketRef.current = updated;
-        setTicket(updated);
+        const merged = mergeTicketDetailMetadataUpdate(ticketRef.current, updated);
+        ticketRef.current = merged;
+        setTicket(merged);
       } catch (error) {
         console.error("Failed to update status:", error);
       }
@@ -656,8 +671,9 @@ export function KanbanTicketDetail({
       try {
         const api = ensureNativeApi();
         const updated = await api.ticketing.update({ id: ticketId, priority });
-        ticketRef.current = updated;
-        setTicket(updated);
+        const merged = mergeTicketDetailMetadataUpdate(ticketRef.current, updated);
+        ticketRef.current = merged;
+        setTicket(merged);
       } catch (error) {
         console.error("Failed to update priority:", error);
       }
@@ -688,8 +704,9 @@ export function KanbanTicketDetail({
         id: ticketId,
         title: result.nextValue as never,
       });
-      ticketRef.current = updated;
-      setTicket(updated);
+      const merged = mergeTicketDetailMetadataUpdate(ticketRef.current, updated);
+      ticketRef.current = merged;
+      setTicket(merged);
     } catch (error) {
       console.error("Failed to update title:", error);
       if (previous) {
@@ -814,8 +831,9 @@ export function KanbanTicketDetail({
         id: ticketId,
         worktree: result.nextValue,
       });
-      ticketRef.current = updated;
-      setTicket(updated);
+      const merged = mergeTicketDetailMetadataUpdate(ticketRef.current, updated);
+      ticketRef.current = merged;
+      setTicket(merged);
     } catch (error) {
       console.error("Failed to update worktree:", error);
       if (previous) {

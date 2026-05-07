@@ -15,6 +15,7 @@ import {
   buildTicketDetailActionItems,
   DECOMPOSE_PROMPT,
   DependencyTicketRow,
+  mergeTicketDetailMetadataUpdate,
   ParentTicketIndicator,
   resolveInlineEditBlurAction,
   resolveNullableInlineTextSave,
@@ -441,6 +442,33 @@ describe("KanbanTicketDetail", () => {
         projectId: "project-55",
       }),
     ).toBe(false);
+  });
+
+  it("preserves the loaded description when metadata update responses are body-light", () => {
+    const currentTicket = makeTicket({
+      description: "Loaded body content",
+      status: "todo",
+    });
+    const updated = makeTicket({
+      description: null,
+      status: "backlog",
+      updatedAt: "2026-04-10T11:00:00.000Z",
+    });
+
+    expect(mergeTicketDetailMetadataUpdate(currentTicket, updated)).toMatchObject({
+      description: "Loaded body content",
+      status: "backlog",
+      updatedAt: "2026-04-10T11:00:00.000Z",
+    });
+  });
+
+  it("uses body-light metadata update descriptions as-is when no loaded detail exists", () => {
+    const updated = makeTicket({
+      description: null,
+      status: "backlog",
+    });
+
+    expect(mergeTicketDetailMetadataUpdate(null, updated).description).toBeNull();
   });
 
   it("refetches for related ticket_upserted events that add or remove sub-ticket and dependency relationships", () => {
