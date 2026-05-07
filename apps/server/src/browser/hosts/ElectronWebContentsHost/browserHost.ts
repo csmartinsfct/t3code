@@ -1152,6 +1152,14 @@ export class ElectronWebContentsBrowserHost {
       for (const vp of viewports) {
         const screenshotPath = `${prefix}-${vp.name}.png`;
         validateOutputPath(screenshotPath);
+        // Match the gstack `responsive` (and our native `viewport`) call
+        // shape — pure metrics override. Note: this *does* visibly stretch
+        // the embedded WebContentsView for the duration of the call, even
+        // with `dontSetVisibleSize: true` and a fully-pinned screen-field
+        // shape. The deterministic fix is the per-tab maintenance overlay
+        // tracked in T3CO-442 (park the view + render a "Resizing browser…"
+        // spinner while this runs). Until that lands, expect a brief
+        // overflow on calls.
         await this.send("Emulation.setDeviceMetricsOverride", {
           width: vp.width,
           height: vp.height,
@@ -1171,12 +1179,7 @@ export class ElectronWebContentsBrowserHost {
   // Full-page (entire scrollable document) variant of the per-viewport
   // capture in `cdpHost.captureScreenshot()`. Uses Page.getLayoutMetrics to
   // size the clip rectangle and `captureBeyondViewport: true` so Chromium
-  // renders content past the visible viewport into the output PNG. We
-  // intentionally do *not* pass `dontSetVisibleSize` to the prior
-  // `setDeviceMetricsOverride` call (different from the embedded emulator's
-  // setViewport in apps/desktop/src/main.ts) — we want the rendering surface
-  // to match the override so the captured frame matches the simulated
-  // viewport exactly.
+  // renders content past the visible viewport into the output PNG.
   private async captureFullPageScreenshot(): Promise<Buffer> {
     const layout = await this.send<{
       readonly cssContentSize?: { width: number; height: number };
