@@ -7,6 +7,12 @@ T3 Code has two ways to render popups, menus, dialogs, sheets, command palettes,
 
 The UI contract is that both paths look and behave the same. A user should not be able to tell which runtime path was used, except that native overlays keep the embedded Chromium browser visible instead of hiding it.
 
+## Doc Ownership
+
+This document owns overlay UI/runtime policy: when to use DOM vs native overlays, primitive vs routed overlays, and which routed wrapper semantics (`Menu`, `Popover`, `Dialog`, `Sheet`, etc.) a component should choose. When changing overlay selection, dismissal behavior, or browser-visible fallback behavior, update this document first.
+
+Implementation details for Electron compositor ordering, overlay pool IPC, and browser host plumbing live in [Browser Tools](browser-tools.md#overlay-view-system). Feature-specific behavior, such as the Runs control, should also be summarized in that feature's doc after the policy is updated here.
+
 ## When Native Overlays Are Used
 
 Native overlays are active only when all of these are true:
@@ -57,6 +63,13 @@ Use the **routed overlay** path when exact UI parity requires arbitrary React co
 - any component tree that would otherwise have to be reimplemented inside a generic menu item renderer.
 
 Keep the DOM fallback for every routed surface. The native route should share the same content component as the DOM route whenever possible.
+
+When a routed overlay is visually menu-like but contains arbitrary interactive content, choose the route wrapper by interaction semantics, not by appearance:
+
+- use `OverlayRouteMenu` / `OverlayRouteMenuPopup` for command-menu behavior where moving through rows, outside-click dismissal, and menu focus semantics are desired;
+- use `OverlayRoutePopover` / `OverlayRoutePopoverPopup` for rich cards, nested hover panels, embedded buttons, or controls that users must move into without closing the parent surface.
+
+For example, `ManagedRunsControl` keeps a normal `Menu` as its DOM fallback, but its browser-visible native route uses `OverlayRoutePopover` because service URL hover controls sit inside the active Runs surface and must remain interactive.
 
 ## Primitive Overlays
 

@@ -152,6 +152,11 @@ describe("ManagedRunsControl browser coverage", () => {
 
       await expect.element(page.getByText("http://localhost:3773")).toBeInTheDocument();
       await expect.element(page.getByText("healthy")).toBeInTheDocument();
+      const serviceDetails = document.querySelector<HTMLElement>(
+        "[data-managed-run-service-details]",
+      );
+      expect(serviceDetails).not.toBeNull();
+      expect(serviceDetails?.parentElement).toBe(document.body);
 
       await expect.element(page.getByTitle("Copy URL")).toBeInTheDocument();
       document.querySelector<HTMLButtonElement>('button[title="Copy URL"]')?.click();

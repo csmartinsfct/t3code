@@ -518,7 +518,7 @@ This uses `Runtime.evaluate` (command channel) and sidesteps `Runtime.addBinding
 
 Electron's `WebContentsView` is an OS-level compositor surface that always paints above HTML/React DOM — no CSS `z-index` crosses that boundary. Context menus, dropdowns, and other overlays would disappear behind it without a dedicated solution.
 
-This section documents the Electron/browser plumbing: compositor ordering, overlay pools, IPC, and host bridge mechanics. The UI contract for which popups use native overlays, which stay in DOM, and how both paths preserve visual/interaction parity lives in [Overlay Surfaces](overlays.md).
+This section documents the Electron/browser plumbing: compositor ordering, overlay pools, IPC, and host bridge mechanics. The UI contract for which popups use native overlays, which stay in DOM, and how both paths preserve visual/interaction parity lives in [Overlay Surfaces](overlays.md). When a change affects overlay selection or interaction semantics, update `docs/overlays.md` first and keep this section focused on implementation mechanics and concrete examples.
 
 When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
 
@@ -724,7 +724,7 @@ These wrappers are intentionally thin: they control open/dismiss semantics and t
 
 `ContextWindowMeter` and `RateLimitMeter` route their rich hover popovers through the shared routed-popover helper in `apps/web/src/routedPopover.ts`. The trigger stays in the host DOM, passes a trigger rect plus a serializable snapshot to the overlay route, and both DOM fallback and native overlay render the exact same breakdown/chart content components.
 
-`ManagedRunsControl` routes its Active Runs menu through the routed mini-app path because the menu contains arbitrary React content and actions: run cards, stop buttons, log drawer buttons, runtime service rows, and URL hover controls. The DOM fallback and overlay route both render the same extracted menu body; the overlay route uses `OverlayRouteMenu`/`OverlayRouteMenuPopup` so the Base UI menu styling and padding remain unchanged.
+`ManagedRunsControl` routes its Active Runs surface through the routed mini-app path because the menu contains arbitrary React content and actions: run cards, stop buttons, log drawer buttons, runtime service rows, and URL hover controls. The DOM fallback keeps the normal `Menu` path. The browser-visible overlay route uses `OverlayRoutePopover`/`OverlayRoutePopoverPopup` around the same extracted body so nested service URL hover controls remain interactive instead of being interpreted as leaving a command-menu surface.
 
 `ProposeActionCard` routes its action icon picker through the same routed popover helper. The host and overlay render the same icon-grid content, and selection returns the chosen `ProjectScriptIcon` as a route result so the host card state remains authoritative.
 

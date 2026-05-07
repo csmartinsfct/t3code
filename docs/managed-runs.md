@@ -233,14 +233,17 @@ After inference, health checks run every 12 seconds (`HEALTH_POLL_INTERVAL_MS`) 
 
 ### Runs Control (`ManagedRunsControl.tsx`)
 
-A menu button in the toolbar showing:
+A toolbar control showing:
 
 - Run count badge
 - List of active runs with status badges
 - Per-runtime-service validation indicators (green/red/gray dots)
 - Service summary (e.g. "2/3 services validated")
 - Inference-aware secondary text when runtime targets are still pending or inference could not produce canonical services
+- Service URL hover details with copy/open actions when a runtime service resolves to a URL
 - Hover/focus stop affordance: the status pill swaps to a same-size stop button with confirmation before stopping the run
+
+Overlay behavior follows the dual runtime rule in [Overlay Surfaces](overlays.md): the no-browser/DOM path renders as a normal `Menu`, while the browser-visible native route uses `OverlayRoutePopover` around the same content. The native path intentionally uses popover semantics because the service URL hover details are interactive nested content; menu semantics close when the pointer leaves the command-menu surface, which prevents users from reaching the URL controls.
 
 ### Settings Runs Page (`/settings/runs`)
 

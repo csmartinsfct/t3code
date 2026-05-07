@@ -21,7 +21,7 @@ import { readNativeApi } from "~/nativeApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useRunLogsDrawerStore } from "~/runLogsDrawerStore";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
-import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { OverlayRoutePopover, OverlayRoutePopoverPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -71,11 +71,18 @@ function deriveUrl(healthCheck: ServiceHealthCheck | null): string | null {
   return null;
 }
 
+interface ServiceDetailsPosition {
+  left: number;
+  mode: "absolute" | "fixed";
+  target: HTMLElement;
+  top: number;
+}
+
 function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
   const url = deriveUrl(service.canonicalHealthCheck);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [detailsPosition, setDetailsPosition] = useState<ServiceDetailsPosition | null>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -83,7 +90,23 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
     clearTimeout(closeTimer.current);
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
-      setPos({ top: rect.top + rect.height / 2, left: rect.left - 30 });
+      const popup = triggerRef.current.closest<HTMLElement>('[data-slot="popover-popup"]');
+      if (popup) {
+        const popupRect = popup.getBoundingClientRect();
+        setDetailsPosition({
+          mode: "absolute",
+          target: popup,
+          top: rect.top + rect.height / 2 - popupRect.top,
+          left: rect.left - 30 - popupRect.left,
+        });
+      } else {
+        setDetailsPosition({
+          mode: "fixed",
+          target: document.body,
+          top: rect.top + rect.height / 2,
+          left: rect.left - 30,
+        });
+      }
     }
     setOpen(true);
   }, []);
@@ -100,6 +123,7 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
     <div
       ref={triggerRef}
       className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+      data-managed-run-service-row
       onMouseEnter={show}
       onMouseLeave={scheduleClose}
     >
@@ -108,11 +132,16 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
       />
       <span className="min-w-0 truncate">{service.resolvedName}</span>
       {open &&
-        pos &&
+        detailsPosition &&
         createPortal(
           <div
-            className="fixed z-[200] rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-md animate-in fade-in zoom-in-95 duration-100"
-            style={{ top: pos.top, left: pos.left, transform: "translate(-100%, -50%)" }}
+            className={`${detailsPosition.mode} z-[200] rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground text-xs shadow-md animate-in fade-in zoom-in-95 duration-100`}
+            data-managed-run-service-details
+            style={{
+              top: detailsPosition.top,
+              left: detailsPosition.left,
+              transform: "translate(-100%, -50%)",
+            }}
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
           >
@@ -156,7 +185,7 @@ function ServiceRow({ service }: { service: ManagedRunRuntimeService }) {
               </div>
             </div>
           </div>,
-          document.body,
+          detailsPosition.target,
         )}
     </div>
   );
@@ -455,11 +484,15 @@ registerOverlayRoute<{
   }
 
   return (
-    <OverlayRouteMenu>
-      <OverlayRouteMenuPopup align="end" side="bottom" className="w-[340px]">
+    <OverlayRoutePopover>
+      <OverlayRoutePopoverPopup
+        align="end"
+        side="bottom"
+        className="w-[340px] [&_[data-slot=popover-viewport]]:p-1"
+      >
         <ManagedRunsMenuContent {...params} onOpenLogs={(request) => controller.submit(request)} />
-      </OverlayRouteMenuPopup>
-    </OverlayRouteMenu>
+      </OverlayRoutePopoverPopup>
+    </OverlayRoutePopover>
   );
 });
 
