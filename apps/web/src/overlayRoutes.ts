@@ -15,6 +15,7 @@ import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
 import "./components/management/BoardToolbar";
 import "./components/management/TicketDetailFieldSelectOverlay";
+import "./components/management/KanbanTicketDetail";
 import "./components/management/MoveTicketToBoardDialog";
 import "./components/management/TicketConfirmDialogs";
 import "./components/management/TicketLabelPicker";
@@ -51,6 +52,7 @@ logWebTimeline("overlay-routes.loaded", {
     "rate-limit-meter",
     "board-toolbar-filter",
     "ticket-detail-field-select",
+    "ticket-detail-actions-menu",
     "move-ticket-to-board",
     "ticket-selection-delete-confirm",
     "ticket-selection-archive-confirm",

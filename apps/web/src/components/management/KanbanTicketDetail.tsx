@@ -4,7 +4,6 @@ import type {
   TicketDependency,
   TicketId,
   TicketLinkedThread,
-  OverlayMenuItem,
   TicketPriority,
   TicketStatus,
   TicketSummary,
@@ -30,6 +29,9 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { newThreadId } from "../../lib/utils";
 import { ensureNativeApi } from "../../nativeApi";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
 import { Badge } from "../ui/badge";
@@ -162,6 +164,10 @@ export function startTicketDetailDecomposeFlow(input: {
   return threadId;
 }
 
+const TICKET_DETAIL_ACTIONS_MENU_OVERLAY_ROUTE_KEY = "ticket-detail-actions-menu";
+
+type TicketDetailActionMenuResult = { actionId: string };
+
 function TicketDetailActionsMenu({
   ticket,
   onOrchestrate,
@@ -185,17 +191,21 @@ function TicketDetailActionsMenu({
     onArchive,
     onDelete,
   });
-  const overlayItems = buildTicketDetailActionOverlayItems(actions);
-  const handleOverlaySelect = useCallback(
-    (id: string) => {
-      const action = actions.find((item) => item.kind === "item" && item.key === id);
+  const route = useRoutedPopoverSurface<HTMLButtonElement, TicketDetailActionMenuResult>({
+    routeKey: TICKET_DETAIL_ACTIONS_MENU_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    params: {
+      includeMoveToBoard: ticket.parentId !== null && Boolean(onMoveToBoard),
+    },
+    onResult: (result) => {
+      const action = actions.find((item) => item.kind === "item" && item.key === result.actionId);
       if (action?.kind === "item") action.onSelect();
     },
-    [actions],
-  );
+  });
 
   return (
-    <Menu overlayItems={overlayItems} overlayMenuAlign="end" overlayOnSelect={handleOverlaySelect}>
+    <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
       <MenuTrigger
         render={
           <Button
@@ -203,28 +213,43 @@ function TicketDetailActionsMenu({
             variant="ghost"
             className="text-muted-foreground hover:text-foreground"
             aria-label="Ticket actions"
+            onFocusCapture={route.updateAnchor}
+            onMouseOverCapture={route.updateAnchor}
+            ref={route.triggerRef}
           />
         }
       >
         <EllipsisVerticalIcon className="size-3.5" />
       </MenuTrigger>
       <MenuPopup align="end">
-        {actions.map((action) =>
-          action.kind === "separator" ? (
-            <MenuSeparator key={action.key} />
-          ) : (
-            <MenuItem
-              key={action.key}
-              variant={action.variant ?? "default"}
-              onClick={action.onSelect}
-            >
-              {action.icon}
-              {action.label}
-            </MenuItem>
-          ),
-        )}
+        <TicketDetailActionsMenuContent actions={actions} />
       </MenuPopup>
     </Menu>
+  );
+}
+
+function TicketDetailActionsMenuContent({
+  actions,
+}: {
+  actions: readonly TicketDetailActionItem[];
+}) {
+  return (
+    <>
+      {actions.map((action) =>
+        action.kind === "separator" ? (
+          <MenuSeparator key={action.key} />
+        ) : (
+          <MenuItem
+            key={action.key}
+            variant={action.variant ?? "default"}
+            onClick={action.onSelect}
+          >
+            {action.icon}
+            {action.label}
+          </MenuItem>
+        ),
+      )}
+    </>
   );
 }
 
@@ -234,7 +259,6 @@ type TicketDetailActionItem =
       kind: "item";
       label: string;
       icon: React.ReactNode;
-      iconName?: string | undefined;
       onSelect: () => void;
       variant?: "default" | "destructive";
     }
@@ -251,24 +275,40 @@ export function buildTicketDetailActionItems(input: {
   onArchive: () => void;
   onDelete: () => void;
 }): TicketDetailActionItem[] {
+  return buildTicketDetailActionMenuItems({
+    includeMoveToBoard: input.ticket.parentId !== null && Boolean(input.onMoveToBoard),
+    onOrchestrate: () => input.onOrchestrate?.(input.ticket),
+    onDecompose: input.onDecompose,
+    onMoveToBoard: input.onMoveToBoard,
+    onArchive: input.onArchive,
+    onDelete: input.onDelete,
+  });
+}
+
+function buildTicketDetailActionMenuItems(input: {
+  includeMoveToBoard: boolean;
+  onOrchestrate: () => void;
+  onDecompose: () => void;
+  onMoveToBoard?: (() => void) | undefined;
+  onArchive: () => void;
+  onDelete: () => void;
+}): TicketDetailActionItem[] {
   return [
     {
       key: "orchestrate",
       kind: "item",
       label: "Orchestrate",
       icon: <PlayIcon className="size-3.5" />,
-      iconName: "Play",
-      onSelect: () => input.onOrchestrate?.(input.ticket),
+      onSelect: input.onOrchestrate,
     },
     {
       key: "decompose",
       kind: "item",
       label: "Decompose",
       icon: <ListTreeIcon className="size-3.5" />,
-      iconName: "ListTree",
       onSelect: input.onDecompose,
     },
-    ...(input.ticket.parentId !== null && input.onMoveToBoard
+    ...(input.includeMoveToBoard && input.onMoveToBoard
       ? [
           {
             key: "move-to-board",
@@ -288,7 +328,6 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Archive",
       icon: <ArchiveIcon className="size-3.5" />,
-      iconName: "Archive",
       onSelect: input.onArchive,
     },
     {
@@ -296,27 +335,38 @@ export function buildTicketDetailActionItems(input: {
       kind: "item",
       label: "Delete",
       icon: <TrashIcon className="size-3.5" />,
-      iconName: "Trash",
       onSelect: input.onDelete,
       variant: "destructive",
     },
   ];
 }
 
-function buildTicketDetailActionOverlayItems(
-  actions: readonly TicketDetailActionItem[],
-): OverlayMenuItem[] {
-  return actions.map((action) =>
-    action.kind === "separator"
-      ? { id: action.key, label: "", separator: true }
-      : {
-          id: action.key,
-          label: action.label,
-          ...(action.iconName ? { icon: action.iconName } : {}),
-          ...(action.variant === "destructive" ? { destructive: true } : {}),
-        },
-  );
-}
+registerOverlayRoute<{
+  includeMoveToBoard?: unknown;
+}>(
+  TICKET_DETAIL_ACTIONS_MENU_OVERLAY_ROUTE_KEY,
+  function TicketDetailActionsMenuOverlayRoute({ message, controller }) {
+    const includeMoveToBoard = message.params.includeMoveToBoard === true;
+    const actions = buildTicketDetailActionMenuItems({
+      includeMoveToBoard,
+      onOrchestrate: () => controller.submit({ actionId: "orchestrate" }),
+      onDecompose: () => controller.submit({ actionId: "decompose" }),
+      onMoveToBoard: includeMoveToBoard
+        ? () => controller.submit({ actionId: "move-to-board" })
+        : undefined,
+      onArchive: () => controller.submit({ actionId: "archive" }),
+      onDelete: () => controller.submit({ actionId: "delete" }),
+    });
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="end">
+          <TicketDetailActionsMenuContent actions={actions} />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);
 
 type TicketRowButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   "data-ticket-selectable"?: boolean;
