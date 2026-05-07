@@ -150,12 +150,13 @@ registerOverlayRoute<{
       <Menu
         open
         trackEmbeddedBrowserOverlay={false}
-        onOpenChange={(open) => {
+        onOpenChange={(open, details) => {
           if (open) return;
           if (suppressSelectionCloseRef.current) {
             suppressSelectionCloseRef.current = false;
             return;
           }
+          if (!shouldDismissSidebarSortMenuRoute(getOpenChangeReason(details))) return;
           controller.cancel("dismissed");
         }}
       >
@@ -204,4 +205,14 @@ function isProjectSortOrder(value: unknown): value is SidebarProjectSortOrder {
 
 function isThreadSortOrder(value: unknown): value is SidebarThreadSortOrder {
   return value === "created_at" || value === "updated_at";
+}
+
+function getOpenChangeReason(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const reason = (details as { reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : null;
+}
+
+export function shouldDismissSidebarSortMenuRoute(reason: string | null): boolean {
+  return reason === "outside-press" || reason === "escape-key";
 }
