@@ -3,7 +3,6 @@ import {
   type BaseProviderKind,
   type ClaudeModelOptions,
   type CodexModelOptions,
-  type OverlayMenuItem,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
@@ -18,7 +17,7 @@ import {
   hasContextWindowOption,
   resolveEffort,
 } from "@t3tools/shared/model";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -34,6 +33,9 @@ import {
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 type ProviderOptions = ProviderModelOptions[BaseProviderKind];
 type TraitsPersistence =
@@ -46,12 +48,25 @@ type TraitsPersistence =
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
 
-export interface TraitsOverlayMenu {
-  overlayItems: OverlayMenuItem[] | undefined;
-  overlaySelectionById: Map<string, () => void>;
-}
-
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
+const TRAITS_PICKER_OVERLAY_ROUTE_KEY = "traits-picker-menu";
+
+export type TraitsPickerResult =
+  | { kind: "context-window"; value: string }
+  | { kind: "effort"; value: string }
+  | { kind: "fast-mode"; value: string }
+  | { kind: "thinking"; value: string };
+
+type TraitsActionHandlers = ReturnType<typeof useTraitsActions>;
+
+export interface TraitsPickerRouteParams extends Record<string, unknown> {
+  allowPromptInjectedEffort: boolean;
+  model: string | null | undefined;
+  modelOptions?: ProviderOptions | null | undefined;
+  models: ReadonlyArray<ServerProviderModel>;
+  prompt: string;
+  provider: ProviderKind;
+}
 
 function getRawEffort(
   provider: ProviderKind,
@@ -240,149 +255,6 @@ function useTraitsActions({
   };
 }
 
-export function useTraitsOverlayMenu({
-  provider,
-  models,
-  model,
-  prompt,
-  onPromptChange,
-  modelOptions,
-  allowPromptInjectedEffort = true,
-  ...persistence
-}: TraitsMenuContentProps & TraitsPersistence): TraitsOverlayMenu {
-  const selected = getSelectedTraits(
-    provider,
-    models,
-    model,
-    prompt,
-    modelOptions,
-    allowPromptInjectedEffort,
-  );
-  const {
-    caps,
-    effort,
-    effortLevels,
-    thinkingEnabled,
-    fastModeEnabled,
-    contextWindowOptions,
-    contextWindow,
-    defaultContextWindow,
-    ultrathinkPromptControlled,
-    ultrathinkInBodyText,
-  } = selected;
-  const {
-    handleEffortChange,
-    handleThinkingChange,
-    handleFastModeChange,
-    handleContextWindowChange,
-  } = useTraitsActions({
-    provider,
-    prompt,
-    onPromptChange,
-    modelOptions,
-    selected,
-    persistence,
-  });
-
-  return useMemo(() => {
-    const items: OverlayMenuItem[] = [];
-    const selectionById = new Map<string, () => void>();
-    let separatorIndex = 0;
-
-    const addLabel = (id: string, label: string) => {
-      items.push({ id, label, labelOnly: true });
-    };
-    const addSeparator = () => {
-      items.push({ id: `separator:${separatorIndex++}`, label: "", separator: true });
-    };
-    const addAction = (item: OverlayMenuItem, action: () => void) => {
-      items.push(item);
-      if (!item.selectDisabled && !item.disabled) {
-        selectionById.set(item.id, action);
-      }
-    };
-
-    if (effort) {
-      addLabel("label:effort", "Effort");
-      if (ultrathinkInBodyText) {
-        items.push({
-          id: "effort:prompt-controlled-help",
-          label: 'Your prompt contains "ultrathink" in the text. Remove it to change effort.',
-          description: undefined,
-          selectDisabled: true,
-        });
-      }
-      const checkedEffort = ultrathinkPromptControlled ? "ultrathink" : effort;
-      for (const option of effortLevels) {
-        addAction(
-          {
-            id: `effort:${option.value}`,
-            label: `${option.label}${option.value === getDefaultEffort(caps) ? " (default)" : ""}`,
-            checked: option.value === checkedEffort,
-            selectDisabled: ultrathinkInBodyText,
-          },
-          () => handleEffortChange(option.value),
-        );
-      }
-    } else if (thinkingEnabled !== null) {
-      addLabel("label:thinking", "Thinking");
-      addAction({ id: "thinking:on", label: "On (default)", checked: thinkingEnabled }, () =>
-        handleThinkingChange("on"),
-      );
-      addAction({ id: "thinking:off", label: "Off", checked: !thinkingEnabled }, () =>
-        handleThinkingChange("off"),
-      );
-    }
-
-    if (caps.supportsFastMode) {
-      if (items.length > 0) addSeparator();
-      addLabel("label:fast-mode", "Fast Mode");
-      addAction({ id: "fast-mode:off", label: "off", checked: !fastModeEnabled }, () =>
-        handleFastModeChange("off"),
-      );
-      addAction({ id: "fast-mode:on", label: "on", checked: fastModeEnabled }, () =>
-        handleFastModeChange("on"),
-      );
-    }
-
-    if (contextWindowOptions.length > 1) {
-      if (items.length > 0) addSeparator();
-      addLabel("label:context-window", "Context Window");
-      const checkedContextWindow = contextWindow ?? defaultContextWindow ?? "";
-      for (const option of contextWindowOptions) {
-        addAction(
-          {
-            id: `context-window:${option.value}`,
-            label: `${option.label}${option.value === defaultContextWindow ? " (default)" : ""}`,
-            checked: option.value === checkedContextWindow,
-          },
-          () => handleContextWindowChange(option.value),
-        );
-      }
-    }
-
-    return {
-      overlayItems: items.length > 0 ? items : undefined,
-      overlaySelectionById: selectionById,
-    };
-  }, [
-    caps,
-    contextWindow,
-    contextWindowOptions,
-    defaultContextWindow,
-    effort,
-    effortLevels,
-    fastModeEnabled,
-    handleContextWindowChange,
-    handleEffortChange,
-    handleFastModeChange,
-    handleThinkingChange,
-    thinkingEnabled,
-    ultrathinkInBodyText,
-    ultrathinkPromptControlled,
-  ]);
-}
-
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   provider,
   models,
@@ -401,6 +273,102 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     modelOptions,
     allowPromptInjectedEffort,
   );
+  const actions = useTraitsActions({
+    provider,
+    prompt,
+    onPromptChange,
+    modelOptions,
+    selected,
+    persistence,
+  });
+
+  return <TraitsMenuBody actions={actions} selected={selected} />;
+});
+
+export function buildTraitsPickerRouteParams({
+  allowPromptInjectedEffort = true,
+  model,
+  modelOptions,
+  models,
+  prompt,
+  provider,
+}: TraitsMenuContentProps): TraitsPickerRouteParams {
+  return {
+    allowPromptInjectedEffort,
+    model,
+    modelOptions,
+    models,
+    prompt,
+    provider,
+  };
+}
+
+export function useTraitsPickerRouteResultHandler({
+  provider,
+  models,
+  model,
+  prompt,
+  onPromptChange,
+  modelOptions,
+  allowPromptInjectedEffort = true,
+  ...persistence
+}: TraitsMenuContentProps & TraitsPersistence): (value: unknown) => void {
+  const selected = getSelectedTraits(
+    provider,
+    models,
+    model,
+    prompt,
+    modelOptions,
+    allowPromptInjectedEffort,
+  );
+  const actions = useTraitsActions({
+    provider,
+    prompt,
+    onPromptChange,
+    modelOptions,
+    selected,
+    persistence,
+  });
+  return useCallback(
+    (value: unknown) => {
+      if (!isTraitsPickerResult(value, selected)) return;
+      applyTraitsPickerResult(value, actions);
+    },
+    [actions, selected],
+  );
+}
+
+export function TraitsMenuRouteContent({
+  onResult,
+  params,
+}: {
+  onResult: (result: TraitsPickerResult) => void;
+  params: TraitsPickerRouteParams;
+}) {
+  const selected = getSelectedTraits(
+    params.provider,
+    params.models,
+    params.model,
+    params.prompt,
+    params.modelOptions,
+    params.allowPromptInjectedEffort,
+  );
+  const actions: TraitsActionHandlers = {
+    handleContextWindowChange: (value) => onResult({ kind: "context-window", value }),
+    handleEffortChange: (value) => onResult({ kind: "effort", value }),
+    handleFastModeChange: (value) => onResult({ kind: "fast-mode", value }),
+    handleThinkingChange: (value) => onResult({ kind: "thinking", value }),
+  };
+  return <TraitsMenuBody actions={actions} selected={selected} />;
+}
+
+function TraitsMenuBody({
+  actions,
+  selected,
+}: {
+  actions: TraitsActionHandlers;
+  selected: ReturnType<typeof getSelectedTraits>;
+}) {
   const {
     caps,
     effort,
@@ -414,19 +382,6 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ultrathinkInBodyText,
   } = selected;
   const defaultEffort = getDefaultEffort(caps);
-  const {
-    handleEffortChange,
-    handleThinkingChange,
-    handleFastModeChange,
-    handleContextWindowChange,
-  } = useTraitsActions({
-    provider,
-    prompt,
-    onPromptChange,
-    modelOptions,
-    selected,
-    persistence,
-  });
 
   if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
     return null;
@@ -445,7 +400,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             ) : null}
             <MenuRadioGroup
               value={ultrathinkPromptControlled ? "ultrathink" : effort}
-              onValueChange={handleEffortChange}
+              onValueChange={actions.handleEffortChange}
             >
               {effortLevels.map((option) => (
                 <MenuRadioItem
@@ -465,7 +420,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Thinking</div>
           <MenuRadioGroup
             value={thinkingEnabled ? "on" : "off"}
-            onValueChange={handleThinkingChange}
+            onValueChange={actions.handleThinkingChange}
           >
             <MenuRadioItem value="on">On (default)</MenuRadioItem>
             <MenuRadioItem value="off">Off</MenuRadioItem>
@@ -479,7 +434,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
             <MenuRadioGroup
               value={fastModeEnabled ? "on" : "off"}
-              onValueChange={handleFastModeChange}
+              onValueChange={actions.handleFastModeChange}
             >
               <MenuRadioItem value="off">off</MenuRadioItem>
               <MenuRadioItem value="on">on</MenuRadioItem>
@@ -496,7 +451,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             </div>
             <MenuRadioGroup
               value={contextWindow ?? defaultContextWindow ?? ""}
-              onValueChange={handleContextWindowChange}
+              onValueChange={actions.handleContextWindowChange}
             >
               {contextWindowOptions.map((option) => (
                 <MenuRadioItem key={option.value} value={option.value}>
@@ -510,7 +465,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       ) : null}
     </>
   );
-});
+}
 
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
@@ -524,7 +479,6 @@ export const TraitsPicker = memo(function TraitsPicker({
   triggerClassName,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const selected = getSelectedTraits(
     provider,
     models,
@@ -544,7 +498,15 @@ export const TraitsPicker = memo(function TraitsPicker({
     defaultContextWindow,
     ultrathinkPromptControlled,
   } = selected;
-  const { overlayItems, overlaySelectionById } = useTraitsOverlayMenu({
+  const actions = useTraitsActions({
+    provider,
+    prompt,
+    onPromptChange,
+    modelOptions,
+    selected,
+    persistence,
+  });
+  const handleRouteResult = useTraitsPickerRouteResultHandler({
     provider,
     models,
     model,
@@ -553,6 +515,21 @@ export const TraitsPicker = memo(function TraitsPicker({
     modelOptions,
     allowPromptInjectedEffort,
     ...persistence,
+  });
+  const route = useRoutedPopoverSurface<HTMLButtonElement, TraitsPickerResult>({
+    routeKey: TRAITS_PICKER_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    params: buildTraitsPickerRouteParams({
+      provider,
+      models,
+      model,
+      prompt,
+      onPromptChange,
+      modelOptions,
+      allowPromptInjectedEffort,
+    }),
+    onResult: handleRouteResult,
   });
 
   const effortLabel = effort
@@ -583,17 +560,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   const isCodexStyle = baseProviderKind(provider) === "codex";
 
   return (
-    <Menu
-      overlayMenuAlign="start"
-      overlayOnSelect={(id) => {
-        overlaySelectionById.get(id)?.();
-      }}
-      open={isMenuOpen}
-      onOpenChange={(open) => {
-        setIsMenuOpen(open);
-      }}
-      {...(overlayItems !== undefined ? { overlayItems } : {})}
-    >
+    <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
       <MenuTrigger
         render={
           <Button
@@ -607,6 +574,9 @@ export const TraitsPicker = memo(function TraitsPicker({
             )}
           />
         }
+        onFocusCapture={route.updateAnchor}
+        onMouseOverCapture={route.updateAnchor}
+        ref={route.triggerRef}
       >
         {isCodexStyle ? (
           <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
@@ -621,17 +591,127 @@ export const TraitsPicker = memo(function TraitsPicker({
         )}
       </MenuTrigger>
       <MenuPopup align="start">
-        <TraitsMenuContent
-          provider={provider}
-          models={models}
-          model={model}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-          modelOptions={modelOptions}
-          allowPromptInjectedEffort={allowPromptInjectedEffort}
-          {...persistence}
-        />
+        <TraitsMenuBody actions={actions} selected={selected} />
       </MenuPopup>
     </Menu>
+  );
+});
+
+function applyTraitsPickerResult(result: TraitsPickerResult, actions: TraitsActionHandlers): void {
+  switch (result.kind) {
+    case "context-window":
+      actions.handleContextWindowChange(result.value);
+      return;
+    case "effort":
+      actions.handleEffortChange(result.value);
+      return;
+    case "fast-mode":
+      actions.handleFastModeChange(result.value);
+      return;
+    case "thinking":
+      actions.handleThinkingChange(result.value);
+  }
+}
+
+function isTraitsPickerResult(
+  value: unknown,
+  selected: ReturnType<typeof getSelectedTraits>,
+): value is TraitsPickerResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<TraitsPickerResult>;
+  if (typeof candidate.value !== "string") return false;
+  switch (candidate.kind) {
+    case "context-window":
+      return selected.contextWindowOptions.some((option) => option.value === candidate.value);
+    case "effort":
+      return (
+        !selected.ultrathinkInBodyText &&
+        selected.effortLevels.some((option) => option.value === candidate.value)
+      );
+    case "fast-mode":
+      return (
+        selected.caps.supportsFastMode && (candidate.value === "on" || candidate.value === "off")
+      );
+    case "thinking":
+      return (
+        selected.thinkingEnabled !== null && (candidate.value === "on" || candidate.value === "off")
+      );
+    default:
+      return false;
+  }
+}
+
+function readProviderKindParam(value: unknown): ProviderKind {
+  return typeof value === "string" ? (value as ProviderKind) : ("codex" as ProviderKind);
+}
+
+function readStringParam(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readBooleanParam(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readModelOptionsParam(value: unknown): ProviderOptions | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as ProviderOptions)
+    : undefined;
+}
+
+function readServerProviderModelsParam(value: unknown): ServerProviderModel[] {
+  if (!Array.isArray(value)) return [];
+  const models: ServerProviderModel[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Partial<ServerProviderModel>;
+    if (typeof candidate.slug !== "string" || typeof candidate.name !== "string") continue;
+    models.push({
+      slug: candidate.slug,
+      name: candidate.name,
+      isCustom: candidate.isCustom === true,
+      capabilities:
+        candidate.capabilities === null || typeof candidate.capabilities === "object"
+          ? candidate.capabilities
+          : null,
+    });
+  }
+  return models;
+}
+
+registerOverlayRoute<{
+  allowPromptInjectedEffort?: unknown;
+  model?: unknown;
+  modelOptions?: unknown;
+  models?: unknown;
+  prompt?: unknown;
+  provider?: unknown;
+}>(TRAITS_PICKER_OVERLAY_ROUTE_KEY, function TraitsPickerOverlayRoute({ controller, message }) {
+  const provider = readProviderKindParam(message.params.provider);
+  const models = readServerProviderModelsParam(message.params.models);
+  const model = readStringParam(message.params.model);
+  const prompt = readStringParam(message.params.prompt);
+  const modelOptions = readModelOptionsParam(message.params.modelOptions);
+  const allowPromptInjectedEffort = readBooleanParam(
+    message.params.allowPromptInjectedEffort,
+    true,
+  );
+
+  return (
+    <OverlayRouteMenu>
+      <OverlayRouteMenuPopup align="start">
+        <TraitsMenuRouteContent
+          params={{
+            allowPromptInjectedEffort,
+            model,
+            modelOptions,
+            models,
+            prompt,
+            provider,
+          }}
+          onResult={(result) => controller.submit(result)}
+        />
+      </OverlayRouteMenuPopup>
+    </OverlayRouteMenu>
   );
 });

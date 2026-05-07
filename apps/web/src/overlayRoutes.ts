@@ -12,6 +12,7 @@ import "./components/SidebarSortMenu";
 import "./components/SystemPromptDialog";
 import "./components/browser/EmbeddedBrowserViewportToolbar";
 import "./components/chat/ContextWindowMeter";
+import "./components/chat/CompactComposerControlsMenu";
 import "./components/chat/ComposerPrimaryActions";
 import "./components/chat/McpServersPicker";
 import "./components/chat/OpenInPicker";
@@ -22,6 +23,7 @@ import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
 import "./components/chat/SkillsPicker";
 import "./components/chat/ThreadSwitcherDropdown";
+import "./components/chat/TraitsPicker";
 import "./components/management/BoardToolbar";
 import "./components/management/TicketDetailFieldSelectOverlay";
 import "./components/management/KanbanTicketDetail";
@@ -58,6 +60,7 @@ logWebTimeline("overlay-routes.loaded", {
     "template-editor",
     "managed-runs-control",
     "context-window-meter",
+    "compact-composer-controls-menu",
     "composer-implement-menu",
     "mcp-servers-picker-menu",
     "open-in-picker-menu",
@@ -69,6 +72,7 @@ logWebTimeline("overlay-routes.loaded", {
     "rate-limit-meter",
     "skills-picker-menu",
     "thread-switcher-menu",
+    "traits-picker-menu",
     "board-toolbar-filter",
     "ticket-detail-field-select",
     "ticket-detail-actions-menu",

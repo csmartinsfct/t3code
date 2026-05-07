@@ -212,7 +212,10 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
-import { useTraitsOverlayMenu } from "./chat/TraitsPicker";
+import {
+  buildTraitsPickerRouteParams,
+  useTraitsPickerRouteResultHandler,
+} from "./chat/TraitsPicker";
 import { McpServersPicker } from "./chat/McpServersPicker";
 import { SkillsPicker } from "./chat/SkillsPicker";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
@@ -4941,7 +4944,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     prompt,
     onPromptChange: setPromptFromTraits,
   });
-  const providerTraitsOverlayMenu = useTraitsOverlayMenu({
+  const providerTraitsRouteParams = buildTraitsPickerRouteParams({
+    provider: selectedProvider,
+    model: selectedModel,
+    models: selectedProviderModels,
+    modelOptions: composerModelOptions?.[baseProviderKind(selectedProvider)],
+    prompt,
+    onPromptChange: setPromptFromTraits,
+  });
+  const handleProviderTraitsRouteResult = useTraitsPickerRouteResultHandler({
     provider: selectedProvider,
     threadId,
     model: selectedModel,
@@ -5933,14 +5944,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   runtimeMode={runtimeMode}
                                   supportsPlan={supportsPlan}
                                   traitsMenuContent={providerTraitsMenuContent}
-                                  onTraitsOverlaySelect={(id) => {
-                                    providerTraitsOverlayMenu.overlaySelectionById.get(id)?.();
-                                  }}
-                                  {...(providerTraitsOverlayMenu.overlayItems !== undefined
-                                    ? {
-                                        traitsOverlayItems: providerTraitsOverlayMenu.overlayItems,
-                                      }
-                                    : {})}
+                                  traitsRouteParams={providerTraitsRouteParams}
+                                  onTraitsResult={handleProviderTraitsRouteResult}
                                   onInteractionModeChange={handleInteractionModeChange}
                                   onRuntimeModeChange={handleRuntimeModeChange}
                                 />
