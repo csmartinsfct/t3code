@@ -239,6 +239,28 @@ function useRouteDismiss(cancelReason = "dismissed") {
   );
 }
 
+function getOpenChangeReason(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const reason = (details as { reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : null;
+}
+
+export function shouldDismissOverlayRouteMenu(reason: string | null): boolean {
+  return reason === "outside-press" || reason === "escape-key" || reason === "close-press";
+}
+
+function useRouteMenuDismiss(cancelReason = "dismissed") {
+  const controller = useOverlayRouteController();
+  return useCallback(
+    (nextOpen: boolean, details?: unknown) => {
+      if (nextOpen) return;
+      if (!shouldDismissOverlayRouteMenu(getOpenChangeReason(details))) return;
+      controller.cancel(cancelReason);
+    },
+    [cancelReason, controller],
+  );
+}
+
 export function OverlayRouteDialog({ cancelReason, ...props }: RouteRootProps<typeof Dialog>) {
   const handleOpenChange = useRouteDismiss(cancelReason);
   return <Dialog open onOpenChange={handleOpenChange} {...props} />;
@@ -310,7 +332,7 @@ export function OverlayRoutePopoverPopup({
 export { OverlayRoutePopoverPopup as OverlayRoutePopoverContent };
 
 export function OverlayRouteMenu({ cancelReason, ...props }: RouteRootProps<typeof Menu>) {
-  const handleOpenChange = useRouteDismiss(cancelReason);
+  const handleOpenChange = useRouteMenuDismiss(cancelReason);
   return (
     <Menu open onOpenChange={handleOpenChange} trackEmbeddedBrowserOverlay={false} {...props} />
   );

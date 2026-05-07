@@ -114,6 +114,7 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 
 - Base UI close requests must forward back to the native overlay bridge.
 - Outside click and Escape should dismiss the full-window overlay so it cannot become an invisible glass pane over the app.
+- Routed menus must use `OverlayRouteMenu`, which centralizes dismissal filtering: only explicit dismiss reasons such as outside click, Escape, or a close button cancel the route. Base UI `focus-out`, `item-press`, and hover bookkeeping must not dismiss a routed menu by themselves, because routed menu items can emit non-dismissing events while the same overlay remains open.
 - Header/row action buttons should emit non-dismissing `action` events by default. Use `dismissOnAction` only when the action intentionally opens another surface or ends the interaction.
 - The host `WebContents` must be focused again after release so app shortcuts work immediately.
 - Electron clipboard actions should prefer `desktopBridge.clipboard.writeText()` because focus may still be transitioning back from the overlay `WebContents`.

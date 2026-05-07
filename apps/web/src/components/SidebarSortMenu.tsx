@@ -1,10 +1,9 @@
 import { ArrowUpDownIcon } from "lucide-react";
-import { useRef } from "react";
 
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
-import { OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
 
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
@@ -139,27 +138,13 @@ registerOverlayRoute<{
   function SidebarSortMenuOverlayRoute({ message, controller }) {
     const projectSortOrder = readProjectSortOrderParam(message.params.projectSortOrder);
     const threadSortOrder = readThreadSortOrderParam(message.params.threadSortOrder);
-    const suppressSelectionCloseRef = useRef(false);
 
     const emitSortChange = (result: SidebarSortMenuResult) => {
-      suppressSelectionCloseRef.current = true;
       controller.bridge.emitEvent("sort-change", result);
     };
 
     return (
-      <Menu
-        open
-        trackEmbeddedBrowserOverlay={false}
-        onOpenChange={(open, details) => {
-          if (open) return;
-          if (suppressSelectionCloseRef.current) {
-            suppressSelectionCloseRef.current = false;
-            return;
-          }
-          if (!shouldDismissSidebarSortMenuRoute(getOpenChangeReason(details))) return;
-          controller.cancel("dismissed");
-        }}
-      >
+      <OverlayRouteMenu>
         <OverlayRouteMenuPopup align="end" side="bottom" className="min-w-44">
           <SidebarSortMenuContent
             projectSortOrder={projectSortOrder}
@@ -178,7 +163,7 @@ registerOverlayRoute<{
             }
           />
         </OverlayRouteMenuPopup>
-      </Menu>
+      </OverlayRouteMenu>
     );
   },
 );
@@ -205,14 +190,4 @@ function isProjectSortOrder(value: unknown): value is SidebarProjectSortOrder {
 
 function isThreadSortOrder(value: unknown): value is SidebarThreadSortOrder {
   return value === "created_at" || value === "updated_at";
-}
-
-function getOpenChangeReason(details: unknown): string | null {
-  if (!details || typeof details !== "object") return null;
-  const reason = (details as { reason?: unknown }).reason;
-  return typeof reason === "string" ? reason : null;
-}
-
-export function shouldDismissSidebarSortMenuRoute(reason: string | null): boolean {
-  return reason === "outside-press" || reason === "escape-key";
 }
