@@ -16,6 +16,7 @@ import "./components/chat/ComposerPrimaryActions";
 import "./components/chat/McpServersPicker";
 import "./components/chat/OpenInPicker";
 import "./components/chat/OrchestrationProgressHeader";
+import "./components/chat/ProviderModelPicker";
 import "./components/chat/ProposeActionCard";
 import "./components/chat/ProposedPlanCard";
 import "./components/chat/RateLimitMeter";
@@ -62,6 +63,7 @@ logWebTimeline("overlay-routes.loaded", {
     "open-in-picker-menu",
     "orchestration-resume-menu",
     "plan-actions-menu",
+    "provider-model-picker-menu",
     "propose-action-icon-picker",
     "proposed-plan-save-dialog",
     "rate-limit-meter",
