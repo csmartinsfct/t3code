@@ -156,6 +156,42 @@ interface PendingUserInput {
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
 }
 
+function normalizeClaudeAskUserQuestionAnswerValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const selected = value.filter((entry): entry is string => typeof entry === "string");
+    return selected.length > 0 ? selected.join(", ") : undefined;
+  }
+  return undefined;
+}
+
+function hasOwnRecordKey(record: ProviderUserInputAnswers, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function toClaudeAskUserQuestionAnswers(
+  questions: ReadonlyArray<UserInputQuestion>,
+  answers: ProviderUserInputAnswers,
+): ProviderUserInputAnswers {
+  const normalized: Record<string, string> = {};
+
+  for (const question of questions) {
+    const key = [question.question, question.id, question.header].find((candidate) =>
+      hasOwnRecordKey(answers, candidate),
+    );
+    if (!key) continue;
+
+    const value = normalizeClaudeAskUserQuestionAnswerValue(answers[key]);
+    if (value !== undefined) {
+      normalized[question.question] = value;
+    }
+  }
+
+  return normalized;
+}
+
 interface ToolInFlight {
   readonly itemId: string;
   readonly itemType: CanonicalItemType;
@@ -3322,7 +3358,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
 
         // Block until the user provides answers.
-        const answers = yield* Deferred.await(answersDeferred);
+        const answers = toClaudeAskUserQuestionAnswers(
+          questions,
+          yield* Deferred.await(answersDeferred),
+        );
         pendingUserInputs.delete(requestId);
 
         // Emit user-input.resolved so the UI knows the interaction completed.

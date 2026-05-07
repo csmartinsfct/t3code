@@ -3087,6 +3087,81 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("returns AskUserQuestion answers keyed by question text for Claude Code", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "approval-required",
+      });
+
+      yield* Stream.runHead(adapter.streamEvents);
+
+      const createInput = harness.getLastCreateQueryInput();
+      const canUseTool = createInput?.options.canUseTool;
+      assert.equal(typeof canUseTool, "function");
+      if (!canUseTool) {
+        return;
+      }
+
+      const askInput = {
+        questions: [
+          {
+            question: "Confirm action on newrelic-infra.service on metric-be?",
+            header: "Confirm",
+            options: [
+              { label: "Stop + disable (Recommended)", description: "Stop and disable." },
+              { label: "Stop only", description: "Stop once." },
+            ],
+            multiSelect: false,
+          },
+        ],
+      };
+
+      const permissionPromise = canUseTool("AskUserQuestion", askInput, {
+        signal: new AbortController().signal,
+        toolUseID: "tool-ask-question-text-key",
+      });
+
+      const requestedEvent = yield* Stream.runHead(adapter.streamEvents);
+      assert.equal(requestedEvent._tag, "Some");
+      if (requestedEvent._tag !== "Some" || requestedEvent.value.type !== "user-input.requested") {
+        return;
+      }
+      const requestId = requestedEvent.value.requestId;
+      assert.equal(requestedEvent.value.payload.questions[0]?.id, "Confirm");
+
+      yield* adapter.respondToUserInput(
+        session.threadId,
+        ApprovalRequestId.makeUnsafe(requestId!),
+        { Confirm: "Stop + disable (Recommended)" },
+      );
+
+      const resolvedEvent = yield* Stream.runHead(adapter.streamEvents);
+      assert.equal(resolvedEvent._tag, "Some");
+      if (resolvedEvent._tag !== "Some" || resolvedEvent.value.type !== "user-input.resolved") {
+        return;
+      }
+      assert.deepEqual(resolvedEvent.value.payload.answers, {
+        "Confirm action on newrelic-infra.service on metric-be?": "Stop + disable (Recommended)",
+      });
+
+      const permissionResult = yield* Effect.promise(() => permissionPromise);
+      assert.equal((permissionResult as PermissionResult).behavior, "allow");
+      const updatedInput = (permissionResult as { updatedInput: Record<string, unknown> })
+        .updatedInput;
+      assert.deepEqual(updatedInput.answers, {
+        "Confirm action on newrelic-infra.service on metric-be?": "Stop + disable (Recommended)",
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("routes AskUserQuestion through user-input flow even in full-access mode", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
