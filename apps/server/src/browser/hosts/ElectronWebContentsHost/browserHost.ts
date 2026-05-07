@@ -496,6 +496,21 @@ export class ElectronWebContentsBrowserHost {
 
   private async primeEventDomains(): Promise<void> {
     try {
+      // `Target.setAutoAttach` with `flatten: true` is what makes
+      // `Runtime.*` / `Network.*` events reach our debugger.on('message')
+      // listener at all on the embedded host. Without it, events from any
+      // sub-target (OOPIFs, cross-origin iframes, service workers, and in
+      // newer Electron the main frame itself when site-isolation is on)
+      // never make it to the connection. With `flatten: true`, all attached
+      // session events flow over the same root debugger pipe — Playwright's
+      // CDPSession does this automatically; we have to ask for it. Must be
+      // sent before Runtime/Network/Page.enable so events from the very
+      // first navigation (including the HTML document request) are caught.
+      await this.send("Target.setAutoAttach", {
+        autoAttach: true,
+        flatten: true,
+        waitForDebuggerOnStart: false,
+      });
       await Promise.all([
         this.send("Runtime.enable"),
         this.send("Network.enable"),

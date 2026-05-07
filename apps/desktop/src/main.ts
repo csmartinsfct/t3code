@@ -2186,14 +2186,19 @@ function subscribeEmbeddedBrowserCdpEvents(
     void event;
     if (closed) return;
     if (method !== request.eventName) return;
-    if ((sessionId ?? undefined) !== expectedSessionId) return;
+    // Newer Electron emits root-session events with `sessionId === ""` (empty
+    // string) rather than `undefined` — `??` would let "" through as a real
+    // value and reject the event when the caller subscribed with sessionId
+    // "root" (which normalizes to `undefined`). Treat empty string as root.
+    const incomingSessionId = sessionId ? sessionId : undefined;
+    if (incomingSessionId !== expectedSessionId) return;
     response.write(
       `${JSON.stringify({
         ok: true,
         result: {
           method,
           params,
-          ...(sessionId === undefined ? {} : { sessionId }),
+          ...(incomingSessionId === undefined ? {} : { sessionId: incomingSessionId }),
         },
       })}\n`,
     );
