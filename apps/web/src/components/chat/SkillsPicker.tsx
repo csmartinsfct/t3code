@@ -1,9 +1,18 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { BookOpenIcon, PencilIcon } from "lucide-react";
 
-import type { OverlayMenuItem, SkillEntry } from "@t3tools/contracts";
+import type { SkillEntry } from "@t3tools/contracts";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+
+const SKILLS_PICKER_OVERLAY_ROUTE_KEY = "skills-picker-menu";
+
+type SkillsPickerResult =
+  | { kind: "attach"; skill: SkillEntry }
+  | { kind: "reveal"; skill: SkillEntry };
 
 interface SkillsPickerProps {
   skills: readonly SkillEntry[];
@@ -50,6 +59,69 @@ function groupSkills(skills: readonly SkillEntry[]): SkillGroup[] {
   return result;
 }
 
+function isSkillEntry(value: unknown): value is SkillEntry {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SkillEntry>;
+  return typeof candidate.id === "string" && typeof candidate.name === "string";
+}
+
+function readSkillEntriesParam(value: unknown): SkillEntry[] {
+  return Array.isArray(value) ? value.filter(isSkillEntry) : [];
+}
+
+function readAttachedSkillIdsParam(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value.filter((item): item is string => typeof item === "string"));
+}
+
+function isSkillsPickerResult(value: unknown): value is SkillsPickerResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SkillsPickerResult>;
+  return (
+    (candidate.kind === "attach" || candidate.kind === "reveal") && isSkillEntry(candidate.skill)
+  );
+}
+
+function SkillsMenuContent({
+  attachedSkillIds,
+  groups,
+  onAttachSkill,
+  onCloseMenu,
+  onRevealSkill,
+}: {
+  attachedSkillIds: ReadonlySet<string>;
+  groups: readonly SkillGroup[];
+  onAttachSkill: (skill: SkillEntry) => void;
+  onCloseMenu: () => void;
+  onRevealSkill: (skill: SkillEntry) => void;
+}) {
+  return (
+    <>
+      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Skills</div>
+      {groups.map((group, groupIdx) => (
+        <div key={group.label ?? "__top__"}>
+          {groupIdx > 0 && <div className="mx-2 my-1 border-t border-border/50" role="separator" />}
+          {group.label !== null && (
+            <div className="px-2 pb-0.5 pt-1.5 font-medium text-muted-foreground text-xs">
+              {group.label}
+            </div>
+          )}
+          {group.skills.map((skill) => (
+            <SkillMenuItem
+              key={skill.id}
+              skill={skill}
+              isAttached={attachedSkillIds.has(skill.id)}
+              onAttach={onAttachSkill}
+              onReveal={onRevealSkill}
+              onCloseMenu={onCloseMenu}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 /**
  * Composer-footer picker that lists discovered skill files and lets users
  * attach them to the current message.  Returns `null` when no skills are
@@ -65,74 +137,34 @@ export const SkillsPicker = memo(function SkillsPicker({
   onRevealSkill,
 }: SkillsPickerProps) {
   const groups = useMemo(() => groupSkills(skills), [skills]);
-  const [open, setOpen] = useState(false);
 
-  const closeMenu = useCallback(() => setOpen(false), []);
-  const { overlayItems, overlaySelectionById } = useMemo(() => {
-    const items: OverlayMenuItem[] = [
-      {
-        id: "skills-header",
-        label: "Skills",
-        labelOnly: true,
-      },
-    ];
-    const selectionById = new Map<string, () => void>();
-
-    groups.forEach((group, groupIdx) => {
-      if (groupIdx > 0) {
-        items.push({
-          id: `skills-separator-${groupIdx}`,
-          label: "",
-          separator: true,
-        });
+  const handleRouteResult = useCallback(
+    (value: SkillsPickerResult) => {
+      if (!isSkillsPickerResult(value)) return;
+      if (value.kind === "attach") {
+        onAttachSkill(value.skill);
+        return;
       }
-
-      if (group.label !== null) {
-        items.push({
-          id: `skills-group-${group.label}`,
-          label: group.label,
-          labelOnly: true,
-        });
-      }
-
-      for (const skill of group.skills) {
-        const attachId = `skill:${skill.id}:attach`;
-        const revealId = `skill:${skill.id}:reveal`;
-        const isAttached = attachedSkillIds.has(skill.id);
-
-        items.push({
-          id: attachId,
-          label: skill.name,
-          selectDisabled: isAttached,
-          secondaryAction: {
-            id: revealId,
-            ariaLabel: `Reveal ${skill.name} in file explorer`,
-            icon: "Pencil",
-            iconClassName: "size-3",
-            dismissOnAction: true,
-          },
-        });
-
-        if (!isAttached) {
-          selectionById.set(attachId, () => onAttachSkill(skill));
-        }
-        selectionById.set(revealId, () => onRevealSkill(skill));
-      }
-    });
-
-    return { overlayItems: items, overlaySelectionById: selectionById };
-  }, [attachedSkillIds, groups, onAttachSkill, onRevealSkill]);
+      onRevealSkill(value.skill);
+    },
+    [onAttachSkill, onRevealSkill],
+  );
+  const route = useRoutedPopoverSurface<HTMLButtonElement, SkillsPickerResult>({
+    routeKey: SKILLS_PICKER_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    params: {
+      attachedSkillIds: Array.from(attachedSkillIds),
+      skills,
+    },
+    onResult: handleRouteResult,
+  });
+  const closeMenu = useCallback(() => route.onOpenChange(false), [route]);
 
   if (skills.length === 0) return null;
 
   return (
-    <Menu
-      open={open}
-      onOpenChange={setOpen}
-      overlayItems={overlayItems}
-      overlayMenuAlign="start"
-      overlayOnSelect={(id) => overlaySelectionById.get(id)?.()}
-    >
+    <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
       <MenuTrigger
         render={
           <Button
@@ -142,36 +174,21 @@ export const SkillsPicker = memo(function SkillsPicker({
             aria-label="Skills"
           />
         }
+        onFocusCapture={route.updateAnchor}
+        onMouseOverCapture={route.updateAnchor}
+        ref={route.triggerRef}
       >
         <BookOpenIcon aria-hidden="true" className="size-4" />
         {!compact ? <span className="sr-only sm:not-sr-only">Skills</span> : null}
       </MenuTrigger>
       <MenuPopup align="start" className="max-h-[500px]">
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Skills</div>
-        {groups.map((group, groupIdx) => (
-          <div key={group.label ?? "__top__"}>
-            {/* Separator between groups */}
-            {groupIdx > 0 && (
-              <div className="mx-2 my-1 border-t border-border/50" role="separator" />
-            )}
-            {/* Group header for sub-packages */}
-            {group.label !== null && (
-              <div className="px-2 pb-0.5 pt-1.5 font-medium text-muted-foreground text-xs">
-                {group.label}
-              </div>
-            )}
-            {group.skills.map((skill) => (
-              <SkillMenuItem
-                key={skill.id}
-                skill={skill}
-                isAttached={attachedSkillIds.has(skill.id)}
-                onAttach={onAttachSkill}
-                onReveal={onRevealSkill}
-                onCloseMenu={closeMenu}
-              />
-            ))}
-          </div>
-        ))}
+        <SkillsMenuContent
+          attachedSkillIds={attachedSkillIds}
+          groups={groups}
+          onAttachSkill={onAttachSkill}
+          onCloseMenu={closeMenu}
+          onRevealSkill={onRevealSkill}
+        />
       </MenuPopup>
     </Menu>
   );
@@ -222,5 +239,28 @@ const SkillMenuItem = memo(function SkillMenuItem({
         <PencilIcon className="size-3" />
       </button>
     </MenuItem>
+  );
+});
+
+registerOverlayRoute<{
+  attachedSkillIds?: unknown;
+  skills?: unknown;
+}>(SKILLS_PICKER_OVERLAY_ROUTE_KEY, function SkillsPickerOverlayRoute({ message, controller }) {
+  const skills = readSkillEntriesParam(message.params.skills);
+  const attachedSkillIds = readAttachedSkillIdsParam(message.params.attachedSkillIds);
+  const groups = groupSkills(skills);
+
+  return (
+    <OverlayRouteMenu>
+      <OverlayRouteMenuPopup align="start" className="max-h-[500px]">
+        <SkillsMenuContent
+          attachedSkillIds={attachedSkillIds}
+          groups={groups}
+          onAttachSkill={(skill) => controller.submit({ kind: "attach", skill })}
+          onCloseMenu={() => undefined}
+          onRevealSkill={(skill) => controller.submit({ kind: "reveal", skill })}
+        />
+      </OverlayRouteMenuPopup>
+    </OverlayRouteMenu>
   );
 });
