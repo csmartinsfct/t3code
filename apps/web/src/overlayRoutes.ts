@@ -2,6 +2,7 @@ import { logWebTimeline } from "./timelineLogger";
 
 import "./components/attachments/ImageExtensionConfirmDialog";
 import "./components/BranchToolbar";
+import "./components/BranchToolbarBranchSelector";
 import "./components/file-explorer/FileSearchModal";
 import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
@@ -37,6 +38,7 @@ logWebTimeline("overlay-routes.loaded", {
   routes: [
     "file-search",
     "branch-env-mode-select",
+    "branch-selector-combobox",
     "browser-viewport-preset-select",
     "browser-viewport-zoom-select",
     "git-actions-menu",

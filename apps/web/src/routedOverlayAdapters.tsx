@@ -19,6 +19,7 @@ import { CommandDialog } from "~/components/ui/command";
 import { Popover, PopoverPopup } from "~/components/ui/popover";
 import { Menu, MenuPopup } from "~/components/ui/menu";
 import { Select, SelectPopup } from "~/components/ui/select";
+import { Combobox, ComboboxPopup } from "~/components/ui/combobox";
 import { useOverlayRouteController } from "~/components/overlay/OverlayRouteContext";
 
 type OpenChangeHandler<TDetails> = (open: boolean, eventDetails?: TDetails) => void;
@@ -266,6 +267,10 @@ export function shouldDismissOverlayRouteSelect(reason: string | null): boolean 
   return reason === "outside-press" || reason === "escape-key" || reason === "window-resize";
 }
 
+export function shouldDismissOverlayRouteCombobox(reason: string | null): boolean {
+  return shouldDismissOverlayRouteSelect(reason);
+}
+
 function useRouteSelectDismiss(cancelReason = "dismissed") {
   const controller = useOverlayRouteController();
   return useCallback(
@@ -360,6 +365,19 @@ export function OverlayRouteSelect({ cancelReason, ...props }: RouteRootProps<ty
   return <Select open onOpenChange={handleOpenChange} {...props} />;
 }
 
+export function OverlayRouteCombobox({ cancelReason, ...props }: RouteRootProps<typeof Combobox>) {
+  const controller = useOverlayRouteController();
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean, details?: unknown) => {
+      if (nextOpen) return;
+      if (!shouldDismissOverlayRouteCombobox(getOpenChangeReason(details))) return;
+      controller.cancel(cancelReason ?? "dismissed");
+    },
+    [cancelReason, controller],
+  );
+  return <Combobox open onOpenChange={handleOpenChange} {...props} />;
+}
+
 export function OverlayRouteMenuPopup({
   anchor,
   align,
@@ -402,6 +420,31 @@ export function OverlayRouteSelectPopup({
 
   return (
     <SelectPopup
+      anchor={anchor ?? anchorRef}
+      align={align ?? routeAlign}
+      side={side ?? routeSide}
+      {...props}
+    />
+  );
+}
+
+export function OverlayRouteComboboxPopup({
+  anchor,
+  align,
+  side,
+  ...props
+}: React.ComponentProps<typeof ComboboxPopup>) {
+  const { anchorRef, message } = useOverlayRouteController();
+  const presentation = message.presentation;
+  const routeSide =
+    presentation.kind === "popover" || presentation.kind === "menu" ? presentation.side : undefined;
+  const routeAlign =
+    presentation.kind === "popover" || presentation.kind === "menu"
+      ? presentation.align
+      : undefined;
+
+  return (
+    <ComboboxPopup
       anchor={anchor ?? anchorRef}
       align={align ?? routeAlign}
       side={side ?? routeSide}

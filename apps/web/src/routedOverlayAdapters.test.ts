@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  shouldDismissOverlayRouteCombobox,
   shouldDismissOverlayRouteMenu,
   shouldDismissOverlayRouteSelect,
 } from "./routedOverlayAdapters";
@@ -26,5 +27,16 @@ describe("routed overlay menu dismissal", () => {
     expect(shouldDismissOverlayRouteSelect("focus-out")).toBe(false);
     expect(shouldDismissOverlayRouteSelect("trigger-press")).toBe(false);
     expect(shouldDismissOverlayRouteSelect(null)).toBe(false);
+  });
+
+  it("uses select-like route dismissal for routed comboboxes", () => {
+    expect(shouldDismissOverlayRouteCombobox("outside-press")).toBe(true);
+    expect(shouldDismissOverlayRouteCombobox("escape-key")).toBe(true);
+    expect(shouldDismissOverlayRouteCombobox("window-resize")).toBe(true);
+
+    expect(shouldDismissOverlayRouteCombobox("item-press")).toBe(false);
+    expect(shouldDismissOverlayRouteCombobox("focus-out")).toBe(false);
+    expect(shouldDismissOverlayRouteCombobox("trigger-press")).toBe(false);
+    expect(shouldDismissOverlayRouteCombobox(null)).toBe(false);
   });
 });

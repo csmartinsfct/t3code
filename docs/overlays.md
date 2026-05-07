@@ -68,6 +68,7 @@ When a routed overlay is visually menu-like but contains arbitrary interactive c
 
 - use `OverlayRouteMenu` / `OverlayRouteMenuPopup` for command-menu behavior where moving through rows, outside-click dismissal, and menu focus semantics are desired;
 - use `OverlayRouteSelect` / `OverlayRouteSelectPopup` for select controls whose DOM popup should remain the source JSX instead of serializing rows into `OverlaySelectItem`;
+- use `OverlayRouteCombobox` / `OverlayRouteComboboxPopup` for searchable pickers whose DOM input/list JSX should remain the source instead of serializing rows into `OverlayComboboxItem`;
 - use `OverlayRoutePopover` / `OverlayRoutePopoverPopup` for rich cards, nested hover panels, embedded buttons, or controls that users must move into without closing the parent surface.
 
 For example, `ManagedRunsControl` keeps a normal `Menu` as its DOM fallback, but its browser-visible native route uses `OverlayRoutePopover` because service URL hover controls sit inside the active Runs surface and must remain interactive.
@@ -103,6 +104,8 @@ Routes can emit non-dismissing events for controls that update host state while 
 
 Action menus that require exact parity, including the Git actions menu, project-script actions menu, sidebar sort menu, plan action menus, orchestration resume menu, orchestration thread switcher, composer implement split-button menu, and Kanban ticket detail actions menu, use routed menu overlays rather than serialized `overlayItems`. Their DOM path and native route share a single content component; the route should only adapt transport concerns such as result submission, anchor positioning, and overlay dismissal.
 
+Searchable pickers that require exact parity should use routed combobox overlays. The branch selector uses one shared branch row/search/list component tree for both browser-hidden DOM rendering and browser-visible native rendering; the route owns only query fetching in the overlay root and submits the selected branch/create/checkout action back to the host.
+
 ## Positioning
 
 The overlay view cannot query the host DOM. The host passes a trigger/input element to `trackNativeOverlayAnchor()`, which samples `getBoundingClientRect()` while the overlay is open and re-renders when the rounded rect changes.
@@ -117,6 +120,7 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 - Outside click and Escape should dismiss the full-window overlay so it cannot become an invisible glass pane over the app.
 - Routed menus must use `OverlayRouteMenu`, which centralizes dismissal filtering: only explicit dismiss reasons such as outside click, Escape, or a close button cancel the route. Base UI `focus-out`, `item-press`, and hover bookkeeping must not dismiss a routed menu by themselves, because routed menu items can emit non-dismissing events while the same overlay remains open.
 - Routed selects must use `OverlayRouteSelect`, which submits selected values through the route result path and ignores Base UI `item-press` close requests as route cancellations. Outside click, Escape, and resize still dismiss the native route.
+- Routed comboboxes must use `OverlayRouteCombobox`, which follows the routed select dismissal policy. Row selection is a route result; outside click, Escape, and resize dismiss the native route.
 - Header/row action buttons should emit non-dismissing `action` events by default. Use `dismissOnAction` only when the action intentionally opens another surface or ends the interaction.
 - The host `WebContents` must be focused again after release so app shortcuts work immediately.
 - Electron clipboard actions should prefer `desktopBridge.clipboard.writeText()` because focus may still be transitioning back from the overlay `WebContents`.
