@@ -3,7 +3,7 @@ import { ArrowUpDownIcon } from "lucide-react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
-import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
 
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
@@ -85,11 +85,14 @@ export function ProjectSortMenu({
     kind: "menu",
     align: "end",
     side: "bottom",
+    interaction: "click",
     params: {
       projectSortOrder,
       threadSortOrder,
     },
-    onResult: (result) => {
+    onEvent: (type, payload) => {
+      if (type !== "sort-change" || !isSidebarSortMenuResult(payload)) return;
+      const result = payload;
       if (result.kind === "project") {
         onProjectSortOrderChange(result.sortOrder);
       } else {
@@ -137,30 +140,50 @@ registerOverlayRoute<{
     const threadSortOrder = readThreadSortOrderParam(message.params.threadSortOrder);
 
     return (
-      <OverlayRouteMenu>
+      <Menu open trackEmbeddedBrowserOverlay={false}>
         <OverlayRouteMenuPopup align="end" side="bottom" className="min-w-44">
           <SidebarSortMenuContent
             projectSortOrder={projectSortOrder}
             threadSortOrder={threadSortOrder}
             onProjectSortOrderChange={(sortOrder) =>
-              controller.submit({ kind: "project", sortOrder } satisfies SidebarSortMenuResult)
+              controller.bridge.emitEvent("sort-change", {
+                kind: "project",
+                sortOrder,
+              } satisfies SidebarSortMenuResult)
             }
             onThreadSortOrderChange={(sortOrder) =>
-              controller.submit({ kind: "thread", sortOrder } satisfies SidebarSortMenuResult)
+              controller.bridge.emitEvent("sort-change", {
+                kind: "thread",
+                sortOrder,
+              } satisfies SidebarSortMenuResult)
             }
           />
         </OverlayRouteMenuPopup>
-      </OverlayRouteMenu>
+      </Menu>
     );
   },
 );
 
+function isSidebarSortMenuResult(value: unknown): value is SidebarSortMenuResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<Record<keyof SidebarSortMenuResult, unknown>>;
+  if (candidate.kind === "project") return isProjectSortOrder(candidate.sortOrder);
+  if (candidate.kind === "thread") return isThreadSortOrder(candidate.sortOrder);
+  return false;
+}
+
 function readProjectSortOrderParam(value: unknown): SidebarProjectSortOrder {
-  return value === "created_at" || value === "manual" || value === "updated_at"
-    ? value
-    : "updated_at";
+  return isProjectSortOrder(value) ? value : "updated_at";
 }
 
 function readThreadSortOrderParam(value: unknown): SidebarThreadSortOrder {
-  return value === "created_at" || value === "updated_at" ? value : "updated_at";
+  return isThreadSortOrder(value) ? value : "updated_at";
+}
+
+function isProjectSortOrder(value: unknown): value is SidebarProjectSortOrder {
+  return value === "created_at" || value === "manual" || value === "updated_at";
+}
+
+function isThreadSortOrder(value: unknown): value is SidebarThreadSortOrder {
+  return value === "created_at" || value === "updated_at";
 }
