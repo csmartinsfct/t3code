@@ -1128,18 +1128,13 @@ export default function GitActionsControl({
 
   const gitOverlayItems = useMemo<OverlayMenuItem[]>(() => {
     const items: OverlayMenuItem[] = gitActionMenuItems.map((item) => {
-      const disabledReason = getMenuActionDisabledReason({
-        item,
-        gitStatus: gitStatusForActions,
-        isBusy: isGitActionRunning,
-        hasOriginRemote,
-      });
       return {
         id: `single:${item.id}`,
         label: item.label,
         icon: gitActionOverlayIcon(item.icon),
+        // Keep visual parity with the DOM menu: disabled reasons are hover
+        // tooltips there, not inline menu descriptions.
         disabled: item.disabled,
-        ...(disabledReason ? { description: disabledReason } : {}),
       };
     });
 
@@ -1189,15 +1184,7 @@ export default function GitActionsControl({
     }
 
     return items;
-  }, [
-    gitActionMenuItems,
-    gitStatusForActions,
-    hasOriginRemote,
-    isGitActionRunning,
-    isMultiRepo,
-    multiRepoMenu,
-    statusByRepoCwd,
-  ]);
+  }, [gitActionMenuItems, gitStatusForActions, isMultiRepo, multiRepoMenu, statusByRepoCwd]);
 
   const handleGitOverlaySelect = useCallback(
     (id: string) => {

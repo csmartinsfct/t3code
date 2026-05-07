@@ -45,6 +45,30 @@ describe("overlay primitive parity", () => {
     expect(html).toContain("data-disabled");
   });
 
+  it("does not add native-only width constraints for secondary action rows", () => {
+    const html = renderToStaticMarkup(
+      <>
+        <MenuPrimitive.Root open>
+          {renderOverlayMenuItemsForTests(
+            [
+              {
+                id: "run",
+                label: "Dev Server",
+                icon: "Play",
+                secondaryAction: { id: "edit", icon: "Settings", ariaLabel: "Edit Dev Server" },
+              },
+            ],
+            bridge(),
+          )}
+        </MenuPrimitive.Root>
+      </>,
+    );
+
+    expect(html).toContain("Dev Server");
+    expect(html).not.toContain("min-w-[15rem]");
+    expect(html).not.toContain("max-w-[22rem]");
+  });
+
   it("renders select separators and hide-indicator rows from serialized overlay data", () => {
     const html = renderToStaticMarkup(
       <>

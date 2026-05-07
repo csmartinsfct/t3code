@@ -147,7 +147,6 @@ function renderMenuItems(items: OverlayMenuItem[], bridge: OverlayBridgeHandle):
             className={cn(
               item.checked === undefined ? ITEM_CLASSES : CHECKED_ITEM_CLASSES,
               item.selectDisabled && "opacity-64",
-              item.secondaryAction && "min-w-[15rem] max-w-[22rem]",
             )}
             data-variant={item.destructive ? "destructive" : undefined}
             disabled={item.disabled}
