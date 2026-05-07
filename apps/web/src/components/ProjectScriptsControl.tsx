@@ -1,6 +1,5 @@
 import type {
   DeclaredService,
-  OverlayMenuItem,
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
@@ -64,7 +63,12 @@ import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
-import { useRoutedOverlaySurface } from "~/routedOverlayAdapters";
+import {
+  OverlayRouteMenu,
+  OverlayRouteMenuPopup,
+  useRoutedOverlaySurface,
+} from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 export const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "play", label: "Play" },
@@ -90,15 +94,6 @@ export function ScriptIcon({
   return <PlayIcon className={className} />;
 }
 
-function scriptOverlayIcon(icon: ProjectScriptIcon): string {
-  if (icon === "test") return "FlaskConical";
-  if (icon === "lint") return "ListChecks";
-  if (icon === "configure") return "Wrench";
-  if (icon === "build") return "Hammer";
-  if (icon === "debug") return "Bug";
-  return "Play";
-}
-
 export interface NewProjectScriptInput {
   name: string;
   /** Empty string for composite actions (per-service commands carry the load). */
@@ -111,6 +106,15 @@ export interface NewProjectScriptInput {
 
 let nextDraftKey = 0;
 const PROJECT_SCRIPT_EDITOR_OVERLAY_ROUTE_KEY = "project-script-editor";
+const PROJECT_SCRIPT_MENU_OVERLAY_ROUTE_KEY = "project-script-menu";
+
+type ProjectScriptMenuResult =
+  | { action: "add" }
+  | { action: "edit"; scriptId: string }
+  | { action: "run"; scriptId: string };
+
+const PROJECT_SCRIPT_DROPDOWN_ITEM_CLASS_NAME =
+  "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground";
 
 /** Mutable draft kept in component state while editing. */
 interface ServiceDraft {
@@ -658,6 +662,72 @@ function ProjectScriptEditorFormFields({
   );
 }
 
+function ProjectScriptsMenuContent({
+  keybindings,
+  onAdd,
+  onEdit,
+  onRun,
+  scripts,
+}: {
+  keybindings: ResolvedKeybindingsConfig;
+  onAdd: () => void;
+  onEdit: (script: ProjectScript) => void;
+  onRun: (script: ProjectScript) => void;
+  scripts: readonly ProjectScript[];
+}) {
+  return (
+    <>
+      {scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return (
+          <MenuItem
+            key={script.id}
+            className={`group ${PROJECT_SCRIPT_DROPDOWN_ITEM_CLASS_NAME}`}
+            onClick={() => onRun(script)}
+          >
+            <ScriptIcon icon={script.icon} className="size-4" />
+            <span className="truncate">
+              {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
+            </span>
+            <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+              {shortcutLabel && (
+                <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0">
+                  {shortcutLabel}
+                </MenuShortcut>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto"
+                aria-label={`Edit ${script.name}`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onEdit(script);
+                }}
+              >
+                <SettingsIcon className="size-3.5" />
+              </Button>
+            </span>
+          </MenuItem>
+        );
+      })}
+      <MenuItem className={PROJECT_SCRIPT_DROPDOWN_ITEM_CLASS_NAME} onClick={onAdd}>
+        <PlusIcon className="size-4" />
+        Add action
+      </MenuItem>
+    </>
+  );
+}
+
 export default function ProjectScriptsControl({
   scripts,
   keybindings,
@@ -680,8 +750,6 @@ export default function ProjectScriptsControl({
     }
     return primaryProjectScript(scripts);
   }, [preferredScriptId, scripts]);
-  const dropdownItemClassName =
-    "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
 
   const openAddDialog = useCallback(() => {
     setEditingScriptId(null);
@@ -724,56 +792,25 @@ export default function ProjectScriptsControl({
     onResult: handleEditorResult,
   });
 
-  const scriptOverlayItems = useMemo<OverlayMenuItem[]>(
-    () => [
-      ...scripts.map((script) => {
-        const shortcutLabel = shortcutLabelForCommand(
-          keybindings,
-          commandForProjectScript(script.id),
-        );
-        return {
-          id: `run:${script.id}`,
-          label: script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name,
-          icon: scriptOverlayIcon(script.icon),
-          iconClassName: "size-4",
-          ...(shortcutLabel ? { shortcut: shortcutLabel } : {}),
-          secondaryAction: {
-            id: `edit:${script.id}`,
-            ariaLabel: `Edit ${script.name}`,
-            icon: "Settings",
-            iconClassName: "size-3.5",
-            dismissOnAction: true,
-          },
-        } satisfies OverlayMenuItem;
-      }),
-      {
-        id: "add",
-        label: "Add action",
-        icon: "Plus",
-        iconClassName: "size-4",
-      },
-    ],
-    [keybindings, scripts],
-  );
-
-  const handleScriptOverlaySelect = useCallback(
-    (id: string) => {
-      if (id === "add") {
+  const scriptMenuRoute = useRoutedPopoverSurface<HTMLButtonElement, ProjectScriptMenuResult>({
+    routeKey: PROJECT_SCRIPT_MENU_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    params: { keybindings, scripts },
+    onResult: (result) => {
+      if (result.action === "add") {
         openAddDialog();
         return;
       }
-      if (id.startsWith("run:")) {
-        const script = scripts.find((entry) => entry.id === id.slice("run:".length));
-        if (script) onRunScript(script);
+      const script = scripts.find((entry) => entry.id === result.scriptId);
+      if (!script) return;
+      if (result.action === "edit") {
+        openEditDialog(script);
         return;
       }
-      if (id.startsWith("edit:")) {
-        const script = scripts.find((entry) => entry.id === id.slice("edit:".length));
-        if (script) openEditDialog(script);
-      }
+      onRunScript(script);
     },
-    [onRunScript, openAddDialog, openEditDialog, scripts],
-  );
+  });
 
   return (
     <>
@@ -793,63 +830,31 @@ export default function ProjectScriptsControl({
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
             highlightItemOnHover={false}
-            overlayItems={scriptOverlayItems}
-            overlayMenuAlign="end"
-            overlayOnSelect={handleScriptOverlaySelect}
+            open={scriptMenuRoute.domOpen}
+            onOpenChange={scriptMenuRoute.onOpenChange}
           >
             <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="outline"
+                  aria-label="Script actions"
+                  onFocusCapture={scriptMenuRoute.updateAnchor}
+                  onMouseOverCapture={scriptMenuRoute.updateAnchor}
+                  ref={scriptMenuRoute.triggerRef}
+                />
+              }
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">
-              {scripts.map((script) => {
-                const shortcutLabel = shortcutLabelForCommand(
-                  keybindings,
-                  commandForProjectScript(script.id),
-                );
-                return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
-                <PlusIcon className="size-4" />
-                Add action
-              </MenuItem>
+              <ProjectScriptsMenuContent
+                keybindings={keybindings}
+                onAdd={openAddDialog}
+                onEdit={openEditDialog}
+                onRun={onRunScript}
+                scripts={scripts}
+              />
             </MenuPopup>
           </Menu>
         </Group>
@@ -903,6 +908,31 @@ registerOverlayRoute<{
         open
         scripts={scripts}
       />
+    );
+  },
+);
+
+registerOverlayRoute<{
+  keybindings?: unknown;
+  scripts?: unknown;
+}>(
+  PROJECT_SCRIPT_MENU_OVERLAY_ROUTE_KEY,
+  function ProjectScriptMenuOverlayRoute({ message, controller }) {
+    const scripts = readProjectScriptsParam(message.params.scripts);
+    const keybindings = readKeybindingsParam(message.params.keybindings);
+
+    return (
+      <OverlayRouteMenu highlightItemOnHover={false}>
+        <OverlayRouteMenuPopup align="end">
+          <ProjectScriptsMenuContent
+            keybindings={keybindings}
+            onAdd={() => controller.submit({ action: "add" })}
+            onEdit={(script) => controller.submit({ action: "edit", scriptId: script.id })}
+            onRun={(script) => controller.submit({ action: "run", scriptId: script.id })}
+            scripts={scripts}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
     );
   },
 );

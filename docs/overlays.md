@@ -85,7 +85,7 @@ Primitive payloads must be JSON-serializable. Callbacks become event IDs; the ov
 
 The native primitive path should mirror the DOM path by reusing the same primitives, class strings, row components, or shared body components. Do not invent a visually similar but separate component.
 
-Primitive adapters that attempt native acquisition must preserve their DOM fallback state. If acquisition fails or is suppressed after a trigger click, uncontrolled primitives must update their internal open state before calling the external `onOpenChange(true)` callback, and controlled primitives must give their owner the same open-change callback. Otherwise host menus that pass `overlayItems`, including the Git and project-script header menus, can render neither the native overlay nor the DOM popup.
+Primitive adapters that attempt native acquisition must preserve their DOM fallback state. If acquisition fails or is suppressed after a trigger click, uncontrolled primitives must update their internal open state before calling the external `onOpenChange(true)` callback, and controlled primitives must give their owner the same open-change callback. Otherwise host menus that pass `overlayItems` can render neither the native overlay nor the DOM popup.
 
 ## Routed Overlays
 
@@ -99,6 +99,8 @@ Routed overlays use one generic `route` message. The overlay view runs the secon
 Host callsites should use `useRoutedOverlaySurface()` from `apps/web/src/routedOverlayAdapters.tsx`. The host keeps the existing DOM component mounted behind `routed.domOpen`, and the native route renders the same content tree when native overlays are active.
 
 Routes can emit non-dismissing events for controls that update host state while the popup remains open. The host then re-renders the same overlay session with refreshed params.
+
+Header action menus that require exact parity, including the Git actions menu and project-script actions menu, use routed menu overlays rather than serialized `overlayItems`. Their DOM path and native route share a single content component; the route should only adapt transport concerns such as result submission, anchor positioning, and overlay dismissal.
 
 ## Positioning
 
@@ -116,6 +118,7 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 - The host `WebContents` must be focused again after release so app shortcuts work immediately.
 - Electron clipboard actions should prefer `desktopBridge.clipboard.writeText()` because focus may still be transitioning back from the overlay `WebContents`.
 - Controlled primitives must not switch between controlled and uncontrolled `open` state when toggling between DOM and native paths.
+- Shared routed JSX can still receive different initial focus/highlight state because the native route mounts in a separate overlay React root. Visual hover affordances, such as row backgrounds or secondary action buttons, should use actual hover/pointer state unless keyboard focus is intentionally meant to look the same as hover.
 
 ## Explicit Exceptions
 

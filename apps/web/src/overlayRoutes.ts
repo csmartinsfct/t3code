@@ -29,10 +29,12 @@ import "./components/terminal/TerminalTooltipOverlay";
 logWebTimeline("overlay-routes.loaded", {
   routes: [
     "file-search",
+    "git-actions-menu",
     "git-commit-dialog",
     "git-default-branch-confirm",
     "git-tooltip",
     "project-script-editor",
+    "project-script-menu",
     "pull-request-thread-dialog",
     "system-prompt-dialog",
     "label-editor",
