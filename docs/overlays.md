@@ -85,6 +85,8 @@ Primitive payloads must be JSON-serializable. Callbacks become event IDs; the ov
 
 The native primitive path should mirror the DOM path by reusing the same primitives, class strings, row components, or shared body components. Do not invent a visually similar but separate component.
 
+Primitive adapters that attempt native acquisition must preserve their DOM fallback state. If acquisition fails or is suppressed after a trigger click, uncontrolled primitives must update their internal open state before calling the external `onOpenChange(true)` callback, and controlled primitives must give their owner the same open-change callback. Otherwise host menus that pass `overlayItems`, including the Git and project-script header menus, can render neither the native overlay nor the DOM popup.
+
 ## Routed Overlays
 
 Routed overlays use one generic `route` message. The overlay view runs the second Vite entry, registers route components via `overlayRouteRegistry.tsx`, and renders the matching route with:

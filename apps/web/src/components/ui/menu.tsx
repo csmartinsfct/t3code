@@ -62,11 +62,13 @@ function Menu({
 }) {
   const nativeActive = useNativeOverlayActive();
   const [nativeAcquireFailed, setNativeAcquireFailed] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen ?? false);
   const nativeSessionRef = useRef<NativeOverlaySession<string | null> | null>(null);
   const nativeAnchorElementRef = useRef<HTMLElement | null>(null);
   const nativeAnchorTrackingStopRef = useRef<(() => void) | null>(null);
   const overlayOnSelectRef = useRef(overlayOnSelect);
   const overlayOnActionRef = useRef(overlayOnAction);
+  const domOpen = open ?? uncontrolledOpen;
 
   useEffect(() => {
     overlayOnSelectRef.current = overlayOnSelect;
@@ -132,6 +134,9 @@ function Menu({
       }).then((session) => {
         if (!session) {
           setNativeAcquireFailed(true);
+          if (open === undefined) {
+            setUncontrolledOpen(true);
+          }
           onOpenChange?.(true, {} as MenuOpenDetails);
           return;
         }
@@ -155,7 +160,7 @@ function Menu({
           });
       });
     },
-    [buildNativeMessage, onOpenChange, stopNativeAnchorTracking],
+    [buildNativeMessage, onOpenChange, open, stopNativeAnchorTracking],
   );
 
   useEffect(() => {
@@ -183,11 +188,14 @@ function Menu({
   );
 
   const handleOpenChange = useTrackedOverlayOpen({
-    open: useNative ? false : open,
+    open: useNative ? false : domOpen,
     defaultOpen: useNative ? false : defaultOpen,
     onOpenChange: useNative
       ? undefined
       : (nextOpen, details) => {
+          if (open === undefined) {
+            setUncontrolledOpen(nextOpen);
+          }
           if (!nextOpen) {
             setNativeAcquireFailed(false);
           }
@@ -207,7 +215,7 @@ function Menu({
       <MenuPrimitive.Root
         defaultOpen={useNative ? false : defaultOpen}
         onOpenChange={useNative ? undefined : handleOpenChange}
-        open={useNative ? false : open}
+        open={useNative ? false : domOpen}
         {...props}
       />
     </NativeMenuContext.Provider>
