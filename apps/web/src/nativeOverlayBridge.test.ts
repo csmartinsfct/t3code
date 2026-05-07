@@ -74,9 +74,13 @@ describe("native overlay gate", () => {
     navigateForTest("/settings/runs");
 
     const session = await openNativeOverlay({
-      type: "menu",
-      anchor: { x: 0, y: 0, width: 1, height: 1 },
-      items: [{ id: "a", label: "A" }],
+      type: "route",
+      routeKey: "test-menu",
+      params: {},
+      presentation: {
+        kind: "menu",
+        anchor: { x: 0, y: 0, width: 1, height: 1 },
+      },
     });
 
     expect(session).toBeNull();

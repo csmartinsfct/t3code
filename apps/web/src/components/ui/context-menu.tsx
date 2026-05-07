@@ -1,7 +1,9 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { useMemo } from "react";
 
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { useContextMenuStore } from "~/contextMenuStore";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 
 import {
   Menu,
@@ -13,6 +15,32 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "./menu";
+
+const CONTEXT_MENU_ROUTE_KEY = "context-menu";
+
+type ContextMenuRouteParams = {
+  items?: unknown;
+};
+
+function readContextMenuItems(value: unknown): readonly ContextMenuItem<string>[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((candidate): ContextMenuItem<string>[] => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const item = candidate as Record<string, unknown>;
+    if (typeof item.id !== "string" || typeof item.label !== "string") return [];
+    const children = readContextMenuItems(item.children);
+    return [
+      {
+        id: item.id,
+        label: item.label,
+        ...(typeof item.destructive === "boolean" ? { destructive: item.destructive } : {}),
+        ...(typeof item.disabled === "boolean" ? { disabled: item.disabled } : {}),
+        ...(children.length > 0 ? { children } : {}),
+      },
+    ];
+  });
+}
 
 function ContextMenuItems({
   items,
@@ -50,6 +78,22 @@ function ContextMenuItems({
   });
 }
 
+function ContextMenuRouteContent({
+  items,
+  onSelect,
+}: {
+  items: readonly ContextMenuItem<string>[];
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <OverlayRouteMenu>
+      <OverlayRouteMenuPopup align="start" side="bottom" sideOffset={0}>
+        <ContextMenuItems items={items} onSelect={onSelect} />
+      </OverlayRouteMenuPopup>
+    </OverlayRouteMenu>
+  );
+}
+
 export function ContextMenuPortal() {
   const open = useContextMenuStore((s) => s.open);
   const items = useContextMenuStore((s) => s.items);
@@ -84,3 +128,10 @@ export function ContextMenuPortal() {
     </Menu>
   );
 }
+
+registerOverlayRoute<ContextMenuRouteParams>(CONTEXT_MENU_ROUTE_KEY, ({ message, controller }) => (
+  <ContextMenuRouteContent
+    items={readContextMenuItems(message.params.items)}
+    onSelect={(id) => controller.submit(id)}
+  />
+));

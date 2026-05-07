@@ -39,6 +39,7 @@ import "./components/settings/SettingsConfirmOverlay";
 import "./components/settings/TemplateEditorDialog";
 import "./components/settings/TicketComments";
 import "./components/terminal/TerminalTooltipOverlay";
+import "./components/ui/context-menu";
 
 logWebTimeline("overlay-routes.loaded", {
   routes: [
@@ -91,5 +92,6 @@ logWebTimeline("overlay-routes.loaded", {
     "settings-confirm",
     "delete-comment-confirm",
     "terminal-tooltip",
+    "context-menu",
   ],
 });
