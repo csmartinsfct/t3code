@@ -2,6 +2,10 @@ import type { ThreadId } from "@t3tools/contracts";
 import { FolderIcon, GitForkIcon } from "lucide-react";
 import { useCallback } from "react";
 
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteSelect, OverlayRouteSelectPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
+
 import { newCommandId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -18,6 +22,7 @@ const envModeItems = [
   { value: "local", label: "Local" },
   { value: "worktree", label: "New worktree" },
 ] as const;
+const BRANCH_ENV_MODE_SELECT_OVERLAY_ROUTE_KEY = "branch-env-mode-select";
 
 interface BranchToolbarProps {
   threadId: ThreadId;
@@ -52,6 +57,17 @@ export default function BranchToolbar({
     activeWorktreePath,
     hasServerThread,
     draftThreadEnvMode: draftThread?.envMode,
+  });
+  const envModeRoute = useRoutedPopoverSurface<HTMLButtonElement, EnvMode>({
+    routeKey: BRANCH_ENV_MODE_SELECT_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    side: "bottom",
+    enabled: !envLocked && !activeWorktreePath,
+    params: { value: effectiveEnvMode },
+    onResult: (value) => {
+      if (isEnvMode(value)) onEnvModeChange(value);
+    },
   });
 
   const setThreadBranch = useCallback(
@@ -129,17 +145,17 @@ export default function BranchToolbar({
           value={effectiveEnvMode}
           onValueChange={(value) => onEnvModeChange(value as EnvMode)}
           items={envModeItems}
-          overlayItems={[
-            { value: "local", label: "Local", icon: "Folder", iconClassName: "size-3" },
-            {
-              value: "worktree",
-              label: "New worktree",
-              icon: "GitFork",
-              iconClassName: "size-3",
-            },
-          ]}
+          open={envModeRoute.domOpen}
+          onOpenChange={envModeRoute.onOpenChange}
         >
-          <SelectTrigger variant="ghost" size="xs" className="font-medium">
+          <SelectTrigger
+            variant="ghost"
+            size="xs"
+            className="font-medium"
+            onFocusCapture={envModeRoute.updateAnchor}
+            onMouseOverCapture={envModeRoute.updateAnchor}
+            ref={envModeRoute.triggerRef}
+          >
             {effectiveEnvMode === "worktree" ? (
               <GitForkIcon className="size-3" />
             ) : (
@@ -148,18 +164,7 @@ export default function BranchToolbar({
             <SelectValue />
           </SelectTrigger>
           <SelectPopup>
-            <SelectItem value="local">
-              <span className="inline-flex items-center gap-1.5">
-                <FolderIcon className="size-3" />
-                Local
-              </span>
-            </SelectItem>
-            <SelectItem value="worktree">
-              <span className="inline-flex items-center gap-1.5">
-                <GitForkIcon className="size-3" />
-                New worktree
-              </span>
-            </SelectItem>
+            <BranchEnvModeSelectItems />
           </SelectPopup>
         </Select>
       )}
@@ -178,3 +183,47 @@ export default function BranchToolbar({
     </div>
   );
 }
+
+function BranchEnvModeSelectItems() {
+  return (
+    <>
+      <SelectItem value="local">
+        <span className="inline-flex items-center gap-1.5">
+          <FolderIcon className="size-3" />
+          Local
+        </span>
+      </SelectItem>
+      <SelectItem value="worktree">
+        <span className="inline-flex items-center gap-1.5">
+          <GitForkIcon className="size-3" />
+          New worktree
+        </span>
+      </SelectItem>
+    </>
+  );
+}
+
+function isEnvMode(value: unknown): value is EnvMode {
+  return value === "local" || value === "worktree";
+}
+
+registerOverlayRoute<{ value?: unknown }>(
+  BRANCH_ENV_MODE_SELECT_OVERLAY_ROUTE_KEY,
+  function BranchEnvModeSelectOverlayRoute({ message, controller }) {
+    const value = isEnvMode(message.params.value) ? message.params.value : "local";
+
+    return (
+      <OverlayRouteSelect
+        value={value}
+        items={envModeItems}
+        onValueChange={(nextValue) => {
+          if (isEnvMode(nextValue)) controller.submit(nextValue);
+        }}
+      >
+        <OverlayRouteSelectPopup>
+          <BranchEnvModeSelectItems />
+        </OverlayRouteSelectPopup>
+      </OverlayRouteSelect>
+    );
+  },
+);

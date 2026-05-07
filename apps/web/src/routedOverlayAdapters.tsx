@@ -18,6 +18,7 @@ import { Sheet, SheetPopup } from "~/components/ui/sheet";
 import { CommandDialog } from "~/components/ui/command";
 import { Popover, PopoverPopup } from "~/components/ui/popover";
 import { Menu, MenuPopup } from "~/components/ui/menu";
+import { Select, SelectPopup } from "~/components/ui/select";
 import { useOverlayRouteController } from "~/components/overlay/OverlayRouteContext";
 
 type OpenChangeHandler<TDetails> = (open: boolean, eventDetails?: TDetails) => void;
@@ -261,6 +262,22 @@ function useRouteMenuDismiss(cancelReason = "dismissed") {
   );
 }
 
+export function shouldDismissOverlayRouteSelect(reason: string | null): boolean {
+  return reason === "outside-press" || reason === "escape-key" || reason === "window-resize";
+}
+
+function useRouteSelectDismiss(cancelReason = "dismissed") {
+  const controller = useOverlayRouteController();
+  return useCallback(
+    (nextOpen: boolean, details?: unknown) => {
+      if (nextOpen) return;
+      if (!shouldDismissOverlayRouteSelect(getOpenChangeReason(details))) return;
+      controller.cancel(cancelReason);
+    },
+    [cancelReason, controller],
+  );
+}
+
 export function OverlayRouteDialog({ cancelReason, ...props }: RouteRootProps<typeof Dialog>) {
   const handleOpenChange = useRouteDismiss(cancelReason);
   return <Dialog open onOpenChange={handleOpenChange} {...props} />;
@@ -338,6 +355,11 @@ export function OverlayRouteMenu({ cancelReason, ...props }: RouteRootProps<type
   );
 }
 
+export function OverlayRouteSelect({ cancelReason, ...props }: RouteRootProps<typeof Select>) {
+  const handleOpenChange = useRouteSelectDismiss(cancelReason);
+  return <Select open onOpenChange={handleOpenChange} {...props} />;
+}
+
 export function OverlayRouteMenuPopup({
   anchor,
   align,
@@ -355,6 +377,31 @@ export function OverlayRouteMenuPopup({
 
   return (
     <MenuPopup
+      anchor={anchor ?? anchorRef}
+      align={align ?? routeAlign}
+      side={side ?? routeSide}
+      {...props}
+    />
+  );
+}
+
+export function OverlayRouteSelectPopup({
+  anchor,
+  align,
+  side,
+  ...props
+}: React.ComponentProps<typeof SelectPopup>) {
+  const { anchorRef, message } = useOverlayRouteController();
+  const presentation = message.presentation;
+  const routeSide =
+    presentation.kind === "popover" || presentation.kind === "menu" ? presentation.side : undefined;
+  const routeAlign =
+    presentation.kind === "popover" || presentation.kind === "menu"
+      ? presentation.align
+      : undefined;
+
+  return (
+    <SelectPopup
       anchor={anchor ?? anchorRef}
       align={align ?? routeAlign}
       side={side ?? routeSide}

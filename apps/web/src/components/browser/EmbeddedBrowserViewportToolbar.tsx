@@ -1,4 +1,8 @@
-import { useId, useMemo } from "react";
+import { useId } from "react";
+
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteSelect, OverlayRouteSelectPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 import { Input } from "../ui/input";
 import {
@@ -24,6 +28,8 @@ import {
 
 const NO_EMULATION_VALUE = "__off";
 const CUSTOM_VALUE = "__custom";
+const VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY = "browser-viewport-preset-select";
+const VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY = "browser-viewport-zoom-select";
 
 interface EmbeddedBrowserViewportToolbarProps {
   emulation: TabEmulation;
@@ -54,28 +60,6 @@ export function EmbeddedBrowserViewportToolbar({
   const effective = effectiveDimensions(emulation);
   const zoomValue = String(effectiveZoom(emulation));
   const isCustom = emulation.kind === "custom";
-  const presetOverlayItems = useMemo(
-    () => [
-      ...DEVICE_PRESETS.map((preset) => ({
-        value: preset.id,
-        label: preset.label,
-        hideIndicator: true,
-      })),
-      { value: "__preset-separator", label: "", separator: true },
-      { value: CUSTOM_VALUE, label: "Custom", hideIndicator: true },
-      { value: NO_EMULATION_VALUE, label: "No emulation", hideIndicator: true },
-    ],
-    [],
-  );
-  const zoomOverlayItems = useMemo(
-    () =>
-      ZOOM_OPTIONS.map((zoom) => ({
-        value: String(zoom),
-        label: formatZoomLabel(zoom),
-        hideIndicator: true,
-      })),
-    [],
-  );
 
   const handlePresetChange = (value: string | null) => {
     if (value === null || value === NO_EMULATION_VALUE) {
@@ -142,31 +126,43 @@ export function EmbeddedBrowserViewportToolbar({
     }
   };
 
+  const presetRoute = useRoutedPopoverSurface<HTMLButtonElement, string>({
+    routeKey: VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    side: "bottom",
+    params: { value: presetValue },
+    onResult: handlePresetChange,
+  });
+  const zoomRoute = useRoutedPopoverSurface<HTMLButtonElement, string>({
+    routeKey: VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    side: "bottom",
+    params: { value: zoomValue },
+    onResult: handleZoomChange,
+  });
+
   return (
     <div className="flex shrink-0 items-center gap-2">
       <Select
         value={presetValue}
         onValueChange={handlePresetChange}
-        overlayItems={presetOverlayItems}
-        overlaySelectAlign="start"
-        overlayAlignItemWithTrigger={false}
+        open={presetRoute.domOpen}
+        onOpenChange={presetRoute.onOpenChange}
       >
-        <SelectTrigger size="sm" className="w-44 text-xs sm:text-xs" aria-label="Device preset">
+        <SelectTrigger
+          size="sm"
+          className="w-44 text-xs sm:text-xs"
+          aria-label="Device preset"
+          onFocusCapture={presetRoute.updateAnchor}
+          onMouseOverCapture={presetRoute.updateAnchor}
+          ref={presetRoute.triggerRef}
+        >
           <SelectValue>{renderPresetLabel(presetValue)}</SelectValue>
         </SelectTrigger>
         <SelectPopup align="start" alignItemWithTrigger={false}>
-          {DEVICE_PRESETS.map((preset) => (
-            <SelectItem key={preset.id} value={preset.id} hideIndicator>
-              {preset.label}
-            </SelectItem>
-          ))}
-          <SelectSeparator />
-          <SelectItem value={CUSTOM_VALUE} hideIndicator>
-            Custom
-          </SelectItem>
-          <SelectItem value={NO_EMULATION_VALUE} hideIndicator>
-            No emulation
-          </SelectItem>
+          <ViewportPresetSelectItems />
         </SelectPopup>
       </Select>
 
@@ -203,22 +199,55 @@ export function EmbeddedBrowserViewportToolbar({
       <Select
         value={zoomValue}
         onValueChange={handleZoomChange}
-        overlayItems={zoomOverlayItems}
-        overlaySelectAlign="start"
-        overlayAlignItemWithTrigger={false}
+        open={zoomRoute.domOpen}
+        onOpenChange={zoomRoute.onOpenChange}
       >
-        <SelectTrigger size="sm" className="w-20 text-xs sm:text-xs" aria-label="Zoom">
+        <SelectTrigger
+          size="sm"
+          className="w-20 text-xs sm:text-xs"
+          aria-label="Zoom"
+          onFocusCapture={zoomRoute.updateAnchor}
+          onMouseOverCapture={zoomRoute.updateAnchor}
+          ref={zoomRoute.triggerRef}
+        >
           <SelectValue>{formatZoomLabel(Number(zoomValue))}</SelectValue>
         </SelectTrigger>
         <SelectPopup align="start" alignItemWithTrigger={false}>
-          {ZOOM_OPTIONS.map((zoom) => (
-            <SelectItem key={zoom} value={String(zoom)} hideIndicator>
-              {formatZoomLabel(zoom)}
-            </SelectItem>
-          ))}
+          <ViewportZoomSelectItems />
         </SelectPopup>
       </Select>
     </div>
+  );
+}
+
+function ViewportPresetSelectItems() {
+  return (
+    <>
+      {DEVICE_PRESETS.map((preset) => (
+        <SelectItem key={preset.id} value={preset.id} hideIndicator>
+          {preset.label}
+        </SelectItem>
+      ))}
+      <SelectSeparator />
+      <SelectItem value={CUSTOM_VALUE} hideIndicator>
+        Custom
+      </SelectItem>
+      <SelectItem value={NO_EMULATION_VALUE} hideIndicator>
+        No emulation
+      </SelectItem>
+    </>
+  );
+}
+
+function ViewportZoomSelectItems() {
+  return (
+    <>
+      {ZOOM_OPTIONS.map((zoom) => (
+        <SelectItem key={zoom} value={String(zoom)} hideIndicator>
+          {formatZoomLabel(zoom)}
+        </SelectItem>
+      ))}
+    </>
   );
 }
 
@@ -231,3 +260,44 @@ function renderPresetLabel(value: string): string {
   if (value === CUSTOM_VALUE) return "Custom";
   return findPreset(value)?.label ?? "No emulation";
 }
+
+registerOverlayRoute<{ value?: unknown }>(
+  VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY,
+  function ViewportPresetSelectOverlayRoute({ message, controller }) {
+    const value =
+      typeof message.params.value === "string" ? message.params.value : NO_EMULATION_VALUE;
+
+    return (
+      <OverlayRouteSelect
+        value={value}
+        onValueChange={(nextValue) => {
+          if (typeof nextValue === "string") controller.submit(nextValue);
+        }}
+      >
+        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false}>
+          <ViewportPresetSelectItems />
+        </OverlayRouteSelectPopup>
+      </OverlayRouteSelect>
+    );
+  },
+);
+
+registerOverlayRoute<{ value?: unknown }>(
+  VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY,
+  function ViewportZoomSelectOverlayRoute({ message, controller }) {
+    const value = typeof message.params.value === "string" ? message.params.value : "1";
+
+    return (
+      <OverlayRouteSelect
+        value={value}
+        onValueChange={(nextValue) => {
+          if (typeof nextValue === "string") controller.submit(nextValue);
+        }}
+      >
+        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false}>
+          <ViewportZoomSelectItems />
+        </OverlayRouteSelectPopup>
+      </OverlayRouteSelect>
+    );
+  },
+);

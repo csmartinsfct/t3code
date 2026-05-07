@@ -1,6 +1,7 @@
 import { logWebTimeline } from "./timelineLogger";
 
 import "./components/attachments/ImageExtensionConfirmDialog";
+import "./components/BranchToolbar";
 import "./components/file-explorer/FileSearchModal";
 import "./components/GitActionsControl";
 import "./components/ManagedRunsControl";
@@ -8,6 +9,7 @@ import "./components/ProjectScriptsControl";
 import "./components/PullRequestThreadDialog";
 import "./components/SidebarSortMenu";
 import "./components/SystemPromptDialog";
+import "./components/browser/EmbeddedBrowserViewportToolbar";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/ComposerPrimaryActions";
 import "./components/chat/OrchestrationProgressHeader";
@@ -34,6 +36,9 @@ import "./components/terminal/TerminalTooltipOverlay";
 logWebTimeline("overlay-routes.loaded", {
   routes: [
     "file-search",
+    "branch-env-mode-select",
+    "browser-viewport-preset-select",
+    "browser-viewport-zoom-select",
     "git-actions-menu",
     "git-commit-dialog",
     "git-default-branch-confirm",
