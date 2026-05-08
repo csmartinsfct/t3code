@@ -349,14 +349,9 @@ Electron allows only one `webContents.debugger` client per `WebContents`. When t
 
 ### Extension Support
 
-Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electron `Session`, so loaded extensions apply only when the project is Electron-authoritative. Playwright projects do not see Electron-loaded extensions, and full extension management UI must gate on host kind.
+Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electron `Session`, so loaded extensions apply only when the project is Electron-authoritative. Playwright projects do not see Electron-loaded extensions.
 
-The Phase 4 smoke audit used `scripts/embedded-browser-extension-audit.cjs` against Electron 40.6.0:
-
-- MV2 content-script extension loaded with the expected deprecation warning; its JS injected and its CSS hiding rule applied.
-- MV3 extension loaded; content script messaged the service worker successfully; `chrome.runtime`, `chrome.storage.local`, `chrome.tabs.query`, `chrome.scripting.executeScript`, and `chrome.action` were present in the tested contexts.
-- The MV3 action popup was directly loaded in a hidden Electron `BrowserWindow` at its `chrome-extension://<id>/popup.html` URL. It rendered successfully, messaged the service worker, and `chrome.tabs.query({ active: true, currentWindow: true })` returned the active audit page tab.
-- No interactive permission prompts surfaced during install, content-script injection, service-worker messaging, or popup rendering; permissions came from the manifest. The current embedded UI still has no native toolbar/action affordance, so user-invoked popup UI remains future extension-management work.
+For the full extension system — Chrome Web Store install flow, the `electron-chrome-extensions` fork, background polyfill, extensions panel UI, popup windows, and dapp approval flow — see [Browser Extensions](./browser-extensions.md).
 
 ### Chromium bundle
 
