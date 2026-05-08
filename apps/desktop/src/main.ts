@@ -102,6 +102,8 @@ const BROWSER_SET_VIEWPORT_CHANNEL = "browser:setViewport";
 const BROWSER_TABS_CHANGED_CHANNEL = "browser:tabsChanged";
 const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
 const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
+const BROWSER_LIST_EXTENSIONS_CHANNEL = "browser:listExtensions";
+const BROWSER_OPEN_EXTENSION_CHANNEL = "browser:openExtension";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const DESKTOP_SCHEME = "t3";
@@ -3700,6 +3702,60 @@ function registerIpcHandlers(): void {
     if (!projectId) return;
     closePopoutWindow(projectId);
   });
+
+  ipcMain.removeHandler(BROWSER_LIST_EXTENSIONS_CHANNEL);
+  ipcMain.handle(BROWSER_LIST_EXTENSIONS_CHANNEL, (_event, rawProjectId: unknown) => {
+    const projectId = normalizeProjectId(rawProjectId);
+    if (!projectId) return [];
+    const ses = session.fromPartition(`persist:${projectId}`);
+    return ses.getAllExtensions().map((ext) => {
+      const manifest = ext.manifest as {
+        icons?: Record<string, string>;
+        action?: { default_popup?: string };
+        browser_action?: { default_popup?: string };
+      };
+      const icons = manifest.icons ?? {};
+      const bestSize = Object.keys(icons)
+        .map(Number)
+        .filter((n) => !isNaN(n))
+        .sort((a, b) => b - a)[0];
+      const iconPath = bestSize !== undefined ? icons[String(bestSize)] : undefined;
+      const popupPath =
+        manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? undefined;
+      return {
+        id: ext.id,
+        name: ext.name,
+        iconUrl: iconPath ? `chrome-extension://${ext.id}/${iconPath}` : null,
+        popupUrl: popupPath ? `chrome-extension://${ext.id}/${popupPath}` : null,
+      };
+    });
+  });
+
+  ipcMain.removeHandler(BROWSER_OPEN_EXTENSION_CHANNEL);
+  ipcMain.handle(
+    BROWSER_OPEN_EXTENSION_CHANNEL,
+    async (event, rawProjectId: unknown, rawExtensionId: unknown) => {
+      const window = getIpcBrowserWindow(event);
+      const project = window
+        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "openExtension")
+        : null;
+      if (!window || !project) return;
+      const extensionId = typeof rawExtensionId === "string" ? rawExtensionId : null;
+      if (!extensionId) return;
+      const ses = session.fromPartition(`persist:${project.projectId}`);
+      const ext = ses.getAllExtensions().find((e) => e.id === extensionId);
+      if (!ext) return;
+      const manifest = ext.manifest as {
+        action?: { default_popup?: string };
+        browser_action?: { default_popup?: string };
+      };
+      const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
+      const url = popupPath
+        ? `chrome-extension://${extensionId}/${popupPath}`
+        : `chrome-extension://${extensionId}/home.html`;
+      openNewBrowserTab(project, url);
+    },
+  );
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {

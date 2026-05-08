@@ -11,6 +11,7 @@ import "./components/PullRequestThreadDialog";
 import "./components/SidebarSortMenu";
 import "./components/SystemPromptDialog";
 import "./components/browser/EmbeddedBrowserViewportToolbar";
+import "./components/browser/EmbeddedBrowserExtensionsPanel";
 import "./components/chat/ContextWindowMeter";
 import "./components/chat/CompactComposerControlsMenu";
 import "./components/chat/ComposerPrimaryActions";
@@ -46,6 +47,7 @@ logWebTimeline("overlay-routes.loaded", {
     "file-search",
     "branch-env-mode-select",
     "branch-selector-combobox",
+    "browser-extensions-panel",
     "browser-viewport-preset-select",
     "browser-viewport-zoom-select",
     "git-actions-menu",

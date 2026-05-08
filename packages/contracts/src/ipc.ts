@@ -266,6 +266,15 @@ export interface ViewportEmulationParams {
   readonly scale: number;
 }
 
+export interface BrowserExtensionInfo {
+  id: string;
+  name: string;
+  /** chrome-extension://<id>/<path> URL for the best available icon, or null. */
+  iconUrl: string | null;
+  /** chrome-extension://<id>/<popup> URL if the extension has an action popup, or null. */
+  popupUrl: string | null;
+}
+
 export interface DesktopBrowserBridge {
   mount: (projectId: string, bounds: BrowserViewBounds) => Promise<string>;
   setBounds: (projectId: string, bounds: BrowserViewBounds) => Promise<void>;
@@ -288,6 +297,8 @@ export interface DesktopBrowserBridge {
   ) => Promise<void>;
   popoutOpen: (projectId: string) => Promise<void>;
   popoutClose: (projectId: string) => Promise<void>;
+  listExtensions: (projectId: string) => Promise<BrowserExtensionInfo[]>;
+  openExtension: (projectId: string, extensionId: string) => Promise<void>;
   onTabsChanged: (
     listener: (payload: {
       projectId: string;

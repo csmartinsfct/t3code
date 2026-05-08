@@ -21,6 +21,7 @@ import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserMo
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
+import { EmbeddedBrowserExtensionsButton } from "./EmbeddedBrowserExtensionsPanel";
 import { EmbeddedBrowserViewportActions } from "./EmbeddedBrowserViewportActions";
 import { EmbeddedBrowserViewportToolbar } from "./EmbeddedBrowserViewportToolbar";
 import { ViewportResizeHandles } from "./ViewportResizeHandles";
@@ -786,6 +787,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           placeholder="Search or enter address"
           spellCheck={false}
         />
+        <EmbeddedBrowserExtensionsButton projectId={projectId} />
         <button
           type="button"
           onClick={toggleEmulation}
