@@ -3648,6 +3648,26 @@ function switchToExtensionPopup(
   return { switched: true, popupKey };
 }
 
+// Hide all open extension popups that belong to a project without destroying them.
+// Called when the project's browser panel is unmounted (user switches thread/project).
+// Popups are restored by showExtensionPopupsForProject when the user returns.
+function hideExtensionPopupsForProject(projectId: string): void {
+  for (const [, popup] of extensionPopupsByProjectId) {
+    if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
+      popup.popupWin.hide();
+    }
+  }
+}
+
+// Re-show extension popups that were hidden when the user left a project.
+function showExtensionPopupsForProject(projectId: string): void {
+  for (const [, popup] of extensionPopupsByProjectId) {
+    if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
+      popup.popupWin.show();
+    }
+  }
+}
+
 function closeExtensionPopupWindow(projectId: string, extensionId: string): void {
   const popupKey = `${projectId}:${extensionId}`;
   const project = embeddedBrowserProjectsByProjectId.get(projectId);
@@ -3817,6 +3837,11 @@ function registerIpcHandlers(): void {
       project.bounds = bounds;
       project.suspendedForModal = false;
       state.activeProjectId = projectId;
+      // Hide extension popups that belong to the outgoing project, show any
+      // that belong to the incoming one. This keeps popups alive in the
+      // background so the extension isn't reloaded when the user returns.
+      if (previousActive) hideExtensionPopupsForProject(previousActive.projectId);
+      showExtensionPopupsForProject(projectId);
       console.log("[desktop/browser] mount", {
         projectId,
         tabs: project.tabs.size,
@@ -3870,6 +3895,9 @@ function registerIpcHandlers(): void {
       state.activeProjectId = null;
       state.mountRequestId += 1;
     }
+    // Hide extension popups so they don't float over other threads while
+    // this project's browser panel is not visible.
+    hideExtensionPopupsForProject(project.projectId);
     // Reset the idle clock so a freshly-unmounted project gets a full
     // grace period before the reaper considers suspending it.
     markEmbeddedBrowserActive(project);

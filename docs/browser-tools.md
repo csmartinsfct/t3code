@@ -366,6 +366,15 @@ Extension metadata (installed extensions, icons, pinned state) is loaded **eager
 
 Tab state (URLs, titles, navigation) remains lazy — it is tightly coupled to the live `WebContentsView` lifecycle and only meaningful while the browser is mounted.
 
+#### Extension popup visibility
+
+Extension popup windows (`BrowserWindow` instances created when the user opens an extension or a dapp triggers `chrome.windows.create`) are **project-scoped** and follow the project's mount lifecycle:
+
+- **`BROWSER_UNMOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(projectId)`: all open popups for the outgoing project are hidden (`BrowserWindow.hide()`). The extension keeps running in the background; no reload occurs.
+- **`BROWSER_MOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(previousProjectId)` for the outgoing project (handles the transition case where unmount was not called explicitly), then `showExtensionPopupsForProject(projectId)` for the incoming project to restore any previously hidden popups.
+
+This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
+
 ### Chromium bundle
 
 Playwright's Chromium binary is shipped inside the packaged desktop app rather than downloaded on first launch. The build script (`scripts/build-desktop-artifact.ts`) runs `bunx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH` pointing at a staged directory, which electron-builder then copies into `Resources/playwright-browsers/` via `extraResources`. At runtime, `backendChildEnv()` in `apps/desktop/src/main.ts` sets `PLAYWRIGHT_BROWSERS_PATH` to that directory before spawning the backend, so Playwright finds the bundled copy.
