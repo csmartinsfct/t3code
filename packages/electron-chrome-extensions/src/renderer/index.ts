@@ -507,6 +507,10 @@ export const injectExtensionAPIs = () => {
         factory: (base) => {
           return {
             ...base,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            onInstalled: new ExtensionEvent("runtime.onInstalled") as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            onStartup: new ExtensionEvent("runtime.onStartup") as any,
             connectNative: (application: string) => {
               const port = new NativePort();
               const receive = port._receive.bind(port);
@@ -654,23 +658,48 @@ export const injectExtensionAPIs = () => {
       // Allow APIs to opt-out of being available in this context.
       if (api.shouldInject && !api.shouldInject()) return;
 
-      Object.defineProperty(chrome, apiName, {
-        value: api.factory(baseApi),
-        enumerable: true,
-        configurable: true,
-      });
+      try {
+        Object.defineProperty(chrome, apiName, {
+          value: api.factory(baseApi),
+          enumerable: true,
+          configurable: true,
+        });
+      } catch {
+        // Some native Chrome properties (e.g. chrome.runtime in service workers)
+        // are non-configurable. Skip this API rather than aborting the loop —
+        // other APIs like chrome.tabs and chrome.storage may still be settable.
+      }
     });
 
     // Remove access to internals
     delete (globalThis as any).electron;
 
-    Object.freeze(chrome);
+    // Don't freeze chrome in service workers — extension polyfills need to
+    // patch chrome.runtime.onInstalled and other APIs after this runs.
+    if (!inSwContext) {
+      Object.freeze(chrome);
+    }
 
     void 0; // no return
   }
 
+  // Service workers don't have contextBridge or webFrame; run mainWorldScript
+  // directly in the global scope. The chrome object is already accessible.
+  // Detect SW via multiple signals: window absent, importScripts present, or
+  // contextBridge absent (service worker preloads don't have it).
+  const safeHref =
+    typeof location !== "undefined" && location.href ? location.href : "unknown";
+  const inSwContext =
+    (typeof window === "undefined" && typeof importScripts === "function") ||
+    typeof contextBridge === "undefined";
+
+  if (inSwContext) {
+    mainWorldScript();
+    return;
+  }
+
   if (!process.contextIsolated) {
-    console.warn(`injectExtensionAPIs: context isolation disabled in ${location.href}`);
+    console.warn(`injectExtensionAPIs: context isolation disabled in ${safeHref}`);
     mainWorldScript();
     return;
   }
@@ -689,7 +718,7 @@ export const injectExtensionAPIs = () => {
       webFrame.executeJavaScript(`(${mainWorldScript}());`);
     }
   } catch (error) {
-    console.error(`injectExtensionAPIs error (${location.href})`);
+    console.error(`injectExtensionAPIs error (${safeHref})`);
     console.error(error);
   }
 };

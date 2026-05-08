@@ -273,6 +273,16 @@ export class ElectronChromeExtensions extends EventEmitter {
   }
 
   /**
+   * Dispatch `chrome.runtime.onInstalled` to the given extension.
+   * Call this after `session.loadExtension()` to let the extension know it was
+   * installed or updated. Chromium's native dispatch doesn't fire in Electron
+   * because `electron-chrome-extensions` replaces the runtime namespace.
+   */
+  notifyInstalled(extensionId: string, reason: "install" | "update" | "chrome_update" = "install") {
+    this.api.runtime.notifyInstalled(extensionId, reason);
+  }
+
+  /**
    * Handles the 'crx://' protocol in the session.
    *
    * @deprecated Call `ElectronChromeExtensions.handleCRXProtocol(session)`

@@ -128,7 +128,9 @@ function ExtensionIcon({
           "absolute -right-0.5 -bottom-0.5 hidden size-3.5 items-center justify-center",
           "rounded-full bg-background shadow-sm ring-1 ring-border/50",
           "transition-colors group-hover:flex",
-          ext.pinned ? "text-primary hover:text-primary/70" : "text-muted-foreground hover:text-foreground",
+          ext.pinned
+            ? "text-primary hover:text-primary/70"
+            : "text-muted-foreground hover:text-foreground",
         )}
       >
         {ext.pinned ? <PinOffIcon className="size-2" /> : <PinIcon className="size-2" />}

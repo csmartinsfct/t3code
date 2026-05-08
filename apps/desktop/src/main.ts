@@ -16,6 +16,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification as ElectronNotification,
   protocol,
   screen,
   session,
@@ -85,8 +86,8 @@ import {
 import { shouldSuspendForIdle } from "./embeddedBrowserIdleReaper";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 import {
+  downloadExtension as webStoreDownloadExtension,
   installChromeWebStore,
-  installExtension as webStoreInstallExtension,
   uninstallExtension as webStoreUninstallExtension,
 } from "electron-chrome-web-store";
 import {
@@ -1469,10 +1470,14 @@ async function installExtensionForProject(
 
   const ses = session.fromPartition(`persist:${projectId}`);
   const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
-  const ext = await webStoreInstallExtension(extensionId, { session: ses, extensionsPath });
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-  }
+
+  // Download and unpack the extension, then apply the polyfill BEFORE the
+  // first session.loadExtension call. This ensures chrome.runtime.onInstalled
+  // fires into a working worker (with sidePanel/offscreen stubs) on the very
+  // first load rather than into a crashed worker.
+  const extDir = await webStoreDownloadExtension(extensionId, extensionsPath);
+  await ensureExtensionPolyfill(extDir);
+  const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
   return {
     id: ext.id,
     name: (ext.manifest["name"] as string | undefined) ?? extensionId,
@@ -2847,7 +2852,8 @@ async function verifyManifestKeyMatchesId(extPath: string, extId: string): Promi
   }
 }
 
-const POLYFILL_SENTINEL = "/*__t3_polyfill_v1__*/";
+// Bump version when the polyfill content changes so existing extensions are re-patched.
+const POLYFILL_SENTINEL = "/*__t3_polyfill_v5__*/";
 
 // Returns true if the background script was newly patched.
 // The caller should clear service worker caches only when true — wiping on
@@ -2873,13 +2879,51 @@ async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
   try {
     const existing = await FS.promises.readFile(bgPath, "utf-8");
     if (!existing.startsWith(POLYFILL_SENTINEL)) {
-      // Minimal polyfill: only requestAnimationFrame which service workers
-      // don't have natively. chrome.tabs/windows events are now provided by
-      // electron-chrome-extensions and no longer need stubs here.
+      // Stub Chrome APIs that are absent in Electron's extension environment but
+      // commonly called during service-worker startup. Without these stubs the
+      // worker crashes before it can set up chrome.runtime.onInstalled listeners,
+      // preventing onboarding tabs from opening. The stubs are no-ops — they keep
+      // the worker alive; actual functionality is handled elsewhere or not needed.
       const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
   if(typeof requestAnimationFrame==='undefined'){
     globalThis.requestAnimationFrame=function(cb){return setTimeout(cb,16);};
     globalThis.cancelAnimationFrame=function(id){clearTimeout(id);};
+  }
+  if(typeof chrome!=='undefined'){
+    var _nev=function(){return{addListener:function(){},removeListener:function(){},hasListener:function(){return false;}};};
+    // chrome.sidePanel — always stub: Electron does not implement it even when
+    // Chromium 130+ defines the API object. Calling methods on the native object
+    // throws internally and kills the service worker.
+    chrome.sidePanel={
+      setOptions:function(){return Promise.resolve();},
+      getOptions:function(){return Promise.resolve({});},
+      open:function(){return Promise.resolve();},
+      setPanelBehavior:function(){return Promise.resolve();},
+      getPanelBehavior:function(){return Promise.resolve({openPanelOnActionClick:false});},
+      onPanelShown:_nev(),onOptionsChanged:_nev()
+    };
+    // chrome.offscreen — always stub: offscreen documents require a browser UI
+    // surface that doesn't exist in Electron's extension environment.
+    chrome.offscreen={
+      createDocument:function(){return Promise.resolve();},
+      closeDocument:function(){return Promise.resolve();},
+      hasDocument:function(){return Promise.resolve(false);},
+      Reason:{AUDIO_PLAYBACK:'AUDIO_PLAYBACK',CLIPBOARD:'CLIPBOARD',DOM_PARSER:'DOM_PARSER',DOM_SCRAPING:'DOM_SCRAPING',LOCAL_STORAGE:'LOCAL_STORAGE',USER_MEDIA:'USER_MEDIA',WEB_RTC:'WEB_RTC',BLOBS:'BLOBS'},
+    };
+    // chrome.alarms — only stub if absent; Electron may provide a working implementation.
+    if(!chrome.alarms){
+      chrome.alarms={create:function(){},get:function(a,cb){if(cb)cb(undefined);return Promise.resolve(undefined);},getAll:function(cb){if(cb)cb([]);return Promise.resolve([]);},clear:function(a,cb){if(cb)cb(true);return Promise.resolve(true);},clearAll:function(cb){if(cb)cb(true);return Promise.resolve(true);},onAlarm:_nev()};
+    }
+    // Mark first run so uninstall can clear the flag and the next install
+    // is treated as fresh. chrome.runtime.onInstalled fires natively from
+    // Chromium — no emulation needed now that the polyfill is applied before
+    // the first session.loadExtension call via the beforeInstall callback.
+    if(chrome.storage&&chrome.storage.local){
+      var _t3K='__t3_first_run_v5__';
+      chrome.storage.local.get(_t3K,function(r){
+        if(!r[_t3K]){var _s={};_s[_t3K]=true;chrome.storage.local.set(_s);}
+      });
+    }
   }
 })();\n`;
       await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
@@ -2985,6 +3029,60 @@ async function loadLegacyFlatExtensions(
   }
 }
 
+// Recursively apply the service-worker polyfill to every extension directory
+// under extensionsPath BEFORE the session loads them. When a file is newly
+// patched, also clears the Service Worker and Code Cache directories so
+// Chromium cannot serve stale bytecode from a previous session.
+async function preApplyPolyfillsToExtensions(
+  extensionsPath: string,
+  ses: Electron.Session,
+  projectId: string,
+): Promise<void> {
+  let idDirs: FS.Dirent[];
+  try {
+    idDirs = await FS.promises.readdir(extensionsPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  let anyCacheCleared = false;
+  for (const idDir of idDirs) {
+    if (!idDir.isDirectory()) continue;
+    const idPath = Path.join(extensionsPath, idDir.name);
+    // Collect candidate dirs: the id dir itself (flat) or versioned subdirs.
+    const candidates: string[] = [];
+    try {
+      const children = await FS.promises.readdir(idPath, { withFileTypes: true });
+      const versionedDirs = children.filter((c) => c.isDirectory() && /_\d+$/.test(c.name));
+      if (versionedDirs.length > 0) {
+        for (const v of versionedDirs) candidates.push(Path.join(idPath, v.name));
+      } else {
+        candidates.push(idPath);
+      }
+    } catch {
+      continue;
+    }
+    for (const dir of candidates) {
+      try {
+        const wasPatched = await ensureExtensionPolyfill(dir);
+        if (wasPatched && !anyCacheCleared) {
+          // Clear cached bytecode so Chromium doesn't serve the old polyfill.
+          const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
+          for (const sub of ["Service Worker", "Code Cache"]) {
+            await FS.promises.rm(Path.join(partitionDir, sub), { recursive: true, force: true });
+          }
+          await ses.clearCodeCaches({});
+          anyCacheCleared = true;
+          console.log("[desktop/browser] pre-patch: cleared SW cache after polyfill update", {
+            projectId,
+          });
+        }
+      } catch {
+        // Non-fatal — extension will still be loaded, just without the pre-patch.
+      }
+    }
+  }
+}
+
 function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtensions {
   const existing = chromeExtsByProjectId.get(projectId);
   if (existing) return existing;
@@ -3028,25 +3126,61 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
       await ses.clearCodeCaches({});
       ses.removeExtension(ext.id);
       await ses.loadExtension(extPath, { allowFileAccess: true });
+      // chrome.runtime.onInstalled is handled by the polyfill in background.js —
+      // it detects first run via chrome.storage.local and fires the event itself.
     }
-    // Only notify for new installs after the initial load chain completes.
-    // During startup batch-loading the final .then() below sends one notification.
-    if (extensionsLoadedByProjectId.has(projectId)) {
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-      }
+    // Always notify so the extensions panel updates immediately after any load
+    // (new install, polyfill reload, or startup). The startup batch also sends
+    // one consolidated notification via the .then() chain below, so the UI
+    // may refresh a few extra times during startup — that is harmless.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
     }
   });
 
+  // Pre-patch all already-installed extension service workers before the first
+  // load so chrome.runtime.onInstalled fires into a running worker. Without this,
+  // extensions load once without the polyfill (worker may crash), Chromium fires
+  // onInstalled into the crashed worker, and the second (patched) load never
+  // receives it. Pre-patching ensures the very first load has the correct stubs.
   // Set up Chrome Web Store integration (loads versioned-format extensions, registers
   // the Web Store preload, schedules auto-updates), then load any remaining flat-format
   // extensions from before the switch to electron-chrome-web-store.
   // Store the ready promise so listExtensions can await it before querying.
-  const readyPromise = installChromeWebStore({
-    session: ses,
-    extensionsPath,
-    autoUpdate: true,
-  })
+  const readyPromise = preApplyPolyfillsToExtensions(extensionsPath, ses, projectId)
+    .catch((err: unknown) => {
+      console.warn("[desktop/browser] pre-patch failed", { projectId, err });
+    })
+    .then(() =>
+      installChromeWebStore({
+        session: ses,
+        extensionsPath,
+        autoUpdate: true,
+        // Intercept every Web Store UI install to apply the service-worker
+        // polyfill BEFORE the first session.loadExtension call. Without this,
+        // electron-chrome-web-store loads the extension without the polyfill,
+        // the worker may crash (no chrome.sidePanel stubs) before registering
+        // its chrome.runtime.onInstalled listener, and Chromium never re-fires
+        // the event on the subsequent patched reload.
+        beforeInstall: async ({ id }: { id: string }) => {
+          try {
+            const extDir = await webStoreDownloadExtension(id, extensionsPath);
+            await ensureExtensionPolyfill(extDir);
+            await ses.loadExtension(extDir, { allowFileAccess: true });
+            console.log("[desktop/browser] pre-patched Web Store install", { id });
+          } catch (err) {
+            console.warn("[desktop/browser] beforeInstall pre-patch failed — falling through", {
+              id,
+              err,
+            });
+            // Don't return 'deny' on error; let the package attempt its own install.
+            return { action: "allow" as const };
+          }
+          // We already loaded the extension; tell the package not to load it again.
+          return { action: "deny" as const };
+        },
+      }),
+    )
     .then(() => loadLegacyFlatExtensions(ses, extensionsPath, projectId))
     .then(() => {
       extensionsLoadedByProjectId.add(projectId);
@@ -3933,8 +4067,14 @@ async function openExtensionPopupForProject(
   const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
 
   if (!popupPath) {
-    openNewBrowserTab(project, `chrome-extension://${extensionId}/home.html`);
-    return `opened home.html for ${extensionId} in a new tab (no action popup defined)`;
+    // Extension has no action popup — it likely works as a content script or
+    // sidebar. Return the extension info so the caller knows it has no popup.
+    const name = (ext.manifest["name"] as string | undefined) ?? extensionId;
+    throw new Error(
+      `"${name}" has no action popup. It works as a content script or sidebar ` +
+        `and can't be opened as a floating window. ` +
+        `Use it by navigating to a web page where it activates automatically.`,
+    );
   }
 
   const popupKey = `${projectId}:${extensionId}`;
@@ -4441,6 +4581,35 @@ function registerIpcHandlers(): void {
       const ses = session.fromPartition(`persist:${projectId}`);
       const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
       await webStoreUninstallExtension(extensionId, { session: ses, extensionsPath });
+
+      // Full profile purge so the next install is always treated as fresh
+      // (Chromium fires chrome.runtime.onInstalled with reason:"install").
+      const partitionDir = Path.join(
+        app.getPath("userData"),
+        "Partitions",
+        projectId,
+      );
+
+      // Remove the extension from Chromium's Preferences registry.
+      const prefsPath = Path.join(partitionDir, "Preferences");
+      try {
+        const prefs = JSON.parse(await FS.promises.readFile(prefsPath, "utf-8")) as {
+          extensions?: { settings?: Record<string, unknown> };
+        };
+        if (prefs.extensions?.settings?.[extensionId]) {
+          delete prefs.extensions.settings[extensionId];
+          await FS.promises.writeFile(prefsPath, JSON.stringify(prefs), "utf-8");
+        }
+      } catch {
+        // Preferences may not exist yet — not fatal.
+      }
+
+      // Remove Local Extension Settings (localStorage / chrome.storage.local).
+      await FS.promises.rm(Path.join(partitionDir, "Local Extension Settings", extensionId), {
+        recursive: true,
+        force: true,
+      });
+
       // Remove from pinned list if present.
       const pinned = await readPinnedExtensions(projectId);
       const updated = pinned.filter((id) => id !== extensionId);
@@ -4481,7 +4650,15 @@ function registerIpcHandlers(): void {
       if (!ownerWindow || !project) return;
       const extensionId = typeof rawExtensionId === "string" ? rawExtensionId : null;
       if (!extensionId) return;
-      await openExtensionPopupForProject(project.projectId, extensionId, ownerWindow);
+      try {
+        await openExtensionPopupForProject(project.projectId, extensionId, ownerWindow);
+      } catch (err) {
+        // Surface friendly errors (e.g. no-popup extensions) as a native
+        // notification rather than letting the IPC rejection surface as an
+        // uncaught promise error in the renderer.
+        const msg = err instanceof Error ? err.message : String(err);
+        new ElectronNotification({ title: "Extension", body: msg, silent: true }).show();
+      }
     },
   );
 

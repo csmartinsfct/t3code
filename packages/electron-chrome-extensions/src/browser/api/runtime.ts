@@ -50,6 +50,14 @@ export class RuntimeAPI extends EventEmitter {
     return await host.sendAndReceive(message);
   };
 
+  /**
+   * Dispatch chrome.runtime.onInstalled to a specific extension.
+   * Call this after session.loadExtension() to notify the extension it was installed.
+   */
+  notifyInstalled(extensionId: string, reason: "install" | "update" | "chrome_update") {
+    this.ctx.router.sendEvent(extensionId, "runtime.onInstalled", { reason });
+  }
+
   private openOptionsPage = async ({ extension }: ExtensionEvent) => {
     // TODO: options page shouldn't appear in Tabs API
     // https://developer.chrome.com/extensions/options#tabs-api
