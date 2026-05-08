@@ -537,7 +537,13 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // the paths Bun needs to read at runtime: the bundled server entry +
     // its transitive `node_modules` graph.
     asar: true,
-    asarUnpack: ["apps/server/dist/**", "node_modules/**"],
+    asarUnpack: [
+      "apps/server/dist/**",
+      "node_modules/**",
+      // panel-window N-API addon — must be outside the asar archive so
+      // Electron's native module loader can dlopen it at runtime. (T3CO-474)
+      "apps/desktop/native/**",
+    ],
     // Bundle the per-platform Bun binary (T3CO-328) into the packaged app's
     // Resources directory. `main.ts` resolves it via
     // `resolveBackendRuntime()` → `process.resourcesPath/bin/<bun exe>`.
@@ -746,10 +752,65 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), { recursive: true });
   yield* fs.makeDirectory(path.join(stageAppDir, "apps/server"), { recursive: true });
 
+  // Compile the panel-window N-API addon for the target arch against the exact
+  // Electron ABI. The compiled .node is staged below and unpacked from app.asar
+  // at runtime so makePanel() can float extension popups above macOS full-screen
+  // Spaces without stealing focus. macOS only — addon is a no-op on other platforms
+  // and the source/binding.gyp only declares a macOS target. (T3CO-474)
+  if (options.platform === "mac") {
+    const nativeAddonDir = path.join(repoRoot, "apps", "desktop", "native", "panel-window");
+    yield* Effect.log(
+      `[desktop-artifact] Compiling panel-window native addon for darwin-${options.arch} (Electron ${electronVersion})...`,
+    );
+    yield* runCommand(
+      ChildProcess.make({
+        cwd: nativeAddonDir,
+        ...commandOutputOptions(options.verbose),
+      })`bunx node-gyp rebuild --target=${electronVersion} --arch=${options.arch} --dist-url=https://electronjs.org/headers/dist`,
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BuildScriptError({
+            message: `Failed to compile panel-window native addon for darwin-${options.arch}.`,
+            cause,
+          }),
+      ),
+    );
+  }
+
   yield* Effect.log("[desktop-artifact] Staging release app...");
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+
+  // Stage the compiled panel-window addon so electron-builder can unpack it from
+  // app.asar at runtime. main.ts requires it via a __dirname-relative path that
+  // Electron redirects to app.asar.unpacked/ for entries listed in asarUnpack.
+  if (options.platform === "mac") {
+    const nativeAddonSrc = path.join(
+      repoRoot,
+      "apps",
+      "desktop",
+      "native",
+      "panel-window",
+      "build",
+      "Release",
+      "panel_window.node",
+    );
+    const nativeAddonDst = path.join(
+      stageAppDir,
+      "apps",
+      "desktop",
+      "native",
+      "panel-window",
+      "build",
+      "Release",
+      "panel_window.node",
+    );
+    yield* fs.makeDirectory(path.dirname(nativeAddonDst), { recursive: true });
+    yield* fs.copyFile(nativeAddonSrc, nativeAddonDst);
+    yield* Effect.log("[desktop-artifact] Staged panel-window native addon.");
+  }
 
   // Bundle the Bun binary for the target platform + arch (T3CO-328). The
   // packaged backend runs under Bun so the vendored `cookie-import-browser`

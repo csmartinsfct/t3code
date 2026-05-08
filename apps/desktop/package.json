@@ -25,6 +25,7 @@
     "@t3tools/shared": "workspace:*",
     "@types/node": "catalog:",
     "electron-chrome-extensions": "workspace:*",
+    "node-gyp": "^10",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

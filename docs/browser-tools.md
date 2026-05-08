@@ -375,6 +375,8 @@ Extension popup windows (`BrowserWindow` instances created when the user opens a
 
 This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
 
+**Native addon (production):** `panel_window.node` is compiled from `apps/desktop/native/panel-window/panel-window.mm` during the production build (`scripts/build-desktop-artifact.ts`), staged at `apps/desktop/native/panel-window/build/Release/`, and listed in electron-builder's `asarUnpack` so Electron can `dlopen` it outside the asar archive at runtime. Without this the addon's `try/catch` fallback fires silently and popups do not float above macOS full-screen Spaces.
+
 ### Chromium bundle
 
 Playwright's Chromium binary is shipped inside the packaged desktop app rather than downloaded on first launch. The build script (`scripts/build-desktop-artifact.ts`) runs `bunx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH` pointing at a staged directory, which electron-builder then copies into `Resources/playwright-browsers/` via `extraResources`. At runtime, `backendChildEnv()` in `apps/desktop/src/main.ts` sets `PLAYWRIGHT_BROWSERS_PATH` to that directory before spawning the backend, so Playwright finds the bundled copy.
