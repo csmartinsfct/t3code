@@ -2828,6 +2828,94 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
         }
       }
     },
+
+    // Handle chrome.windows.create() — used by MetaMask/Rainbow for approval
+    // popups (connect, sign, send). Without this, dapp requests silently fail.
+    createWindow: async (details) => {
+      const url = Array.isArray(details.url)
+        ? (details.url[0] ?? "about:blank")
+        : (details.url ?? "about:blank");
+      const width = details.width ?? 360;
+      const height = details.height ?? 600;
+
+      const ses2 = session.fromPartition(`persist:${projectId}`);
+      const notifWin = new BrowserWindow({
+        width,
+        height,
+        frame: true,
+        title: "",
+        resizable: false,
+        show: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        webPreferences: {
+          session: ses2,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
+        },
+      });
+
+      makePanel(notifWin);
+      notifWin.setAlwaysOnTop(true);
+
+      // Centre on the owner window (or fall back to cursor display centre).
+      const ob =
+        mainWindow && !mainWindow.isDestroyed()
+          ? mainWindow.getBounds()
+          : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+      notifWin.setPosition(
+        ob.x + Math.round((ob.width - width) / 2),
+        ob.y + Math.round((ob.height - height) / 2),
+      );
+
+      if (url && url !== "about:blank") {
+        // Resolve relative URLs (e.g. 'notification.html') to chrome-extension://
+        // — extensions pass bare filenames; Chrome resolves them automatically
+        // but electron-chrome-extensions passes them raw.
+        let resolvedUrl = url;
+        if (!url.startsWith("http") && !url.startsWith("chrome-extension://")) {
+          const ses3 = session.fromPartition(`persist:${projectId}`);
+          let fallbackExtId: string | null = null;
+          for (const ext of ses3.getAllExtensions()) {
+            const extPath = (ext as unknown as { path?: string }).path;
+            if (!extPath) continue;
+            fallbackExtId = ext.id; // remember last extension as fallback
+            try {
+              await FS.promises.access(Path.join(extPath, url));
+              resolvedUrl = `chrome-extension://${ext.id}/${url}`;
+              break;
+            } catch {
+              // not in this extension — check if it has a home.html fallback
+            }
+          }
+          // If the specific file wasn't found in any extension, fall back to
+          // home.html — the extension tracks pending requests in its state and
+          // will show the approval UI when its main page opens.
+          if (resolvedUrl === url && fallbackExtId) {
+            resolvedUrl = `chrome-extension://${fallbackExtId}/home.html`;
+            console.log("[desktop/browser] extension URL not found, opening home.html", { url, fallbackExtId });
+          }
+        }
+        await notifWin.loadURL(resolvedUrl).catch((err: unknown) => {
+          console.warn("[desktop/browser] extension window loadURL failed", { url: resolvedUrl, err });
+        });
+      }
+      notifWin.show();
+
+      // Hide-then-destroy to avoid white flash on close.
+      notifWin.on("close", (e) => {
+        if (!notifWin.isDestroyed()) {
+          e.preventDefault();
+          notifWin.hide();
+          setImmediate(() => { if (!notifWin.isDestroyed()) notifWin.destroy(); });
+        }
+      });
+
+      console.log("[desktop/browser] extension notification window created", { projectId, url, width, height });
+      return notifWin;
+    },
   });
 
   ext.on("browser-action-popup-created", (popup) => {
