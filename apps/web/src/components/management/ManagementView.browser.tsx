@@ -399,6 +399,44 @@ describe("ManagementView", () => {
     }
   });
 
+  it("toggles the right chat panel with the platform Mod+L shortcut in board mode", async () => {
+    await using mounted = await mountManagementView({ threadId: null });
+    const rightSidebar = mounted.host.querySelector<HTMLElement>(
+      '[data-slot="sidebar"][data-side="right"]',
+    );
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+
+    expect(rightSidebar?.dataset.state).toBe("expanded");
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "l",
+        metaKey: isMac,
+        ctrlKey: !isMac,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(rightSidebar?.dataset.state).toBe("collapsed");
+    });
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "l",
+        metaKey: isMac,
+        ctrlKey: !isMac,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(rightSidebar?.dataset.state).toBe("expanded");
+    });
+  });
+
   it("clears the mounted board selection when the active project changes", async () => {
     const host = document.createElement("div");
     document.body.append(host);

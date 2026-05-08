@@ -3597,6 +3597,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        fileExplorerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -3647,6 +3648,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
 
       if (command === "fileExplorer.toggle") {
+        if (meta && event.key.toLowerCase() === "s" && !event.shiftKey && !event.altKey) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onToggleFileExplorer();
@@ -3680,6 +3684,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
+    fileExplorerOpen,
     keybindings,
     onToggleDiff,
     onToggleFileExplorer,
@@ -5423,7 +5428,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </header>
         )}
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
+          <div className="drag-region electron-titlebar-inset flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
             <CollapsedSidebarTrigger className="size-7 shrink-0" />
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
@@ -5456,6 +5461,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         className={cn(
           "flex h-[50px] items-center border-b border-border px-3 sm:px-5",
           isElectron && "drag-region",
+          isElectron && "electron-titlebar-inset",
         )}
       >
         <ChatHeader

@@ -59,7 +59,7 @@ import {
 } from "@t3tools/contracts";
 import { makeProviderModelSelection } from "@t3tools/shared/model";
 import { useQueries } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -84,6 +84,7 @@ import {
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { parseFileExplorerRouteSearch } from "../fileExplorerRouteSearch";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -817,6 +818,10 @@ export default function Sidebar() {
   const { toggleSidebar } = useSidebar();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
+  const fileExplorerOpen = useSearch({
+    strict: false,
+    select: (params) => parseFileExplorerRouteSearch(params).fileExplorer === "1",
+  });
   const isOnSettings = pathname.startsWith("/settings");
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -1859,6 +1864,7 @@ export default function Sidebar() {
     const getShortcutContext = () => ({
       terminalFocus: isTerminalFocused(),
       terminalOpen: routeTerminalOpen,
+      fileExplorerOpen,
     });
 
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1877,6 +1883,21 @@ export default function Sidebar() {
         platform,
         context: getShortcutContext(),
       });
+      const isPrimarySaveShortcut =
+        (isMacPlatform(platform) ? event.metaKey : event.ctrlKey) &&
+        event.key.toLowerCase() === "s" &&
+        !event.shiftKey &&
+        !event.altKey;
+      if (fileExplorerOpen && isPrimarySaveShortcut) {
+        return;
+      }
+      if (command === "sidebar.toggle" || (!fileExplorerOpen && isPrimarySaveShortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSidebar();
+        return;
+      }
+
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         const targetThreadId = resolveAdjacentThreadId({
@@ -1933,12 +1954,14 @@ export default function Sidebar() {
     };
   }, [
     keybindings,
+    fileExplorerOpen,
     navigateToThread,
     orderedSidebarThreadIds,
     platform,
     routeTerminalOpen,
     routeThreadId,
     threadJumpThreadIds,
+    toggleSidebar,
     updateThreadJumpHintsVisibility,
   ]);
 

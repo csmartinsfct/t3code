@@ -4,7 +4,6 @@ import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry"
 import { OverlayRouteSelect, OverlayRouteSelectPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
 
-import { Input } from "../ui/input";
 import {
   Select,
   SelectItem,
@@ -190,7 +189,7 @@ export function EmbeddedBrowserViewportToolbar({
       >
         <SelectTrigger
           size="sm"
-          className="w-44 text-xs sm:text-xs"
+          className="w-fit min-w-0 text-xs sm:text-xs"
           aria-label="Device preset"
           onFocusCapture={presetRoute.updateAnchor}
           onMouseOverCapture={presetRoute.updateAnchor}
@@ -203,63 +202,65 @@ export function EmbeddedBrowserViewportToolbar({
         </SelectPopup>
       </Select>
 
-      <Input
-        id={widthInputId}
-        size="sm"
-        type="number"
-        inputMode="numeric"
-        min={VIEWPORT_DIMENSION_MIN}
-        max={VIEWPORT_DIMENSION_MAX}
-        value={
-          focusedDimension === "width" ? widthDraft : formatDimensionInputValue(effective.width)
-        }
-        onBlur={() => {
-          commitWidthDraft();
-          setFocusedDimension(null);
-        }}
-        onFocus={() => {
-          setFocusedDimension("width");
-          setWidthDraft(formatDimensionInputValue(effective.width));
-        }}
-        onChange={(event) => handleWidthChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
+      <span className="relative grid min-h-8 w-32 grid-cols-[1fr_1.5rem_1fr] items-center rounded-lg border border-input bg-background not-dark:bg-clip-padding text-xs text-foreground shadow-xs/5 ring-ring/24 transition-[color,box-shadow,background-color] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus-within:border-ring focus-within:ring-[3px] sm:min-h-7 dark:bg-input/32 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+        <input
+          id={widthInputId}
+          type="number"
+          inputMode="numeric"
+          min={VIEWPORT_DIMENSION_MIN}
+          max={VIEWPORT_DIMENSION_MAX}
+          value={
+            focusedDimension === "width" ? widthDraft : formatDimensionInputValue(effective.width)
           }
-        }}
-        className="w-16 text-xs sm:text-xs"
-        aria-label="Viewport width"
-      />
-      <span aria-hidden="true" className="text-muted-foreground">
-        ×
+          onBlur={() => {
+            commitWidthDraft();
+            setFocusedDimension(null);
+          }}
+          onFocus={() => {
+            setFocusedDimension("width");
+            setWidthDraft(formatDimensionInputValue(effective.width));
+          }}
+          onChange={(event) => handleWidthChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="relative h-full min-w-0 rounded-l-[inherit] bg-transparent px-2 text-center font-normal text-current outline-none [appearance:textfield] selection:bg-primary selection:text-primary-foreground [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Viewport width"
+        />
+        <span aria-hidden="true" className="text-center text-muted-foreground">
+          ×
+        </span>
+        <input
+          id={heightInputId}
+          type="number"
+          inputMode="numeric"
+          min={VIEWPORT_DIMENSION_MIN}
+          max={VIEWPORT_DIMENSION_MAX}
+          value={
+            focusedDimension === "height"
+              ? heightDraft
+              : formatDimensionInputValue(effective.height)
+          }
+          onBlur={() => {
+            commitHeightDraft();
+            setFocusedDimension(null);
+          }}
+          onFocus={() => {
+            setFocusedDimension("height");
+            setHeightDraft(formatDimensionInputValue(effective.height));
+          }}
+          onChange={(event) => handleHeightChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="relative h-full min-w-0 rounded-r-[inherit] bg-transparent px-2 text-center font-normal text-current outline-none [appearance:textfield] selection:bg-primary selection:text-primary-foreground [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Viewport height"
+        />
       </span>
-      <Input
-        id={heightInputId}
-        size="sm"
-        type="number"
-        inputMode="numeric"
-        min={VIEWPORT_DIMENSION_MIN}
-        max={VIEWPORT_DIMENSION_MAX}
-        value={
-          focusedDimension === "height" ? heightDraft : formatDimensionInputValue(effective.height)
-        }
-        onBlur={() => {
-          commitHeightDraft();
-          setFocusedDimension(null);
-        }}
-        onFocus={() => {
-          setFocusedDimension("height");
-          setHeightDraft(formatDimensionInputValue(effective.height));
-        }}
-        onChange={(event) => handleHeightChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
-          }
-        }}
-        className="w-16 text-xs sm:text-xs"
-        aria-label="Viewport height"
-      />
 
       <Select
         value={zoomValue}
@@ -269,7 +270,7 @@ export function EmbeddedBrowserViewportToolbar({
       >
         <SelectTrigger
           size="sm"
-          className="w-20 text-xs sm:text-xs"
+          className="w-18 min-w-0 text-xs sm:text-xs"
           aria-label="Zoom"
           onFocusCapture={zoomRoute.updateAnchor}
           onMouseOverCapture={zoomRoute.updateAnchor}
@@ -277,7 +278,7 @@ export function EmbeddedBrowserViewportToolbar({
         >
           <SelectValue>{formatZoomLabel(Number(zoomValue))}</SelectValue>
         </SelectTrigger>
-        <SelectPopup align="start" alignItemWithTrigger={false}>
+        <SelectPopup align="start" alignItemWithTrigger={false} className="w-18">
           <ViewportZoomSelectItems />
         </SelectPopup>
       </Select>
@@ -372,7 +373,7 @@ registerOverlayRoute<{ value?: unknown }>(
           if (typeof nextValue === "string") controller.submit(nextValue);
         }}
       >
-        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false}>
+        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false} className="w-18">
           <ViewportZoomSelectItems />
         </OverlayRouteSelectPopup>
       </OverlayRouteSelect>

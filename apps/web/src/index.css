@@ -180,6 +180,14 @@ input {
   -webkit-app-region: no-drag;
 }
 
+@media (min-width: 768px) {
+  [data-slot="sidebar"][data-side="left"][data-state="collapsed"]
+    ~ [data-slot="sidebar-inset"]
+    .electron-titlebar-inset {
+    padding-left: var(--electron-titlebar-left-inset, 90px);
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

@@ -18,6 +18,32 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
 
     const unsubscribe = onMenuAction((action) => {
+      if (action === "primary-save") {
+        const isMac = navigator.platform.toLowerCase().includes("mac");
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            key: "s",
+            metaKey: isMac,
+            ctrlKey: !isMac,
+          }),
+        );
+        return;
+      }
+      if (action === "board-chat-sidebar-toggle") {
+        const isMac = navigator.platform.toLowerCase().includes("mac");
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            key: "l",
+            metaKey: isMac,
+            ctrlKey: !isMac,
+          }),
+        );
+        return;
+      }
       if (action !== "open-settings") return;
       void navigate({ to: "/settings" });
     });

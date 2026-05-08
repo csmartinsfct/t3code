@@ -157,6 +157,7 @@ type EmbeddedBrowserTabState = {
   reattachRetryTimer: ReturnType<typeof setTimeout> | null;
   devtoolsOpen: boolean;
   isBlank: boolean;
+  viewportEmulationActive: boolean;
   readyForMount: Promise<void> | null;
   title: string;
   favicon: string | null;
@@ -2262,9 +2263,8 @@ function publicEmbeddedBrowserUrl(url: string): string {
   return isEmbeddedBrowserBlankUrl(url) ? EMBEDDED_BROWSER_PUBLIC_BLANK_URL : url;
 }
 
-// Blank tabs render a transparent document so the React rect div's
-// `bg-background` shows through the WebContentsView, guaranteeing a single
-// source of truth for the empty-tab background. Real pages still paint
+// Blank tabs render a transparent inert document so the WebContentsView's
+// renderer-owned viewport background shows through. Real pages still paint
 // normally on top of the transparent view.
 function embeddedBrowserLoadUrl(url: string): string {
   if (!isEmbeddedBrowserBlankUrl(url)) return url;
@@ -2279,6 +2279,7 @@ function embeddedBrowserLoadUrl(url: string): string {
         margin: 0;
         width: 100%;
         height: 100%;
+        overflow: hidden;
         background: transparent;
         color-scheme: ${nativeTheme.shouldUseDarkColors ? "dark" : "light"};
       }
@@ -2291,8 +2292,8 @@ function embeddedBrowserLoadUrl(url: string): string {
 
 function applyEmbeddedBrowserBackground(view: WebContentsView): void {
   try {
-    // Transparent so the React `bg-background` rect div behind the view shows
-    // through for blank tabs. Real pages set their own opaque background.
+    // Transparent so the renderer-owned browser rect behind the native view
+    // shows through for blank tabs. Real pages set their own opaque background.
     view.setBackgroundColor("#00000000");
   } catch (error) {
     console.warn("[desktop/browser] failed to set view background color", { error });
@@ -2507,6 +2508,7 @@ function createEmbeddedBrowserTab(
     reattachRetryTimer: null,
     devtoolsOpen: false,
     isBlank,
+    viewportEmulationActive: false,
     readyForMount: null,
     title: "",
     favicon: null,
@@ -2559,7 +2561,8 @@ function createEmbeddedBrowserTab(
   // inside the webview (where the React shell's window-level keydown listener
   // never sees them). Cmd/Ctrl+T opens a new tab and switches to it, Cmd/Ctrl+W
   // closes the active tab, Cmd/Ctrl+R reloads the active tab (Shift for a
-  // cache-bypassing reload). Without the reload intercept the menu's
+  // cache-bypassing reload), and Cmd/Ctrl+S plus Cmd/Ctrl+L forward app-level
+  // shortcuts to the React shell. Without the reload intercept the menu's
   // `role: "reload"` accelerator would reload the host T3 Code window instead.
   // Cmd/Ctrl+<number> is intentionally NOT bound — that range is owned by the
   // chat-thread navigation shortcut.
@@ -2601,6 +2604,16 @@ function createEmbeddedBrowserTab(
     // Remaining shortcuts reject alt so Option-modified keys (text composition
     // etc.) pass through to the page.
     if (input.alt) return;
+    if (key === "s" && !input.shift) {
+      event.preventDefault();
+      owner.webContents.send(MENU_ACTION_CHANNEL, "primary-save");
+      return;
+    }
+    if (key === "l" && !input.shift) {
+      event.preventDefault();
+      owner.webContents.send(MENU_ACTION_CHANNEL, "board-chat-sidebar-toggle");
+      return;
+    }
     if (key === "t") {
       event.preventDefault();
       try {
@@ -2699,6 +2712,12 @@ function createEmbeddedBrowserTab(
       tab.title = "";
       tab.favicon = null;
     }
+    if (project.activeTabId === tab.tabId && project.bounds) {
+      const owner = findEmbeddedBrowserOwnerWindow(tab);
+      if (owner && !owner.isDestroyed()) {
+        void mountActiveTabInWindow(project, owner, project.bounds);
+      }
+    }
     if (tab.devtoolsOpen) void resumeEmbeddedBrowser(tab);
     if (!preNavHadViewFocus && view.webContents.isFocused()) {
       const owner = findEmbeddedBrowserOwnerWindow(tab);
@@ -2768,6 +2787,23 @@ async function mountActiveTabInWindow(
 ): Promise<boolean> {
   const activeTab = project.tabs.get(project.activeTabId);
   if (!activeTab) return false;
+  if (activeTab.isBlank && activeTab.viewportEmulationActive) {
+    if (project.mounted) {
+      try {
+        window.contentView.removeChildView(activeTab.view);
+      } catch (error) {
+        console.warn("[desktop/browser] failed to hide blank browser view", {
+          projectId: project.projectId,
+          tabId: activeTab.tabId,
+          error,
+        });
+      }
+      parkEmbeddedBrowserView(activeTab.view);
+      void pauseEmbeddedBrowserMedia(activeTab);
+      project.mounted = false;
+    }
+    return true;
+  }
   await resumeEmbeddedBrowser(activeTab);
   if (activeTab.isBlank) await activeTab.readyForMount?.catch(() => {});
   const state = embeddedBrowserStateByWindow.get(window);
@@ -2853,8 +2889,23 @@ async function closeBrowserTab(
   if (!tab) throw new Error(`unknown tab id ${tabId}`);
   if (project.tabs.size <= 1) {
     // Reset the root tab to about:blank rather than destroying the last tab —
-    // the project always has at least one tab so the webview stays mounted.
+    // the project always has at least one tab. In device-emulator mode blank
+    // tabs are rendered by the React shell, so park the native view instead
+    // of leaving Chromium visible there.
     tab.isBlank = true;
+    if (tab.viewportEmulationActive && project.mounted) {
+      try {
+        window.contentView.removeChildView(tab.view);
+      } catch (error) {
+        console.warn("[desktop/browser] failed to park reset blank tab", {
+          projectId: project.projectId,
+          tabId,
+          error,
+        });
+      }
+      parkEmbeddedBrowserView(tab.view);
+      project.mounted = false;
+    }
     tab.readyForMount = tab.view.webContents.loadURL(
       embeddedBrowserLoadUrl(EMBEDDED_BROWSER_PUBLIC_BLANK_URL),
     );
@@ -2986,10 +3037,9 @@ function registerIpcHandlers(): void {
       const project = window
         ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "setBounds")
         : null;
-      if (!project || !bounds) return;
+      if (!window || !project || !bounds) return;
       project.bounds = bounds;
-      const activeTab = project.tabs.get(project.activeTabId);
-      if (activeTab) activeTab.view.setBounds(bounds);
+      await mountActiveTabInWindow(project, window, bounds);
     },
   );
 
@@ -3062,15 +3112,20 @@ function registerIpcHandlers(): void {
         : null;
       const url = normalizeBrowserUrl(rawUrl);
       const activeTab = project?.tabs.get(project.activeTabId);
-      if (!project) return;
+      if (!window || !project) return;
       if (!activeTab || !url) {
         throw new Error("invalid embedded browser navigation request");
       }
       activeTab.isBlank = isEmbeddedBrowserBlankUrl(url);
+      if (activeTab.isBlank && project.bounds) {
+        await mountActiveTabInWindow(project, window, project.bounds);
+      }
       const loadUrl = embeddedBrowserLoadUrl(url);
       try {
         activeTab.readyForMount = activeTab.view.webContents.loadURL(loadUrl);
         await activeTab.readyForMount;
+        activeTab.isBlank = isEmbeddedBrowserBlankUrl(activeTab.view.webContents.getURL());
+        if (project.bounds) await mountActiveTabInWindow(project, window, project.bounds);
       } catch (cause) {
         if (isBrowserNavigationAbortError(cause)) {
           console.warn("[desktop/browser] embedded browser navigation canceled", {
@@ -3200,7 +3255,7 @@ function registerIpcHandlers(): void {
       const project = window
         ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "setViewport")
         : null;
-      if (!project) return;
+      if (!window || !project) return;
       const tabId = Number(rawTabId);
       if (!Number.isInteger(tabId)) return;
       const tab = project.tabs.get(tabId);
@@ -3208,9 +3263,13 @@ function registerIpcHandlers(): void {
       // Touching emulation counts as activity — resume an idle-suspended view.
       markEmbeddedBrowserActive(project);
       if (rawParams === null) {
+        tab.viewportEmulationActive = false;
         await sendBrowserCdp(tab, "Emulation.clearDeviceMetricsOverride", {});
         await sendBrowserCdp(tab, "Emulation.setTouchEmulationEnabled", { enabled: false });
         await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: "" });
+        if (tabId === project.activeTabId && project.bounds) {
+          await mountActiveTabInWindow(project, window, project.bounds);
+        }
         return;
       }
       const params = normalizeViewportParams(rawParams);
@@ -3218,6 +3277,7 @@ function registerIpcHandlers(): void {
         console.warn("[desktop/browser] setViewport called with invalid params", { rawParams });
         return;
       }
+      tab.viewportEmulationActive = true;
       // `dontSetVisibleSize: true` is critical. Without it, Chromium
       // auto-resizes the WebContentsView's rendering surface to the override
       // width/height. When the renderer's React-side rect is clamped to fit
@@ -3243,6 +3303,9 @@ function registerIpcHandlers(): void {
       });
       await sendBrowserCdp(tab, "Emulation.setTouchEmulationEnabled", { enabled: params.mobile });
       await sendBrowserCdp(tab, "Emulation.setUserAgentOverride", { userAgent: params.userAgent });
+      if (tabId === project.activeTabId && project.bounds) {
+        await mountActiveTabInWindow(project, window, project.bounds);
+      }
     },
   );
 

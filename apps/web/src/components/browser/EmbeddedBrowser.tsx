@@ -47,7 +47,7 @@ const BLANK_URLS = new Set(["about:blank", "about:newtab"]);
 const EMULATION_STORAGE_PREFIX = "embeddedBrowser.emulation.";
 const OFF_EMULATION: TabEmulation = { kind: "off" };
 const EMULATED_PANE_PADDING_X = 24;
-const EMULATED_PANE_PADDING_TOP = 96;
+const EMULATED_PANE_PADDING_TOP = 64;
 const EMULATED_PANE_PADDING_BOTTOM = 24;
 const OPTIMISTIC_NEW_TAB_ID = -1;
 
@@ -135,7 +135,7 @@ function readBrowserRectForEmulation(
   const rect = pane.getBoundingClientRect();
   // Predict the final emulated layout, not the pane's current classes. During
   // tab close/switch the current tab may be non-emulated, but the incoming tab
-  // will render with `px-6 pt-24 pb-6`; using current computed padding would
+  // will render with `px-6 pt-16 pb-6`; using current computed padding would
   // mount the WebContentsView one frame too high/left.
   const paddingLeft = EMULATED_PANE_PADDING_X;
   const paddingRight = EMULATED_PANE_PADDING_X;
@@ -266,6 +266,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   }, [projectId, url, tabs, activeTabId, emulationByTab]);
 
   const activeEmulation = emulationByTab.get(activeTabId) ?? OFF_EMULATION;
+  const isDeviceEmulatorActive = activeEmulation.kind !== "off";
   const effectiveDimensions = useMemo<{ width: number; height: number } | null>(() => {
     const params = paramsFromState(activeEmulation);
     if (!params) return null;
@@ -697,7 +698,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     ],
   );
 
-  // Tab keyboard shortcuts (Cmd/Ctrl+T, Cmd/Ctrl+W) are handled
+  // Browser-focused keyboard shortcuts are handled
   // in the Electron main process via `before-input-event` on each tab's
   // webContents — when focus is inside the webview, keydown events never
   // bubble out to the shell's window, so a React-side listener cannot see
@@ -878,7 +879,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
         ref={paneRef}
         className={cn(
           "relative min-h-0 flex-1 bg-background",
-          effectiveDimensions && "flex items-start justify-center px-6 pt-24 pb-6",
+          effectiveDimensions && "flex items-start justify-center px-6 pt-16 pb-6",
         )}
       >
         {effectiveDimensions && browserBridge ? (
@@ -908,7 +909,12 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
               : { width: "100%", height: "100%" }
           }
         >
-          <div ref={rectRef} data-browser-rect className="absolute inset-0 bg-background" />
+          <div className="absolute inset-0 overflow-hidden">
+            {isDeviceEmulatorActive ? (
+              <div className="pointer-events-none absolute inset-0 bg-muted" />
+            ) : null}
+            <div ref={rectRef} data-browser-rect className="absolute inset-0" />
+          </div>
           {effectiveDimensions && browserBridge ? (
             <ViewportResizeHandles
               emulation={activeEmulation}

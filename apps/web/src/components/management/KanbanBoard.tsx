@@ -900,6 +900,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
         className={cn(
           "flex h-[50px] items-center justify-between border-b border-border px-3 sm:px-5",
           isElectron && "drag-region",
+          isElectron && "electron-titlebar-inset",
         )}
       >
         <div className="flex min-w-0 items-center gap-2">
