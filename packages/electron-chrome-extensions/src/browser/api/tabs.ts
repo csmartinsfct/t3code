@@ -321,11 +321,11 @@ export class TabsAPI {
     const tab = this.ctx.store.getTabById(tabId)
     if (!tab) return
 
-    let prevDetails
-    if (this.ctx.store.tabDetailsCache.has(tab.id)) {
-      prevDetails = this.ctx.store.tabDetailsCache.get(tab.id)
-    }
-    if (!prevDetails) return
+    // Fix: if no cached details yet, create them. Previously returned early
+    // here which silently dropped the first update event for new tabs.
+    const prevDetails = this.ctx.store.tabDetailsCache.has(tab.id)
+      ? this.ctx.store.tabDetailsCache.get(tab.id)
+      : this.createTabDetails(tab)
 
     const details = this.createTabDetails(tab)
 
@@ -384,12 +384,12 @@ export class TabsAPI {
     const tab = this.ctx.store.getTabById(tabId)
     if (!tab) return
 
-    const activeTab = this.ctx.store.getActiveTabFromWebContents(tab)
-    const activeChanged = activeTab?.id !== tabId
-    if (!activeChanged) return
-
     const win = this.ctx.store.tabToWindow.get(tab)
 
+    // Fix: previously compared getActiveTabFromWebContents against tabId, but
+    // store.addTab calls setActiveTab() before tab-added fires observeTab, so
+    // the tab was already marked active when this ran → activeChanged = false
+    // → event silently dropped. Now always set + emit (idempotent set is fine).
     this.ctx.store.setActiveTab(tab)
 
     // invalidate cache since 'active' has changed

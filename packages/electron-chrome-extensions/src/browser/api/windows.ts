@@ -18,8 +18,7 @@ export class WindowsAPI {
   constructor(private ctx: ExtensionContext) {
     const handle = this.ctx.router.apiHandler()
     handle('windows.get', this.get.bind(this))
-    // TODO: how does getCurrent differ from getLastFocused?
-    handle('windows.getCurrent', this.getLastFocused.bind(this))
+    handle('windows.getCurrent', this.getCurrent.bind(this))
     handle('windows.getLastFocused', this.getLastFocused.bind(this))
     handle('windows.getAll', this.getAll.bind(this))
     handle('windows.create', this.create.bind(this))
@@ -97,6 +96,31 @@ export class WindowsAPI {
     const win = this.getWindowFromId(windowId)
     if (!win) return { id: WindowsAPI.WINDOW_ID_NONE }
     return this.getWindowDetails(win)
+  }
+
+  // Fix: getCurrent resolves the window that owns the sender webContents,
+  // so chrome.windows.getCurrent() in a popup returns that popup's window
+  // rather than whatever window last received keyboard focus.
+  private getCurrent(event: ExtensionEvent) {
+    if (event.type === 'frame') {
+      const senderWc = event.sender as Electron.WebContents
+      // Find the window that owns the sender — check if any registered window
+      // contains this webContents (BrowserWindow) or is associated via tabToWindow.
+      for (const win of this.ctx.store.windows) {
+        if (win.isDestroyed()) continue
+        // BrowserWindow: sender is its webContents
+        if ('webContents' in win && (win as Electron.BrowserWindow).webContents === senderWc) {
+          return this.getWindowDetails(win)
+        }
+        // Tab associated with this window
+        const tab = this.ctx.store.tabToWindow.get(senderWc)
+        if (tab && tab === win) {
+          return this.getWindowDetails(win)
+        }
+      }
+    }
+    // Fall back to last focused window
+    return this.getLastFocused(event)
   }
 
   private getLastFocused(event: ExtensionEvent) {

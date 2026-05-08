@@ -2652,25 +2652,9 @@ function closePopoutWindow(projectId: string): void {
 // Per T3CO-421 a project's lifecycle is decoupled from window mount state.
 const POLYFILL_SENTINEL = "/*__t3_polyfill_v1__*/";
 
-// Optional-chain patterns for Chrome extension APIs that Electron doesn't implement.
-// Replaces hard property accesses with ?. so missing APIs degrade gracefully rather
-// than crashing the extension's background service worker.
-const EXTENSION_API_PATCHES: Array<[string, string]> = [
-  // chrome.windows events — chrome.windows is not implemented in Electron
-  [".windows.onRemoved.", ".windows?.onRemoved?."],
-  [".windows.onFocusChanged.", ".windows?.onFocusChanged?."],
-  [".windows.onCreated.", ".windows?.onCreated?."],
-  // chrome.tabs events — may be missing in some Electron builds
-  [".tabs.onRemoved.", ".tabs?.onRemoved?."],
-  [".tabs.onUpdated.", ".tabs?.onUpdated?."],
-  [".tabs.onActivated.", ".tabs?.onActivated?."],
-  [".tabs.onReplaced.", ".tabs?.onReplaced?."],
-];
-
-// Returns true if any files were modified (polyfill or API patches applied).
-// The caller should only clear service worker caches when this returns true —
-// clearing caches on every startup while a service worker is already running
-// leaves Chromium in an inconsistent state and breaks the background connection.
+// Returns true if the background script was newly patched.
+// The caller should clear service worker caches only when true — wiping on
+// every startup disrupts a running service worker (background connection drops).
 async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
   let manifest: { background?: { service_worker?: string; scripts?: string[] } };
   try {
@@ -2692,18 +2676,13 @@ async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
   try {
     const existing = await FS.promises.readFile(bgPath, "utf-8");
     if (!existing.startsWith(POLYFILL_SENTINEL)) {
+      // Minimal polyfill: only requestAnimationFrame which service workers
+      // don't have natively. chrome.tabs/windows events are now provided by
+      // electron-chrome-extensions and no longer need stubs here.
       const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
   if(typeof requestAnimationFrame==='undefined'){
     globalThis.requestAnimationFrame=function(cb){return setTimeout(cb,16);};
     globalThis.cancelAnimationFrame=function(id){clearTimeout(id);};
-  }
-  if(typeof chrome!=='undefined'&&chrome.tabs){
-    var _evt=function(){var L=[];return{addListener:function(f){L.push(f);},removeListener:function(f){var i=L.indexOf(f);if(i>-1)L.splice(i,1);},hasListener:function(f){return L.indexOf(f)>-1;},hasListeners:function(){return L.length>0;}};};
-    if(!chrome.tabs.onRemoved)chrome.tabs.onRemoved=_evt();
-    if(!chrome.tabs.onCreated)chrome.tabs.onCreated=_evt();
-    if(!chrome.tabs.onUpdated)chrome.tabs.onUpdated=_evt();
-    if(!chrome.tabs.onActivated)chrome.tabs.onActivated=_evt();
-    if(!chrome.tabs.onReplaced)chrome.tabs.onReplaced=_evt();
   }
 })();\n`;
       await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
@@ -2714,45 +2693,7 @@ async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
     // Non-fatal — extension might still work without the polyfill.
   }
 
-  const jsPatched = await patchExtensionJsFiles(extDir);
-  return changed || jsPatched;
-}
-
-async function patchExtensionJsFiles(extDir: string): Promise<boolean> {
-  let jsFiles: string[];
-  try {
-    const entries = await FS.promises.readdir(extDir, { recursive: true, withFileTypes: true });
-    jsFiles = (entries as FS.Dirent[])
-      .filter((e) => e.isFile() && e.name.endsWith(".js"))
-      .map((e) =>
-        Path.join((e as FS.Dirent & { parentPath?: string }).parentPath ?? extDir, e.name),
-      );
-  } catch {
-    return false;
-  }
-  let anyChanged = false;
-  for (const filePath of jsFiles) {
-    try {
-      let content = await FS.promises.readFile(filePath, "utf-8");
-      let changed = false;
-      for (const [from, to] of EXTENSION_API_PATCHES) {
-        if (content.includes(from)) {
-          content = content.split(from).join(to);
-          changed = true;
-        }
-      }
-      if (changed) {
-        await FS.promises.writeFile(filePath, content, "utf-8");
-        anyChanged = true;
-        console.log("[desktop/browser] patched extension JS", {
-          file: Path.relative(extDir, filePath),
-        });
-      }
-    } catch {
-      // Non-fatal per file.
-    }
-  }
-  return anyChanged;
+  return changed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2870,36 +2811,11 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
         ob.y + Math.round((ob.height - height) / 2),
       );
 
+      // URL is now fully resolved by electron-chrome-extensions before
+      // reaching createWindow (gap fix 1 in store.ts). Only load if present.
       if (url && url !== "about:blank") {
-        // Resolve relative URLs (e.g. 'notification.html') to chrome-extension://
-        // — extensions pass bare filenames; Chrome resolves them automatically
-        // but electron-chrome-extensions passes them raw.
-        let resolvedUrl = url;
-        if (!url.startsWith("http") && !url.startsWith("chrome-extension://")) {
-          const ses3 = session.fromPartition(`persist:${projectId}`);
-          let fallbackExtId: string | null = null;
-          for (const ext of ses3.getAllExtensions()) {
-            const extPath = (ext as unknown as { path?: string }).path;
-            if (!extPath) continue;
-            fallbackExtId = ext.id; // remember last extension as fallback
-            try {
-              await FS.promises.access(Path.join(extPath, url));
-              resolvedUrl = `chrome-extension://${ext.id}/${url}`;
-              break;
-            } catch {
-              // not in this extension — check if it has a home.html fallback
-            }
-          }
-          // If the specific file wasn't found in any extension, fall back to
-          // home.html — the extension tracks pending requests in its state and
-          // will show the approval UI when its main page opens.
-          if (resolvedUrl === url && fallbackExtId) {
-            resolvedUrl = `chrome-extension://${fallbackExtId}/home.html`;
-            console.log("[desktop/browser] extension URL not found, opening home.html", { url, fallbackExtId });
-          }
-        }
-        await notifWin.loadURL(resolvedUrl).catch((err: unknown) => {
-          console.warn("[desktop/browser] extension window loadURL failed", { url: resolvedUrl, err });
+        await notifWin.loadURL(url).catch((err: unknown) => {
+          console.warn("[desktop/browser] extension window loadURL failed", { url, err });
         });
       }
       notifWin.show();

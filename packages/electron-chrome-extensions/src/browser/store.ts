@@ -64,7 +64,33 @@ export class ExtensionStore extends EventEmitter {
       throw new Error('createWindow is not implemented')
     }
 
-    const win = await this.impl.createWindow(details)
+    // Fix: Resolve relative URLs against the calling extension's origin.
+    // Chrome does this natively; without it, bare filenames like
+    // 'notification.html' reach createWindow and fail with ERR_INVALID_URL.
+    let resolvedDetails = details
+    const rawUrl = Array.isArray(details.url) ? details.url[0] : details.url
+    if (rawUrl && !rawUrl.startsWith('http') && !rawUrl.startsWith('chrome-extension://')) {
+      const extensionId = event.extension?.id
+      if (extensionId) {
+        const resolved = `chrome-extension://${extensionId}/${rawUrl}`
+        resolvedDetails = { ...details, url: Array.isArray(details.url) ? [resolved] : resolved }
+      }
+    }
+
+    // Fix: When chrome.windows.create({tabId}) is used to move an existing
+    // tab into a popup window, populate url from the tab's cached details so
+    // createWindow implementations can load the right content.
+    if (details.tabId !== undefined && !resolvedDetails.url) {
+      const existingTab = this.getTabById(details.tabId)
+      if (existingTab) {
+        const tabDetails = this.tabDetailsCache.get(existingTab.id)
+        if (tabDetails?.url) {
+          resolvedDetails = { ...resolvedDetails, url: tabDetails.url }
+        }
+      }
+    }
+
+    const win = await this.impl.createWindow(resolvedDetails)
 
     this.addWindow(win)
 
