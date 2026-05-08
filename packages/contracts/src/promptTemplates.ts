@@ -436,7 +436,30 @@ The browser this tool drives is the **embedded WebContentsView** in the T3 Code 
 
 One tool hasn't been ported to this mode yet and returns "tool X is not yet supported in native (Electron) mode" if called: \`cookie-import-browser\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
 
-Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
+Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.
+
+### Chrome extension tools (desktop only)
+
+The embedded browser supports Chrome extensions. Use these tools to install, discover, and interact with extension popup windows (e.g. MetaMask, Rainbow wallet):
+
+- **\`load_extension\`** — install a pending Chrome Web Store extension (navigate to the extension page, click "Add to Chrome", then call this)
+- **\`list_extensions\`** — list all installed extensions with their IDs, names, versions
+- **\`open_extension <extensionId>\`** — open an extension's action popup as a real floating window (same as clicking the extension icon in the toolbar). Required before \`ext_switch\` if the popup isn't already open.
+- **\`ext_windows\`** — list all open extension popup windows, including dapp approval/notification windows that appeared automatically via \`chrome.windows.create()\`
+- **\`ext_switch <extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` commands to an extension popup window instead of the main browser tab. Call with no extensionId to revert to the main tab.
+- **\`ext_close <extensionId>\`** — close an open extension popup window
+
+**Typical wallet dapp flow:**
+\`\`\`
+list_extensions                          # find MetaMask's extension ID
+open_extension <id>                      # open MetaMask popup
+ext_switch <id>                          # target it for CDP commands
+snapshot                                 # see MetaMask's current UI
+click @eN                                # click approve/connect/sign
+ext_switch                               # revert to main tab
+\`\`\`
+
+For dapp-triggered popups (MetaMask asking to approve a transaction), call \`ext_windows\` after the dapp interaction to find the approval window, then \`ext_switch\` to target it.`;
 
 const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
 
