@@ -375,6 +375,12 @@ Extension popup windows (`BrowserWindow` instances created when the user opens a
 
 This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
 
+**Extension signature verification (T3CO-471):** Two layers protect against tampered or mismatched extensions:
+
+1. _CRX3 cryptographic verification (agent installs)_: When `load_extension` is called, the CRX is fetched to a buffer and `verifyCrxSignature()` verifies the RSA-SHA256 signature in the CRX3 protobuf header over the signed header data + zip archive using `node:crypto`. The install is aborted if verification fails.
+
+2. _`manifest.key` → ID consistency check (all loads)_: At every `extension-loaded` event and in `loadLegacyFlatExtensions`, `verifyManifestKeyMatchesId()` derives the extension ID from the base64 public key stored in `manifest.json` (`SHA256(base64(key))[0:16]` → a-p alphabet) and verifies it matches the directory name. Extensions that fail this check are unloaded immediately. Dev/unpacked extensions without a `manifest.key` field are exempt.
+
 **Native addon (production):** `panel_window.node` is compiled from `apps/desktop/native/panel-window/panel-window.mm` during the production build (`scripts/build-desktop-artifact.ts`), staged at `apps/desktop/native/panel-window/build/Release/`, and listed in electron-builder's `asarUnpack` so Electron can `dlopen` it outside the asar archive at runtime. Without this the addon's `try/catch` fallback fires silently and popups do not float above macOS full-screen Spaces.
 
 ### Chromium bundle

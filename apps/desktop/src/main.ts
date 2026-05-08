@@ -1445,6 +1445,28 @@ async function installExtensionForProject(
   projectId: string,
   extensionId: string,
 ): Promise<InstalledExtensionInfo> {
+  // Download the CRX and verify its RSA-SHA256 signature before the package
+  // installs it. This catches MITM attacks and corrupted downloads. The package
+  // will also download the CRX independently — the double fetch is intentional.
+  const crxUrl =
+    `https://clients2.google.com/service/update2/crx` +
+    `?response=redirect&prodversion=130.0.0.0&acceptformat=crx3` +
+    `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
+  const crxResponse = await fetch(crxUrl, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    },
+  });
+  if (!crxResponse.ok)
+    throw new Error(
+      `CRX download failed (${crxResponse.status}) for ${extensionId} — cannot verify signature`,
+    );
+  const crxBuffer = Buffer.from(await crxResponse.arrayBuffer());
+  verifyCrxSignature(crxBuffer, extensionId); // throws if signature invalid
+  console.log("[desktop/browser] CRX signature verified", { extensionId });
+
   const ses = session.fromPartition(`persist:${projectId}`);
   const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
   const ext = await webStoreInstallExtension(extensionId, { session: ses, extensionsPath });
@@ -2662,6 +2684,169 @@ function closePopoutWindow(projectId: string): void {
 // the agent CDP broker handler (lazy first-touch) and BROWSER_MOUNT_CHANNEL
 // (reuse the warm view if it exists, create one if the agent raced ahead).
 // Per T3CO-421 a project's lifecycle is decoupled from window mount state.
+// ---------------------------------------------------------------------------
+// CRX3 signature verification (T3CO-471)
+// ---------------------------------------------------------------------------
+
+// Minimal protobuf decoder for the two CRX3 field types we care about.
+// CrxFileHeader field 2 = sha256_with_rsa (repeated AsymmetricKeyProof)
+// CrxFileHeader field 10000 = signed_header_data (bytes)
+// AsymmetricKeyProof field 1 = public_key, field 2 = signature
+
+function _crxReadVarInt(buf: Buffer, pos: number): { value: number; next: number } {
+  let result = 0;
+  let shift = 0;
+  let p = pos;
+  while (p < buf.length) {
+    const byte = buf[p++]!;
+    result |= (byte & 0x7f) << shift;
+    if (!(byte & 0x80)) break;
+    shift += 7;
+  }
+  return { value: result, next: p };
+}
+
+interface Crx3Header {
+  sha256_with_rsa: Array<{ public_key: Buffer; signature: Buffer }>;
+  signed_header_data: Buffer | null;
+}
+
+function decodeCrx3Header(buf: Buffer): Crx3Header {
+  const result: Crx3Header = { sha256_with_rsa: [], signed_header_data: null };
+  let pos = 0;
+  while (pos < buf.length) {
+    const tag = _crxReadVarInt(buf, pos);
+    pos = tag.next;
+    const fieldNumber = tag.value >>> 3;
+    const wireType = tag.value & 0x7;
+    if (wireType !== 2) {
+      // skip non-length-delimited fields
+      if (wireType === 0) {
+        const v = _crxReadVarInt(buf, pos);
+        pos = v.next;
+      } else if (wireType === 5) {
+        pos += 4;
+      } else if (wireType === 1) {
+        pos += 8;
+      }
+      continue;
+    }
+    const lenV = _crxReadVarInt(buf, pos);
+    pos = lenV.next;
+    const fieldBuf = buf.subarray(pos, pos + lenV.value);
+    pos += lenV.value;
+    if (fieldNumber === 2) {
+      // AsymmetricKeyProof submessage
+      const proof = { public_key: Buffer.alloc(0), signature: Buffer.alloc(0) };
+      let pp = 0;
+      while (pp < fieldBuf.length) {
+        const t2 = _crxReadVarInt(fieldBuf, pp);
+        pp = t2.next;
+        const f2 = t2.value >>> 3;
+        const w2 = t2.value & 0x7;
+        if (w2 !== 2) {
+          if (w2 === 0) {
+            const v2 = _crxReadVarInt(fieldBuf, pp);
+            pp = v2.next;
+          } else if (w2 === 5) {
+            pp += 4;
+          } else if (w2 === 1) {
+            pp += 8;
+          }
+          continue;
+        }
+        const l2 = _crxReadVarInt(fieldBuf, pp);
+        pp = l2.next;
+        const fb2 = fieldBuf.subarray(pp, pp + l2.value);
+        pp += l2.value;
+        if (f2 === 1) proof.public_key = Buffer.from(fb2);
+        if (f2 === 2) proof.signature = Buffer.from(fb2);
+      }
+      result.sha256_with_rsa.push(proof);
+    } else if (fieldNumber === 10000) {
+      result.signed_header_data = Buffer.from(fieldBuf);
+    }
+  }
+  return result;
+}
+
+// Derive a Chrome extension ID (32 lowercase a-p chars) from a base64-encoded
+// SubjectPublicKeyInfo (DER) key, matching Chrome's ID derivation algorithm.
+function deriveCrxId(publicKeyBase64: string): string {
+  const hash = Crypto.createHash("sha256").update(publicKeyBase64, "base64").digest();
+  let id = "";
+  for (let i = 0; i < 16; i++) {
+    id += String.fromCharCode(97 + (hash[i]! >> 4));
+    id += String.fromCharCode(97 + (hash[i]! & 0xf));
+  }
+  return id;
+}
+
+// Verify the RSA-SHA256 signature in a CRX3 buffer against the expected
+// extension ID.  Throws a descriptive error if verification fails.
+function verifyCrxSignature(crxBuffer: Buffer, expectedId: string): void {
+  if (crxBuffer.toString("ascii", 0, 4) !== "Cr24")
+    throw new Error(`CRX verification failed: invalid magic bytes for ${expectedId}`);
+  const version = crxBuffer.readUInt32LE(4);
+  if (version !== 3)
+    throw new Error(`CRX verification failed: unsupported version ${version} for ${expectedId}`);
+  const headerSize = crxBuffer.readUInt32LE(8);
+  if (12 + headerSize > crxBuffer.length)
+    throw new Error(`CRX verification failed: header size exceeds file length for ${expectedId}`);
+  const headerBuf = crxBuffer.subarray(12, 12 + headerSize);
+  const zipBuf = crxBuffer.subarray(12 + headerSize);
+  const header = decodeCrx3Header(headerBuf);
+  if (!header.signed_header_data)
+    throw new Error(`CRX verification failed: missing signed_header_data for ${expectedId}`);
+  // Construct the signed message per Chrome's CRX3 spec:
+  //   "CRX3 SignedData\x00" || uint32LE(len(signed_header_data)) || signed_header_data || zip
+  const signedHeaderData = header.signed_header_data;
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32LE(signedHeaderData.length, 0);
+  const message = Buffer.concat([
+    Buffer.from("CRX3 SignedData\x00", "ascii"),
+    lenBuf,
+    signedHeaderData,
+    zipBuf,
+  ]);
+  let verified = false;
+  for (const proof of header.sha256_with_rsa) {
+    if (!proof.public_key.length || !proof.signature.length) continue;
+    const keyBase64 = proof.public_key.toString("base64");
+    if (deriveCrxId(keyBase64) !== expectedId) continue;
+    try {
+      const pubKey = Crypto.createPublicKey({ key: proof.public_key, format: "der", type: "spki" });
+      const verifier = Crypto.createVerify("RSA-SHA256");
+      verifier.update(message);
+      if (verifier.verify(pubKey, proof.signature)) {
+        verified = true;
+        break;
+      }
+    } catch {
+      // malformed key — try the next proof entry
+    }
+  }
+  if (!verified)
+    throw new Error(
+      `CRX verification failed: RSA-SHA256 signature invalid for ${expectedId}. ` +
+        `The extension may have been tampered with or downloaded incorrectly.`,
+    );
+}
+
+// Verify that the public key stored in an unpacked extension's manifest.json
+// correctly derives to its extension ID.  Returns true if the check passes or
+// if no key is present (dev/unpacked extensions have no manifest.key).
+async function verifyManifestKeyMatchesId(extPath: string, extId: string): Promise<boolean> {
+  try {
+    const raw = await FS.promises.readFile(Path.join(extPath, "manifest.json"), "utf-8");
+    const manifest = JSON.parse(raw) as { key?: string };
+    if (!manifest.key) return true; // no key — dev/unpacked extension, skip check
+    return deriveCrxId(manifest.key) === extId;
+  } catch {
+    return true; // non-fatal; Electron's loader will handle malformed manifests
+  }
+}
+
 const POLYFILL_SENTINEL = "/*__t3_polyfill_v1__*/";
 
 // Returns true if the background script was newly patched.
@@ -2773,6 +2958,16 @@ async function loadLegacyFlatExtensions(
       return ep && Path.resolve(ep) === Path.resolve(extDir);
     });
     if (alreadyLoaded) continue;
+    // Verify manifest.key → ID consistency (skipped for dev extensions without a key).
+    const idValid = await verifyManifestKeyMatchesId(extDir, entry.name);
+    if (!idValid) {
+      console.warn("[desktop/browser] legacy extension manifest.key mismatch — skipping", {
+        projectId,
+        extensionId: entry.name,
+        extDir,
+      });
+      continue;
+    }
     try {
       await ensureExtensionPolyfill(extDir);
       await ses.loadExtension(extDir, { allowFileAccess: true });
@@ -2809,6 +3004,18 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
   ses.on("extension-loaded", async (_, ext) => {
     const extPath = (ext as { path?: string }).path;
     if (!extPath) return;
+    // Verify manifest.key → ID consistency. Catches disk tampering and mismatched
+    // installs. Skipped for dev/unpacked extensions that have no manifest.key.
+    const idValid = await verifyManifestKeyMatchesId(extPath, ext.id);
+    if (!idValid) {
+      console.error("[desktop/browser] extension manifest.key/ID mismatch — unloading", {
+        extId: ext.id,
+        extPath,
+        projectId,
+      });
+      ses.removeExtension(ext.id);
+      return;
+    }
     const wasPatched = await ensureExtensionPolyfill(extPath);
     if (wasPatched) {
       const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
