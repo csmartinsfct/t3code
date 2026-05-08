@@ -2638,23 +2638,28 @@ const EXTENSION_API_PATCHES: Array<[string, string]> = [
   [".tabs.onReplaced.", ".tabs?.onReplaced?."],
 ];
 
-async function ensureExtensionPolyfill(extDir: string): Promise<void> {
+// Returns true if any files were modified (polyfill or API patches applied).
+// The caller should only clear service worker caches when this returns true —
+// clearing caches on every startup while a service worker is already running
+// leaves Chromium in an inconsistent state and breaks the background connection.
+async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
   let manifest: { background?: { service_worker?: string; scripts?: string[] } };
   try {
     manifest = JSON.parse(
       await FS.promises.readFile(Path.join(extDir, "manifest.json"), "utf-8"),
     ) as typeof manifest;
   } catch {
-    return;
+    return false;
   }
   const bgScript =
     manifest.background?.service_worker ??
     (manifest.background?.scripts?.[0] as string | undefined);
-  if (!bgScript) return;
-  // Reject paths that could escape the extension directory
-  if (bgScript.startsWith("/") || bgScript.includes("..")) return;
+  if (!bgScript) return false;
+  if (bgScript.startsWith("/") || bgScript.includes("..")) return false;
   const bgPath = Path.resolve(Path.join(extDir, bgScript));
-  if (!bgPath.startsWith(Path.resolve(extDir) + Path.sep)) return;
+  if (!bgPath.startsWith(Path.resolve(extDir) + Path.sep)) return false;
+
+  let changed = false;
   try {
     const existing = await FS.promises.readFile(bgPath, "utf-8");
     if (!existing.startsWith(POLYFILL_SENTINEL)) {
@@ -2674,18 +2679,17 @@ async function ensureExtensionPolyfill(extDir: string): Promise<void> {
 })();\n`;
       await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
       console.log("[desktop/browser] applied extension polyfill", { extDir, bgScript });
+      changed = true;
     }
   } catch {
     // Non-fatal — extension might still work without the polyfill.
   }
 
-  // Patch JS files in the extension to optional-chain Chrome APIs that Electron
-  // doesn't implement (chrome.windows, partial chrome.tabs events). Idempotent —
-  // optional chaining is safe to apply even when the API exists.
-  await patchExtensionJsFiles(extDir);
+  const jsPatched = await patchExtensionJsFiles(extDir);
+  return changed || jsPatched;
 }
 
-async function patchExtensionJsFiles(extDir: string): Promise<void> {
+async function patchExtensionJsFiles(extDir: string): Promise<boolean> {
   let jsFiles: string[];
   try {
     const entries = await FS.promises.readdir(extDir, { recursive: true, withFileTypes: true });
@@ -2695,8 +2699,9 @@ async function patchExtensionJsFiles(extDir: string): Promise<void> {
         Path.join((e as FS.Dirent & { parentPath?: string }).parentPath ?? extDir, e.name),
       );
   } catch {
-    return;
+    return false;
   }
+  let anyChanged = false;
   for (const filePath of jsFiles) {
     try {
       let content = await FS.promises.readFile(filePath, "utf-8");
@@ -2709,6 +2714,7 @@ async function patchExtensionJsFiles(extDir: string): Promise<void> {
       }
       if (changed) {
         await FS.promises.writeFile(filePath, content, "utf-8");
+        anyChanged = true;
         console.log("[desktop/browser] patched extension JS", {
           file: Path.relative(extDir, filePath),
         });
@@ -2717,6 +2723,7 @@ async function patchExtensionJsFiles(extDir: string): Promise<void> {
       // Non-fatal per file.
     }
   }
+  return anyChanged;
 }
 
 async function reloadPersistedExtensions(projectId: string): Promise<void> {
@@ -2732,26 +2739,28 @@ async function reloadPersistedExtensions(projectId: string): Promise<void> {
     if (!entry.isDirectory()) continue;
     const extDir = Path.join(extRoot, entry.name);
     try {
-      // Apply polyfill and patches before loading. Must run on every startup
-      // because patches may not have been applied during the install session.
-      await ensureExtensionPolyfill(extDir);
-      // Remove any previously registered version first so Chromium re-reads
-      // all extension files from disk, bypassing its service worker cache.
+      // Apply polyfill and API patches. Returns true only when files were
+      // actually modified — used to decide whether to wipe service worker caches.
+      const patched = await ensureExtensionPolyfill(extDir);
       const existing = ses.getAllExtensions().find((e) => {
         const ep = (e as unknown as { path?: string }).path;
         return ep && Path.resolve(ep) === Path.resolve(extDir);
       });
-      // Clear caches BEFORE patching and reloading so Chromium picks up the
-      // patched files rather than compiled bytecode from the previous session.
-      const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
-      for (const cacheSubdir of ["Service Worker", "Code Cache"]) {
-        await FS.promises.rm(Path.join(partitionDir, cacheSubdir), {
-          recursive: true,
-          force: true,
-        });
+      if (patched) {
+        // New patches were applied — clear the service worker and code caches so
+        // Chromium recompiles from the freshly-patched files. Only done when
+        // something changed; wiping caches on every startup disrupts an already-
+        // running service worker and causes "Background connection unresponsive".
+        const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
+        for (const cacheSubdir of ["Service Worker", "Code Cache"]) {
+          await FS.promises.rm(Path.join(partitionDir, cacheSubdir), {
+            recursive: true,
+            force: true,
+          });
+        }
+        await ses.clearCodeCaches({});
+        if (existing) ses.removeExtension(existing.id);
       }
-      await ses.clearCodeCaches({});
-      if (existing) ses.removeExtension(existing.id);
       const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
       console.log("[desktop/browser] reloaded persisted extension", {
         projectId,
@@ -3708,27 +3717,65 @@ function registerIpcHandlers(): void {
     const projectId = normalizeProjectId(rawProjectId);
     if (!projectId) return [];
     const ses = session.fromPartition(`persist:${projectId}`);
-    return ses.getAllExtensions().map((ext) => {
-      const manifest = ext.manifest as {
-        icons?: Record<string, string>;
-        action?: { default_popup?: string };
-        browser_action?: { default_popup?: string };
-      };
-      const icons = manifest.icons ?? {};
-      const bestSize = Object.keys(icons)
-        .map(Number)
-        .filter((n) => !isNaN(n))
-        .sort((a, b) => b - a)[0];
-      const iconPath = bestSize !== undefined ? icons[String(bestSize)] : undefined;
-      const popupPath =
-        manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? undefined;
-      return {
-        id: ext.id,
-        name: ext.name,
-        iconUrl: iconPath ? `chrome-extension://${ext.id}/${iconPath}` : null,
-        popupUrl: popupPath ? `chrome-extension://${ext.id}/${popupPath}` : null,
-      };
-    });
+    const extRoot = projectId
+      ? Path.join(STATE_DIR, "browser", projectId, "extensions")
+      : null;
+
+    return Promise.all(
+      ses.getAllExtensions().map(async (ext) => {
+        const manifest = ext.manifest as {
+          icons?: Record<string, string>;
+          action?: { default_popup?: string };
+          browser_action?: { default_popup?: string };
+        };
+        const icons = manifest.icons ?? {};
+        const bestSize = Object.keys(icons)
+          .map(Number)
+          .filter((n) => !isNaN(n))
+          .sort((a, b) => b - a)[0];
+        const iconPath = bestSize !== undefined ? icons[String(bestSize)] : undefined;
+        const popupPath =
+          manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? undefined;
+
+        // Read icon from disk and encode as base64 data URL so any renderer
+        // (including the overlay which uses a different session partition) can
+        // display it. chrome-extension:// URLs only work in the extension's own session.
+        let iconUrl: string | null = null;
+        if (iconPath && extRoot) {
+          try {
+            const extDirs = await FS.promises.readdir(extRoot);
+            for (const dir of extDirs) {
+              const candidate = Path.join(extRoot, dir, iconPath);
+              try {
+                const data = await FS.promises.readFile(candidate);
+                const ext2 = Path.extname(iconPath).toLowerCase();
+                const mime =
+                  ext2 === ".png"
+                    ? "image/png"
+                    : ext2 === ".svg"
+                      ? "image/svg+xml"
+                      : ext2 === ".jpg" || ext2 === ".jpeg"
+                        ? "image/jpeg"
+                        : "image/png";
+                iconUrl = `data:${mime};base64,${data.toString("base64")}`;
+                break;
+              } catch {
+                // try next dir
+              }
+            }
+          } catch {
+            // extRoot doesn't exist yet — first boot before any install
+          }
+        }
+
+        return {
+          id: ext.id,
+          name: ext.name,
+          iconUrl,
+          popupUrl: popupPath ? `chrome-extension://${ext.id}/${popupPath}` : null,
+        };
+      }),
+    );
   });
 
   ipcMain.removeHandler(BROWSER_OPEN_EXTENSION_CHANNEL);
@@ -3750,9 +3797,28 @@ function registerIpcHandlers(): void {
         browser_action?: { default_popup?: string };
       };
       const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
-      const url = popupPath
-        ? `chrome-extension://${extensionId}/${popupPath}`
-        : `chrome-extension://${extensionId}/home.html`;
+      // Prefer home.html when the extension has one — popup.html is designed for
+      // Chrome's extension popup context (small overlay) and relies on
+      // chrome.tabs.getCurrent() which is undefined in Electron's tab context,
+      // causing the UI to hang on a loading screen. home.html is full-page safe.
+      // Use ext.path (the actual directory on disk) rather than reconstructing
+      // from extensionId — Electron assigns a different ID than the CWS install ID.
+      const extPath = (ext as unknown as { path?: string }).path ?? "";
+      let url: string;
+      if (extPath) {
+        try {
+          await FS.promises.access(Path.join(extPath, "home.html"));
+          url = `chrome-extension://${extensionId}/home.html`;
+        } catch {
+          url = popupPath
+            ? `chrome-extension://${extensionId}/${popupPath}`
+            : `chrome-extension://${extensionId}/home.html`;
+        }
+      } else {
+        url = popupPath
+          ? `chrome-extension://${extensionId}/${popupPath}`
+          : `chrome-extension://${extensionId}/home.html`;
+      }
       openNewBrowserTab(project, url);
     },
   );
