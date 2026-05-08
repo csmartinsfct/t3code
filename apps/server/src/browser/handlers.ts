@@ -118,7 +118,7 @@ function valueFlag(flag: string, key: string, input: Record<string, unknown>): s
   return v === undefined ? [] : [flag, String(v)];
 }
 
-const SPECS: Record<string, CommandSpec> = {
+export const SPECS: Record<string, CommandSpec> = {
   // ─── Navigate ─────────────────────────────────────────────
   goto: {
     command: "goto",
@@ -807,11 +807,15 @@ const SPECS: Record<string, CommandSpec> = {
   load_extension: {
     command: "load_extension",
     category: "meta",
-    argsFromInput: () => [],
-    title: "Load pending Chrome Web Store extension",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Install Chrome extension by ID",
     description:
-      "Reads the pending Chrome Web Store install captured by the 'Add to Chrome' button, fetches the CRX from Google, extracts it, and loads it into the project browser session. Navigate to the extension's Web Store page and click 'Add to Chrome' before calling this tool. Returns the installed extension name, version, and ID. Desktop (Electron) host only.",
-    inputSchema: {},
+      "Download and install a Chrome extension from the Web Store by its 32-character extension ID. The extension is fetched, unpacked, and loaded into the project browser session. Returns the installed extension name, version, and ID. Note: users can also install extensions by visiting the Chrome Web Store in the embedded browser and clicking 'Add to Chrome' — no agent action needed for that flow. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str(
+        "Chrome extension ID (32 lowercase a-p chars). Find it in the Web Store URL: chromewebstore.google.com/detail/<name>/<ID>",
+      ),
+    },
   },
   open_extension: {
     command: "open_extension",

@@ -59,6 +59,9 @@ export const OrchestrationPromptOverridesPatch = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type OrchestrationPromptOverridesPatch = typeof OrchestrationPromptOverridesPatch.Type;
 
+// This version tracks the prompt document format, not the shipped prompt text.
+// Text-only default prompt updates must keep the same version so persisted
+// settings, project overrides, and orchestration-run overrides remain readable.
 export const PROMPT_TEMPLATE_VERSION = 1 as const;
 export const PromptTemplateVersion = Schema.Literal(PROMPT_TEMPLATE_VERSION);
 export type PromptTemplateVersion = typeof PromptTemplateVersion.Type;
@@ -420,7 +423,21 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 - **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
 - **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
 - **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`status\`, \`ux-audit\`
+- **Extensions (desktop only):** \`load_extension\`, \`open_extension\`, \`list_extensions\`, \`ext_windows\`, \`ext_switch\`, \`ext_close\`
 - **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
+
+### Chrome extension tools (desktop only)
+
+Install and interact with Chrome extensions (e.g. MetaMask, Rainbow wallet) in the embedded browser:
+
+- **\`load_extension <extensionId>\`** — install a Chrome extension by its 32-char Web Store ID (find it in the Web Store URL). Users can also click "Add to Chrome" directly in the embedded browser — that flow is fully automatic and requires no agent action.
+- **\`list_extensions\`** — list all installed extensions with their IDs, names, versions
+- **\`open_extension <extensionId>\`** — open an extension's action popup as a real floating window (same as clicking the extension icon). Required before \`ext_switch\` if no popup is open yet.
+- **\`ext_windows\`** — list all open extension popup windows, including dapp approval windows from \`chrome.windows.create()\`
+- **\`ext_switch <extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` calls to an extension popup. Call with no argument to revert to the main tab.
+- **\`ext_close <extensionId>\`** — close an extension popup window
+
+Typical wallet dapp flow: \`open_extension <id>\` → \`ext_switch <id>\` → \`snapshot\` → \`click\` approve → \`ext_switch\` (revert). Use \`ext_windows\` to find approval popups that appeared automatically from dapp interactions.
 
 ### Known issues
 
@@ -436,30 +453,7 @@ The browser this tool drives is the **embedded WebContentsView** in the T3 Code 
 
 One tool hasn't been ported to this mode yet and returns "tool X is not yet supported in native (Electron) mode" if called: \`cookie-import-browser\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
 
-Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.
-
-### Chrome extension tools (desktop only)
-
-The embedded browser supports Chrome extensions. Use these tools to install, discover, and interact with extension popup windows (e.g. MetaMask, Rainbow wallet):
-
-- **\`load_extension\`** — install a pending Chrome Web Store extension (navigate to the extension page, click "Add to Chrome", then call this)
-- **\`list_extensions\`** — list all installed extensions with their IDs, names, versions
-- **\`open_extension <extensionId>\`** — open an extension's action popup as a real floating window (same as clicking the extension icon in the toolbar). Required before \`ext_switch\` if the popup isn't already open.
-- **\`ext_windows\`** — list all open extension popup windows, including dapp approval/notification windows that appeared automatically via \`chrome.windows.create()\`
-- **\`ext_switch <extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` commands to an extension popup window instead of the main browser tab. Call with no extensionId to revert to the main tab.
-- **\`ext_close <extensionId>\`** — close an open extension popup window
-
-**Typical wallet dapp flow:**
-\`\`\`
-list_extensions                          # find MetaMask's extension ID
-open_extension <id>                      # open MetaMask popup
-ext_switch <id>                          # target it for CDP commands
-snapshot                                 # see MetaMask's current UI
-click @eN                                # click approve/connect/sign
-ext_switch                               # revert to main tab
-\`\`\`
-
-For dapp-triggered popups (MetaMask asking to approve a transaction), call \`ext_windows\` after the dapp interaction to find the approval window, then \`ext_switch\` to target it.`;
+Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
 
 const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
 

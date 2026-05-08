@@ -554,7 +554,7 @@ export class ElectronWebContentsBrowserHost {
       case "ux-audit":
         return this.evaluateJson(UX_AUDIT_SCRIPT);
       case "load_extension":
-        return this.loadExtension();
+        return this.loadExtension(requiredArg(args, "load_extension", "extensionId"));
       case "open_extension":
         return this.openExtension(requiredArg(args, "open_extension", "extensionId"));
       case "list_extensions":
@@ -636,20 +636,8 @@ export class ElectronWebContentsBrowserHost {
     }).catch(() => {});
   }
 
-  private async loadExtension(): Promise<string> {
-    const pendingRaw = await this.evaluateText(
-      `(function(){var v=window.__t3_ext_install_pending;window.__t3_ext_install_pending=undefined;return v?String(v):"";})()`,
-    );
-    if (!pendingRaw.trim()) {
-      throw new Error(
-        "No pending extension install. Navigate to the Chrome Web Store and click 'Add to Chrome' first.",
-      );
-    }
-    const idMatch = pendingRaw.match(/[a-p]{32}/);
-    const extensionId = idMatch?.[0];
-    if (!extensionId)
-      throw new Error(`Could not extract a Chrome extension ID from: ${pendingRaw}`);
-    if (!this.broker) throw new Error("load_extension requires the Electron embedded browser host");
+  private async loadExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
     const info: InstalledExtensionInfo = await this.broker.installExtension(
       this.viewId,
       extensionId,

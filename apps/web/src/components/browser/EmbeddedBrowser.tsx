@@ -1,4 +1,10 @@
-import type { BrowserTabListing, BrowserTabSummary, ProjectId } from "@t3tools/contracts";
+import type {
+  BrowserExtensionInfo,
+  BrowserTabListing,
+  BrowserTabSummary,
+  ContextMenuItem,
+  ProjectId,
+} from "@t3tools/contracts";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import {
   ArrowDownLeftFromSquareIcon,
@@ -7,6 +13,7 @@ import {
   ArrowUpRightFromSquareIcon,
   GlobeIcon,
   MonitorSmartphoneIcon,
+  PinOffIcon,
   PlusIcon,
   RotateCwIcon,
   XIcon,
@@ -18,10 +25,14 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 
 import type { ViewportEmulationParams } from "@t3tools/contracts";
 
 import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserModalSuspension";
+import { useBrowserMetadataStore } from "~/lib/browserMetadataStore";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
-import { EmbeddedBrowserExtensionsButton } from "./EmbeddedBrowserExtensionsPanel";
+import {
+  EmbeddedBrowserExtensionsButton,
+  handleExtensionContextMenu,
+} from "./EmbeddedBrowserExtensionsPanel";
 import { EmbeddedBrowserViewportActions } from "./EmbeddedBrowserViewportActions";
 import { EmbeddedBrowserViewportToolbar } from "./EmbeddedBrowserViewportToolbar";
 import { ViewportResizeHandles } from "./ViewportResizeHandles";
@@ -173,6 +184,41 @@ function tabDisplayName(tab: BrowserTabSummary): string {
   }
 }
 
+function PinnedExtensionIcon({
+  ext,
+  onOpen,
+  onContextMenu,
+}: {
+  ext: BrowserExtensionInfo;
+  onOpen: (id: string) => void;
+  onContextMenu: (ext: BrowserExtensionInfo, pos: { x: number; y: number }) => void;
+}) {
+  const [imgError, setImgError] = useState(false);
+  return (
+    <button
+      type="button"
+      title={ext.name}
+      onClick={() => onOpen(ext.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(ext, { x: e.clientX, y: e.clientY });
+      }}
+      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      {ext.iconUrl && !imgError ? (
+        <img
+          src={ext.iconUrl}
+          alt={ext.name}
+          className="size-4 rounded-sm object-contain"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <PinOffIcon className="size-3.5" />
+      )}
+    </button>
+  );
+}
+
 export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const rectRef = useRef<HTMLDivElement | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -231,6 +277,33 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   // ignores this flag — it is what's hosting the view, so it should always
   // render the full chrome.
   const [isPoppedOut, setIsPoppedOut] = useState(false);
+
+  // Pinned extensions in toolbar
+  const toolbarRef = useRef<HTMLFormElement>(null);
+  // Pinned extensions — derived from the shared store populated by useBrowserMetadata
+  // (called in KanbanBoard). No IPC calls needed here; the store is always warm.
+  // Select the extensions array by reference (stable when unchanged) then derive
+  // the pinned subset via useMemo to avoid creating new arrays on every render.
+  const allExtensions = useBrowserMetadataStore((s) => s.entries[projectId]?.extensions);
+  const pinnedExtensions = useMemo(
+    () => (allExtensions ?? []).filter((e) => e.pinned) as BrowserExtensionInfo[],
+    [allExtensions],
+  );
+  const [visiblePinnedCount, setVisiblePinnedCount] = useState(99);
+
+  useEffect(() => {
+    if (!toolbarRef.current) return;
+    const obs = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const w = entry.contentRect.width;
+      // Reserve: 180px URL bar min + 7 fixed toolbar buttons × 32px each
+      const reserved = 180 + 7 * 32;
+      setVisiblePinnedCount(Math.max(0, Math.floor((w - reserved) / 32)));
+    });
+    obs.observe(toolbarRef.current);
+    return () => obs.disconnect();
+  }, []);
   const isInsidePopout = useMemo(
     () => typeof window !== "undefined" && window.location.search.includes("popout="),
     [],
@@ -746,6 +819,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   return (
     <div className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <form
+        ref={toolbarRef}
         className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2"
         onSubmit={handleSubmit}
       >
@@ -787,6 +861,26 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           placeholder="Search or enter address"
           spellCheck={false}
         />
+        {pinnedExtensions.slice(0, visiblePinnedCount).map((ext) => (
+          <PinnedExtensionIcon
+            key={ext.id}
+            ext={ext}
+            onOpen={(id) => void browserBridge?.openExtension(projectId, id)}
+            onContextMenu={(pinnedExt, pos) => {
+              if (!browserBridge) return;
+              const bridge = {
+                showContextMenu: (
+                  items: readonly ContextMenuItem<string>[],
+                  position?: { x: number; y: number },
+                ) => window.desktopBridge!.showContextMenu(items, position),
+                setPinnedExtensions: browserBridge.setPinnedExtensions,
+                uninstallExtension: browserBridge.uninstallExtension,
+                listExtensions: browserBridge.listExtensions,
+              };
+              void handleExtensionContextMenu(pinnedExt, pos, bridge, projectId);
+            }}
+          />
+        ))}
         <EmbeddedBrowserExtensionsButton projectId={projectId} />
         <button
           type="button"

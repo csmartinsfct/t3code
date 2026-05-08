@@ -25,13 +25,18 @@ import {
   createElectronWebContentsHarness,
   type ElectronWebContentsHarness,
 } from "./hosts/ElectronWebContentsHost/__test__/harness.ts";
+import { SPECS } from "./handlers.ts";
 
 const DEFERRED_NATIVE_TOOLS = ["cookie-import-browser"] as const;
 const PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS = ["focus", "visibility"] as const;
+// Tools that work in native Electron but require specific browser state (e.g. a pending
+// Chrome Web Store install) that the headless test harness cannot provide.
+const BROWSER_PRECONDITION_TOOLS = ["load_extension"] as const;
 const DAY_1_TOOLS = BROWSER_HOST_TOOL_NAMES.filter(
   (tool) =>
     !(DEFERRED_NATIVE_TOOLS as readonly string[]).includes(tool) &&
-    !(PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS as readonly string[]).includes(tool),
+    !(PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS as readonly string[]).includes(tool) &&
+    !(BROWSER_PRECONDITION_TOOLS as readonly string[]).includes(tool),
 );
 const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
   "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
@@ -732,6 +737,11 @@ describe("ElectronWebContentsBrowserHost", () => {
       await invoke("goto", [`${server.baseUrl}/next`]);
       await invoke("back");
       await invoke("forward");
+      await invoke("list_extensions");
+      await invoke("ext_windows");
+      await invoke("ext_switch");
+      await invoke("open_extension", ["aaabbbcccdddeeefff00011122233344"]);
+      await invoke("ext_close", ["aaabbbcccdddeeefff00011122233344"]);
 
       assert.deepEqual([...invoked].toSorted(), [...DAY_1_TOOLS].toSorted());
     } finally {
@@ -879,8 +889,6 @@ describe("extension agent tools (via harness)", () => {
   });
 
   it("SPECS table includes all 4 new extension tools", () => {
-    // Import is inline to avoid circular dep issues at module level.
-    const { SPECS } = require("./handlers.ts") as { SPECS: Record<string, unknown> };
     for (const name of ["list_extensions", "ext_windows", "ext_switch", "ext_close"]) {
       assert.property(SPECS, name, `SPECS missing tool: ${name}`);
     }

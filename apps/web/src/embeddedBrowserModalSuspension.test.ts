@@ -31,6 +31,8 @@ function installBrowserBridge() {
     onPopoutStateChanged: vi.fn(() => () => undefined),
     listExtensions: vi.fn(async () => []),
     openExtension: vi.fn(async () => undefined),
+    uninstallExtension: vi.fn(async () => undefined),
+    setPinnedExtensions: vi.fn(async () => undefined),
     onExtensionsChanged: vi.fn(() => () => undefined),
   } satisfies DesktopBrowserBridge;
 

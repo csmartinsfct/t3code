@@ -19,6 +19,8 @@ These prompt ids belong to the `orchestration` prompt group and are stored as pr
 - resolved global documents from `settings.prompts.orchestration`
 - sparse project overrides from `project.promptOverrides.orchestration`
 
+`PROMPT_TEMPLATE_VERSION` tracks the document format, not the shipped prompt text. Text-only changes to default prompts must keep the existing version so persisted settings, project overrides, and orchestration-run overrides remain readable.
+
 Effective prompt resolution order is:
 
 1. project override

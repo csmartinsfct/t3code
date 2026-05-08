@@ -353,6 +353,19 @@ Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electro
 
 For the full extension system — Chrome Web Store install flow, the `electron-chrome-extensions` fork, background polyfill, extensions panel UI, popup windows, and dapp approval flow — see [Browser Extensions](./browser-extensions.md).
 
+#### Eager metadata loading
+
+Extension metadata (installed extensions, icons, pinned state) is loaded **eagerly** when a project thread is selected — not lazily when the browser panel is toggled open. This eliminates race conditions and ensures pinned toolbar icons and the extensions panel are always instant.
+
+**Architecture:**
+
+- `useBrowserMetadata(projectId)` — hook called in `KanbanBoard` the moment a project thread mounts. Fires `bridge.listExtensions()` → populates `useBrowserMetadataStore` (Zustand, keyed by `projectId`). Subscribes to `bridge.onExtensionsChanged()` for live updates on install/uninstall/pin.
+- `useBrowserMetadataStore` (`apps/web/src/lib/browserMetadataStore.ts`) — shared Zustand store. Both `EmbeddedBrowser` (toolbar pinned icons) and `EmbeddedBrowserExtensionsPanel` (panel icons) read from this store; neither fetches independently.
+- Main process — `BROWSER_LIST_EXTENSIONS_CHANNEL` handler calls `getOrCreateChromeExtensions(projectId)` (idempotent) and `await extensionsReadyByProjectId.get(projectId)` before querying `ses.getAllExtensions()`. This ensures the handler always returns the complete extension list even when called before the browser is mounted.
+- `extensionsLoadedByProjectId` set — prevents the `extension-loaded` event hook from sending redundant `BROWSER_EXTENSIONS_CHANGED_CHANNEL` notifications during the initial startup batch load; only new installs trigger a notification after startup completes.
+
+Tab state (URLs, titles, navigation) remains lazy — it is tightly coupled to the live `WebContentsView` lifecycle and only meaningful while the browser is mounted.
+
 ### Chromium bundle
 
 Playwright's Chromium binary is shipped inside the packaged desktop app rather than downloaded on first launch. The build script (`scripts/build-desktop-artifact.ts`) runs `bunx playwright install chromium` with `PLAYWRIGHT_BROWSERS_PATH` pointing at a staged directory, which electron-builder then copies into `Resources/playwright-browsers/` via `extraResources`. At runtime, `backendChildEnv()` in `apps/desktop/src/main.ts` sets `PLAYWRIGHT_BROWSERS_PATH` to that directory before spawning the backend, so Playwright finds the bundled copy.

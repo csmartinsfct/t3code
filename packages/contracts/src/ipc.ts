@@ -273,6 +273,8 @@ export interface BrowserExtensionInfo {
   iconUrl: string | null;
   /** chrome-extension://<id>/<popup> URL if the extension has an action popup, or null. */
   popupUrl: string | null;
+  /** Whether this extension is pinned to the browser toolbar. */
+  pinned: boolean;
 }
 
 export interface DesktopBrowserBridge {
@@ -299,6 +301,8 @@ export interface DesktopBrowserBridge {
   popoutClose: (projectId: string) => Promise<void>;
   listExtensions: (projectId: string) => Promise<BrowserExtensionInfo[]>;
   openExtension: (projectId: string, extensionId: string) => Promise<void>;
+  uninstallExtension: (projectId: string, extensionId: string) => Promise<void>;
+  setPinnedExtensions: (projectId: string, extensionIds: string[]) => Promise<void>;
   onExtensionsChanged: (listener: (projectId: string) => void) => () => void;
   onTabsChanged: (
     listener: (payload: {

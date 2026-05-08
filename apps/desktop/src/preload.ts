@@ -35,6 +35,8 @@ const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 const BROWSER_LIST_EXTENSIONS_CHANNEL = "browser:listExtensions";
 const BROWSER_OPEN_EXTENSION_CHANNEL = "browser:openExtension";
+const BROWSER_UNINSTALL_EXTENSION_CHANNEL = "browser:uninstallExtension";
+const BROWSER_SET_PINNED_EXTENSIONS_CHANNEL = "browser:setPinnedExtensions";
 const BROWSER_EXTENSIONS_CHANGED_CHANNEL = "browser:extensionsChanged";
 const OVERLAY_ACQUIRE_CHANNEL = "overlay:acquire";
 const OVERLAY_RELEASE_CHANNEL = "overlay:release";
@@ -132,6 +134,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     listExtensions: (projectId) => ipcRenderer.invoke(BROWSER_LIST_EXTENSIONS_CHANNEL, projectId),
     openExtension: (projectId, extensionId) =>
       ipcRenderer.invoke(BROWSER_OPEN_EXTENSION_CHANNEL, projectId, extensionId),
+    uninstallExtension: (projectId, extensionId) =>
+      ipcRenderer.invoke(BROWSER_UNINSTALL_EXTENSION_CHANNEL, projectId, extensionId),
+    setPinnedExtensions: (projectId, extensionIds) =>
+      ipcRenderer.invoke(BROWSER_SET_PINNED_EXTENSIONS_CHANNEL, projectId, extensionIds),
     onExtensionsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, changedProjectId: unknown) => {
         if (typeof changedProjectId === "string") listener(changedProjectId);

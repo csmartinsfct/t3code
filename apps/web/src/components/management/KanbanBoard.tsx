@@ -26,6 +26,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../../env";
+import { useBrowserMetadata } from "../../hooks/useBrowserMetadata";
 import { useTicketing } from "../../hooks/useTicketing";
 import { useProjectById } from "../../storeSelectors";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
@@ -202,6 +203,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
   ref,
 ) {
   const typedProjectId = projectId as ProjectId;
+  useBrowserMetadata(typedProjectId); // eagerly loads extension metadata; store shared with browser toolbar + panel
   const { tickets, loading, selectedProjectId, applyLocalReorder } = useTicketing({ projectId });
   const selectedTicketIds = useTicketSelectionStore((s) => s.selectedTicketIds);
   const selectedTickets = useTicketSelectionStore((s) => s.selectedTickets);
