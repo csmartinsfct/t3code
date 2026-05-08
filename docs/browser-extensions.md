@@ -15,11 +15,13 @@ Extensions are loaded per-project into the Electron session partition `persist:<
 ### Chrome Web Store
 
 The embedded browser injects a shim into every page that:
+
 1. Overrides `navigator.userAgent` to strip `Electron/...` so the Web Store renders the "Add to Chrome" button.
 2. Sets `window.chrome.webstore.install()` to capture the extension ID and signal Electron main via a prefixed `console.log` message (`__t3_ext_install__:<id>`).
 3. Uses a `MutationObserver` to re-enable disabled install buttons (Google detects non-Chrome browsers and greys the button).
 
 When the install signal fires, `loadExtensionFromCrx` in `apps/desktop/src/main.ts`:
+
 1. Fetches the CRX from Google's CDN (`clients2.google.com/service/update2/crx?...`).
 2. Strips the CRX3 header and extracts the ZIP using `fflate`.
 3. Validates paths to prevent ZIP traversal attacks.
@@ -56,6 +58,7 @@ packages/electron-chrome-extensions/
 ```
 
 To rebuild after source changes:
+
 ```bash
 cd packages/electron-chrome-extensions
 bun run build
@@ -69,13 +72,21 @@ bun run build
 
 ```typescript
 const ext = new ElectronChromeExtensions({
-  license: 'GPL-3.0',
+  license: "GPL-3.0",
   session: ses,
-  createTab:   (details) => { /* opens new T3 browser tab */ },
-  selectTab:   (tab)     => { /* switches T3 active tab */ },
-  removeTab:   (tab)     => { /* closes T3 tab */ },
-  createWindow:(details) => { /* opens extension notification popup */ },
-})
+  createTab: (details) => {
+    /* opens new T3 browser tab */
+  },
+  selectTab: (tab) => {
+    /* switches T3 active tab */
+  },
+  removeTab: (tab) => {
+    /* closes T3 tab */
+  },
+  createWindow: (details) => {
+    /* opens extension notification popup */
+  },
+});
 ```
 
 `addTab` / `removeTab` / `selectTab` are called from `createEmbeddedBrowserTab`'s `did-finish-load` and `will-be-destroyed` events so `chrome.tabs.*` events fire correctly as T3's tab system changes.
@@ -86,13 +97,13 @@ The library's preload (`dist/chrome-extension-api.preload.js`) is registered via
 
 Five gaps in the upstream library were fixed. See [T3CO-475](t3://ticket/T3CO-475) for the original tracking.
 
-| Gap | File | Fix |
-|-----|------|-----|
-| Relative URLs in `createWindow` (e.g. `'notification.html'` → `ERR_INVALID_URL`) | `store.ts` | Resolve against `event.extension.id` before calling callback |
-| `chrome.windows.create({tabId})` opens blank window | `store.ts` | Populate `url` from `tabDetailsCache` for the given tab |
-| `chrome.windows.getCurrent()` returns wrong window in popup context | `windows.ts` | Walk window registry to find the window containing the sender's `webContents` |
-| `tabs.onUpdated` silently dropped first event (cache miss early return) | `tabs.ts` | Create initial cache entry instead of returning early |
-| `tabs.onActivated` silently dropped when `addTab` already set tab active | `tabs.ts` | Removed `activeChanged` guard — set+emit is idempotent |
+| Gap                                                                              | File         | Fix                                                                           |
+| -------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------- |
+| Relative URLs in `createWindow` (e.g. `'notification.html'` → `ERR_INVALID_URL`) | `store.ts`   | Resolve against `event.extension.id` before calling callback                  |
+| `chrome.windows.create({tabId})` opens blank window                              | `store.ts`   | Populate `url` from `tabDetailsCache` for the given tab                       |
+| `chrome.windows.getCurrent()` returns wrong window in popup context              | `windows.ts` | Walk window registry to find the window containing the sender's `webContents` |
+| `tabs.onUpdated` silently dropped first event (cache miss early return)          | `tabs.ts`    | Create initial cache entry instead of returning early                         |
+| `tabs.onActivated` silently dropped when `addTab` already set tab active         | `tabs.ts`    | Removed `activeChanged` guard — set+emit is idempotent                        |
 
 ---
 
@@ -103,9 +114,9 @@ Five gaps in the upstream library were fixed. See [T3CO-475](t3://ticket/T3CO-47
 ```javascript
 // Only requestAnimationFrame — MV3 service workers don't have this DOM API.
 // chrome.tabs/windows events are provided by electron-chrome-extensions.
-if (typeof requestAnimationFrame === 'undefined') {
-  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16)
-  globalThis.cancelAnimationFrame = (id) => clearTimeout(id)
+if (typeof requestAnimationFrame === "undefined") {
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 }
 ```
 
@@ -143,6 +154,7 @@ hide-then-destroy on close (prevents white flash)
 This addon replaces the class-swapping approach used by `@egoist/electron-panel-window` (which is incompatible with Electron 40's V8 via NAN). It does **not** use `object_setClass` — the window class is untouched, avoiding the `cleanup` selector crash on close.
 
 Build:
+
 ```bash
 node ~/.nvm/versions/node/v22.22.1/lib/node_modules/node-gyp/bin/node-gyp.js \
   configure build \
@@ -165,25 +177,25 @@ When extensions call `chrome.windows.create()` for dapp approvals (MetaMask conn
 
 ## Known limitations and open tickets
 
-| Ticket | Description |
-|--------|-------------|
+| Ticket                               | Description                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
 | [T3CO-465–467](t3://ticket/T3CO-465) | Agent tools for extension popup windows (`ext_windows`, `ext_switch`, `ext_close`) |
-| [T3CO-468](t3://ticket/T3CO-468) | Settings UI for loading unpacked extensions |
-| [T3CO-469](t3://ticket/T3CO-469) | Docs update pass |
-| [T3CO-471](t3://ticket/T3CO-471) | CRX signature verification (currently skipped) |
-| [T3CO-473](t3://ticket/T3CO-473) | Full-screen popup via NSPanel (N-API port incompatible with Electron 40 NAN) |
-| [T3CO-474](t3://ticket/T3CO-474) | Production build integration for `panel-window` native addon |
-| [T3CO-475](t3://ticket/T3CO-475) | Fork `electron-chrome-extensions` — done; remaining upstream gaps tracked here |
+| [T3CO-468](t3://ticket/T3CO-468)     | Settings UI for loading unpacked extensions                                        |
+| [T3CO-469](t3://ticket/T3CO-469)     | Docs update pass                                                                   |
+| [T3CO-471](t3://ticket/T3CO-471)     | CRX signature verification (currently skipped)                                     |
+| [T3CO-473](t3://ticket/T3CO-473)     | Full-screen popup via NSPanel (N-API port incompatible with Electron 40 NAN)       |
+| [T3CO-474](t3://ticket/T3CO-474)     | Production build integration for `panel-window` native addon                       |
+| [T3CO-475](t3://ticket/T3CO-475)     | Fork `electron-chrome-extensions` — done; remaining upstream gaps tracked here     |
 
 ---
 
 ## File map
 
-| Path | Purpose |
-|------|---------|
-| `packages/electron-chrome-extensions/` | Forked Chrome API bridge (workspace package) |
-| `apps/desktop/native/panel-window/` | NSPanel N-API addon source + prebuilt binary |
-| `apps/desktop/src/main.ts` | `getOrCreateChromeExtensions`, `loadExtensionFromCrx`, `reloadPersistedExtensions`, `ensureExtensionPolyfill`, popup window creation |
-| `apps/desktop/src/preload.ts` | `browser:listExtensions`, `browser:openExtension`, `browser:extensionsChanged` IPC channels |
-| `packages/contracts/src/ipc.ts` | `DesktopBrowserBridge` — `listExtensions`, `openExtension`, `onExtensionsChanged` types |
-| `apps/web/src/components/browser/EmbeddedBrowserExtensionsPanel.tsx` | Extensions panel UI component + overlay route |
+| Path                                                                 | Purpose                                                                                                                              |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/electron-chrome-extensions/`                               | Forked Chrome API bridge (workspace package)                                                                                         |
+| `apps/desktop/native/panel-window/`                                  | NSPanel N-API addon source + prebuilt binary                                                                                         |
+| `apps/desktop/src/main.ts`                                           | `getOrCreateChromeExtensions`, `loadExtensionFromCrx`, `reloadPersistedExtensions`, `ensureExtensionPolyfill`, popup window creation |
+| `apps/desktop/src/preload.ts`                                        | `browser:listExtensions`, `browser:openExtension`, `browser:extensionsChanged` IPC channels                                          |
+| `packages/contracts/src/ipc.ts`                                      | `DesktopBrowserBridge` — `listExtensions`, `openExtension`, `onExtensionsChanged` types                                              |
+| `apps/web/src/components/browser/EmbeddedBrowserExtensionsPanel.tsx` | Extensions panel UI component + overlay route                                                                                        |

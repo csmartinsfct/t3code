@@ -813,6 +813,51 @@ const SPECS: Record<string, CommandSpec> = {
       "Reads the pending Chrome Web Store install captured by the 'Add to Chrome' button, fetches the CRX from Google, extracts it, and loads it into the project browser session. Navigate to the extension's Web Store page and click 'Add to Chrome' before calling this tool. Returns the installed extension name, version, and ID. Desktop (Electron) host only.",
     inputSchema: {},
   },
+  list_extensions: {
+    command: "list_extensions",
+    category: "meta",
+    argsFromInput: () => [],
+    title: "List installed extensions",
+    description:
+      "List all Chrome extensions installed in the embedded browser for this project. Returns extension ID, name, version, and whether a popup window is currently open. Use the ID with ext_switch to target a popup for snapshot/click/fill commands. Desktop (Electron) host only.",
+    inputSchema: {},
+  },
+  ext_windows: {
+    command: "ext_windows",
+    category: "meta",
+    argsFromInput: () => [],
+    title: "List open extension popup windows",
+    description:
+      "List all open extension popup windows — both user-opened action popups and dapp approval/notification windows from chrome.windows.create(). Returns extension ID, title, URL, and whether it is the current active CDP target. Use ext_switch with an extension ID to target one for snapshot/click/fill commands. Desktop (Electron) host only.",
+    inputSchema: {},
+  },
+  ext_switch: {
+    command: "ext_switch",
+    category: "meta",
+    argsFromInput: (i) => {
+      const id = optString(i, "extensionId");
+      return id ? [id] : [];
+    },
+    title: "Switch CDP target to extension popup",
+    description:
+      "Route subsequent snapshot/click/fill/js commands to an extension popup window instead of the main browser tab. Pass extensionId to switch; omit to revert to the main browser tab. The popup must already be open (use ext_windows to check). Note: CDP event subscriptions (console, network) are not supported while targeting a popup. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.optStr(
+        "Extension ID (32-char a-p string, e.g. dgdongbhnogjdmalcjmoaohehadoolep). Omit to revert to main tab.",
+      ),
+    },
+  },
+  ext_close: {
+    command: "ext_close",
+    category: "meta",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Close extension popup",
+    description:
+      "Close an open extension popup window by extension ID. Automatically reverts the active CDP target to the main browser tab if the popup being closed was the active target. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str("Extension ID of the popup to close"),
+    },
+  },
 };
 
 // Tools explicitly dropped from the T3 surface (daemon-era or meta-unsafe):

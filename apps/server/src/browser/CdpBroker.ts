@@ -63,12 +63,50 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly extensionId: string;
   }) => Promise<InstalledExtensionInfo>;
+  readonly listExtensions?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+  }) => Promise<ExtensionInfo[]>;
+  readonly listExtensionWindows?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+  }) => Promise<ExtensionWindowInfo[]>;
+  readonly extSwitch?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId?: string;
+  }) => Promise<ExtSwitchResult>;
+  readonly extClose?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId: string;
+  }) => Promise<void>;
 }
 
 export interface InstalledExtensionInfo {
   readonly id: string;
   readonly name: string;
   readonly version: string;
+}
+
+export interface ExtensionInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly hasPopup: boolean;
+}
+
+export interface ExtensionWindowInfo {
+  readonly extensionId: string;
+  readonly title: string;
+  readonly url: string;
+  readonly isActive: boolean;
+  readonly popupKey: string;
+}
+
+export interface ExtSwitchResult {
+  readonly switched: boolean;
+  readonly popupKey: string | null;
 }
 
 export interface BrowserTabSummary {
@@ -353,5 +391,49 @@ export class CdpBroker {
       });
     }
     return this.transport.installExtension({ id: this.requestId(), viewId, extensionId });
+  }
+
+  async listExtensions(viewId: string): Promise<ExtensionInfo[]> {
+    if (!this.transport.listExtensions) {
+      throw new CdpBrokerError("listExtensions is not available for this transport", {
+        code: "CDP_LIST_EXTENSIONS_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.listExtensions({ id: this.requestId(), viewId });
+  }
+
+  async listExtensionWindows(viewId: string): Promise<ExtensionWindowInfo[]> {
+    if (!this.transport.listExtensionWindows) {
+      throw new CdpBrokerError("listExtensionWindows is not available for this transport", {
+        code: "CDP_LIST_EXT_WINDOWS_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.listExtensionWindows({ id: this.requestId(), viewId });
+  }
+
+  async extSwitch(viewId: string, extensionId?: string): Promise<ExtSwitchResult> {
+    if (!this.transport.extSwitch) {
+      throw new CdpBrokerError("extSwitch is not available for this transport", {
+        code: "CDP_EXT_SWITCH_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.extSwitch({
+      id: this.requestId(),
+      viewId,
+      ...(extensionId ? { extensionId } : {}),
+    });
+  }
+
+  async extClose(viewId: string, extensionId: string): Promise<void> {
+    if (!this.transport.extClose) {
+      throw new CdpBrokerError("extClose is not available for this transport", {
+        code: "CDP_EXT_CLOSE_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    await this.transport.extClose({ id: this.requestId(), viewId, extensionId });
   }
 }

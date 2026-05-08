@@ -5,6 +5,9 @@ import {
   type CdpBrokerEvent,
   type CdpBrokerTransport,
   type InstalledExtensionInfo,
+  type ExtensionInfo,
+  type ExtensionWindowInfo,
+  type ExtSwitchResult,
 } from "./CdpBroker";
 import type { ServerConfigShape } from "../config";
 
@@ -201,6 +204,30 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     request: Parameters<NonNullable<CdpBrokerTransport["installExtension"]>>[0],
   ): Promise<InstalledExtensionInfo> {
     return this.postJson<InstalledExtensionInfo>("extensions/load", request);
+  }
+
+  async listExtensions(
+    request: Parameters<NonNullable<CdpBrokerTransport["listExtensions"]>>[0],
+  ): Promise<ExtensionInfo[]> {
+    return this.postJson<ExtensionInfo[]>("ext/list", request);
+  }
+
+  async listExtensionWindows(
+    request: Parameters<NonNullable<CdpBrokerTransport["listExtensionWindows"]>>[0],
+  ): Promise<ExtensionWindowInfo[]> {
+    return this.postJson<ExtensionWindowInfo[]>("ext/windows", request);
+  }
+
+  async extSwitch(
+    request: Parameters<NonNullable<CdpBrokerTransport["extSwitch"]>>[0],
+  ): Promise<ExtSwitchResult> {
+    return this.postJson<ExtSwitchResult>("ext/switch", request);
+  }
+
+  async extClose(
+    request: Parameters<NonNullable<CdpBrokerTransport["extClose"]>>[0],
+  ): Promise<void> {
+    await this.postJson<void>("ext/close", request);
   }
 
   private async postJson<T>(path: string, request: unknown): Promise<T> {

@@ -1,8 +1,9 @@
-import { session } from 'electron'
+import { session } from "electron";
 
-type SessionPartitionResolver = (partition: string) => Electron.Session
+type SessionPartitionResolver = (partition: string) => Electron.Session;
 
-let resolvePartitionImpl: SessionPartitionResolver = (partition) => session.fromPartition(partition)
+let resolvePartitionImpl: SessionPartitionResolver = (partition) =>
+  session.fromPartition(partition);
 
 /**
  * Overrides the default `session.fromPartition()` behavior for retrieving Electron Sessions.
@@ -11,9 +12,9 @@ let resolvePartitionImpl: SessionPartitionResolver = (partition) => session.from
  * @param handler A function that receives a string identifier and returns the corresponding Electron `Session`.
  */
 export function setSessionPartitionResolver(resolver: SessionPartitionResolver) {
-  resolvePartitionImpl = resolver
+  resolvePartitionImpl = resolver;
 }
 
 export function resolvePartition(partition: string) {
-  return resolvePartitionImpl(partition)
+  return resolvePartitionImpl(partition);
 }

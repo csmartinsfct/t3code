@@ -155,7 +155,7 @@ There are several applications distributing this package without sponsoring. I'm
 
 ## [3.0.0] - 2021-01-15
 
-### Added 
+### Added
 
 - Most of `chrome.cookies`
 - Most of `chrome.windows`

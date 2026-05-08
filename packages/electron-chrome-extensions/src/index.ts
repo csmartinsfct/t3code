@@ -1,2 +1,2 @@
-export * from './browser'
-export { setSessionPartitionResolver } from './browser/partition'
+export * from "./browser";
+export { setSessionPartitionResolver } from "./browser/partition";

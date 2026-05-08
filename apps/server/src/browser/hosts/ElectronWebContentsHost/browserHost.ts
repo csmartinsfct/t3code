@@ -4,7 +4,12 @@ import * as nodePath from "node:path";
 
 import type { ProjectId } from "@t3tools/contracts";
 
-import type { CdpBroker, InstalledExtensionInfo } from "../../CdpBroker.ts";
+import type {
+  CdpBroker,
+  InstalledExtensionInfo,
+  ExtensionInfo,
+  ExtensionWindowInfo,
+} from "../../CdpBroker.ts";
 import { installBrowserHostCommands, type BrowserHostCommand } from "../../BrowserHost.ts";
 import { ElectronWebContentsHost } from "./host.ts";
 import type { CdpClient } from "./types.ts";
@@ -550,6 +555,14 @@ export class ElectronWebContentsBrowserHost {
         return this.evaluateJson(UX_AUDIT_SCRIPT);
       case "load_extension":
         return this.loadExtension();
+      case "list_extensions":
+        return this.listExtensionsChromeApi();
+      case "ext_windows":
+        return this.extWindows();
+      case "ext_switch":
+        return this.extSwitch(args[0]);
+      case "ext_close":
+        return this.extClose(requiredArg(args, "ext_close", "extensionId"));
       default:
         throw new Error(`unknown Electron browser tool '${tool}'`);
     }
@@ -640,6 +653,46 @@ export class ElectronWebContentsBrowserHost {
       extensionId,
     );
     return `Installed: ${info.name} v${info.version} (${info.id})`;
+  }
+
+  private async listExtensionsChromeApi(): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const exts: ExtensionInfo[] = await this.broker.listExtensions(this.viewId);
+    if (exts.length === 0) return "(no extensions installed)";
+    return exts
+      .map((e) => `${e.id}  ${e.name} v${e.version}${e.hasPopup ? "  [popup open]" : ""}`)
+      .join("\n");
+  }
+
+  private async extWindows(): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const wins: ExtensionWindowInfo[] = await this.broker.listExtensionWindows(this.viewId);
+    if (wins.length === 0) return "(no extension popup windows open)";
+    return wins
+      .map(
+        (w) =>
+          `${w.extensionId}  ${w.title || "(untitled)"}  ${w.url}${w.isActive ? "  [active CDP target]" : ""}`,
+      )
+      .join("\n");
+  }
+
+  private async extSwitch(extensionId?: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const result = await this.broker.extSwitch(this.viewId, extensionId);
+    if (!extensionId || result.popupKey === null) {
+      return "Reverted CDP target to main browser tab.";
+    }
+    return (
+      `Switched CDP target to extension popup ${result.popupKey}. ` +
+      `Use snapshot/click/fill/js to interact with it. ` +
+      `Call ext_switch (no extensionId) to revert to the main tab.`
+    );
+  }
+
+  private async extClose(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    await this.broker.extClose(this.viewId, extensionId);
+    return `Closed popup for extension ${extensionId}.`;
   }
 
   private async installWebstoreShim(): Promise<void> {

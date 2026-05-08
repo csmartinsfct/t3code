@@ -25,19 +25,19 @@ npm install electron-chrome-extensions
 Simple browser using Electron's [default session](https://www.electronjs.org/docs/api/session#sessiondefaultsession) and one tab.
 
 ```js
-const { app, BrowserWindow } = require('electron')
-const { ElectronChromeExtensions } = require('electron-chrome-extensions')
+const { app, BrowserWindow } = require("electron");
+const { ElectronChromeExtensions } = require("electron-chrome-extensions");
 
 app.whenReady().then(() => {
-  const extensions = new ElectronChromeExtensions()
-  const browserWindow = new BrowserWindow()
+  const extensions = new ElectronChromeExtensions();
+  const browserWindow = new BrowserWindow();
 
   // Adds the active tab of the browser
-  extensions.addTab(browserWindow.webContents, browserWindow)
+  extensions.addTab(browserWindow.webContents, browserWindow);
 
-  browserWindow.loadURL('https://samuelmaddock.com')
-  browserWindow.show()
-})
+  browserWindow.loadURL("https://samuelmaddock.com");
+  browserWindow.show();
+});
 ```
 
 ### Advanced
@@ -47,11 +47,11 @@ Multi-tab browser with full support for Chrome extension APIs.
 > For a complete example, see the [`electron-browser-shell`](https://github.com/samuelmaddock/electron-browser-shell) project.
 
 ```js
-const { app, session, BrowserWindow } = require('electron')
-const { ElectronChromeExtensions } = require('electron-chrome-extensions')
+const { app, session, BrowserWindow } = require("electron");
+const { ElectronChromeExtensions } = require("electron-chrome-extensions");
 
 app.whenReady().then(() => {
-  const browserSession = session.fromPartition('persist:custom')
+  const browserSession = session.fromPartition("persist:custom");
 
   const extensions = new ElectronChromeExtensions({
     session: browserSession,
@@ -73,7 +73,7 @@ app.whenReady().then(() => {
     requestPermissions(extension, permissions) {
       // Optionally implemented for chrome.permissions.request support
     },
-  })
+  });
 
   const browserWindow = new BrowserWindow({
     webPreferences: {
@@ -84,14 +84,14 @@ app.whenReady().then(() => {
       // Recommended for loading remote content
       contextIsolation: true,
     },
-  })
+  });
 
   // Adds the active tab of the browser
-  extensions.addTab(browserWindow.webContents, browserWindow)
+  extensions.addTab(browserWindow.webContents, browserWindow);
 
-  browserWindow.loadURL('https://samuelmaddock.com')
-  browserWindow.show()
-})
+  browserWindow.loadURL("https://samuelmaddock.com");
+  browserWindow.show();
+});
 ```
 
 ### Packaging the preload script
@@ -113,13 +113,13 @@ Here's an example for webpack configurations:
 
 ```js
 module.exports = {
-  entry: './index.js',
+  entry: "./index.js",
   plugins: [
     new CopyWebpackPlugin({
-      patterns: [require.resolve('electron-chrome-extensions/preload')],
+      patterns: [require.resolve("electron-chrome-extensions/preload")],
     }),
   ],
-}
+};
 ```
 
 ## API
@@ -163,17 +163,17 @@ module.exports = {
 ```ts
 new ElectronChromeExtensions({
   createTab(details) {
-    const tab = myTabApi.createTab()
+    const tab = myTabApi.createTab();
     if (details.url) {
-      tab.webContents.loadURL(details.url)
+      tab.webContents.loadURL(details.url);
     }
-    return [tab.webContents, tab.browserWindow]
+    return [tab.webContents, tab.browserWindow];
   },
   createWindow(details) {
-    const window = new BrowserWindow()
-    return window
+    const window = new BrowserWindow();
+    return window;
   },
-})
+});
 ```
 
 For a complete usage example, see the browser implementation in the
@@ -213,7 +213,7 @@ Example:
 
 ```js
 {
-  newtab: 'chrome-extension://<id>/newtab.html'
+  newtab: "chrome-extension://<id>/newtab.html";
 }
 ```
 
@@ -257,11 +257,11 @@ To enable the element on a webpage, you must define a preload script which injec
 Inject the browserAction API to make the `<browser-action-list>` element accessible in your application.
 
 ```js
-import { injectBrowserAction } from 'electron-chrome-extensions/browser-action'
+import { injectBrowserAction } from "electron-chrome-extensions/browser-action";
 
 // Inject <browser-action-list> element into our page
-if (location.href === 'webui://browser-chrome.html') {
-  injectBrowserAction()
+if (location.href === "webui://browser-chrome.html") {
+  injectBrowserAction();
 }
 ```
 
@@ -292,14 +292,14 @@ For extension icons to appear in the list, the `crx://` protocol needs to be han
 where it's intended to be displayed.
 
 ```js
-import { app, session } from 'electron'
-import { ElectronChromeExtensions } from 'electron-chrome-extensions'
+import { app, session } from "electron";
+import { ElectronChromeExtensions } from "electron-chrome-extensions";
 
 app.whenReady().then(() => {
   // Provide the session where your app will display <browser-action-list>
-  const appSession = session.defaultSession
-  ElectronChromeExtensions.handleCRXProtocol(appSession)
-})
+  const appSession = session.defaultSession;
+  ElectronChromeExtensions.handleCRXProtocol(appSession);
+});
 ```
 
 ##### Custom CSS

@@ -12,6 +12,7 @@ import {
   CdpBrokerError,
   type CdpBrokerEvent,
   type CdpBrokerTransport,
+  type ExtSwitchResult,
 } from "./CdpBroker.ts";
 import type { ServerConfigShape } from "../config.ts";
 import { getElectronCdpBroker } from "./ElectronCdpHttpTransport.ts";
@@ -178,6 +179,26 @@ class HarnessTransport implements CdpBrokerTransport {
     }
     return this.activeTabId;
   }
+
+  async listExtensions(_request: Parameters<NonNullable<CdpBrokerTransport["listExtensions"]>>[0]) {
+    return [];
+  }
+
+  async listExtensionWindows(
+    _request: Parameters<NonNullable<CdpBrokerTransport["listExtensionWindows"]>>[0],
+  ) {
+    return [];
+  }
+
+  async extSwitch(
+    _request: Parameters<NonNullable<CdpBrokerTransport["extSwitch"]>>[0],
+  ): Promise<ExtSwitchResult> {
+    return { switched: true, popupKey: null };
+  }
+
+  async extClose(
+    _request: Parameters<NonNullable<CdpBrokerTransport["extClose"]>>[0],
+  ): Promise<void> {}
 
   private ensureRoot(): void {
     if (this.rootInitialized) return;
@@ -756,6 +777,106 @@ describe("ElectronWebContentsBrowserHost", () => {
       await host.dispose();
       await harness.dispose();
       await server.close();
+    }
+  });
+});
+
+describe("extension agent tools (via harness)", () => {
+  // These tests run against the real Electron harness with stub broker methods
+  // that return empty lists / success. They verify the tool dispatch path and
+  // plaintext output format without requiring actual installed extensions.
+
+  it("list_extensions returns '(no extensions installed)' when broker returns empty list", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool([], { __toolName: "list_extensions" });
+      assert.equal(result, "(no extensions installed)");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_windows returns '(no extension popup windows open)' when broker returns empty list", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool([], { __toolName: "ext_windows" });
+      assert.equal(result, "(no extension popup windows open)");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_switch without extensionId reverts to main browser tab", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool([], { __toolName: "ext_switch" });
+      assert.include(result, "Reverted CDP target to main browser tab");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_switch with extensionId confirms switch (stub broker returns switched=true)", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      // Override stub to simulate a successfully-opened popup.
+      transport.extSwitch = async () => ({
+        switched: true,
+        popupKey: "project-ext-test:aaabbbcccdddeeefff00011122233344",
+      });
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["aaabbbcccdddeeefff00011122233344"], {
+        __toolName: "ext_switch",
+        extensionId: "aaabbbcccdddeeefff00011122233344",
+      });
+      assert.include(result, "Switched CDP target to extension popup");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_close returns closed confirmation", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["aaabbbcccdddeeefff00011122233344"], {
+        __toolName: "ext_close",
+        extensionId: "aaabbbcccdddeeefff00011122233344",
+      });
+      assert.include(result, "Closed popup for extension aaabbbcccdddeeefff00011122233344");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("SPECS table includes all 4 new extension tools", () => {
+    // Import is inline to avoid circular dep issues at module level.
+    const { SPECS } = require("./handlers.ts") as { SPECS: Record<string, unknown> };
+    for (const name of ["list_extensions", "ext_windows", "ext_switch", "ext_close"]) {
+      assert.property(SPECS, name, `SPECS missing tool: ${name}`);
     }
   });
 });

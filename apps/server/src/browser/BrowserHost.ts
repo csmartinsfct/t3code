@@ -59,6 +59,11 @@ export const BROWSER_HOST_TOOL_NAMES = [
   "status",
   "ux-audit",
   "visibility",
+  "load_extension",
+  "list_extensions",
+  "ext_windows",
+  "ext_switch",
+  "ext_close",
 ] as const;
 
 export type BrowserHostToolName = (typeof BROWSER_HOST_TOOL_NAMES)[number];

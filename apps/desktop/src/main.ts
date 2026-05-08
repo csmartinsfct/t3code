@@ -190,6 +190,19 @@ type EmbeddedBrowserTabState = {
   title: string;
   favicon: string | null;
 };
+// Tracks a BrowserWindow opened as a Chrome extension popup (either from the
+// user clicking the extension icon or from the extension calling
+// chrome.windows.create for a dapp approval). Key: `${projectId}:${extensionId}`.
+type EmbeddedBrowserPopupState = {
+  readonly popupKey: string;
+  readonly projectId: string;
+  readonly extensionId: string;
+  readonly popupWin: BrowserWindow;
+  readonly subscriptions: Set<EmbeddedBrowserCdpSubscription>;
+  devtoolsOpen: boolean;
+  debuggerAttached: boolean;
+};
+
 type EmbeddedBrowserProjectState = {
   readonly projectId: string;
   readonly handle: string;
@@ -206,6 +219,10 @@ type EmbeddedBrowserProjectState = {
   // True while the project's WebContents have been background-throttled and
   // audio-muted by the idle reaper. Cleared on the next activity signal.
   suspended: boolean;
+  // Non-null while ext_switch has targeted an extension popup. Subsequent CDP
+  // send calls are routed to that popup's debugger instead of the active tab.
+  // Cleared by ext_switch (no arg), ext_close, or when the popup closes.
+  activeExtensionPopupKey: string | null;
 };
 type EmbeddedBrowserWindowState = {
   readonly projectsByProjectId: Map<string, EmbeddedBrowserProjectState>;
@@ -1315,6 +1332,35 @@ async function handleBrowserCdpBrokerRequest(
       sendBrokerSuccess(response, result);
       return;
     }
+    if (url.pathname === "/ext/list") {
+      const viewId = isRecord(body) && typeof body.viewId === "string" ? body.viewId : "";
+      const { projectId } = parseViewId(viewId);
+      if (!projectId) throw new Error("invalid viewId for ext/list");
+      sendBrokerSuccess(response, listProjectExtensions(projectId));
+      return;
+    }
+    if (url.pathname === "/ext/windows") {
+      const viewId = isRecord(body) && typeof body.viewId === "string" ? body.viewId : "";
+      const { projectId } = parseViewId(viewId);
+      if (!projectId) throw new Error("invalid viewId for ext/windows");
+      sendBrokerSuccess(response, listExtensionPopupWindows(projectId));
+      return;
+    }
+    if (url.pathname === "/ext/switch") {
+      const req = parseExtSwitchRequest(body);
+      const { projectId } = parseViewId(req.viewId);
+      if (!projectId) throw new Error("invalid viewId for ext/switch");
+      sendBrokerSuccess(response, switchToExtensionPopup(projectId, req.extensionId));
+      return;
+    }
+    if (url.pathname === "/ext/close") {
+      const req = parseExtCloseRequest(body);
+      const { projectId } = parseViewId(req.viewId);
+      if (!projectId) throw new Error("invalid viewId for ext/close");
+      closeExtensionPopupWindow(projectId, req.extensionId);
+      sendBrokerSuccess(response, { closed: true });
+      return;
+    }
     sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1783,6 +1829,22 @@ function parseTabIdRequest(value: unknown): BrowserTabIdRequest {
   const tabId = Number(tabIdRaw);
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid tabId");
   return { ...base, tabId };
+}
+
+function parseExtSwitchRequest(body: unknown): { viewId: string; extensionId: string | undefined } {
+  if (!isRecord(body)) throw new Error("invalid ext/switch request");
+  const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
+  if (!viewId) throw new Error("ext/switch: viewId required");
+  const extensionId = typeof body.extensionId === "string" ? body.extensionId : undefined;
+  return { viewId, extensionId };
+}
+
+function parseExtCloseRequest(body: unknown): { viewId: string; extensionId: string } {
+  if (!isRecord(body)) throw new Error("invalid ext/close request");
+  const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
+  const extensionId = typeof body.extensionId === "string" ? body.extensionId : undefined;
+  if (!viewId || !extensionId) throw new Error("ext/close: viewId and extensionId required");
+  return { viewId, extensionId };
 }
 
 function parsePrintPdfRequest(value: unknown): BrowserPrintPdfRequest {
@@ -2273,6 +2335,35 @@ function assertEmbeddedBrowserDebuggerAvailable(embedded: EmbeddedBrowserTabStat
 }
 
 async function sendEmbeddedBrowserCdpCommand(request: BrowserCdpSendRequest): Promise<unknown> {
+  // Route to extension popup if ext_switch has made one the active CDP target.
+  const { projectId } = parseViewId(request.viewId);
+  if (projectId) {
+    const project = embeddedBrowserProjectsByProjectId.get(projectId);
+    if (project?.activeExtensionPopupKey) {
+      const popup = extensionPopupsByProjectId.get(project.activeExtensionPopupKey);
+      if (popup && !popup.popupWin.isDestroyed()) {
+        if (popup.devtoolsOpen || !popup.popupWin.webContents.debugger.isAttached()) {
+          throw new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE);
+        }
+        try {
+          return await popup.popupWin.webContents.debugger.sendCommand(
+            request.method,
+            request.params,
+            cdpSessionId(request.sessionId),
+          );
+        } catch (error) {
+          if (!popup.popupWin.webContents.debugger.isAttached()) {
+            popup.devtoolsOpen = true;
+            throw new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE, { cause: error });
+          }
+          throw error;
+        }
+      }
+      // Popup was closed externally — auto-revert to main tab.
+      project.activeExtensionPopupKey = null;
+    }
+  }
+  // Normal tab routing path.
   const embedded = getEmbeddedBrowserForCdp(request.viewId);
   assertEmbeddedBrowserDebuggerAvailable(embedded);
   try {
@@ -2385,6 +2476,22 @@ function subscribeEmbeddedBrowserCdpEvents(
   response: HTTP.ServerResponse,
   request: BrowserCdpSubscribeRequest,
 ): void {
+  // Block SSE subscriptions while an extension popup is the active CDP target.
+  // Popup windows don't support event subscriptions in this implementation.
+  // Call ext_switch (no extensionId) to revert to the main tab first.
+  const { projectId } = parseViewId(request.viewId);
+  if (projectId) {
+    const project = embeddedBrowserProjectsByProjectId.get(projectId);
+    if (project?.activeExtensionPopupKey) {
+      sendBrokerError(
+        response,
+        400,
+        "CDP event subscriptions are not supported while an extension popup is the active CDP target. Call ext_switch (no extensionId) to revert to the main tab first.",
+        "ELECTRON_CDP_POPUP_SUBSCRIBE_UNSUPPORTED",
+      );
+      return;
+    }
+  }
   const embedded = getEmbeddedBrowserForCdp(request.viewId);
   assertEmbeddedBrowserDebuggerAvailable(embedded);
 
@@ -2701,7 +2808,7 @@ async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 const chromeExtsByProjectId = new Map<string, ElectronChromeExtensions>();
-const extensionPopupsByProjectId = new Map<string, BrowserWindow>();
+const extensionPopupsByProjectId = new Map<string, EmbeddedBrowserPopupState>();
 // Cancellation callbacks for popups that haven't been shown yet —
 // keyed by `projectId:extensionId`. Called when chrome.tabs.create fires
 // from within the popup so we abort the show and keep only the tab.
@@ -2825,11 +2932,25 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
         if (!notifWin.isDestroyed()) {
           e.preventDefault();
           notifWin.hide();
-          setImmediate(() => { if (!notifWin.isDestroyed()) notifWin.destroy(); });
+          setImmediate(() => {
+            if (!notifWin.isDestroyed()) notifWin.destroy();
+          });
         }
       });
 
-      console.log("[desktop/browser] extension notification window created", { projectId, url, width, height });
+      // Register in the unified popup registry so agents can target this window
+      // via ext_switch. Extract extension ID from the resolved chrome-extension:// URL.
+      const extIdMatch = url ? /chrome-extension:\/\/([^/]+)/.exec(url) : null;
+      if (extIdMatch) {
+        registerExtensionPopup(projectId, extIdMatch[1]!, notifWin);
+      }
+
+      console.log("[desktop/browser] extension notification window created", {
+        projectId,
+        url,
+        width,
+        height,
+      });
       return notifWin;
     },
   });
@@ -2916,6 +3037,7 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     bounds: null,
     lastActivityAt: Date.now(),
     suspended: false,
+    activeExtensionPopupKey: null,
   };
   // Boot the Chrome API bridge before creating the first tab so the session
   // preload (chrome.tabs, chrome.offscreen, etc.) is ready when content loads.
@@ -3473,6 +3595,140 @@ async function closeBrowserTab(
   notifyEmbeddedBrowserTabsChanged(project);
 }
 
+// ---------------------------------------------------------------------------
+// Extension popup registry
+// ---------------------------------------------------------------------------
+
+// Registers a BrowserWindow as a tracked extension popup. Called both when
+// the user clicks an extension icon (BROWSER_OPEN_EXTENSION_CHANNEL) and when
+// an extension calls chrome.windows.create() (dapp approval notifications).
+// Last-write-wins: notification popups replace stale action popups for the same
+// extension, which is the desired behaviour for MetaMask-style approval flows.
+function registerExtensionPopup(
+  projectId: string,
+  extensionId: string,
+  popupWin: BrowserWindow,
+): void {
+  const popupKey = `${projectId}:${extensionId}`;
+  const existing = extensionPopupsByProjectId.get(popupKey);
+  if (existing && !existing.popupWin.isDestroyed()) {
+    try {
+      existing.popupWin.close();
+    } catch {}
+  }
+  const state: EmbeddedBrowserPopupState = {
+    popupKey,
+    projectId,
+    extensionId,
+    popupWin,
+    subscriptions: new Set(),
+    devtoolsOpen: false,
+    debuggerAttached: false,
+  };
+  extensionPopupsByProjectId.set(popupKey, state);
+
+  popupWin.once("closed", () => {
+    if (extensionPopupsByProjectId.get(popupKey) === state) {
+      extensionPopupsByProjectId.delete(popupKey);
+    }
+    const project = embeddedBrowserProjectsByProjectId.get(projectId);
+    if (project?.activeExtensionPopupKey === popupKey) {
+      project.activeExtensionPopupKey = null;
+    }
+    for (const sub of state.subscriptions) {
+      sub.closeWithError("Extension popup closed");
+    }
+    state.subscriptions.clear();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Extension agent tools — list, switch, close
+// ---------------------------------------------------------------------------
+
+function listProjectExtensions(projectId: string) {
+  const ses = session.fromPartition(`persist:${projectId}`);
+  return ses.getAllExtensions().map((ext) => ({
+    id: ext.id,
+    name: ext.name,
+    version: (ext.manifest["version"] as string | undefined) ?? "unknown",
+    hasPopup: extensionPopupsByProjectId.has(`${projectId}:${ext.id}`),
+  }));
+}
+
+function listExtensionPopupWindows(projectId: string) {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  const activeKey = project?.activeExtensionPopupKey ?? null;
+  const results: Array<{
+    extensionId: string;
+    title: string;
+    url: string;
+    isActive: boolean;
+    popupKey: string;
+  }> = [];
+  for (const [key, popup] of extensionPopupsByProjectId) {
+    if (!key.startsWith(`${projectId}:`) || popup.popupWin.isDestroyed()) continue;
+    results.push({
+      extensionId: popup.extensionId,
+      title: popup.popupWin.webContents.getTitle(),
+      url: popup.popupWin.webContents.getURL(),
+      isActive: key === activeKey,
+      popupKey: key,
+    });
+  }
+  return results;
+}
+
+function switchToExtensionPopup(
+  projectId: string,
+  extensionId: string | undefined,
+): { switched: boolean; popupKey: string | null } {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (!project) {
+    throw new Error(
+      "Embedded browser host is not connected yet; retry once the desktop process re-announces active browser views.",
+    );
+  }
+  if (!extensionId) {
+    project.activeExtensionPopupKey = null;
+    return { switched: true, popupKey: null };
+  }
+  const popupKey = `${projectId}:${extensionId}`;
+  const popup = extensionPopupsByProjectId.get(popupKey);
+  if (!popup || popup.popupWin.isDestroyed()) {
+    extensionPopupsByProjectId.delete(popupKey);
+    throw new Error(`No open popup for extension ${extensionId}`);
+  }
+  // Attach debugger on first switch so CDP commands can reach the popup.
+  if (!popup.popupWin.webContents.debugger.isAttached()) {
+    try {
+      popup.popupWin.webContents.debugger.attach("1.3");
+      popup.debuggerAttached = true;
+      popup.devtoolsOpen = false;
+    } catch (err) {
+      popup.devtoolsOpen = true;
+      throw new Error(
+        `Failed to attach debugger to extension popup ${extensionId}: ${String(err)}`,
+      );
+    }
+  }
+  project.activeExtensionPopupKey = popupKey;
+  return { switched: true, popupKey };
+}
+
+function closeExtensionPopupWindow(projectId: string, extensionId: string): void {
+  const popupKey = `${projectId}:${extensionId}`;
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (project?.activeExtensionPopupKey === popupKey) {
+    project.activeExtensionPopupKey = null;
+  }
+  const popup = extensionPopupsByProjectId.get(popupKey);
+  if (popup && !popup.popupWin.isDestroyed()) popup.popupWin.close();
+  extensionPopupsByProjectId.delete(popupKey);
+  pendingPopupCancels.get(popupKey)?.();
+  pendingPopupCancels.delete(popupKey);
+}
+
 function summarizeEmbeddedBrowserTabs(
   project: EmbeddedBrowserProjectState,
 ): Array<{ id: number; url: string; title: string; favicon: string | null; active: boolean }> {
@@ -3951,8 +4207,8 @@ function registerIpcHandlers(): void {
         // tabs when the extension itself called chrome.tabs.create on startup).
         const popupKey = `${project.projectId}:${extensionId}`;
         const existing = extensionPopupsByProjectId.get(popupKey);
-        if (existing && !existing.isDestroyed()) {
-          existing.focus();
+        if (existing && !existing.popupWin.isDestroyed()) {
+          existing.popupWin.focus();
           return;
         }
 
@@ -4009,7 +4265,9 @@ function registerIpcHandlers(): void {
         }
         popupWin.setPosition(px, py);
 
-        extensionPopupsByProjectId.set(popupKey, popupWin);
+        // Register in the unified popup registry (tracks both action popups and
+        // notification windows, auto-clears activeExtensionPopupKey on close).
+        registerExtensionPopup(project.projectId, extensionId, popupWin);
         // Hide-before-close: prevents the white flash that occurs when Electron's
         // WebContents clears itself just before the native window animation runs.
         // hide() is instant (no flash), then destroy() cleans up after a tick.
@@ -4021,10 +4279,6 @@ function registerIpcHandlers(): void {
               if (!popupWin.isDestroyed()) popupWin.destroy();
             });
           }
-        });
-        popupWin.on("closed", () => {
-          extensionPopupsByProjectId.delete(popupKey);
-          pendingPopupCancels.delete(popupKey);
         });
 
         await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
@@ -4420,8 +4674,8 @@ app.on("before-quit", () => {
   stopBrowserCdpBrokerServer();
   restoreStdIoCapture?.();
   // Close all open extension popups so they don't block app quit.
-  for (const win of extensionPopupsByProjectId.values()) {
-    if (!win.isDestroyed()) win.destroy();
+  for (const popup of extensionPopupsByProjectId.values()) {
+    if (!popup.popupWin.isDestroyed()) popup.popupWin.destroy();
   }
   extensionPopupsByProjectId.clear();
 });

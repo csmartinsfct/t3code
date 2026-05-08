@@ -1,40 +1,40 @@
-import { ExtensionContext } from '../context'
-import { ExtensionEvent } from '../router'
+import { ExtensionContext } from "../context";
+import { ExtensionEvent } from "../router";
 
 enum CookieStoreID {
-  Default = '0',
-  Incognito = '1',
+  Default = "0",
+  Incognito = "1",
 }
 
 const onChangedCauseTranslation: { [key: string]: string } = {
-  'expired-overwrite': 'expired_overwrite',
-}
+  "expired-overwrite": "expired_overwrite",
+};
 
 const createCookieDetails = (cookie: Electron.Cookie): chrome.cookies.Cookie => ({
   ...cookie,
-  domain: cookie.domain || '',
+  domain: cookie.domain || "",
   hostOnly: Boolean(cookie.hostOnly),
   session: Boolean(cookie.session),
-  path: cookie.path || '',
+  path: cookie.path || "",
   httpOnly: Boolean(cookie.httpOnly),
   secure: Boolean(cookie.secure),
   storeId: CookieStoreID.Default,
-})
+});
 
 export class CookiesAPI {
   private get cookies() {
-    return this.ctx.session.cookies
+    return this.ctx.session.cookies;
   }
 
   constructor(private ctx: ExtensionContext) {
-    const handle = this.ctx.router.apiHandler()
-    handle('cookies.get', this.get.bind(this))
-    handle('cookies.getAll', this.getAll.bind(this))
-    handle('cookies.set', this.set.bind(this))
-    handle('cookies.remove', this.remove.bind(this))
-    handle('cookies.getAllCookieStores', this.getAllCookieStores.bind(this))
+    const handle = this.ctx.router.apiHandler();
+    handle("cookies.get", this.get.bind(this));
+    handle("cookies.getAll", this.getAll.bind(this));
+    handle("cookies.set", this.set.bind(this));
+    handle("cookies.remove", this.remove.bind(this));
+    handle("cookies.getAllCookieStores", this.getAllCookieStores.bind(this));
 
-    this.cookies.addListener('changed', this.onChanged)
+    this.cookies.addListener("changed", this.onChanged);
   }
 
   private async get(
@@ -45,12 +45,12 @@ export class CookiesAPI {
     const cookies = await this.cookies.get({
       url: details.url,
       name: details.name,
-    })
+    });
 
     // TODO: If more than one cookie of the same name exists for the given URL,
     // the one with the longest path will be returned. For cookies with the
     // same path length, the cookie with the earliest creation time will be returned.
-    return cookies.length > 0 ? createCookieDetails(cookies[0]) : null
+    return cookies.length > 0 ? createCookieDetails(cookies[0]) : null;
   }
 
   private async getAll(
@@ -65,18 +65,18 @@ export class CookiesAPI {
       path: details.path,
       secure: details.secure,
       session: details.session,
-    })
+    });
 
-    return cookies.map(createCookieDetails)
+    return cookies.map(createCookieDetails);
   }
 
   private async set(
     event: ExtensionEvent,
     details: chrome.cookies.SetDetails,
   ): Promise<chrome.cookies.Cookie | null> {
-    await this.cookies.set(details)
-    const cookies = await this.cookies.get(details)
-    return cookies.length > 0 ? createCookieDetails(cookies[0]) : null
+    await this.cookies.set(details);
+    const cookies = await this.cookies.get(details);
+    return cookies.length > 0 ? createCookieDetails(cookies[0]) : null;
   }
 
   private async remove(
@@ -84,18 +84,18 @@ export class CookiesAPI {
     details: chrome.cookies.CookieDetails,
   ): Promise<chrome.cookies.CookieDetails | null> {
     try {
-      await this.cookies.remove(details.url, details.name)
+      await this.cookies.remove(details.url, details.name);
     } catch {
-      return null
+      return null;
     }
-    return details
+    return details;
   }
 
   private async getAllCookieStores(event: ExtensionEvent): Promise<chrome.cookies.CookieStore[]> {
     const tabIds = Array.from(this.ctx.store.tabs)
       .map((tab) => (tab.isDestroyed() ? undefined : tab.id))
-      .filter(Boolean) as number[]
-    return [{ id: CookieStoreID.Default, tabIds }]
+      .filter(Boolean) as number[];
+    return [{ id: CookieStoreID.Default, tabIds }];
   }
 
   private onChanged = (
@@ -108,8 +108,8 @@ export class CookiesAPI {
       cause: onChangedCauseTranslation[cause] || cause,
       cookie: createCookieDetails(cookie),
       removed,
-    }
+    };
 
-    this.ctx.router.broadcastEvent('cookies.onChanged', changeInfo)
-  }
+    this.ctx.router.broadcastEvent("cookies.onChanged", changeInfo);
+  };
 }
