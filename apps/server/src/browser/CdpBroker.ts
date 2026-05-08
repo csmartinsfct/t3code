@@ -58,6 +58,17 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly tabId: number;
   }) => Promise<number>;
+  readonly installExtension?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId: string;
+  }) => Promise<InstalledExtensionInfo>;
+}
+
+export interface InstalledExtensionInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
 }
 
 export interface BrowserTabSummary {
@@ -332,5 +343,15 @@ export class CdpBroker {
       });
     }
     return this.transport.closeTab({ id: this.requestId(), viewId, tabId });
+  }
+
+  async installExtension(viewId: string, extensionId: string): Promise<InstalledExtensionInfo> {
+    if (!this.transport.installExtension) {
+      throw new CdpBrokerError("installExtension is not available for this transport", {
+        code: "CDP_INSTALL_EXTENSION_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.installExtension({ id: this.requestId(), viewId, extensionId });
   }
 }

@@ -804,6 +804,15 @@ const SPECS: Record<string, CommandSpec> = {
     description: "Heuristic UX/accessibility audit of the current page.",
     inputSchema: {},
   },
+  load_extension: {
+    command: "load_extension",
+    category: "meta",
+    argsFromInput: () => [],
+    title: "Load pending Chrome Web Store extension",
+    description:
+      "Reads the pending Chrome Web Store install captured by the 'Add to Chrome' button, fetches the CRX from Google, extracts it, and loads it into the project browser session. Navigate to the extension's Web Store page and click 'Add to Chrome' before calling this tool. Returns the installed extension name, version, and ID. Desktop (Electron) host only.",
+    inputSchema: {},
+  },
 };
 
 // Tools explicitly dropped from the T3 surface (daemon-era or meta-unsafe):

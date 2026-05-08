@@ -22,6 +22,8 @@ import {
   WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
+import { unzipSync } from "fflate";
+
 import * as Effect from "effect/Effect";
 import type {
   DesktopTheme,
@@ -1282,6 +1284,11 @@ async function handleBrowserCdpBrokerRequest(
       sendBrokerSuccess(response, activeTabId);
       return;
     }
+    if (url.pathname === "/extensions/load") {
+      const result = await loadExtensionFromCrx(parseInstallExtensionRequest(body));
+      sendBrokerSuccess(response, result);
+      return;
+    }
     sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1294,6 +1301,99 @@ async function handleBrowserCdpBrokerRequest(
         : "ELECTRON_CDP_REQUEST_FAILED",
     );
   }
+}
+
+interface InstallExtensionRequest {
+  readonly projectId: string;
+  readonly extensionId: string;
+}
+
+interface InstalledExtensionInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+}
+
+function parseInstallExtensionRequest(body: unknown): InstallExtensionRequest {
+  if (!isRecord(body)) throw new Error("install-extension: body must be an object");
+  // projectId is derived from viewId (same as all other broker routes)
+  const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
+  const { projectId } = viewId ? parseViewId(viewId) : { projectId: null };
+  // Fallback: scan projects by legacy handle ("electron-wc:{projectId}")
+  const resolvedProjectId =
+    projectId ??
+    (viewId
+      ? [...embeddedBrowserProjectsByProjectId.values()].find((p) => p.handle === viewId)?.projectId
+      : undefined);
+  if (!resolvedProjectId)
+    throw new Error("install-extension: could not resolve projectId from viewId");
+  if (typeof body.extensionId !== "string" || !body.extensionId)
+    throw new Error("install-extension: extensionId is required");
+  return { projectId: resolvedProjectId, extensionId: body.extensionId };
+}
+
+const CHROME_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+async function loadExtensionFromCrx(req: InstallExtensionRequest): Promise<InstalledExtensionInfo> {
+  const { projectId, extensionId } = req;
+
+  const crxUrl =
+    `https://clients2.google.com/service/update2/crx` +
+    `?response=redirect&prodversion=130.0.0.0&acceptformat=crx3,crx2` +
+    `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
+
+  const crxResponse = await fetch(crxUrl, { headers: { "User-Agent": CHROME_UA } });
+  if (!crxResponse.ok) throw new Error(`CRX fetch failed (${crxResponse.status}): ${crxUrl}`);
+
+  const crxBuffer = Buffer.from(await crxResponse.arrayBuffer());
+
+  // CRX3: magic(4) + version(4) + header_size(4) + proto_header(header_size) + zip
+  // CRX2: magic(4) + version(4) + pub_key_len(4) + sig_len(4) + pub_key + sig + zip
+  if (crxBuffer.subarray(0, 4).toString("ascii") !== "Cr24")
+    throw new Error("Not a valid CRX file (bad magic)");
+
+  const version = crxBuffer.readUInt32LE(4);
+  let zipOffset: number;
+  if (version === 3) {
+    zipOffset = 12 + crxBuffer.readUInt32LE(8);
+  } else if (version === 2) {
+    zipOffset = 16 + crxBuffer.readUInt32LE(8) + crxBuffer.readUInt32LE(12);
+  } else {
+    throw new Error(`Unsupported CRX version: ${version}`);
+  }
+
+  const zipData = new Uint8Array(crxBuffer.buffer, crxBuffer.byteOffset + zipOffset);
+  const files = unzipSync(zipData);
+
+  const manifestBytes = files["manifest.json"];
+  if (!manifestBytes) throw new Error("No manifest.json in CRX zip");
+  const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf-8")) as {
+    name?: string;
+    version?: string;
+    background?: { service_worker?: string; scripts?: string[] };
+  };
+
+  const extDir = Path.join(STATE_DIR, "browser", projectId, "extensions", extensionId);
+  await FS.promises.mkdir(extDir, { recursive: true });
+
+  for (const [filename, data] of Object.entries(files)) {
+    if (filename.endsWith("/")) continue;
+    const dest = Path.join(extDir, filename);
+    await FS.promises.mkdir(Path.dirname(dest), { recursive: true });
+    await FS.promises.writeFile(dest, data);
+  }
+
+  await ensureExtensionPolyfill(extDir);
+
+  const ses = session.fromPartition(`persist:${projectId}`);
+  const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
+
+  return {
+    id: ext.id,
+    name: (ext.manifest["name"] as string | undefined) ?? manifest.name ?? extensionId,
+    version: (ext.manifest["version"] as string | undefined) ?? manifest.version ?? "unknown",
+  };
 }
 
 async function startBrowserCdpBrokerServer(): Promise<void> {
@@ -1730,7 +1830,9 @@ function normalizeBrowserUrl(value: unknown): string | null {
   const candidate = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
   try {
     const parsed = new URL(candidate);
-    return ["about:", "http:", "https:"].includes(parsed.protocol) ? parsed.toString() : null;
+    return ["about:", "http:", "https:", "chrome-extension:"].includes(parsed.protocol)
+      ? parsed.toString()
+      : null;
   } catch {
     return null;
   }
@@ -1775,6 +1877,69 @@ function clearEmbeddedBrowserDebuggerRetry(embedded: EmbeddedBrowserTabState): v
   clearTimeout(embedded.reattachRetryTimer);
   embedded.reattachRetryTimer = null;
 }
+
+// Injected into every page after debugger reattach (e.g. after DevTools closes).
+// Mirrors the webstore shim from the server-side browserHost, but runs directly
+// from Electron main so it fires even when the server host's prime() couldn't
+// register Page.addScriptToEvaluateOnNewDocument (DevTools conflict).
+const WEBSTORE_REATTACH_SHIM = `(function(){
+  try {
+    var ua = navigator.userAgent.replace(/Electron\\/[^\\s]+ /, '');
+    Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
+  } catch(e) {}
+  if (!window.chrome) window.chrome = {};
+  if (!window.chrome.webstore) {
+    window.chrome.webstore = {
+      install: function(url, onSuccess) {
+        try {
+          var src = url
+            || (document.querySelector('link[rel="chrome-webstore-item"]') || {}).href
+            || window.location.href;
+          var m = src.match(/\\/detail\\/(?:[^\\/]+\\/)?([a-p]{32})/);
+          window.__t3_ext_install_pending = m ? m[1] : src;
+        } catch(e) { window.__t3_ext_install_pending = url || window.location.href; }
+        if (typeof onSuccess === 'function') onSuccess();
+      },
+      onInstallStageChanged: { addListener: function() {} },
+      onDownloadProgress: { addListener: function() {} },
+    };
+  }
+  var isWebStore = /chromewebstore\\.google\\.com|chrome\\.google\\.com\\/webstore/.test(
+    location.hostname + location.pathname
+  );
+  if (!isWebStore) return;
+  function enableInstallButtons() {
+    document.querySelectorAll('button[disabled]').forEach(function(btn) {
+      var text = (btn.textContent || '').toLowerCase();
+      if (!text.includes('add to') && !text.includes('install')) return;
+      btn.removeAttribute('disabled');
+      btn.disabled = false;
+      if (btn.__t3_wired) return;
+      btn.__t3_wired = true;
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var m = window.location.href.match(/\\/detail\\/(?:[^\\/]+\\/)?([a-p]{32})/);
+        var extId = m ? m[1] : null;
+        if (extId) {
+          window.__t3_ext_install_pending = extId;
+          // Signal Electron main to start the install immediately.
+          console.log('__t3_ext_install__:' + extId);
+        }
+        if (window.chrome && window.chrome.webstore) window.chrome.webstore.install();
+      }, true);
+    });
+  }
+  enableInstallButtons();
+  var obs = new MutationObserver(enableInstallButtons);
+  if (document.body) {
+    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+      enableInstallButtons();
+    });
+  }
+})();`;
 
 function attachEmbeddedBrowserDebugger(embedded: EmbeddedBrowserTabState): boolean {
   if (isEmbeddedBrowserDestroyed(embedded)) return false;
@@ -2437,6 +2602,151 @@ function closePopoutWindow(projectId: string): void {
 // the agent CDP broker handler (lazy first-touch) and BROWSER_MOUNT_CHANNEL
 // (reuse the warm view if it exists, create one if the agent raced ahead).
 // Per T3CO-421 a project's lifecycle is decoupled from window mount state.
+const POLYFILL_SENTINEL = "/*__t3_polyfill_v1__*/";
+
+// Optional-chain patterns for Chrome extension APIs that Electron doesn't implement.
+// Replaces hard property accesses with ?. so missing APIs degrade gracefully rather
+// than crashing the extension's background service worker.
+const EXTENSION_API_PATCHES: Array<[string, string]> = [
+  // chrome.windows events — chrome.windows is not implemented in Electron
+  [".windows.onRemoved.", ".windows?.onRemoved?."],
+  [".windows.onFocusChanged.", ".windows?.onFocusChanged?."],
+  [".windows.onCreated.", ".windows?.onCreated?."],
+  // chrome.tabs events — may be missing in some Electron builds
+  [".tabs.onRemoved.", ".tabs?.onRemoved?."],
+  [".tabs.onUpdated.", ".tabs?.onUpdated?."],
+  [".tabs.onActivated.", ".tabs?.onActivated?."],
+  [".tabs.onReplaced.", ".tabs?.onReplaced?."],
+];
+
+async function ensureExtensionPolyfill(extDir: string): Promise<void> {
+  let manifest: { background?: { service_worker?: string; scripts?: string[] } };
+  try {
+    manifest = JSON.parse(
+      await FS.promises.readFile(Path.join(extDir, "manifest.json"), "utf-8"),
+    ) as typeof manifest;
+  } catch {
+    return;
+  }
+  const bgScript =
+    manifest.background?.service_worker ??
+    (manifest.background?.scripts?.[0] as string | undefined);
+  if (!bgScript) return;
+  const bgPath = Path.join(extDir, bgScript);
+  try {
+    const existing = await FS.promises.readFile(bgPath, "utf-8");
+    if (!existing.startsWith(POLYFILL_SENTINEL)) {
+    const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
+  if(typeof requestAnimationFrame==='undefined'){
+    globalThis.requestAnimationFrame=function(cb){return setTimeout(cb,16);};
+    globalThis.cancelAnimationFrame=function(id){clearTimeout(id);};
+  }
+  if(typeof chrome!=='undefined'&&chrome.tabs){
+    var _evt=function(){var L=[];return{addListener:function(f){L.push(f);},removeListener:function(f){var i=L.indexOf(f);if(i>-1)L.splice(i,1);},hasListener:function(f){return L.indexOf(f)>-1;},hasListeners:function(){return L.length>0;}};};
+    if(!chrome.tabs.onRemoved)chrome.tabs.onRemoved=_evt();
+    if(!chrome.tabs.onCreated)chrome.tabs.onCreated=_evt();
+    if(!chrome.tabs.onUpdated)chrome.tabs.onUpdated=_evt();
+    if(!chrome.tabs.onActivated)chrome.tabs.onActivated=_evt();
+    if(!chrome.tabs.onReplaced)chrome.tabs.onReplaced=_evt();
+  }
+})();\n`;
+    await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
+    console.log("[desktop/browser] applied extension polyfill", { extDir, bgScript });
+    }
+  } catch {
+    // Non-fatal — extension might still work without the polyfill.
+  }
+
+  // Patch JS files in the extension to optional-chain Chrome APIs that Electron
+  // doesn't implement (chrome.windows, partial chrome.tabs events). Idempotent —
+  // optional chaining is safe to apply even when the API exists.
+  await patchExtensionJsFiles(extDir);
+}
+
+async function patchExtensionJsFiles(extDir: string): Promise<void> {
+  let jsFiles: string[];
+  try {
+    const entries = await FS.promises.readdir(extDir, { recursive: true, withFileTypes: true });
+    jsFiles = (entries as FS.Dirent[])
+      .filter((e) => e.isFile() && e.name.endsWith(".js"))
+      .map((e) => Path.join((e as FS.Dirent & { parentPath?: string }).parentPath ?? extDir, e.name));
+  } catch {
+    return;
+  }
+  for (const filePath of jsFiles) {
+    try {
+      let content = await FS.promises.readFile(filePath, "utf-8");
+      let changed = false;
+      for (const [from, to] of EXTENSION_API_PATCHES) {
+        if (content.includes(from)) {
+          content = content.split(from).join(to);
+          changed = true;
+        }
+      }
+      if (changed) {
+        await FS.promises.writeFile(filePath, content, "utf-8");
+        console.log("[desktop/browser] patched extension JS", {
+          file: Path.relative(extDir, filePath),
+        });
+      }
+    } catch {
+      // Non-fatal per file.
+    }
+  }
+}
+
+async function reloadPersistedExtensions(projectId: string): Promise<void> {
+  const extRoot = Path.join(STATE_DIR, "browser", projectId, "extensions");
+  let entries: FS.Dirent[];
+  try {
+    entries = await FS.promises.readdir(extRoot, { withFileTypes: true });
+  } catch {
+    return; // directory doesn't exist yet — no extensions installed
+  }
+  const ses = session.fromPartition(`persist:${projectId}`);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const extDir = Path.join(extRoot, entry.name);
+    try {
+      // Apply polyfill and patches before loading. Must run on every startup
+      // because patches may not have been applied during the install session.
+      await ensureExtensionPolyfill(extDir);
+      // Remove any previously registered version first so Chromium re-reads
+      // all extension files from disk, bypassing its service worker cache.
+      const existing = ses.getAllExtensions().find((e) => {
+        const ep = (e as unknown as { path?: string }).path;
+        return ep && Path.resolve(ep) === Path.resolve(extDir);
+      });
+      if (existing) await ses.removeExtension(existing.id);
+      // Clear V8 bytecode + service worker caches so Chromium re-compiles from
+      // our patched files rather than using cached pre-patch bytecode.
+      await ses.clearCodeCaches({});
+      // clearCodeCaches doesn't reach the service worker registration cache in
+      // all Electron versions. Delete the on-disk Service Worker and Code Cache
+      // directories for this session partition to guarantee a clean slate.
+      const partitionDir = Path.join(
+        app.getPath("userData"),
+        "Partitions",
+        projectId,
+      );
+      for (const cacheSubdir of ["Service Worker", "Code Cache"]) {
+        await FS.promises.rm(Path.join(partitionDir, cacheSubdir), {
+          recursive: true,
+          force: true,
+        });
+      }
+      const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
+      console.log("[desktop/browser] reloaded persisted extension", {
+        projectId,
+        id: ext.id,
+        name: ext.manifest["name"],
+      });
+    } catch (error) {
+      console.warn("[desktop/browser] failed to reload extension", { projectId, extDir, error });
+    }
+  }
+}
+
 function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProjectState {
   const existing = embeddedBrowserProjectsByProjectId.get(projectId);
   if (existing && !isEmbeddedBrowserProjectDestroyed(existing)) return existing;
@@ -2460,6 +2770,24 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
   const rootTab = createEmbeddedBrowserTab(project, 0, EMBEDDED_BROWSER_PUBLIC_BLANK_URL);
   project.tabs.set(0, rootTab);
   embeddedBrowserProjectsByProjectId.set(projectId, project);
+  // Reload any previously installed extensions for this project.
+  void reloadPersistedExtensions(projectId);
+  // Rewrite User-Agent to Chrome for Chrome Web Store requests so the
+  // "Add to Chrome" button renders. Scoped to this project's session partition.
+  session
+    .fromPartition(`persist:${projectId}`)
+    .webRequest.onBeforeSendHeaders(
+      { urls: ["*://chrome.google.com/webstore/*", "*://chromewebstore.google.com/*"] },
+      (details, callback) => {
+        callback({
+          requestHeaders: {
+            ...details.requestHeaders,
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          },
+        });
+      },
+    );
   return project;
 }
 
@@ -2725,7 +3053,40 @@ function createEmbeddedBrowserTab(
     }
     markEmbeddedBrowserActive(project);
     notifyEmbeddedBrowserTabsChanged(project);
+    // Inject webstore shim on regular web pages only — skip chrome-extension://
+    // pages so we don't interfere with extension security sandboxes (e.g. MetaMask's
+    // LavaMoat scuttles the chrome global and throws if we try to access it).
+    if (!view.webContents.getURL().startsWith("chrome-extension://")) {
+      void view.webContents.executeJavaScript(WEBSTORE_REATTACH_SHIM).catch(() => {});
+    }
   });
+  // Auto-install extensions when the user clicks "Add to Chrome" on the webstore.
+  // The page-side shim emits a prefixed console.log; we intercept it here and
+  // fire loadExtensionFromCrx without needing CDP or an agent tool call.
+  view.webContents.on("console-message", (event) => {
+    const message = typeof event.message === "string" ? event.message : "";
+    if (!message.startsWith("__t3_ext_install__:")) return;
+    const extensionId = message.slice("__t3_ext_install__:".length).trim();
+    if (!/^[a-p]{32}$/.test(extensionId)) return;
+    console.log("[desktop/browser] webstore install triggered", { projectId, extensionId });
+    void loadExtensionFromCrx({ projectId, extensionId })
+      .then((info) => {
+        console.log("[desktop/browser] extension installed", info);
+        void view.webContents
+          .executeJavaScript(
+            `console.info('[T3] Extension installed: ${info.name} v${info.version}')`,
+          )
+          .catch(() => {});
+      })
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error("[desktop/browser] extension install failed", { extensionId, error });
+        void view.webContents
+          .executeJavaScript(`console.error('[T3] Extension install failed: ${msg}')`)
+          .catch(() => {});
+      });
+  });
+
   view.webContents.on("destroyed", () => {
     // Resolve the owning window at destroy-time rather than at tab creation:
     // a view created offscreen may later be bound to a real BrowserWindow.

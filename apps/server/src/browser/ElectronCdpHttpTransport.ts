@@ -4,6 +4,7 @@ import {
   CdpBrokerError,
   type CdpBrokerEvent,
   type CdpBrokerTransport,
+  type InstalledExtensionInfo,
 } from "./CdpBroker";
 import type { ServerConfigShape } from "../config";
 
@@ -194,6 +195,12 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
 
   async closeTab(request: Parameters<NonNullable<CdpBrokerTransport["closeTab"]>>[0]) {
     return this.postJson<number>("tabs/close", request);
+  }
+
+  async installExtension(
+    request: Parameters<NonNullable<CdpBrokerTransport["installExtension"]>>[0],
+  ): Promise<InstalledExtensionInfo> {
+    return this.postJson<InstalledExtensionInfo>("extensions/load", request);
   }
 
   private async postJson<T>(path: string, request: unknown): Promise<T> {
