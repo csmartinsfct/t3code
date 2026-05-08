@@ -813,6 +813,17 @@ const SPECS: Record<string, CommandSpec> = {
       "Reads the pending Chrome Web Store install captured by the 'Add to Chrome' button, fetches the CRX from Google, extracts it, and loads it into the project browser session. Navigate to the extension's Web Store page and click 'Add to Chrome' before calling this tool. Returns the installed extension name, version, and ID. Desktop (Electron) host only.",
     inputSchema: {},
   },
+  open_extension: {
+    command: "open_extension",
+    category: "meta",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Open extension popup",
+    description:
+      "Open a Chrome extension's action popup as a real floating window (same as clicking the extension icon in the toolbar). The popup is registered so subsequent ext_switch + snapshot/click/fill commands can interact with it. Use list_extensions to get extension IDs. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str("Extension ID to open (32-char a-p string)"),
+    },
+  },
   list_extensions: {
     command: "list_extensions",
     category: "meta",

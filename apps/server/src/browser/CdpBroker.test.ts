@@ -200,6 +200,12 @@ class HarnessTransport implements CdpBrokerTransport {
     _request: Parameters<NonNullable<CdpBrokerTransport["extClose"]>>[0],
   ): Promise<void> {}
 
+  async extOpen(
+    _request: Parameters<NonNullable<CdpBrokerTransport["extOpen"]>>[0],
+  ): Promise<{ popupKey: string }> {
+    return { popupKey: "test-project:test-extension" };
+  }
+
   private ensureRoot(): void {
     if (this.rootInitialized) return;
     this.tabs.set(0, { targetId: "root", sessionId: "root", url: "about:blank", title: "" });

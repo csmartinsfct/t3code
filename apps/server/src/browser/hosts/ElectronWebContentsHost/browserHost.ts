@@ -555,6 +555,8 @@ export class ElectronWebContentsBrowserHost {
         return this.evaluateJson(UX_AUDIT_SCRIPT);
       case "load_extension":
         return this.loadExtension();
+      case "open_extension":
+        return this.openExtension(requiredArg(args, "open_extension", "extensionId"));
       case "list_extensions":
         return this.listExtensionsChromeApi();
       case "ext_windows":
@@ -653,6 +655,15 @@ export class ElectronWebContentsBrowserHost {
       extensionId,
     );
     return `Installed: ${info.name} v${info.version} (${info.id})`;
+  }
+
+  private async openExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const result = await this.broker.extOpen(this.viewId, extensionId);
+    return (
+      `Opened extension popup for ${extensionId} (popupKey: ${result.popupKey}). ` +
+      `Call ext_switch ${extensionId} to target it for snapshot/click/fill commands.`
+    );
   }
 
   private async listExtensionsChromeApi(): Promise<string> {

@@ -230,6 +230,12 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     await this.postJson<void>("ext/close", request);
   }
 
+  async extOpen(
+    request: Parameters<NonNullable<CdpBrokerTransport["extOpen"]>>[0],
+  ): Promise<{ popupKey: string }> {
+    return this.postJson<{ popupKey: string }>("ext/open", request);
+  }
+
   private async postJson<T>(path: string, request: unknown): Promise<T> {
     try {
       const response = await fetch(brokerUrl(this.baseUrl, path), {

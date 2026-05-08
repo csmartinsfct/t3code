@@ -61,6 +61,7 @@ export const BROWSER_HOST_TOOL_NAMES = [
   "visibility",
   "load_extension",
   "list_extensions",
+  "open_extension",
   "ext_windows",
   "ext_switch",
   "ext_close",

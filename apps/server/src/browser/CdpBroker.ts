@@ -81,6 +81,11 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly extensionId: string;
   }) => Promise<void>;
+  readonly extOpen?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId: string;
+  }) => Promise<{ popupKey: string }>;
 }
 
 export interface InstalledExtensionInfo {
@@ -435,5 +440,15 @@ export class CdpBroker {
       });
     }
     await this.transport.extClose({ id: this.requestId(), viewId, extensionId });
+  }
+
+  async extOpen(viewId: string, extensionId: string): Promise<{ popupKey: string }> {
+    if (!this.transport.extOpen) {
+      throw new CdpBrokerError("extOpen is not available for this transport", {
+        code: "CDP_EXT_OPEN_UNAVAILABLE",
+        details: { viewId },
+      });
+    }
+    return this.transport.extOpen({ id: this.requestId(), viewId, extensionId });
   }
 }

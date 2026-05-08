@@ -1332,6 +1332,15 @@ async function handleBrowserCdpBrokerRequest(
       sendBrokerSuccess(response, result);
       return;
     }
+    if (url.pathname === "/ext/open") {
+      const req = parseExtCloseRequest(body); // same shape: viewId + extensionId
+      const { projectId } = parseViewId(req.viewId);
+      if (!projectId) throw new Error("invalid viewId for ext/open");
+      const anchor = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const popupKey = await openExtensionPopupForProject(projectId, req.extensionId, anchor);
+      sendBrokerSuccess(response, { popupKey });
+      return;
+    }
     if (url.pathname === "/ext/list") {
       const viewId = isRecord(body) && typeof body.viewId === "string" ? body.viewId : "";
       const { projectId } = parseViewId(viewId);
@@ -3743,6 +3752,85 @@ function summarizeEmbeddedBrowserTabs(
   return summaries;
 }
 
+// Opens an extension's action popup as a real BrowserWindow. Called from both
+// the UI IPC handler (user clicks extension icon) and the /ext/open broker route
+// (agents call open_extension tool). Returns the popupKey on success.
+async function openExtensionPopupForProject(
+  projectId: string,
+  extensionId: string,
+  anchorWindow: BrowserWindow | null,
+): Promise<string> {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (!project) throw new Error("project not found");
+  const ses = session.fromPartition(`persist:${projectId}`);
+  const ext = ses.getAllExtensions().find((e) => e.id === extensionId);
+  if (!ext) throw new Error(`extension ${extensionId} not installed`);
+  const manifest = ext.manifest as {
+    action?: { default_popup?: string };
+    browser_action?: { default_popup?: string };
+  };
+  const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
+
+  if (!popupPath) {
+    openNewBrowserTab(project, `chrome-extension://${extensionId}/home.html`);
+    return `opened home.html for ${extensionId} in a new tab (no action popup defined)`;
+  }
+
+  const popupKey = `${projectId}:${extensionId}`;
+  const existing = extensionPopupsByProjectId.get(popupKey);
+  if (existing && !existing.popupWin.isDestroyed()) {
+    existing.popupWin.focus();
+    return popupKey;
+  }
+
+  const popupWin = new BrowserWindow({
+    width: 380,
+    height: 628,
+    frame: true,
+    title: "",
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      session: ses,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
+    },
+  });
+  makePanel(popupWin);
+  popupWin.setAlwaysOnTop(true);
+
+  const chromeExt = chromeExtsByProjectId.get(projectId);
+  if (chromeExt) {
+    chromeExt.addTab(popupWin.webContents, popupWin);
+    chromeExt.selectTab(popupWin.webContents);
+  }
+
+  const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { bounds } = cursorDisplay;
+  const isFS =
+    anchorWindow ? anchorWindow.isFullScreen() || anchorWindow.isSimpleFullScreen() : false;
+  let px: number, py: number;
+  if (isFS || !anchorWindow) {
+    px = bounds.x + bounds.width - 400;
+    py = bounds.y + 40;
+  } else {
+    const ob = anchorWindow.getBounds();
+    px = Math.min(ob.x + ob.width - 395, bounds.x + bounds.width - 400);
+    py = ob.y + 72;
+  }
+  popupWin.setPosition(px, py);
+
+  registerExtensionPopup(projectId, extensionId, popupWin);
+
+  await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
+  popupWin.show();
+  return popupKey;
+}
+
 function registerIpcHandlers(): void {
   ipcMain.removeAllListeners(GET_WS_URL_CHANNEL);
   ipcMain.on(GET_WS_URL_CHANNEL, (event) => {
@@ -4181,90 +4269,7 @@ function registerIpcHandlers(): void {
       if (!ownerWindow || !project) return;
       const extensionId = typeof rawExtensionId === "string" ? rawExtensionId : null;
       if (!extensionId) return;
-      const ses = session.fromPartition(`persist:${project.projectId}`);
-      const ext = ses.getAllExtensions().find((e) => e.id === extensionId);
-      if (!ext) return;
-      const manifest = ext.manifest as {
-        action?: { default_popup?: string };
-        browser_action?: { default_popup?: string };
-      };
-      const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
-
-      if (popupPath) {
-        // Open as a floating popup window — matches Chrome's extension popup UX
-        // and avoids opening inside T3's embedded tab system (which caused double
-        // tabs when the extension itself called chrome.tabs.create on startup).
-        const popupKey = `${project.projectId}:${extensionId}`;
-        const existing = extensionPopupsByProjectId.get(popupKey);
-        if (existing && !existing.popupWin.isDestroyed()) {
-          existing.popupWin.focus();
-          return;
-        }
-
-        const popupWin = new BrowserWindow({
-          width: 380,
-          // 628 = 28px native title bar + 600px content area.
-          height: 628,
-          // Default frame — visible native title bar that is draggable out of the box.
-          // titleBarStyle intentionally omitted (defaults to 'default' = full visible bar).
-          frame: true,
-          title: "",
-          resizable: false,
-          show: false,
-          skipTaskbar: true,
-          alwaysOnTop: true,
-          webPreferences: {
-            session: ses,
-            sandbox: true,
-            contextIsolation: true,
-            nodeIntegration: false,
-            ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
-          },
-        });
-        // Convert to NSPanel so the popup enters the full-screen Space via
-        // NSWindowCollectionBehaviorFullScreenAuxiliary without stealing focus.
-        makePanel(popupWin);
-        // Keep above T3 but not above all other apps.
-        popupWin.setAlwaysOnTop(true);
-
-        // Register with electron-chrome-extensions so chrome.tabs.getCurrent()
-        // works inside the popup — this is what prevents Rainbow (and others)
-        // from redirecting to a tab because they can't get a tab context.
-        const chromeExt = chromeExtsByProjectId.get(project.projectId);
-        if (chromeExt) {
-          chromeExt.addTab(popupWin.webContents, popupWin);
-          chromeExt.selectTab(popupWin.webContents);
-        }
-
-        // Position below the URL bar on the right side of the screen.
-        // In macOS full-screen the owner window's getBounds() returns screen
-        // dimensions — use raw screen bounds for positioning in that case.
-        const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-        const { bounds } = cursorDisplay;
-        const isFS = ownerWindow.isFullScreen() || ownerWindow.isSimpleFullScreen();
-        let px: number, py: number;
-        if (isFS) {
-          // Anchor to upper-right of the display so the popup is reachable.
-          px = bounds.x + bounds.width - 400;
-          py = bounds.y + 40;
-        } else {
-          const ob = ownerWindow.getBounds();
-          px = Math.min(ob.x + ob.width - 395, bounds.x + bounds.width - 400);
-          py = ob.y + 72;
-        }
-        popupWin.setPosition(px, py);
-
-        // Register in the unified popup registry (tracks both action popups and
-        // notification windows, auto-clears activeExtensionPopupKey on close).
-        registerExtensionPopup(project.projectId, extensionId, popupWin);
-
-        await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
-        popupWin.show();
-      } else {
-        // No action popup defined — open home.html or extension root in a tab.
-        const fallback = `chrome-extension://${extensionId}/home.html`;
-        openNewBrowserTab(project, fallback);
-      }
+      await openExtensionPopupForProject(project.projectId, extensionId, ownerWindow);
     },
   );
 
