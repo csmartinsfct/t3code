@@ -23,6 +23,7 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@types/node": "catalog:",
+    "electron-chrome-extensions": "^4.9.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

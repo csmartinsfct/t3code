@@ -299,6 +299,7 @@ export interface DesktopBrowserBridge {
   popoutClose: (projectId: string) => Promise<void>;
   listExtensions: (projectId: string) => Promise<BrowserExtensionInfo[]>;
   openExtension: (projectId: string, extensionId: string) => Promise<void>;
+  onExtensionsChanged: (listener: (projectId: string) => void) => () => void;
   onTabsChanged: (
     listener: (payload: {
       projectId: string;

@@ -17,12 +17,35 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
+  screen,
   session,
   shell,
   WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import { unzipSync } from "fflate";
+import { ElectronChromeExtensions } from "electron-chrome-extensions";
+
+// N-API port of @egoist/electron-panel-window — loads our local build.
+// Falls back gracefully if the native module isn't compiled yet.
+let _panelWindow: {
+  MakePanel: (buf: Buffer) => boolean;
+  MakeWindow: (buf: Buffer) => boolean;
+} | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  _panelWindow = require(
+    Path.join(__dirname, "../native/panel-window/build/Release/panel_window.node"),
+  ) as typeof _panelWindow;
+} catch {
+  console.warn(
+    "[desktop] panel-window native module not built — extension popups won't float above full-screen",
+  );
+}
+function makePanel(win: Electron.BrowserWindow): void {
+  if (!_panelWindow || process.platform !== "darwin") return;
+  _panelWindow.MakePanel(win.getNativeWindowHandle());
+}
 
 import * as Effect from "effect/Effect";
 import type {
@@ -104,6 +127,7 @@ const BROWSER_POPOUT_OPEN_CHANNEL = "browser:popout-open";
 const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
 const BROWSER_LIST_EXTENSIONS_CHANNEL = "browser:listExtensions";
 const BROWSER_OPEN_EXTENSION_CHANNEL = "browser:openExtension";
+const BROWSER_EXTENSIONS_CHANGED_CHANNEL = "browser:extensionsChanged";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const DESKTOP_SCHEME = "t3";
@@ -1407,6 +1431,11 @@ async function loadExtensionFromCrx(req: InstallExtensionRequest): Promise<Insta
 
   const ses = session.fromPartition(`persist:${projectId}`);
   const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
+
+  // Notify renderers so the extensions panel refreshes immediately.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
+  }
 
   return {
     id: ext.id,
@@ -2726,6 +2755,93 @@ async function patchExtensionJsFiles(extDir: string): Promise<boolean> {
   return anyChanged;
 }
 
+// ---------------------------------------------------------------------------
+// electron-chrome-extensions — per-project Chrome API bridge
+// ---------------------------------------------------------------------------
+
+const chromeExtsByProjectId = new Map<string, ElectronChromeExtensions>();
+const extensionPopupsByProjectId = new Map<string, BrowserWindow>();
+// Cancellation callbacks for popups that haven't been shown yet —
+// keyed by `projectId:extensionId`. Called when chrome.tabs.create fires
+// from within the popup so we abort the show and keep only the tab.
+const pendingPopupCancels = new Map<string, () => void>();
+
+// Resolve the library's preload script once at startup. In production builds
+// this file must be copied to the app resources; in dev it's in node_modules.
+let chromeExtPreloadPath: string | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  chromeExtPreloadPath = require.resolve("electron-chrome-extensions/preload");
+} catch {
+  console.warn(
+    "[desktop/browser] electron-chrome-extensions preload not found — Chrome APIs will be limited",
+  );
+}
+
+function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtensions {
+  const existing = chromeExtsByProjectId.get(projectId);
+  if (existing) return existing;
+
+  const ses = session.fromPartition(`persist:${projectId}`);
+
+  // Inject the library's preload into all frames for this session so
+  // chrome.tabs, chrome.windows, chrome.offscreen, etc. work in extensions.
+  if (chromeExtPreloadPath) {
+    ses.registerPreloadScript({ id: "chrome-ext", type: "frame", filePath: chromeExtPreloadPath });
+  }
+
+  const ext = new ElectronChromeExtensions({
+    license: "GPL-3.0",
+    session: ses,
+
+    createTab: async (details) => {
+      const project = ensureEmbeddedBrowserProject(projectId);
+      const url = details.url ?? "about:blank";
+      const newTabId = await openNewBrowserTab(project, url);
+      const tab = project.tabs.get(newTabId);
+      if (!tab) throw new Error("Tab creation failed");
+      const win = findEmbeddedBrowserOwnerWindow(tab) ?? mainWindow;
+      if (!win) throw new Error("No owner window for new tab");
+      return [tab.view.webContents, win];
+    },
+
+    selectTab: (tab) => {
+      const project = embeddedBrowserProjectsByProjectId.get(projectId);
+      if (!project) return;
+      for (const [tabId, t] of project.tabs) {
+        if (t.view.webContents === tab) {
+          const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
+          if (win) void switchBrowserTab(project, tabId, win);
+          break;
+        }
+      }
+    },
+
+    removeTab: (tab) => {
+      const project = embeddedBrowserProjectsByProjectId.get(projectId);
+      if (!project) return;
+      for (const [tabId, t] of project.tabs) {
+        if (t.view.webContents === tab) {
+          const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
+          if (win) void closeBrowserTab(project, tabId, win);
+          break;
+        }
+      }
+    },
+  });
+
+  ext.on("browser-action-popup-created", (popup) => {
+    console.log("[desktop/browser] extension action popup created", { projectId });
+    void popup.whenReady().then(() => {
+      if (!popup.browserWindow) return;
+      popup.browserWindow.show();
+    });
+  });
+
+  chromeExtsByProjectId.set(projectId, ext);
+  return ext;
+}
+
 async function reloadPersistedExtensions(projectId: string): Promise<void> {
   const extRoot = Path.join(STATE_DIR, "browser", projectId, "extensions");
   let entries: FS.Dirent[];
@@ -2771,6 +2887,10 @@ async function reloadPersistedExtensions(projectId: string): Promise<void> {
       console.warn("[desktop/browser] failed to reload extension", { projectId, extDir, error });
     }
   }
+  // Notify all renderer windows that the extension list for this project changed.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
+  }
 }
 
 function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProjectState {
@@ -2793,6 +2913,9 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     lastActivityAt: Date.now(),
     suspended: false,
   };
+  // Boot the Chrome API bridge before creating the first tab so the session
+  // preload (chrome.tabs, chrome.offscreen, etc.) is ready when content loads.
+  getOrCreateChromeExtensions(projectId);
   const rootTab = createEmbeddedBrowserTab(project, 0, EMBEDDED_BROWSER_PUBLIC_BLANK_URL);
   project.tabs.set(0, rootTab);
   embeddedBrowserProjectsByProjectId.set(projectId, project);
@@ -3079,6 +3202,14 @@ function createEmbeddedBrowserTab(
     }
     markEmbeddedBrowserActive(project);
     notifyEmbeddedBrowserTabsChanged(project);
+    // Register/update the tab with electron-chrome-extensions so chrome.tabs
+    // API calls inside extensions reflect T3's tab state.
+    const chromeExt = chromeExtsByProjectId.get(projectId);
+    if (chromeExt) {
+      const win = findEmbeddedBrowserOwnerWindow(tab) ?? mainWindow ?? ensureOffscreenBrowserHost();
+      chromeExt.addTab(view.webContents, win);
+      if (project.activeTabId === tab.tabId) chromeExt.selectTab(view.webContents);
+    }
     // Inject webstore shim on regular web pages only — skip chrome-extension://
     // pages so we don't interfere with extension security sandboxes (e.g. MetaMask's
     // LavaMoat scuttles the chrome global and throws if we try to access it).
@@ -3122,6 +3253,15 @@ function createEmbeddedBrowserTab(
     const ownerState = owner ? embeddedBrowserStateByWindow.get(owner) : undefined;
     cleanupEmbeddedBrowserView(tab, ownerState);
     notifyEmbeddedBrowserTabsChanged(project);
+  });
+  // Remove the tab from electron-chrome-extensions inside the destroyed handler
+  // wrapped in try/catch — the library throws if the webContents is already gone.
+  view.webContents.on("destroyed", () => {
+    try {
+      chromeExtsByProjectId.get(projectId)?.removeTab(view.webContents);
+    } catch {
+      // Best-effort — webContents already invalid or tab not registered.
+    }
   });
 
   attachEmbeddedBrowserDebugger(tab);
@@ -3265,6 +3405,11 @@ async function switchBrowserTab(
     fromTabId: previousTabId,
     toTabId: tabId,
   });
+  // Notify electron-chrome-extensions that the active tab changed.
+  const newActive = project.tabs.get(tabId);
+  if (newActive) {
+    chromeExtsByProjectId.get(project.projectId)?.selectTab(newActive.view.webContents);
+  }
   notifyEmbeddedBrowserTabsChanged(project);
 }
 
@@ -3717,9 +3862,7 @@ function registerIpcHandlers(): void {
     const projectId = normalizeProjectId(rawProjectId);
     if (!projectId) return [];
     const ses = session.fromPartition(`persist:${projectId}`);
-    const extRoot = projectId
-      ? Path.join(STATE_DIR, "browser", projectId, "extensions")
-      : null;
+    const extRoot = projectId ? Path.join(STATE_DIR, "browser", projectId, "extensions") : null;
 
     return Promise.all(
       ses.getAllExtensions().map(async (ext) => {
@@ -3782,11 +3925,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     BROWSER_OPEN_EXTENSION_CHANNEL,
     async (event, rawProjectId: unknown, rawExtensionId: unknown) => {
-      const window = getIpcBrowserWindow(event);
-      const project = window
-        ? getProjectScopedEmbeddedBrowserProject(window, rawProjectId, "openExtension")
+      const ownerWindow = getIpcBrowserWindow(event);
+      const project = ownerWindow
+        ? getProjectScopedEmbeddedBrowserProject(ownerWindow, rawProjectId, "openExtension")
         : null;
-      if (!window || !project) return;
+      if (!ownerWindow || !project) return;
       const extensionId = typeof rawExtensionId === "string" ? rawExtensionId : null;
       if (!extensionId) return;
       const ses = session.fromPartition(`persist:${project.projectId}`);
@@ -3797,29 +3940,96 @@ function registerIpcHandlers(): void {
         browser_action?: { default_popup?: string };
       };
       const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
-      // Prefer home.html when the extension has one — popup.html is designed for
-      // Chrome's extension popup context (small overlay) and relies on
-      // chrome.tabs.getCurrent() which is undefined in Electron's tab context,
-      // causing the UI to hang on a loading screen. home.html is full-page safe.
-      // Use ext.path (the actual directory on disk) rather than reconstructing
-      // from extensionId — Electron assigns a different ID than the CWS install ID.
-      const extPath = (ext as unknown as { path?: string }).path ?? "";
-      let url: string;
-      if (extPath) {
-        try {
-          await FS.promises.access(Path.join(extPath, "home.html"));
-          url = `chrome-extension://${extensionId}/home.html`;
-        } catch {
-          url = popupPath
-            ? `chrome-extension://${extensionId}/${popupPath}`
-            : `chrome-extension://${extensionId}/home.html`;
+
+      if (popupPath) {
+        // Open as a floating popup window — matches Chrome's extension popup UX
+        // and avoids opening inside T3's embedded tab system (which caused double
+        // tabs when the extension itself called chrome.tabs.create on startup).
+        const popupKey = `${project.projectId}:${extensionId}`;
+        const existing = extensionPopupsByProjectId.get(popupKey);
+        if (existing && !existing.isDestroyed()) {
+          existing.focus();
+          return;
         }
+
+        const popupWin = new BrowserWindow({
+          width: 380,
+          // 628 = 28px native title bar + 600px content area.
+          height: 628,
+          // Default frame — visible native title bar that is draggable out of the box.
+          // titleBarStyle intentionally omitted (defaults to 'default' = full visible bar).
+          frame: true,
+          title: "",
+          resizable: false,
+          show: false,
+          skipTaskbar: true,
+          alwaysOnTop: true,
+          webPreferences: {
+            session: ses,
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+            ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
+          },
+        });
+        // Convert to NSPanel so the popup enters the full-screen Space via
+        // NSWindowCollectionBehaviorFullScreenAuxiliary without stealing focus.
+        makePanel(popupWin);
+        // Keep above T3 but not above all other apps.
+        popupWin.setAlwaysOnTop(true);
+
+        // Register with electron-chrome-extensions so chrome.tabs.getCurrent()
+        // works inside the popup — this is what prevents Rainbow (and others)
+        // from redirecting to a tab because they can't get a tab context.
+        const chromeExt = chromeExtsByProjectId.get(project.projectId);
+        if (chromeExt) {
+          chromeExt.addTab(popupWin.webContents, popupWin);
+          chromeExt.selectTab(popupWin.webContents);
+        }
+
+        // Position below the URL bar on the right side of the screen.
+        // In macOS full-screen the owner window's getBounds() returns screen
+        // dimensions — use raw screen bounds for positioning in that case.
+        const cursorDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        const { bounds } = cursorDisplay;
+        const isFS = ownerWindow.isFullScreen() || ownerWindow.isSimpleFullScreen();
+        let px: number, py: number;
+        if (isFS) {
+          // Anchor to upper-right of the display so the popup is reachable.
+          px = bounds.x + bounds.width - 400;
+          py = bounds.y + 40;
+        } else {
+          const ob = ownerWindow.getBounds();
+          px = Math.min(ob.x + ob.width - 395, bounds.x + bounds.width - 400);
+          py = ob.y + 72;
+        }
+        popupWin.setPosition(px, py);
+
+        extensionPopupsByProjectId.set(popupKey, popupWin);
+        // Hide-before-close: prevents the white flash that occurs when Electron's
+        // WebContents clears itself just before the native window animation runs.
+        // hide() is instant (no flash), then destroy() cleans up after a tick.
+        popupWin.on("close", (e) => {
+          if (!popupWin.isDestroyed()) {
+            e.preventDefault();
+            popupWin.hide();
+            setImmediate(() => {
+              if (!popupWin.isDestroyed()) popupWin.destroy();
+            });
+          }
+        });
+        popupWin.on("closed", () => {
+          extensionPopupsByProjectId.delete(popupKey);
+          pendingPopupCancels.delete(popupKey);
+        });
+
+        await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
+        popupWin.show();
       } else {
-        url = popupPath
-          ? `chrome-extension://${extensionId}/${popupPath}`
-          : `chrome-extension://${extensionId}/home.html`;
+        // No action popup defined — open home.html or extension root in a tab.
+        const fallback = `chrome-extension://${extensionId}/home.html`;
+        openNewBrowserTab(project, fallback);
       }
-      openNewBrowserTab(project, url);
     },
   );
 
@@ -4205,6 +4415,11 @@ app.on("before-quit", () => {
   stopBackend();
   stopBrowserCdpBrokerServer();
   restoreStdIoCapture?.();
+  // Close all open extension popups so they don't block app quit.
+  for (const win of extensionPopupsByProjectId.values()) {
+    if (!win.isDestroyed()) win.destroy();
+  }
+  extensionPopupsByProjectId.clear();
 });
 
 app

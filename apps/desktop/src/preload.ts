@@ -35,6 +35,7 @@ const BROWSER_POPOUT_CLOSE_CHANNEL = "browser:popout-close";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
 const BROWSER_LIST_EXTENSIONS_CHANNEL = "browser:listExtensions";
 const BROWSER_OPEN_EXTENSION_CHANNEL = "browser:openExtension";
+const BROWSER_EXTENSIONS_CHANGED_CHANNEL = "browser:extensionsChanged";
 const OVERLAY_ACQUIRE_CHANNEL = "overlay:acquire";
 const OVERLAY_RELEASE_CHANNEL = "overlay:release";
 const OVERLAY_RENDER_CHANNEL = "overlay:render";
@@ -131,6 +132,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     listExtensions: (projectId) => ipcRenderer.invoke(BROWSER_LIST_EXTENSIONS_CHANNEL, projectId),
     openExtension: (projectId, extensionId) =>
       ipcRenderer.invoke(BROWSER_OPEN_EXTENSION_CHANNEL, projectId, extensionId),
+    onExtensionsChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, changedProjectId: unknown) => {
+        if (typeof changedProjectId === "string") listener(changedProjectId);
+      };
+      ipcRenderer.on(BROWSER_EXTENSIONS_CHANGED_CHANNEL, wrapped);
+      return () => {
+        ipcRenderer.removeListener(BROWSER_EXTENSIONS_CHANGED_CHANNEL, wrapped);
+      };
+    },
     onTabsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
         if (typeof payload !== "object" || payload === null) return;

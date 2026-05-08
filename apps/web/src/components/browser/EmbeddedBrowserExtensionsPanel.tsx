@@ -36,65 +36,61 @@ function parseExtensionsParam(raw: unknown): BrowserExtensionInfo[] {
 function ExtensionIcon({ ext, onClick }: { ext: BrowserExtensionInfo; onClick: () => void }) {
   const [imgError, setImgError] = useState(false);
 
+  // Pure CSS label — no JS tooltip so focus-on-open can't trigger it spuriously.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            onClick={onClick}
-            className={cn(
-              "group relative flex size-9 shrink-0 items-center justify-center",
-              "rounded-lg border border-transparent transition-all duration-150",
-              "hover:border-border hover:bg-accent",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            )}
-          >
-            {ext.iconUrl && !imgError ? (
-              <img
-                src={ext.iconUrl}
-                alt={ext.name}
-                className="size-6 rounded-md object-contain"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <div className="flex size-6 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <PuzzleIcon className="size-3.5" />
-              </div>
-            )}
-          </button>
-        }
-      />
-      <TooltipPopup side="bottom" className="max-w-36 truncate text-xs">
+    <div className="group relative flex flex-col items-center">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onClick}
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center",
+          "rounded-lg border border-transparent transition-all duration-150",
+          "hover:border-border hover:bg-accent",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        {ext.iconUrl && !imgError ? (
+          <img
+            src={ext.iconUrl}
+            alt={ext.name}
+            className="size-6 rounded-md object-contain"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="flex size-6 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <PuzzleIcon className="size-3.5" />
+          </div>
+        )}
+      </button>
+      {/* Name fades in on pointer-hover only — immune to focus events */}
+      <span className="pointer-events-none absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-popover-foreground opacity-0 shadow transition-opacity delay-500 group-hover:opacity-100 max-w-20 truncate">
         {ext.name}
-      </TooltipPopup>
-    </Tooltip>
+      </span>
+    </div>
   );
 }
 
 function AddExtensionButton({ onClick }: { onClick: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            onClick={onClick}
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center",
-              "rounded-lg border border-dashed border-border/60 transition-all duration-150",
-              "text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            )}
-          >
-            <PlusIcon className="size-4" />
-          </button>
-        }
-      />
-      <TooltipPopup side="bottom" className="text-xs">
+    <div className="group relative flex flex-col items-center">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onClick}
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center",
+          "rounded-lg border border-dashed border-border/60 transition-all duration-150",
+          "text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        <PlusIcon className="size-4" />
+      </button>
+      <span className="pointer-events-none absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-popover-foreground opacity-0 shadow transition-opacity delay-500 group-hover:opacity-100">
         Browse Web Store
-      </TooltipPopup>
-    </Tooltip>
+      </span>
+    </div>
   );
 }
 
@@ -110,7 +106,7 @@ function ExtensionsPanelContent({
   onOpenWebStore: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="flex flex-col gap-3 p-3 pb-6">
       <p className="px-0.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
         Extensions
       </p>
@@ -139,28 +135,50 @@ function ExtensionsPanelContent({
 // Main renderer trigger — shown when the WebContentsView is NOT occludes
 // ---------------------------------------------------------------------------
 
+// Module-level cache keyed by projectId — persists across component remounts
+// so the panel shows instantly on second open instead of re-fetching from disk.
+const extensionCache = new Map<string, BrowserExtensionInfo[]>();
+
 export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: string }) {
   const bridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
 
-  const [extensions, setExtensions] = useState<BrowserExtensionInfo[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [extensions, setExtensions] = useState<BrowserExtensionInfo[]>(
+    () => extensionCache.get(projectId) ?? [],
+  );
+  const [loading, setLoading] = useState(() => !extensionCache.has(projectId));
 
   // Fetch in the main renderer (which has desktopBridge). The overlay renderer
   // uses overlay-preload.js and has no desktopBridge, so it can't call IPC —
   // data reaches the overlay via params instead.
-  const refresh = useCallback(() => {
-    if (!bridge) return;
-    setLoading(true);
-    void bridge.listExtensions(projectId).then((exts) => {
-      setExtensions(exts);
-      setLoading(false);
-    });
-  }, [bridge, projectId]);
+  const refresh = useCallback(
+    (force = false) => {
+      if (!bridge) return;
+      if (!force && extensionCache.has(projectId)) return; // serve from cache
+      setLoading(true);
+      void bridge.listExtensions(projectId).then((exts) => {
+        extensionCache.set(projectId, exts);
+        setExtensions(exts);
+        setLoading(false);
+      });
+    },
+    [bridge, projectId],
+  );
 
-  // Pre-fetch on mount so data is ready when the panel first opens.
+  // Load once on mount (no-op if already cached).
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Listen for the main process notifying that the extension list changed
+  // (e.g. after reloadPersistedExtensions completes on startup, or after install).
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.onExtensionsChanged((changedProjectId) => {
+      if (changedProjectId !== projectId) return;
+      extensionCache.delete(projectId); // invalidate so next refresh re-fetches
+      refresh();
+    });
+  }, [bridge, projectId, refresh]);
 
   const route = useRoutedPopoverSurface<HTMLButtonElement, { kind: string; extensionId?: string }>({
     routeKey: EXTENSIONS_PANEL_OVERLAY_ROUTE_KEY,
@@ -181,9 +199,9 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
     },
   });
 
-  // Refresh when the panel is opened (picks up newly installed extensions).
+  // Force-refresh when the panel opens to pick up newly installed extensions.
   useEffect(() => {
-    if (route.domOpen) refresh();
+    if (route.domOpen) refresh(true);
   }, [route.domOpen, refresh]);
 
   return (
