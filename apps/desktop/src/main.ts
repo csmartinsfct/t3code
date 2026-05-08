@@ -2927,17 +2927,6 @@ function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtension
       }
       notifWin.show();
 
-      // Hide-then-destroy to avoid white flash on close.
-      notifWin.on("close", (e) => {
-        if (!notifWin.isDestroyed()) {
-          e.preventDefault();
-          notifWin.hide();
-          setImmediate(() => {
-            if (!notifWin.isDestroyed()) notifWin.destroy();
-          });
-        }
-      });
-
       // Register in the unified popup registry so agents can target this window
       // via ext_switch. Extract extension ID from the resolved chrome-extension:// URL.
       const extIdMatch = url ? /chrome-extension:\/\/([^/]+)/.exec(url) : null;
@@ -4268,18 +4257,6 @@ function registerIpcHandlers(): void {
         // Register in the unified popup registry (tracks both action popups and
         // notification windows, auto-clears activeExtensionPopupKey on close).
         registerExtensionPopup(project.projectId, extensionId, popupWin);
-        // Hide-before-close: prevents the white flash that occurs when Electron's
-        // WebContents clears itself just before the native window animation runs.
-        // hide() is instant (no flash), then destroy() cleans up after a tick.
-        popupWin.on("close", (e) => {
-          if (!popupWin.isDestroyed()) {
-            e.preventDefault();
-            popupWin.hide();
-            setImmediate(() => {
-              if (!popupWin.isDestroyed()) popupWin.destroy();
-            });
-          }
-        });
 
         await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
         popupWin.show();
