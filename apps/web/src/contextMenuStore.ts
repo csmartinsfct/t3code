@@ -1,18 +1,8 @@
-import type { ContextMenuItem, OverlayMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import { registerEmbeddedBrowserOverlay } from "./embeddedBrowserModalSuspension";
-import { openNativeOverlay, shouldUseNativeOverlay } from "./nativeOverlayBridge";
-
-function toOverlayMenuItems(items: readonly ContextMenuItem<string>[]): OverlayMenuItem[] {
-  return items.map((item) => ({
-    id: item.id,
-    label: item.label,
-    destructive: item.destructive,
-    disabled: item.disabled,
-    children: item.children ? toOverlayMenuItems(item.children) : undefined,
-  }));
-}
+import { openNativeOverlayRoute, shouldUseNativeOverlay } from "./nativeOverlayBridge";
 
 interface ContextMenuState {
   open: boolean;
@@ -53,25 +43,32 @@ export const useContextMenuStore = create<ContextMenuState & ContextMenuActions>
     // Native overlay path: render in a transparent WebContentsView positioned
     // above the embedded Chromium browser. No suspension required.
     if (shouldUseNativeOverlay()) {
-      return openNativeOverlay<T | null>(
+      return openNativeOverlayRoute<T | null>(
         {
-          type: "context-menu",
-          anchor: { x: position?.x ?? 0, y: position?.y ?? 0, width: 0, height: 0 },
-          items: toOverlayMenuItems(items as readonly ContextMenuItem<string>[]),
+          routeKey: "context-menu",
+          params: {
+            items: items as readonly ContextMenuItem<string>[],
+          },
+          presentation: {
+            kind: "menu",
+            anchor: { x: position?.x ?? 0, y: position?.y ?? 0, width: 0, height: 0 },
+            side: "bottom",
+            align: "start",
+          },
         },
         {
-          dismissValue: null,
-          resolveEvent: (type, payload) => {
-            if (type !== "select") return null;
-            return { value: ((payload as { id?: string })?.id ?? null) as T | null };
-          },
+          dismissValue: { status: "cancelled", reason: "dismissed" },
         },
       ).then((session) => {
         if (!session) {
           // Fallback to suspension path if acquire failed.
           return suspensionShow<T>(items, position, set);
         }
-        return session.result;
+        return session.result.then((result) => {
+          if (result.status === "submitted") return result.value;
+          if (result.status === "error") return suspensionShow<T>(items, position, set);
+          return null;
+        });
       });
     }
 

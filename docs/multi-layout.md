@@ -107,6 +107,7 @@ The right chat panel uses a second `SidebarProvider` nested inside the outer one
 - The inner wrapper overrides `className` with `w-auto min-h-0 flex-none` so it sizes to content rather than filling the viewport.
 - Each sidebar has its own `storageKey` for persisted width (`chat_thread_sidebar_width` vs `management_chat_sidebar_width`).
 - CSS custom properties (`--sidebar-width`) are scoped to each wrapper via inline styles, so they don't conflict.
+- Board mode binds platform `Mod+L` (`Cmd+L` on macOS, `Ctrl+L` elsewhere) to the right chat sidebar only. Do not route this through the global keybinding table. When focus is inside the native embedded browser `WebContentsView`, Electron main forwards the shortcut back to the React shell because browser key events do not bubble into React.
 
 ### Resize Guard
 

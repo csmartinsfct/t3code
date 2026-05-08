@@ -1,7 +1,6 @@
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
-  OverlayMenuItem,
   OverlayAnchorRect,
   GitStackedAction,
   GitStatusResult,
@@ -17,6 +16,7 @@ import {
   buildMultiRepoMenuItems,
   type GitActionIconName,
   type GitActionMenuItem,
+  type MultiRepoMenuResult,
   type GitQuickAction,
   type DefaultBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
@@ -58,10 +58,13 @@ import { readNativeApi } from "~/nativeApi";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import {
   OverlayRouteDialog,
+  OverlayRouteMenu,
+  OverlayRouteMenuPopup,
   OverlayRoutePopover,
   OverlayRoutePopoverPopup,
   useRoutedOverlaySurface,
 } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { useStore } from "~/store";
 
 interface GitActionsControlProps {
@@ -197,6 +200,7 @@ const COMMIT_DIALOG_DESCRIPTION =
   "Review and confirm your commit. Leave the message blank to auto-generate one.";
 const GIT_COMMIT_OVERLAY_ROUTE_KEY = "git-commit-dialog";
 const GIT_DEFAULT_BRANCH_OVERLAY_ROUTE_KEY = "git-default-branch-confirm";
+const GIT_ACTIONS_MENU_OVERLAY_ROUTE_KEY = "git-actions-menu";
 const GIT_TOOLTIP_OVERLAY_ROUTE_KEY = "git-tooltip";
 const ZERO_OVERLAY_ANCHOR: OverlayAnchorRect = { x: 0, y: 0, width: 0, height: 0 };
 
@@ -222,16 +226,29 @@ interface GitDefaultBranchDialogParams {
   continueLabel: string;
 }
 
+interface GitActionsMenuRouteParams {
+  gitStatus: GitStatusResult | null;
+  hasOriginRemote: boolean;
+  isBusy: boolean;
+  isMultiRepo: boolean;
+  items: readonly GitActionMenuItem[];
+  multiRepoMenu: MultiRepoMenuResult | null;
+  statusByRepoEntries: readonly (readonly [string, GitStatusResult])[];
+}
+
+interface GitActionsMenuResult {
+  item: GitActionMenuItem;
+}
+
+type GitActionsMenuContentProps = Omit<GitActionsMenuRouteParams, "statusByRepoEntries"> & {
+  onSelect: (item: GitActionMenuItem) => void;
+  statusByRepoCwd: ReadonlyMap<string, GitStatusResult>;
+};
+
 function GitActionItemIcon({ icon }: { icon: GitActionIconName }) {
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
   return <GitHubIcon />;
-}
-
-function gitActionOverlayIcon(icon: GitActionIconName): string {
-  if (icon === "commit") return "GitCommit";
-  if (icon === "push") return "CloudUpload";
-  return "Github";
 }
 
 function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
@@ -247,6 +264,109 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
   }
   if (quickAction.label === "Commit") return <GitCommitIcon className={iconClassName} />;
   return <InfoIcon className={iconClassName} />;
+}
+
+function GitActionsMenuContent({
+  gitStatus,
+  hasOriginRemote,
+  isBusy,
+  isMultiRepo,
+  items,
+  multiRepoMenu,
+  onSelect,
+  statusByRepoCwd,
+}: GitActionsMenuContentProps) {
+  return (
+    <>
+      {items.map((item) => {
+        const disabledReason = getMenuActionDisabledReason({
+          item,
+          gitStatus,
+          isBusy,
+          hasOriginRemote,
+        });
+        if (item.disabled && disabledReason) {
+          return (
+            <Popover key={`${item.id}-${item.label}`}>
+              <PopoverTrigger
+                openOnHover
+                nativeButton={false}
+                render={<span className="block w-max cursor-not-allowed" />}
+              >
+                <MenuItem className="w-full" disabled>
+                  <GitActionItemIcon icon={item.icon} />
+                  {item.label}
+                </MenuItem>
+              </PopoverTrigger>
+              <PopoverPopup tooltipStyle side="left" align="center">
+                {disabledReason}
+              </PopoverPopup>
+            </Popover>
+          );
+        }
+
+        return (
+          <MenuItem
+            key={`${item.id}-${item.label}`}
+            disabled={item.disabled}
+            onClick={() => {
+              onSelect(item);
+            }}
+          >
+            <GitActionItemIcon icon={item.icon} />
+            {item.label}
+          </MenuItem>
+        );
+      })}
+      {!isMultiRepo && gitStatus?.branch === null && (
+        <p className="px-2 py-1.5 text-xs text-warning">
+          Detached HEAD: create and checkout a branch to enable push and PR actions.
+        </p>
+      )}
+      {!isMultiRepo &&
+        gitStatus &&
+        gitStatus.branch !== null &&
+        !gitStatus.hasWorkingTreeChanges &&
+        gitStatus.behindCount > 0 &&
+        gitStatus.aheadCount === 0 && (
+          <p className="px-2 py-1.5 text-xs text-warning">Behind upstream. Pull/rebase first.</p>
+        )}
+      {isMultiRepo && multiRepoMenu && multiRepoMenu.repoSections.length > 0 && (
+        <>
+          <MenuSeparator />
+          {multiRepoMenu.repoSections.map((section) => {
+            const repoStatus = statusByRepoCwd.get(section.repo.cwd) ?? null;
+            const hasChanges = repoStatus?.hasWorkingTreeChanges ?? false;
+            return (
+              <div key={section.repo.cwd}>
+                <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5">
+                  {hasChanges && (
+                    <span className="inline-block size-1.5 shrink-0 rounded-full bg-amber-500" />
+                  )}
+                  <span className="truncate text-[11px] font-medium text-muted-foreground">
+                    {section.repo.label}
+                  </span>
+                </div>
+                {section.items.map((item) => (
+                  <MenuItem
+                    key={`${section.repo.cwd}-${item.id}`}
+                    disabled={item.disabled}
+                    className="pl-5 text-xs"
+                    onClick={() => {
+                      onSelect(item);
+                    }}
+                  >
+                    <GitActionItemIcon icon={item.icon} />
+                    {item.label}
+                  </MenuItem>
+                ))}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </>
+  );
 }
 
 function GitCommitDialogContent({
@@ -1126,83 +1246,30 @@ export default function GitActionsControl({
     enabled: quickActionTooltipAnchor !== null,
   });
 
-  const gitOverlayItems = useMemo<OverlayMenuItem[]>(() => {
-    const items: OverlayMenuItem[] = gitActionMenuItems.map((item) => {
-      return {
-        id: `single:${item.id}`,
-        label: item.label,
-        icon: gitActionOverlayIcon(item.icon),
-        // Keep visual parity with the DOM menu: disabled reasons are hover
-        // tooltips there, not inline menu descriptions.
-        disabled: item.disabled,
-      };
-    });
-
-    if (!isMultiRepo && gitStatusForActions?.branch === null) {
-      items.push({
-        id: "hint:detached-head",
-        label: "Detached HEAD: create and checkout a branch to enable push and PR actions.",
-        labelOnly: true,
-      });
-    }
-
-    if (
-      !isMultiRepo &&
-      gitStatusForActions &&
-      gitStatusForActions.branch !== null &&
-      !gitStatusForActions.hasWorkingTreeChanges &&
-      gitStatusForActions.behindCount > 0 &&
-      gitStatusForActions.aheadCount === 0
-    ) {
-      items.push({
-        id: "hint:behind-upstream",
-        label: "Behind upstream. Pull/rebase first.",
-        labelOnly: true,
-      });
-    }
-
-    if (isMultiRepo && multiRepoMenu && multiRepoMenu.repoSections.length > 0) {
-      items.push({ id: "separator:repos", label: "", separator: true });
-      multiRepoMenu.repoSections.forEach((section, sectionIndex) => {
-        const repoStatus = statusByRepoCwd.get(section.repo.cwd) ?? null;
-        items.push({
-          id: `repo-label:${sectionIndex}`,
-          label: section.repo.label,
-          labelOnly: true,
-          ...(repoStatus?.hasWorkingTreeChanges ? { badge: "changes" } : {}),
-        });
-        section.items.forEach((item) => {
-          items.push({
-            id: `repo:${sectionIndex}:${item.id}`,
-            label: item.label,
-            icon: gitActionOverlayIcon(item.icon),
-            iconClassName: "size-4",
-            disabled: item.disabled,
-          });
-        });
-      });
-    }
-
-    return items;
-  }, [gitActionMenuItems, gitStatusForActions, isMultiRepo, multiRepoMenu, statusByRepoCwd]);
-
-  const handleGitOverlaySelect = useCallback(
-    (id: string) => {
-      if (id.startsWith("single:")) {
-        const item = gitActionMenuItems.find((entry) => entry.id === id.slice("single:".length));
-        if (item) openDialogForMenuItem(item);
-        return;
-      }
-      if (id.startsWith("repo:") && multiRepoMenu) {
-        const [, sectionIndexText, itemId] = id.split(":");
-        const sectionIndex = Number(sectionIndexText);
-        const item = Number.isInteger(sectionIndex)
-          ? multiRepoMenu.repoSections[sectionIndex]?.items.find((entry) => entry.id === itemId)
-          : undefined;
-        if (item) openDialogForMenuItem(item);
-      }
+  const gitMenuRoute = useRoutedPopoverSurface<HTMLButtonElement, GitActionsMenuResult>({
+    routeKey: GIT_ACTIONS_MENU_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    params: {
+      gitStatus: gitStatusForActions,
+      hasOriginRemote,
+      isBusy: isGitActionRunning,
+      isMultiRepo,
+      items: gitActionMenuItems,
+      multiRepoMenu,
+      statusByRepoEntries: [...statusByRepoCwd.entries()],
+    } satisfies GitActionsMenuRouteParams,
+    onResult: (result) => {
+      openDialogForMenuItem(result.item);
     },
-    [gitActionMenuItems, multiRepoMenu, openDialogForMenuItem],
+  });
+
+  const handleGitMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) void invalidateGitStatusQuery(queryClient, gitCwd);
+      gitMenuRoute.onOpenChange(open);
+    },
+    [gitCwd, gitMenuRoute, queryClient],
   );
 
   if (!gitCwd) return null;
@@ -1265,110 +1332,33 @@ export default function GitActionsControl({
             </Button>
           )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />
-          <Menu
-            overlayItems={gitOverlayItems}
-            overlayMenuAlign="end"
-            overlayOnSelect={handleGitOverlaySelect}
-            onOpenChange={(open) => {
-              if (open) void invalidateGitStatusQuery(queryClient, gitCwd);
-            }}
-          >
+          <Menu open={gitMenuRoute.domOpen} onOpenChange={handleGitMenuOpenChange}>
             <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+              render={
+                <Button
+                  aria-label="Git action options"
+                  onFocusCapture={gitMenuRoute.updateAnchor}
+                  onMouseOverCapture={gitMenuRoute.updateAnchor}
+                  ref={gitMenuRoute.triggerRef}
+                  size="icon-xs"
+                  variant="outline"
+                />
+              }
               disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end" className="w-full max-h-80 overflow-y-auto">
-              {gitActionMenuItems.map((item) => {
-                const disabledReason = getMenuActionDisabledReason({
-                  item,
-                  gitStatus: gitStatusForActions,
-                  isBusy: isGitActionRunning,
-                  hasOriginRemote,
-                });
-                if (item.disabled && disabledReason) {
-                  return (
-                    <Popover key={`${item.id}-${item.label}`}>
-                      <PopoverTrigger
-                        openOnHover
-                        nativeButton={false}
-                        render={<span className="block w-max cursor-not-allowed" />}
-                      >
-                        <MenuItem className="w-full" disabled>
-                          <GitActionItemIcon icon={item.icon} />
-                          {item.label}
-                        </MenuItem>
-                      </PopoverTrigger>
-                      <PopoverPopup tooltipStyle side="left" align="center">
-                        {disabledReason}
-                      </PopoverPopup>
-                    </Popover>
-                  );
-                }
-
-                return (
-                  <MenuItem
-                    key={`${item.id}-${item.label}`}
-                    disabled={item.disabled}
-                    onClick={() => {
-                      openDialogForMenuItem(item);
-                    }}
-                  >
-                    <GitActionItemIcon icon={item.icon} />
-                    {item.label}
-                  </MenuItem>
-                );
-              })}
-              {!isMultiRepo && gitStatusForActions?.branch === null && (
-                <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a branch to enable push and PR actions.
-                </p>
-              )}
-              {!isMultiRepo &&
-                gitStatusForActions &&
-                gitStatusForActions.branch !== null &&
-                !gitStatusForActions.hasWorkingTreeChanges &&
-                gitStatusForActions.behindCount > 0 &&
-                gitStatusForActions.aheadCount === 0 && (
-                  <p className="px-2 py-1.5 text-xs text-warning">
-                    Behind upstream. Pull/rebase first.
-                  </p>
-                )}
-              {isMultiRepo && multiRepoMenu && multiRepoMenu.repoSections.length > 0 && (
-                <>
-                  <MenuSeparator />
-                  {multiRepoMenu.repoSections.map((section) => {
-                    const repoStatus = statusByRepoCwd.get(section.repo.cwd) ?? null;
-                    const hasChanges = repoStatus?.hasWorkingTreeChanges ?? false;
-                    return (
-                      <div key={section.repo.cwd}>
-                        <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5">
-                          {hasChanges && (
-                            <span className="inline-block size-1.5 shrink-0 rounded-full bg-amber-500" />
-                          )}
-                          <span className="truncate text-[11px] font-medium text-muted-foreground">
-                            {section.repo.label}
-                          </span>
-                        </div>
-                        {section.items.map((item) => (
-                          <MenuItem
-                            key={`${section.repo.cwd}-${item.id}`}
-                            disabled={item.disabled}
-                            className="pl-5 text-xs"
-                            onClick={() => {
-                              openDialogForMenuItem(item);
-                            }}
-                          >
-                            <GitActionItemIcon icon={item.icon} />
-                            {item.label}
-                          </MenuItem>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </>
-              )}
+              <GitActionsMenuContent
+                gitStatus={gitStatusForActions}
+                hasOriginRemote={hasOriginRemote}
+                isBusy={isGitActionRunning}
+                isMultiRepo={isMultiRepo}
+                items={gitActionMenuItems}
+                multiRepoMenu={multiRepoMenu}
+                onSelect={openDialogForMenuItem}
+                statusByRepoCwd={statusByRepoCwd}
+              />
             </MenuPopup>
           </Menu>
         </Group>
@@ -1479,6 +1469,97 @@ registerOverlayRoute<{
     </OverlayRoutePopover>
   );
 });
+
+registerOverlayRoute<{
+  gitStatus?: unknown;
+  hasOriginRemote?: unknown;
+  isBusy?: unknown;
+  isMultiRepo?: unknown;
+  items?: unknown;
+  multiRepoMenu?: unknown;
+  statusByRepoEntries?: unknown;
+}>(
+  GIT_ACTIONS_MENU_OVERLAY_ROUTE_KEY,
+  function GitActionsMenuOverlayRoute({ message, controller }) {
+    const params = readGitActionsMenuParams(message.params);
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="end" className="w-full max-h-80 overflow-y-auto">
+          <GitActionsMenuContent
+            {...params}
+            onSelect={(item) => controller.submit({ item })}
+            statusByRepoCwd={new Map(params.statusByRepoEntries)}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);
+
+function readGitActionsMenuParams(params: Record<string, unknown>): GitActionsMenuRouteParams {
+  return {
+    gitStatus: readGitStatusParam(params.gitStatus),
+    hasOriginRemote: params.hasOriginRemote === true,
+    isBusy: params.isBusy === true,
+    isMultiRepo: params.isMultiRepo === true,
+    items: readGitActionMenuItemsParam(params.items),
+    multiRepoMenu: readMultiRepoMenuParam(params.multiRepoMenu),
+    statusByRepoEntries: readGitStatusEntriesParam(params.statusByRepoEntries),
+  };
+}
+
+function readGitStatusParam(value: unknown): GitStatusResult | null {
+  if (!value || typeof value !== "object") return null;
+  return value as GitStatusResult;
+}
+
+function readGitActionMenuItemsParam(value: unknown): GitActionMenuItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Partial<GitActionMenuItem>;
+    if (
+      (item.id !== "commit" && item.id !== "push" && item.id !== "pr") ||
+      typeof item.label !== "string" ||
+      typeof item.disabled !== "boolean" ||
+      (item.icon !== "commit" && item.icon !== "push" && item.icon !== "pr") ||
+      (item.kind !== "open_dialog" && item.kind !== "open_pr")
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: item.id,
+        label: item.label,
+        disabled: item.disabled,
+        icon: item.icon,
+        kind: item.kind,
+        ...(item.dialogAction === "commit" ||
+        item.dialogAction === "push" ||
+        item.dialogAction === "create_pr"
+          ? { dialogAction: item.dialogAction }
+          : {}),
+      },
+    ];
+  });
+}
+
+function readMultiRepoMenuParam(value: unknown): MultiRepoMenuResult | null {
+  if (!value || typeof value !== "object") return null;
+  const menu = value as { bulkItems?: unknown; repoSections?: unknown };
+  if (!Array.isArray(menu.bulkItems) || !Array.isArray(menu.repoSections)) return null;
+  return value as MultiRepoMenuResult;
+}
+
+function readGitStatusEntriesParam(value: unknown): Array<readonly [string, GitStatusResult]> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") return [];
+    const status = readGitStatusParam(entry[1]);
+    return status ? ([[entry[0], status]] as Array<readonly [string, GitStatusResult]>) : [];
+  });
+}
 
 function readGitCommitDialogParams(params: Record<string, unknown>): GitCommitDialogParams {
   return {

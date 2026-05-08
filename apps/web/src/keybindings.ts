@@ -21,6 +21,7 @@ export interface ShortcutEventLike {
 export interface ShortcutMatchContext {
   terminalFocus: boolean;
   terminalOpen: boolean;
+  fileExplorerOpen: boolean;
   [key: string]: boolean;
 }
 
@@ -102,6 +103,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
   return {
     terminalFocus: false,
     terminalOpen: false,
+    fileExplorerOpen: false,
     ...options?.context,
   };
 }

@@ -101,6 +101,11 @@ const DEFAULT_BINDINGS = compile([
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
+  {
+    shortcut: modShortcut("s"),
+    command: "sidebar.toggle",
+    whenAst: whenNot(whenIdentifier("fileExplorerOpen")),
+  },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
@@ -393,6 +398,22 @@ describe("chat/editor shortcuts", () => {
       isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { terminalFocus: true },
+      }),
+    );
+  });
+
+  it("matches sidebar.toggle only while the file explorer is closed", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "s", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { fileExplorerOpen: false },
+      }),
+      "sidebar.toggle",
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "s", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { fileExplorerOpen: true },
       }),
     );
   });

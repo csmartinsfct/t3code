@@ -4,19 +4,7 @@ import { Autocomplete as AutocompletePrimitive } from "@base-ui/react/autocomple
 import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
-import type {
-  OverlayAnchorRect,
-  OverlayAutocompleteMessage,
-  OverlayComboboxItem,
-} from "@t3tools/contracts";
-
 import { useTrackedOverlayOpen } from "~/embeddedBrowserModalSuspension";
-import {
-  acquireNativeOverlay,
-  getElementOverlayAnchor,
-  trackNativeOverlayAnchor,
-  useNativeOverlayActive,
-} from "~/nativeOverlayBridge";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -25,52 +13,8 @@ const AutocompleteRoot = AutocompletePrimitive.Root as <ItemValue>(
   props: AutocompletePrimitive.Root.Props<ItemValue>,
 ) => React.ReactElement | null;
 
-type AutocompleteInputSize = "sm" | "default" | "lg";
-type AutocompleteOpenDetails = Parameters<
-  NonNullable<AutocompletePrimitive.Root.Props<unknown>["onOpenChange"]>
->[1];
-type AutocompleteValueChangeDetails = Parameters<
-  NonNullable<AutocompletePrimitive.Root.Props<unknown>["onValueChange"]>
->[1];
-
-interface NativeAutocompleteOpenOptions {
-  placeholder?: string;
-  size?: AutocompleteInputSize;
-}
-
-interface NativeAutocompleteContextValue {
-  openNative?: (anchorElement: HTMLElement, options?: NativeAutocompleteOpenOptions) => void;
-}
-
-const NativeAutocompleteContext = React.createContext<NativeAutocompleteContextValue>({});
-
-function Autocomplete<ItemValue>(
-  props: AutocompletePrimitive.Root.Props<ItemValue> & {
-    /** Opt-in: when provided AND the native overlay system is active, the
-     *  dropdown renders in a WebContentsView above the embedded browser.
-     *  This path is only for serialized row data; arbitrary CommandDialog
-     *  content remains on the DOM/Phase 2 path. */
-    overlayItems?: OverlayComboboxItem[];
-    overlayOnSearch?: (query: string) => Promise<OverlayComboboxItem[]>;
-    overlayOnSelect?: (value: string) => void;
-    overlayInputValue?: string;
-    overlayPlaceholder?: string;
-    overlayEmptyText?: string;
-    overlayStatusText?: string | null;
-    overlayAutocompleteSide?: "top" | "bottom";
-    overlayAutocompleteAlign?: "start" | "center" | "end";
-  },
-) {
+function Autocomplete<ItemValue>(props: AutocompletePrimitive.Root.Props<ItemValue>) {
   const {
-    overlayItems,
-    overlayOnSearch,
-    overlayOnSelect,
-    overlayInputValue,
-    overlayPlaceholder,
-    overlayEmptyText,
-    overlayStatusText,
-    overlayAutocompleteSide,
-    overlayAutocompleteAlign,
     open,
     defaultOpen,
     onOpenChange,
@@ -79,176 +23,25 @@ function Autocomplete<ItemValue>(
     defaultValue,
     ...rest
   } = props;
-  const nativeActive = useNativeOverlayActive();
-  const [nativeAcquireFailed, setNativeAcquireFailed] = React.useState(false);
-  const nativeHandleRef = React.useRef<Awaited<ReturnType<typeof acquireNativeOverlay>> | null>(
-    null,
-  );
-  const nativeOpeningRef = React.useRef(false);
-  const useNative = nativeActive && overlayItems !== undefined && !nativeAcquireFailed;
-
-  const releaseNative = React.useCallback(() => {
-    nativeOpeningRef.current = false;
-    nativeHandleRef.current?.release();
-    nativeHandleRef.current = null;
-  }, []);
-
-  React.useEffect(() => releaseNative, [releaseNative]);
-
-  const openNative = React.useCallback(
-    (anchorElement: HTMLElement, options: NativeAutocompleteOpenOptions = {}) => {
-      if (!overlayItems || nativeHandleRef.current || nativeOpeningRef.current) return;
-      nativeOpeningRef.current = true;
-
-      const initialValue = String(overlayInputValue ?? rootValue ?? defaultValue ?? "");
-      const makeMessage = (
-        anchor: OverlayAnchorRect,
-        items: OverlayComboboxItem[],
-        value: string,
-      ): OverlayAutocompleteMessage => ({
-        type: "autocomplete",
-        anchor,
-        items,
-        value,
-        ...((options.placeholder ?? overlayPlaceholder)
-          ? { placeholder: options.placeholder ?? overlayPlaceholder }
-          : {}),
-        ...(overlayEmptyText !== undefined ? { emptyText: overlayEmptyText } : {}),
-        ...(overlayStatusText ? { statusText: overlayStatusText } : {}),
-        ...(options.size ? { inputSize: options.size } : {}),
-        ...(overlayAutocompleteSide !== undefined ? { side: overlayAutocompleteSide } : {}),
-        ...(overlayAutocompleteAlign !== undefined ? { align: overlayAutocompleteAlign } : {}),
-      });
-
-      const initialAnchor = getElementOverlayAnchor(anchorElement);
-      if (!initialAnchor) {
-        nativeOpeningRef.current = false;
-        return;
-      }
-
-      void acquireNativeOverlay(makeMessage(initialAnchor, overlayItems, initialValue)).then(
-        (handle) => {
-          nativeOpeningRef.current = false;
-          if (!handle) {
-            setNativeAcquireFailed(true);
-            onOpenChange?.(true, {} as AutocompleteOpenDetails);
-            return;
-          }
-
-          nativeHandleRef.current = handle;
-          onOpenChange?.(true, {} as AutocompleteOpenDetails);
-          let searchVersion = 0;
-          let currentItems = overlayItems;
-          let currentValue = initialValue;
-          const stopTracking = trackNativeOverlayAnchor(
-            handle,
-            () => getElementOverlayAnchor(anchorElement),
-            (anchor) => makeMessage(anchor, currentItems, currentValue),
-            anchorElement,
-          );
-
-          handle.onEvent((type, payload) => {
-            if (type === "search") {
-              const query = String((payload as { query?: unknown })?.query ?? "");
-              currentValue = query;
-              onValueChange?.(query, { reason: "input-change" } as AutocompleteValueChangeDetails);
-              const version = ++searchVersion;
-              void (
-                overlayOnSearch
-                  ? overlayOnSearch(query)
-                  : Promise.resolve(
-                      overlayItems.filter((item) =>
-                        item.label.toLowerCase().includes(query.trim().toLowerCase()),
-                      ),
-                    )
-              ).then((items) => {
-                if (version !== searchVersion || nativeHandleRef.current !== handle) return;
-                currentItems = items;
-                const anchor = getElementOverlayAnchor(anchorElement);
-                if (!anchor) {
-                  stopTracking();
-                  releaseNative();
-                  onOpenChange?.(false, {} as AutocompleteOpenDetails);
-                  return;
-                }
-                void handle.render(makeMessage(anchor, items, query));
-              });
-              return;
-            }
-
-            if (type === "select") {
-              const selectedValue = (payload as { value?: unknown })?.value;
-              if (typeof selectedValue !== "string") return;
-              const selectedItem = overlayItems.find((item) => item.value === selectedValue);
-              overlayOnSelect?.(selectedValue);
-              if (!overlayOnSelect) {
-                onValueChange?.(selectedItem?.label ?? selectedValue, {
-                  reason: "item-press",
-                } as AutocompleteValueChangeDetails);
-              }
-              stopTracking();
-              releaseNative();
-              onOpenChange?.(false, {} as AutocompleteOpenDetails);
-            }
-          });
-
-          handle.onDismiss(() => {
-            stopTracking();
-            releaseNative();
-            onOpenChange?.(false, {} as AutocompleteOpenDetails);
-          });
-        },
-      );
-    },
-    [
-      defaultValue,
-      onOpenChange,
-      onValueChange,
-      overlayAutocompleteAlign,
-      overlayAutocompleteSide,
-      overlayEmptyText,
-      overlayInputValue,
-      overlayItems,
-      overlayOnSearch,
-      overlayOnSelect,
-      overlayPlaceholder,
-      overlayStatusText,
-      releaseNative,
-      rootValue,
-    ],
-  );
 
   const handleOpenChange = useTrackedOverlayOpen({
-    open: useNative ? false : open,
-    defaultOpen: useNative ? false : defaultOpen,
-    onOpenChange: useNative
-      ? undefined
-      : (nextOpen, details) => {
-          if (!nextOpen) {
-            setNativeAcquireFailed(false);
-          }
-          onOpenChange?.(nextOpen, details as AutocompleteOpenDetails);
-        },
-    enabled: !useNative,
+    open,
+    defaultOpen,
+    onOpenChange,
+    enabled: true,
     source: "autocomplete",
   });
 
-  const nativeContext = React.useMemo<NativeAutocompleteContextValue>(
-    () => (useNative ? { openNative } : {}),
-    [openNative, useNative],
-  );
-
   return (
-    <NativeAutocompleteContext.Provider value={nativeContext}>
-      <AutocompleteRoot
-        {...rest}
-        defaultOpen={useNative ? false : defaultOpen}
-        onOpenChange={useNative ? undefined : handleOpenChange}
-        onValueChange={onValueChange}
-        open={useNative ? false : open}
-        value={rootValue}
-      />
-    </NativeAutocompleteContext.Provider>
+    <AutocompleteRoot
+      {...rest}
+      defaultOpen={defaultOpen}
+      defaultValue={defaultValue}
+      onOpenChange={handleOpenChange}
+      onValueChange={onValueChange}
+      open={open}
+      value={rootValue}
+    />
   );
 }
 
@@ -268,36 +61,7 @@ function AutocompleteInput({
   size?: "sm" | "default" | "lg" | number;
   ref?: React.Ref<HTMLInputElement>;
 }) {
-  const { openNative } = React.useContext(NativeAutocompleteContext);
   const sizeValue = (size ?? "default") as "sm" | "default" | "lg" | number;
-  const openOptions = React.useMemo<NativeAutocompleteOpenOptions>(
-    () => ({
-      ...(typeof props.placeholder === "string" ? { placeholder: props.placeholder } : {}),
-      ...(typeof sizeValue === "string" ? { size: sizeValue } : {}),
-    }),
-    [props.placeholder, sizeValue],
-  );
-  const openFromElement = React.useCallback(
-    (element: HTMLElement) => {
-      if (!openNative) return;
-      openNative(element, openOptions);
-    },
-    [openNative, openOptions],
-  );
-  const handleFocus = openNative
-    ? (event: Parameters<NonNullable<AutocompletePrimitive.Input.Props["onFocus"]>>[0]) => {
-        onFocus?.(event);
-        if (event.defaultPrevented) return;
-        openFromElement(event.currentTarget as HTMLElement);
-      }
-    : onFocus;
-  const handleClick = openNative
-    ? (event: Parameters<NonNullable<AutocompletePrimitive.Input.Props["onClick"]>>[0]) => {
-        onClick?.(event);
-        if (event.defaultPrevented) return;
-        openFromElement(event.currentTarget as HTMLElement);
-      }
-    : onClick;
 
   return (
     <div className="relative not-has-[>*.w-full]:w-fit w-full text-foreground has-disabled:opacity-64">
@@ -321,8 +85,8 @@ function AutocompleteInput({
         )}
         data-slot="autocomplete-input"
         render={<Input nativeInput size={sizeValue} />}
-        onClick={handleClick}
-        onFocus={handleFocus}
+        onClick={onClick}
+        onFocus={onFocus}
         {...props}
       />
       {showTrigger && (
@@ -515,22 +279,11 @@ function AutocompleteTrigger({
   onClick,
   ...props
 }: AutocompletePrimitive.Trigger.Props) {
-  const { openNative } = React.useContext(NativeAutocompleteContext);
-  const handleClick = openNative
-    ? (event: Parameters<NonNullable<AutocompletePrimitive.Trigger.Props["onClick"]>>[0]) => {
-        onClick?.(event);
-        if (event.defaultPrevented) return;
-        event.preventDefault();
-        event.preventBaseUIHandler();
-        openNative(event.currentTarget);
-      }
-    : onClick;
-
   return (
     <AutocompletePrimitive.Trigger
       className={className}
       data-slot="autocomplete-trigger"
-      onClick={handleClick}
+      onClick={onClick}
       {...props}
     >
       {children}

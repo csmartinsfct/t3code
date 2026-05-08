@@ -40,22 +40,18 @@ Do not remove the DOM popup/content from a callsite just because it has a native
 
 ## Choosing A Path
 
-Use the **primitive overlay** path when the popup can be represented as JSON plus discrete host callbacks:
-
-- command menus,
-- checked/radio menus,
-- grouped menus,
-- select lists,
-- branch/model pickers,
-- serialized autocomplete/typeahead rows,
-- menu-local actions whose loading/disabled state can be refreshed by re-rendering the same overlay session.
-
-Use the **routed overlay** path when exact UI parity requires arbitrary React content:
+Use the **routed overlay** path for browser-visible native overlays. The native route must share the browser-hidden DOM JSX and adapt only the transport details:
 
 - `Dialog`,
 - `AlertDialog`,
 - `Sheet`,
 - `CommandDialog`,
+- command menus,
+- checked/radio menus,
+- grouped menus,
+- select lists,
+- branch/model pickers,
+- autocomplete/typeahead pickers,
 - arbitrary-child `Popover`,
 - rich cards/menus with custom layouts,
 - forms with controlled inputs and validation,
@@ -67,25 +63,17 @@ Keep the DOM fallback for every routed surface. The native route should share th
 When a routed overlay is visually menu-like but contains arbitrary interactive content, choose the route wrapper by interaction semantics, not by appearance:
 
 - use `OverlayRouteMenu` / `OverlayRouteMenuPopup` for command-menu behavior where moving through rows, outside-click dismissal, and menu focus semantics are desired;
+- use `OverlayRouteSelect` / `OverlayRouteSelectPopup` for select controls whose DOM popup should remain the source JSX;
+- use `OverlayRouteCombobox` / `OverlayRouteComboboxPopup` for searchable pickers whose DOM input/list JSX should remain the source;
 - use `OverlayRoutePopover` / `OverlayRoutePopoverPopup` for rich cards, nested hover panels, embedded buttons, or controls that users must move into without closing the parent surface.
 
 For example, `ManagedRunsControl` keeps a normal `Menu` as its DOM fallback, but its browser-visible native route uses `OverlayRoutePopover` because service URL hover controls sit inside the active Runs surface and must remain interactive.
 
 ## Primitive Overlays
 
-Primitive overlays are serialized through `OverlayRenderMessage` and rendered by the overlay app:
+The old serialized primitive overlay path has been retired. `Menu`, `Select`, `Combobox`, and `Autocomplete` no longer accept `overlayItems`-style native-renderer props, and the overlay app no longer has generic JSON renderers for those primitives.
 
-- `Menu` supports `overlayItems`, `overlayOnSelect(id)`, and `overlayOnAction(id)`.
-- `Select` supports serialized rows, separators, icons, and `hideIndicator`.
-- `Combobox` owns the overlay search input and emits `search` events so the host can refresh JSON rows.
-- `Autocomplete` supports plain serialized result rows.
-- The chat composer `@`, `/`, and `/model` menu uses a narrow `composer-command` overlay so it can render the exact composer command menu rather than pretending to be a generic autocomplete.
-
-Primitive payloads must be JSON-serializable. Callbacks become event IDs; the overlay emits an event and the host maps it back to the real callback.
-
-The native primitive path should mirror the DOM path by reusing the same primitives, class strings, row components, or shared body components. Do not invent a visually similar but separate component.
-
-Primitive adapters that attempt native acquisition must preserve their DOM fallback state. If acquisition fails or is suppressed after a trigger click, uncontrolled primitives must update their internal open state before calling the external `onOpenChange(true)` callback, and controlled primitives must give their owner the same open-change callback. Otherwise host menus that pass `overlayItems`, including the Git and project-script header menus, can render neither the native overlay nor the DOM popup.
+Browser-visible native overlays that need to match browser-hidden DOM UI must use routed/shared-JSX overlays. The DOM popup remains the source component tree; the native route may adapt result transport, anchor positioning, and overlay dismissal, but it must not duplicate the UI as serialized rows. The only narrow non-route overlay that remains is the chat composer `composer-command` surface, which renders the same composer command menu component in the overlay view from already-derived command rows.
 
 ## Routed Overlays
 
@@ -100,6 +88,10 @@ Host callsites should use `useRoutedOverlaySurface()` from `apps/web/src/routedO
 
 Routes can emit non-dismissing events for controls that update host state while the popup remains open. The host then re-renders the same overlay session with refreshed params.
 
+Action menus that require exact parity, including the Git actions menu, project-script actions menu, sidebar sort menu, plan action menus, orchestration resume menu, orchestration thread switcher, composer implement split-button menu, context-menu API, and Kanban ticket detail actions menu, use routed menu overlays. Their DOM path and native route share a single content component; the route should only adapt transport concerns such as result submission, anchor positioning, and overlay dismissal.
+
+Searchable pickers that require exact parity should use routed combobox overlays. The branch selector uses one shared branch row/search/list component tree for both browser-hidden DOM rendering and browser-visible native rendering; the route owns only query fetching in the overlay root and submits the selected branch/create/checkout action back to the host.
+
 ## Positioning
 
 The overlay view cannot query the host DOM. The host passes a trigger/input element to `trackNativeOverlayAnchor()`, which samples `getBoundingClientRect()` while the overlay is open and re-renders when the rounded rect changes.
@@ -112,10 +104,14 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 
 - Base UI close requests must forward back to the native overlay bridge.
 - Outside click and Escape should dismiss the full-window overlay so it cannot become an invisible glass pane over the app.
+- Routed menus must use `OverlayRouteMenu`, which centralizes dismissal filtering: only explicit dismiss reasons such as outside click, Escape, or a close button cancel the route. Base UI `focus-out`, `item-press`, and hover bookkeeping must not dismiss a routed menu by themselves, because routed menu items can emit non-dismissing events while the same overlay remains open.
+- Routed selects must use `OverlayRouteSelect`, which submits selected values through the route result path and ignores Base UI `item-press` close requests as route cancellations. Outside click, Escape, and resize still dismiss the native route.
+- Routed comboboxes must use `OverlayRouteCombobox`, which follows the routed select dismissal policy. Row selection is a route result; outside click, Escape, and resize dismiss the native route.
 - Header/row action buttons should emit non-dismissing `action` events by default. Use `dismissOnAction` only when the action intentionally opens another surface or ends the interaction.
 - The host `WebContents` must be focused again after release so app shortcuts work immediately.
 - Electron clipboard actions should prefer `desktopBridge.clipboard.writeText()` because focus may still be transitioning back from the overlay `WebContents`.
 - Controlled primitives must not switch between controlled and uncontrolled `open` state when toggling between DOM and native paths.
+- Shared routed JSX can still receive different initial focus/highlight state because the native route mounts in a separate overlay React root. Visual hover affordances, such as row backgrounds or secondary action buttons, should use actual hover/pointer state unless keyboard focus is intentionally meant to look the same as hover.
 
 ## Explicit Exceptions
 

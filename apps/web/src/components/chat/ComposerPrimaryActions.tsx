@@ -3,6 +3,9 @@ import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 interface PendingActionState {
   questionIndex: number;
@@ -27,6 +30,24 @@ interface ComposerPrimaryActionsProps {
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
+}
+
+const COMPOSER_IMPLEMENT_MENU_OVERLAY_ROUTE_KEY = "composer-implement-menu";
+
+type ComposerImplementMenuResult = { action: "implement-new-thread" };
+
+function ComposerImplementMenuContent({
+  disabled,
+  onImplementPlanInNewThread,
+}: {
+  disabled: boolean;
+  onImplementPlanInNewThread: () => void;
+}) {
+  return (
+    <MenuItem disabled={disabled} onClick={() => void onImplementPlanInNewThread()}>
+      Implement in a new thread
+    </MenuItem>
+  );
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -59,6 +80,23 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onInterrupt,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
+  const implementMenuDisabled = disabled || isSendBusy || isConnecting;
+  const implementMenuRoute = useRoutedPopoverSurface<
+    HTMLButtonElement,
+    ComposerImplementMenuResult
+  >({
+    routeKey: COMPOSER_IMPLEMENT_MENU_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    side: "top",
+    params: { disabled: implementMenuDisabled },
+    onResult: (result) => {
+      if (result.action === "implement-new-thread" && !implementMenuDisabled) {
+        void onImplementPlanInNewThread();
+      }
+    },
+  });
+
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
@@ -145,34 +183,28 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
         </Button>
-        <Menu
-          overlayItems={[{ id: "implement-new-thread", label: "Implement in a new thread" }]}
-          overlayMenuAlign="end"
-          overlayMenuSide="top"
-          overlayOnSelect={(id) => {
-            if (id === "implement-new-thread") void onImplementPlanInNewThread();
-          }}
-        >
+        <Menu open={implementMenuRoute.domOpen} onOpenChange={implementMenuRoute.onOpenChange}>
           <MenuTrigger
             render={
               <Button
+                aria-label="Implementation actions"
+                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                disabled={implementMenuDisabled}
+                onFocusCapture={implementMenuRoute.updateAnchor}
+                onMouseOverCapture={implementMenuRoute.updateAnchor}
+                ref={implementMenuRoute.triggerRef}
                 size="sm"
                 variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
-                aria-label="Implementation actions"
-                disabled={disabled || isSendBusy || isConnecting}
               />
             }
           >
             <ChevronDownIcon className="size-3.5" />
           </MenuTrigger>
           <MenuPopup align="end" side="top">
-            <MenuItem
-              disabled={disabled || isSendBusy || isConnecting}
-              onClick={() => void onImplementPlanInNewThread()}
-            >
-              Implement in a new thread
-            </MenuItem>
+            <ComposerImplementMenuContent
+              disabled={implementMenuDisabled}
+              onImplementPlanInNewThread={onImplementPlanInNewThread}
+            />
           </MenuPopup>
         </Menu>
       </div>
@@ -229,3 +261,29 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </button>
   );
 });
+
+registerOverlayRoute<{
+  disabled?: unknown;
+}>(
+  COMPOSER_IMPLEMENT_MENU_OVERLAY_ROUTE_KEY,
+  function ComposerImplementMenuOverlayRoute({ message, controller }) {
+    const disabled = message.params.disabled === true;
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="end" side="top">
+          <ComposerImplementMenuContent
+            disabled={disabled}
+            onImplementPlanInNewThread={() => {
+              if (!disabled) {
+                controller.submit({
+                  action: "implement-new-thread",
+                } satisfies ComposerImplementMenuResult);
+              }
+            }}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);

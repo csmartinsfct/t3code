@@ -313,113 +313,9 @@ export interface OverlayAnchorRect {
   height: number;
 }
 
-export interface OverlayMenuItem {
-  id: string;
-  label: string;
-  icon?: string | undefined;
-  iconClassName?: string | undefined;
-  description?: string | undefined;
-  badge?: string | undefined;
-  statusTone?: "success" | "warning" | "danger" | "muted" | undefined;
-  shortcut?: string | undefined;
-  disabled?: boolean | undefined;
-  selectDisabled?: boolean | undefined;
-  destructive?: boolean | undefined;
-  separator?: boolean | undefined;
-  labelOnly?: boolean | undefined;
-  checked?: boolean | undefined;
-  actions?: OverlayMenuAction[] | undefined;
-  secondaryAction?: OverlayMenuAction | undefined;
-  children?: OverlayMenuItem[] | undefined;
-}
-
-export interface OverlayMenuAction {
-  id: string;
-  label?: string | undefined;
-  ariaLabel?: string | undefined;
-  icon?: string | undefined;
-  iconClassName?: string | undefined;
-  disabled?: boolean | undefined;
-  loading?: boolean | undefined;
-  /** Defaults to false so menu-local buttons can behave like DOM buttons that
-   * stop propagation and keep the menu open while the host refreshes state. */
-  dismissOnAction?: boolean | undefined;
-}
-
-export interface OverlaySelectItem {
-  value: string;
-  label: string;
-  icon?: string | undefined;
-  iconClassName?: string | undefined;
-  disabled?: boolean;
-  separator?: boolean;
-  hideIndicator?: boolean;
-}
-
-export interface OverlayComboboxItem {
-  value: string;
-  label: string;
-  description?: string | undefined;
-  badge?: string | undefined;
-  disabled?: boolean;
-}
-
 export interface OverlayImageItem {
   src: string;
   name: string;
-}
-
-export interface OverlayContextMenuMessage {
-  type: "context-menu";
-  anchor: OverlayAnchorRect;
-  items: readonly OverlayMenuItem[];
-}
-
-export interface OverlayMenuMessage {
-  type: "menu";
-  anchor: OverlayAnchorRect;
-  items: readonly OverlayMenuItem[];
-  side?: "top" | "bottom" | "left" | "right";
-  align?: "start" | "center" | "end";
-  highlightItemOnHover?: boolean | undefined;
-}
-
-export interface OverlaySelectMessage {
-  type: "select";
-  anchor: OverlayAnchorRect;
-  items: readonly OverlaySelectItem[];
-  value: string;
-  side?: "top" | "bottom";
-  align?: "start" | "center" | "end";
-  alignItemWithTrigger?: boolean;
-}
-
-export interface OverlayComboboxMessage {
-  type: "combobox";
-  anchor: OverlayAnchorRect;
-  items: readonly OverlayComboboxItem[];
-  value: string;
-  inputValue: string;
-  multiple: boolean;
-  selectedValues?: string[];
-  placeholder?: string | undefined;
-  emptyText?: string | undefined;
-  statusText?: string | undefined;
-  side?: "top" | "bottom";
-  align?: "start" | "center" | "end";
-}
-
-export interface OverlayAutocompleteMessage {
-  type: "autocomplete";
-  anchor: OverlayAnchorRect;
-  items: readonly OverlayComboboxItem[];
-  value: string;
-  placeholder?: string | undefined;
-  emptyText?: string | undefined;
-  statusText?: string | undefined;
-  inputSize?: "sm" | "default" | "lg" | undefined;
-  side?: "top" | "bottom";
-  align?: "start" | "center" | "end";
 }
 
 export type OverlayComposerCommandItem =
@@ -526,11 +422,6 @@ export interface OverlayCommandMessage {
 }
 
 export type OverlayRenderMessage =
-  | OverlayContextMenuMessage
-  | OverlayMenuMessage
-  | OverlaySelectMessage
-  | OverlayComboboxMessage
-  | OverlayAutocompleteMessage
   | OverlayComposerCommandMessage
   | OverlayAlertDialogMessage
   | OverlayImagePreviewMessage

@@ -1,6 +1,9 @@
-import { useId, useMemo } from "react";
+import { useEffect, useId, useState } from "react";
 
-import { Input } from "../ui/input";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteSelect, OverlayRouteSelectPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
+
 import {
   Select,
   SelectItem,
@@ -24,6 +27,8 @@ import {
 
 const NO_EMULATION_VALUE = "__off";
 const CUSTOM_VALUE = "__custom";
+const VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY = "browser-viewport-preset-select";
+const VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY = "browser-viewport-zoom-select";
 
 interface EmbeddedBrowserViewportToolbarProps {
   emulation: TabEmulation;
@@ -53,29 +58,14 @@ export function EmbeddedBrowserViewportToolbar({
 
   const effective = effectiveDimensions(emulation);
   const zoomValue = String(effectiveZoom(emulation));
-  const isCustom = emulation.kind === "custom";
-  const presetOverlayItems = useMemo(
-    () => [
-      ...DEVICE_PRESETS.map((preset) => ({
-        value: preset.id,
-        label: preset.label,
-        hideIndicator: true,
-      })),
-      { value: "__preset-separator", label: "", separator: true },
-      { value: CUSTOM_VALUE, label: "Custom", hideIndicator: true },
-      { value: NO_EMULATION_VALUE, label: "No emulation", hideIndicator: true },
-    ],
-    [],
-  );
-  const zoomOverlayItems = useMemo(
-    () =>
-      ZOOM_OPTIONS.map((zoom) => ({
-        value: String(zoom),
-        label: formatZoomLabel(zoom),
-        hideIndicator: true,
-      })),
-    [],
-  );
+  const [focusedDimension, setFocusedDimension] = useState<"width" | "height" | null>(null);
+  const [widthDraft, setWidthDraft] = useState("");
+  const [heightDraft, setHeightDraft] = useState("");
+
+  useEffect(() => {
+    if (focusedDimension !== "width") setWidthDraft(formatDimensionInputValue(effective.width));
+    if (focusedDimension !== "height") setHeightDraft(formatDimensionInputValue(effective.height));
+  }, [effective.height, effective.width, focusedDimension]);
 
   const handlePresetChange = (value: string | null) => {
     if (value === null || value === NO_EMULATION_VALUE) {
@@ -103,9 +93,7 @@ export function EmbeddedBrowserViewportToolbar({
     });
   };
 
-  const handleWidthChange = (raw: string) => {
-    const next = clampDimension(Number(raw));
-    if (next === null) return;
+  const applyWidth = (next: number) => {
     onChange({
       kind: "custom",
       width: next,
@@ -116,9 +104,7 @@ export function EmbeddedBrowserViewportToolbar({
     });
   };
 
-  const handleHeightChange = (raw: string) => {
-    const next = clampDimension(Number(raw));
-    if (next === null) return;
+  const applyHeight = (next: number) => {
     onChange({
       kind: "custom",
       width: effective.width ?? 1280,
@@ -127,6 +113,40 @@ export function EmbeddedBrowserViewportToolbar({
       rotated: false,
       zoom: effectiveZoom(emulation),
     });
+  };
+
+  const handleWidthChange = (raw: string) => {
+    setWidthDraft(raw);
+    const next = parseCommittableDimension(raw);
+    if (next === null) return;
+    applyWidth(next);
+  };
+
+  const handleHeightChange = (raw: string) => {
+    setHeightDraft(raw);
+    const next = parseCommittableDimension(raw);
+    if (next === null) return;
+    applyHeight(next);
+  };
+
+  const commitWidthDraft = () => {
+    const next = clampDimension(Number(widthDraft));
+    if (next === null) {
+      setWidthDraft(formatDimensionInputValue(effective.width));
+      return;
+    }
+    setWidthDraft(String(next));
+    applyWidth(next);
+  };
+
+  const commitHeightDraft = () => {
+    const next = clampDimension(Number(heightDraft));
+    if (next === null) {
+      setHeightDraft(formatDimensionInputValue(effective.height));
+      return;
+    }
+    setHeightDraft(String(next));
+    applyHeight(next);
   };
 
   const handleZoomChange = (value: string | null) => {
@@ -142,83 +162,171 @@ export function EmbeddedBrowserViewportToolbar({
     }
   };
 
+  const presetRoute = useRoutedPopoverSurface<HTMLButtonElement, string>({
+    routeKey: VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    side: "bottom",
+    params: { value: presetValue },
+    onResult: handlePresetChange,
+  });
+  const zoomRoute = useRoutedPopoverSurface<HTMLButtonElement, string>({
+    routeKey: VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    side: "bottom",
+    params: { value: zoomValue },
+    onResult: handleZoomChange,
+  });
+
   return (
     <div className="flex shrink-0 items-center gap-2">
       <Select
         value={presetValue}
         onValueChange={handlePresetChange}
-        overlayItems={presetOverlayItems}
-        overlaySelectAlign="start"
-        overlayAlignItemWithTrigger={false}
+        open={presetRoute.domOpen}
+        onOpenChange={presetRoute.onOpenChange}
       >
-        <SelectTrigger size="sm" className="w-44 text-xs sm:text-xs" aria-label="Device preset">
+        <SelectTrigger
+          size="sm"
+          className="w-fit min-w-0 text-xs sm:text-xs"
+          aria-label="Device preset"
+          onFocusCapture={presetRoute.updateAnchor}
+          onMouseOverCapture={presetRoute.updateAnchor}
+          ref={presetRoute.triggerRef}
+        >
           <SelectValue>{renderPresetLabel(presetValue)}</SelectValue>
         </SelectTrigger>
         <SelectPopup align="start" alignItemWithTrigger={false}>
-          {DEVICE_PRESETS.map((preset) => (
-            <SelectItem key={preset.id} value={preset.id} hideIndicator>
-              {preset.label}
-            </SelectItem>
-          ))}
-          <SelectSeparator />
-          <SelectItem value={CUSTOM_VALUE} hideIndicator>
-            Custom
-          </SelectItem>
-          <SelectItem value={NO_EMULATION_VALUE} hideIndicator>
-            No emulation
-          </SelectItem>
+          <ViewportPresetSelectItems />
         </SelectPopup>
       </Select>
 
-      <Input
-        id={widthInputId}
-        size="sm"
-        type="number"
-        inputMode="numeric"
-        min={VIEWPORT_DIMENSION_MIN}
-        max={VIEWPORT_DIMENSION_MAX}
-        readOnly={!isCustom}
-        value={effective.width ?? ""}
-        onChange={(event) => handleWidthChange(event.target.value)}
-        className="w-16 text-xs sm:text-xs"
-        aria-label="Viewport width"
-      />
-      <span aria-hidden="true" className="text-muted-foreground">
-        ×
+      <span className="relative grid min-h-8 w-32 grid-cols-[1fr_1.5rem_1fr] items-center rounded-lg border border-input bg-background not-dark:bg-clip-padding text-xs text-foreground shadow-xs/5 ring-ring/24 transition-[color,box-shadow,background-color] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus-within:border-ring focus-within:ring-[3px] sm:min-h-7 dark:bg-input/32 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+        <input
+          id={widthInputId}
+          type="number"
+          inputMode="numeric"
+          min={VIEWPORT_DIMENSION_MIN}
+          max={VIEWPORT_DIMENSION_MAX}
+          value={
+            focusedDimension === "width" ? widthDraft : formatDimensionInputValue(effective.width)
+          }
+          onBlur={() => {
+            commitWidthDraft();
+            setFocusedDimension(null);
+          }}
+          onFocus={() => {
+            setFocusedDimension("width");
+            setWidthDraft(formatDimensionInputValue(effective.width));
+          }}
+          onChange={(event) => handleWidthChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="relative h-full min-w-0 rounded-l-[inherit] bg-transparent px-2 text-center font-normal text-current outline-none [appearance:textfield] selection:bg-primary selection:text-primary-foreground [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Viewport width"
+        />
+        <span aria-hidden="true" className="text-center text-muted-foreground">
+          ×
+        </span>
+        <input
+          id={heightInputId}
+          type="number"
+          inputMode="numeric"
+          min={VIEWPORT_DIMENSION_MIN}
+          max={VIEWPORT_DIMENSION_MAX}
+          value={
+            focusedDimension === "height"
+              ? heightDraft
+              : formatDimensionInputValue(effective.height)
+          }
+          onBlur={() => {
+            commitHeightDraft();
+            setFocusedDimension(null);
+          }}
+          onFocus={() => {
+            setFocusedDimension("height");
+            setHeightDraft(formatDimensionInputValue(effective.height));
+          }}
+          onChange={(event) => handleHeightChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="relative h-full min-w-0 rounded-r-[inherit] bg-transparent px-2 text-center font-normal text-current outline-none [appearance:textfield] selection:bg-primary selection:text-primary-foreground [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          aria-label="Viewport height"
+        />
       </span>
-      <Input
-        id={heightInputId}
-        size="sm"
-        type="number"
-        inputMode="numeric"
-        min={VIEWPORT_DIMENSION_MIN}
-        max={VIEWPORT_DIMENSION_MAX}
-        readOnly={!isCustom}
-        value={effective.height ?? ""}
-        onChange={(event) => handleHeightChange(event.target.value)}
-        className="w-16 text-xs sm:text-xs"
-        aria-label="Viewport height"
-      />
 
       <Select
         value={zoomValue}
         onValueChange={handleZoomChange}
-        overlayItems={zoomOverlayItems}
-        overlaySelectAlign="start"
-        overlayAlignItemWithTrigger={false}
+        open={zoomRoute.domOpen}
+        onOpenChange={zoomRoute.onOpenChange}
       >
-        <SelectTrigger size="sm" className="w-20 text-xs sm:text-xs" aria-label="Zoom">
+        <SelectTrigger
+          size="sm"
+          className="w-18 min-w-0 text-xs sm:text-xs"
+          aria-label="Zoom"
+          onFocusCapture={zoomRoute.updateAnchor}
+          onMouseOverCapture={zoomRoute.updateAnchor}
+          ref={zoomRoute.triggerRef}
+        >
           <SelectValue>{formatZoomLabel(Number(zoomValue))}</SelectValue>
         </SelectTrigger>
-        <SelectPopup align="start" alignItemWithTrigger={false}>
-          {ZOOM_OPTIONS.map((zoom) => (
-            <SelectItem key={zoom} value={String(zoom)} hideIndicator>
-              {formatZoomLabel(zoom)}
-            </SelectItem>
-          ))}
+        <SelectPopup align="start" alignItemWithTrigger={false} className="w-18">
+          <ViewportZoomSelectItems />
         </SelectPopup>
       </Select>
     </div>
+  );
+}
+
+function formatDimensionInputValue(value: number | null): string {
+  return value === null ? "" : String(value);
+}
+
+function parseCommittableDimension(raw: string): number | null {
+  if (raw.trim() === "") return null;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return null;
+  const rounded = Math.round(numeric);
+  if (rounded < VIEWPORT_DIMENSION_MIN || rounded > VIEWPORT_DIMENSION_MAX) return null;
+  return rounded;
+}
+
+function ViewportPresetSelectItems() {
+  return (
+    <>
+      {DEVICE_PRESETS.map((preset) => (
+        <SelectItem key={preset.id} value={preset.id} hideIndicator>
+          {preset.label}
+        </SelectItem>
+      ))}
+      <SelectSeparator />
+      <SelectItem value={CUSTOM_VALUE} hideIndicator>
+        Custom
+      </SelectItem>
+      <SelectItem value={NO_EMULATION_VALUE} hideIndicator>
+        No emulation
+      </SelectItem>
+    </>
+  );
+}
+
+function ViewportZoomSelectItems() {
+  return (
+    <>
+      {ZOOM_OPTIONS.map((zoom) => (
+        <SelectItem key={zoom} value={String(zoom)} hideIndicator>
+          {formatZoomLabel(zoom)}
+        </SelectItem>
+      ))}
+    </>
   );
 }
 
@@ -231,3 +339,44 @@ function renderPresetLabel(value: string): string {
   if (value === CUSTOM_VALUE) return "Custom";
   return findPreset(value)?.label ?? "No emulation";
 }
+
+registerOverlayRoute<{ value?: unknown }>(
+  VIEWPORT_PRESET_SELECT_OVERLAY_ROUTE_KEY,
+  function ViewportPresetSelectOverlayRoute({ message, controller }) {
+    const value =
+      typeof message.params.value === "string" ? message.params.value : NO_EMULATION_VALUE;
+
+    return (
+      <OverlayRouteSelect
+        value={value}
+        onValueChange={(nextValue) => {
+          if (typeof nextValue === "string") controller.submit(nextValue);
+        }}
+      >
+        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false}>
+          <ViewportPresetSelectItems />
+        </OverlayRouteSelectPopup>
+      </OverlayRouteSelect>
+    );
+  },
+);
+
+registerOverlayRoute<{ value?: unknown }>(
+  VIEWPORT_ZOOM_SELECT_OVERLAY_ROUTE_KEY,
+  function ViewportZoomSelectOverlayRoute({ message, controller }) {
+    const value = typeof message.params.value === "string" ? message.params.value : "1";
+
+    return (
+      <OverlayRouteSelect
+        value={value}
+        onValueChange={(nextValue) => {
+          if (typeof nextValue === "string") controller.submit(nextValue);
+        }}
+      >
+        <OverlayRouteSelectPopup align="start" alignItemWithTrigger={false} className="w-18">
+          <ViewportZoomSelectItems />
+        </OverlayRouteSelectPopup>
+      </OverlayRouteSelect>
+    );
+  },
+);

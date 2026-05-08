@@ -1,6 +1,5 @@
 import {
   ArchiveIcon,
-  ArrowUpDownIcon,
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
@@ -51,7 +50,6 @@ import {
   EDITORS,
   type EditorId,
   type ModelSelection,
-  type OverlayMenuItem,
   ProjectId,
   providerDisplayName,
   type ProviderKind,
@@ -61,11 +59,7 @@ import {
 } from "@t3tools/contracts";
 import { makeProviderModelSelection } from "@t3tools/shared/model";
 import { useQueries } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import {
-  type SidebarProjectSortOrder,
-  type SidebarThreadSortOrder,
-} from "@t3tools/contracts/settings";
+import { Link, useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -90,6 +84,7 @@ import {
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { parseFileExplorerRouteSearch } from "../fileExplorerRouteSearch";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -107,8 +102,8 @@ import {
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
-import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { ProjectSortMenu } from "./SidebarSortMenu";
 import {
   SidebarContent,
   SidebarFooter,
@@ -163,15 +158,6 @@ import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { isUserVisibleProvider } from "../providerVisibility";
 import { preloadTicketingProject } from "../lib/ticketingCacheStore";
 const THREAD_PREVIEW_LIMIT = 6;
-const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
-  updated_at: "Last user message",
-  created_at: "Created at",
-  manual: "Manual",
-};
-const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
-  updated_at: "Last user message",
-  created_at: "Created at",
-};
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
@@ -757,108 +743,6 @@ type SortableProjectHandleProps = Pick<
   "attributes" | "listeners" | "setActivatorNodeRef"
 >;
 
-function ProjectSortMenu({
-  projectSortOrder,
-  threadSortOrder,
-  onProjectSortOrderChange,
-  onThreadSortOrderChange,
-}: {
-  projectSortOrder: SidebarProjectSortOrder;
-  threadSortOrder: SidebarThreadSortOrder;
-  onProjectSortOrderChange: (sortOrder: SidebarProjectSortOrder) => void;
-  onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
-}) {
-  const overlayItems = useMemo<OverlayMenuItem[]>(
-    () => [
-      { id: "project-label", label: "Sort projects", labelOnly: true },
-      ...(Object.entries(SIDEBAR_SORT_LABELS) as Array<[SidebarProjectSortOrder, string]>).map(
-        ([value, label]) => ({
-          id: `project:${value}`,
-          label,
-          checked: value === projectSortOrder,
-        }),
-      ),
-      { id: "thread-separator", label: "", separator: true },
-      { id: "thread-label", label: "Sort threads", labelOnly: true },
-      ...(
-        Object.entries(SIDEBAR_THREAD_SORT_LABELS) as Array<[SidebarThreadSortOrder, string]>
-      ).map(([value, label]) => ({
-        id: `thread:${value}`,
-        label,
-        checked: value === threadSortOrder,
-      })),
-    ],
-    [projectSortOrder, threadSortOrder],
-  );
-
-  const handleOverlaySelect = useCallback(
-    (id: string) => {
-      const [kind, value] = id.split(":");
-      if (kind === "project" && value) {
-        onProjectSortOrderChange(value as SidebarProjectSortOrder);
-      } else if (kind === "thread" && value) {
-        onThreadSortOrderChange(value as SidebarThreadSortOrder);
-      }
-    },
-    [onProjectSortOrderChange, onThreadSortOrderChange],
-  );
-
-  return (
-    <Menu overlayItems={overlayItems} overlayMenuAlign="end" overlayOnSelect={handleOverlaySelect}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <MenuTrigger className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground" />
-          }
-        >
-          <ArrowUpDownIcon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="right">Sort projects</TooltipPopup>
-      </Tooltip>
-      <MenuPopup align="end" side="bottom" className="min-w-44">
-        <MenuGroup>
-          <div className="px-2 py-1 sm:text-xs font-medium text-muted-foreground">
-            Sort projects
-          </div>
-          <MenuRadioGroup
-            value={projectSortOrder}
-            onValueChange={(value) => {
-              onProjectSortOrderChange(value as SidebarProjectSortOrder);
-            }}
-          >
-            {(Object.entries(SIDEBAR_SORT_LABELS) as Array<[SidebarProjectSortOrder, string]>).map(
-              ([value, label]) => (
-                <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
-                  {label}
-                </MenuRadioItem>
-              ),
-            )}
-          </MenuRadioGroup>
-        </MenuGroup>
-        <MenuGroup>
-          <div className="px-2 pt-2 pb-1 sm:text-xs font-medium text-muted-foreground">
-            Sort threads
-          </div>
-          <MenuRadioGroup
-            value={threadSortOrder}
-            onValueChange={(value) => {
-              onThreadSortOrderChange(value as SidebarThreadSortOrder);
-            }}
-          >
-            {(
-              Object.entries(SIDEBAR_THREAD_SORT_LABELS) as Array<[SidebarThreadSortOrder, string]>
-            ).map(([value, label]) => (
-              <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
-                {label}
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
-  );
-}
-
 function SortableProjectItem({
   projectId,
   disabled = false,
@@ -934,6 +818,10 @@ export default function Sidebar() {
   const { toggleSidebar } = useSidebar();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
+  const fileExplorerOpen = useSearch({
+    strict: false,
+    select: (params) => parseFileExplorerRouteSearch(params).fileExplorer === "1",
+  });
   const isOnSettings = pathname.startsWith("/settings");
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -1976,6 +1864,7 @@ export default function Sidebar() {
     const getShortcutContext = () => ({
       terminalFocus: isTerminalFocused(),
       terminalOpen: routeTerminalOpen,
+      fileExplorerOpen,
     });
 
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1994,6 +1883,21 @@ export default function Sidebar() {
         platform,
         context: getShortcutContext(),
       });
+      const isPrimarySaveShortcut =
+        (isMacPlatform(platform) ? event.metaKey : event.ctrlKey) &&
+        event.key.toLowerCase() === "s" &&
+        !event.shiftKey &&
+        !event.altKey;
+      if (fileExplorerOpen && isPrimarySaveShortcut) {
+        return;
+      }
+      if (command === "sidebar.toggle" || (!fileExplorerOpen && isPrimarySaveShortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSidebar();
+        return;
+      }
+
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         const targetThreadId = resolveAdjacentThreadId({
@@ -2050,12 +1954,14 @@ export default function Sidebar() {
     };
   }, [
     keybindings,
+    fileExplorerOpen,
     navigateToThread,
     orderedSidebarThreadIds,
     platform,
     routeTerminalOpen,
     routeThreadId,
     threadJumpThreadIds,
+    toggleSidebar,
     updateThreadJumpHintsVisibility,
   ]);
 

@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import ChatView from "../ChatView";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../ui/sidebar";
+import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, useSidebar } from "../ui/sidebar";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { KanbanBoard, type KanbanBoardHandle } from "./KanbanBoard";
@@ -44,6 +44,29 @@ function ChatDropTarget({ children }: { children: React.ReactNode }) {
       )}
     </div>
   );
+}
+
+function ManagementChatSidebarShortcut() {
+  const { toggleSidebar } = useSidebar();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== "l") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSidebar();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleSidebar]);
+
+  return null;
 }
 
 export function ManagementView({ threadId, projectId }: ManagementViewProps) {
@@ -136,6 +159,7 @@ export function ManagementView({ threadId, projectId }: ManagementViewProps) {
         className="w-auto min-h-0 flex-none bg-transparent"
         style={{ "--sidebar-width": MANAGEMENT_CHAT_DEFAULT_WIDTH } as React.CSSProperties}
       >
+        <ManagementChatSidebarShortcut />
         <Sidebar
           side="right"
           collapsible="offcanvas"

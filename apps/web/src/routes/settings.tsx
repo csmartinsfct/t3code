@@ -52,7 +52,7 @@ function SettingsContentLayout() {
         )}
 
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
+          <div className="drag-region electron-titlebar-inset flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
             <CollapsedSidebarTrigger className="size-7 shrink-0" />
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings

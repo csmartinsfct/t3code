@@ -794,9 +794,9 @@ KeybindingRule {
 }
 ```
 
-Commands: `terminal.toggle`, `terminal.split`, `terminal.new`, `terminal.close`, `chat.new`, `chat.newLocal`, `thread.previous`, `thread.next`, `thread.jump.1-9`, `file.quickOpen`, `editor.openFavorite`, `script.{id}.run`.
+Commands: `terminal.toggle`, `terminal.split`, `terminal.new`, `terminal.close`, `chat.new`, `chat.newLocal`, `thread.previous`, `thread.next`, `thread.jump.1-9`, `sidebar.toggle`, `fileExplorer.toggle`, `file.quickOpen`, `editor.openFavorite`, `script.{id}.run`.
 
-Conditions support `!`, `&&`, `||`, and parentheses. Available conditions: `terminalFocus`, `terminalOpen`.
+Conditions support `!`, `&&`, `||`, and parentheses. Available conditions: `terminalFocus`, `terminalOpen`, `fileExplorerOpen`.
 
 Limits: 256 rules max, 64-char key values, 256-char when expressions.
 
@@ -942,12 +942,13 @@ All WebSocket RPC calls are instrumented with request/response tracing, error tr
 
 ### Chat shortcuts
 
-| Shortcut           | Action                            |
-| ------------------ | --------------------------------- |
-| `Cmd+P` / `Ctrl+P` | File search                       |
-| `Cmd+S` / `Ctrl+S` | Save file                         |
-| `Cmd+W` / `Ctrl+W` | Close tab                         |
-| `Escape`           | Close diff / file explorer panels |
+| Shortcut           | Action                                                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cmd+P` / `Ctrl+P` | File search                                                                                                                                                                                             |
+| `Cmd+S` / `Ctrl+S` | Toggle projects sidebar / save file. When focus is inside the embedded browser, Electron forwards the shortcut back to the shell because browser `WebContentsView` key events do not bubble into React. |
+| `Cmd+L` / `Ctrl+L` | In Board mode, toggle the right chat panel, including while focus is inside the embedded browser.                                                                                                       |
+| `Cmd+W` / `Ctrl+W` | Close tab                                                                                                                                                                                               |
+| `Escape`           | Close diff / file explorer panels                                                                                                                                                                       |
 
 ### Terminal-aware behavior
 

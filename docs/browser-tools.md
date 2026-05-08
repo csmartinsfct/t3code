@@ -158,6 +158,8 @@ CSS selectors still work as a fallback for any command that takes a `ref` or `se
 
 The Electron host implements the day-1 native surface for navigation, core read commands, core interactions, snapshot/ref commands, screenshots/PDF, tabs, cookies/storage, headers, console/network/dialog buffers, style/cleanup, and status/UX audit.
 
+When focus is inside the embedded `WebContentsView`, React `keydown` handlers in the shell do not receive browser-page keystrokes. Browser-focused shortcuts that must affect the T3 shell are intercepted in Electron main with `before-input-event` and forwarded back to the host renderer. This includes tab shortcuts, reload/zoom handling, and the primary `Cmd/Ctrl+S` app shortcut so file saving/sidebar toggling stays consistent while the browser view has focus.
+
 Three tools are intentionally deferred in native mode and return the standard parity message:
 
 | Tool                    | Reason deferred                                                                                  |
@@ -272,7 +274,7 @@ The renderer is the source of truth for the browser's on-screen rect. `EmbeddedB
 
 The view is cached per project for the life of the Electron main process — unmount removes it from the visible window and re-parks it in the offscreen `BaseWindow` host (see the "Always-on per project" and "Offscreen `BaseWindow` parking" key design decisions below) so cookies, scroll position, JS state, AND the Chromium compositor all survive toggling. Every post-mount renderer IPC call includes the expected project id; Electron main ignores stale calls when that id no longer matches the window's active embedded-browser project. This prevents delayed bounds, unmount, URL, tab, or navigation requests from a previous project from attaching or reading the newly active project's browser surface. See `apps/desktop/src/main.ts` around the `BROWSER_*_CHANNEL` handlers, `createEmbeddedBrowserTab`, and `parkEmbeddedBrowserView` for the lifecycle.
 
-Tab new/switch/close IPC may include the target tab's intended bounds. The renderer computes those bounds from the current pane geometry plus the target tab's known device-emulation state before asking Electron main to reparent the `WebContentsView`; for emulated tabs it predicts the final emulated pane padding instead of reading the current tab's DOM classes. The renderer also commits the local active-tab state before sending switch/close IPC. Foreground new-tab opens render an optimistic temporary blank tab in the same frame as the pane layout change, then replace it when Electron returns the real tab id. Main suppresses the intermediate "tab created, old tab still active" broadcast for foreground opens, updates `project.bounds` before mounting the incoming tab, and only then broadcasts the final active-tab state. Blank tabs are not loaded as raw Chromium `about:blank`; Electron main loads a pre-styled inert `data:text/html` document, waits for that document before mounting the new blank tab, and maps it back to public `about:blank` for `getUrl`/tab summaries. Embedded browser views also set a theme-matched native background color and blank tabs are summarized without Chromium's title/favicon, so fresh tabs stay visually named `New Tab`. The renderer's temporary blank-tab surface uses the same explicit blank background as the native blank document rather than `bg-background`, avoiding a React-placeholder → native-view color handoff.
+Tab new/switch/close IPC may include the target tab's intended bounds. The renderer computes those bounds from the current pane geometry plus the target tab's known device-emulation state before asking Electron main to reparent the `WebContentsView`; for emulated tabs it predicts the final emulated pane padding instead of reading the current tab's DOM classes. The renderer also commits the local active-tab state before sending switch/close IPC. Foreground new-tab opens render an optimistic temporary blank tab in the same frame as the pane layout change, then replace it when Electron returns the real tab id. Main suppresses the intermediate "tab created, old tab still active" broadcast for foreground opens, updates `project.bounds` before mounting the incoming tab, and only then broadcasts the final active-tab state. Blank tabs are not loaded as raw Chromium `about:blank`; Electron main maps the inert blank document back to public `about:blank` for `getUrl`/tab summaries. Normal full-pane blank tabs keep their native `WebContentsView` mounted, preserving the original browser behavior. Device-emulator mode parks blank-tab native views offscreen and lets the React browser rect own the visible blank surface, so empty emulated tabs do not show native Chromium scrollbars. Navigating an emulated blank tab to a real URL reattaches the native view after load; navigating back to blank or enabling emulation on a blank tab parks it again. Blank tabs are summarized without Chromium's title/favicon, so fresh tabs stay visually named `New Tab`.
 
 ### Hidden-view media pause
 
@@ -522,7 +524,7 @@ This section documents the Electron/browser plumbing: compositor ordering, overl
 
 When the embedded browser is active, overlays render in their own `WebContentsView` (the "overlay view") positioned above the embedded browser in the window's compositor stack. The browser stays visible at all times. When the embedded browser is not mounted the system is inactive — all overlays render in the host DOM as normal, with no behavioral difference.
 
-`Menu`, `Select`, `Combobox`, `Autocomplete`, and composer-command popups use the primitive overlay path when their callsite can provide serialized rows plus discrete host callbacks. Arbitrary React content uses the routed overlay path below: the overlay view runs the same React component tree in a second Vite entry and returns a typed result/event payload to the host. Remaining DOM/suspension surfaces should be explicit exceptions, not accidental gaps.
+Menus, selects, comboboxes, autocomplete-like pickers, popovers, dialogs, and context menus use the routed overlay path when they need to appear above the embedded browser: the overlay view runs the same React component tree in a second Vite entry and returns a typed result/event payload to the host. The narrow `composer-command` overlay remains as a specialized renderer for the chat composer command menu. Remaining DOM/suspension surfaces should be explicit exceptions, not accidental gaps.
 
 ### Architecture
 
@@ -546,7 +548,7 @@ When the embedded browser is active, overlays render in their own `WebContentsVi
 | `apps/web/src/overlay.tsx`                                  | Overlay renderer entry — mounts `OverlayShell`, applies theme before first render.                                                                                                                                                                                                                                                              |
 | `apps/web/src/components/overlay/OverlayShell.tsx`          | Root overlay component. Full-window transparent div. Positions a zero-size "virtual anchor" div at the trigger's DOMRect so Base UI Positioner can do smart flip/collision-avoidance. Backdrop click calls `requestDismiss()`.                                                                                                                  |
 | `apps/web/src/components/overlay/OverlayContent.tsx`        | Switches on `OverlayRenderMessage.type` → delegates to the right component.                                                                                                                                                                                                                                                                     |
-| `apps/web/src/components/overlay/Overlay*.tsx`              | Per-overlay-type render components (`OverlayMenu`, `OverlaySelect`, `OverlayCombobox`, `OverlayAutocomplete`, `OverlayComposerCommand`, `OverlayRoute`, `OverlayAlertDialog`, `OverlayImagePreview`). Use the same Base UI primitives and Tailwind classes as the host app.                                                                     |
+| `apps/web/src/components/overlay/Overlay*.tsx`              | Per-overlay-type render components (`OverlayComposerCommand`, `OverlayRoute`, `OverlayAlertDialog`, `OverlayImagePreview`). Routed overlays use the same Base UI primitives and Tailwind classes as the host app by importing the shared component/body from the original DOM implementation.                                                   |
 | `apps/web/src/components/overlay/overlayRouteRegistry.tsx`  | Phase 2 route registry. Routed overlay components register by `routeKey`; `OverlayRoute` resolves the component and provides controller/result helpers.                                                                                                                                                                                         |
 | `apps/web/src/components/overlay/OverlayRouteProviders.tsx` | Phase 2 provider shell for routed overlays: `QueryClientProvider` and `AppAtomRegistryProvider`. Overlay entry also installs a WebSocket-backed `window.nativeApi`. Route-dependent providers such as the main app toast viewports stay out of the overlay app until they have a router-free variant.                                           |
 | `apps/web/src/overlayRoutes.ts`                             | Imports routed overlay modules for side-effect registration in the overlay app. Add newly migrated routed surfaces here.                                                                                                                                                                                                                        |
@@ -565,16 +567,16 @@ When `false` (no browser visible, full-page surfaces such as `/settings`, web bu
 
 ### Dual runtime behavior
 
-Overlay-capable primitives intentionally have two rendering modes:
+Overlay-capable surfaces intentionally have two rendering modes:
 
-| Browser state                                        | Rendering path                                                                                                                                           |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Embedded Chromium browser mounted in the main window | Native overlay path. The host adapter serializes menu/select/combobox/autocomplete rows, opens an overlay `WebContentsView`, and keeps Chromium visible. |
-| No embedded browser mounted                          | Normal DOM path. The same component renders through its original Base UI portal/content in the host React tree. No overlay IPC is used.                  |
-| Full-page app surface covers the browser             | Normal DOM path. Routes such as `/settings` may leave the browser mounted behind the app shell, but the browser is not visually relevant there.          |
-| Native overlay unavailable or acquisition fails      | Fallback DOM path. The component should behave exactly like the pre-overlay implementation, including the old suspension behavior where applicable.      |
+| Browser state                                        | Rendering path                                                                                                                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded Chromium browser mounted in the main window | Native routed overlay path. The host opens an overlay `WebContentsView`; the overlay route renders the same React content/body used by the DOM path and keeps Chromium visible. |
+| No embedded browser mounted                          | Normal DOM path. The same component renders through its original Base UI portal/content in the host React tree. No overlay IPC is used.                                         |
+| Full-page app surface covers the browser             | Normal DOM path. Routes such as `/settings` may leave the browser mounted behind the app shell, but the browser is not visually relevant there.                                 |
+| Native overlay unavailable or acquisition fails      | Fallback DOM path. The component should behave exactly like the pre-overlay implementation, including the old suspension behavior where applicable.                             |
 
-Adapters must keep both paths first-class. Do not remove the DOM popup/content from callsites just because a native `overlayItems` path exists; the DOM content is still the source of behavior when the browser is hidden, in web builds, in popout-only flows, and in failure fallback. The native path should mirror the DOM UI by reusing the same primitives/classes or shared body components, not by inventing an alternate design.
+Adapters must keep both paths first-class. Do not remove the DOM popup/content from callsites just because a native route exists; the DOM content is still the source of behavior when the browser is hidden, in web builds, in popout-only flows, and in failure fallback. The native path must share the same JSX content/body component instead of inventing an alternate design.
 
 The native path uses a full-window transparent overlay view, so anchored popups need extra positioning care. The host owns the real trigger DOM node; the overlay view owns only a synthetic fixed-position anchor. While an overlay is open, `trackNativeOverlayAnchor()` samples the host trigger rect with `requestAnimationFrame` and re-renders when the rounded rect changes. `OverlayShell` keys positioned content by that rounded rect so Base UI remounts/recomputes placement during live resize. This keeps popups reasonably close to their targets during active window resizing, with the remaining smoothness bounded by Electron/Chromium repaint and IPC cadence.
 
@@ -601,29 +603,23 @@ Events from the overlay view carry `null` as the overlay ID (the view doesn't kn
 
 Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup. Event and dismiss subscriptions are attached before the initial render message is sent, so fast routed-overlay bootstrap failures cannot be missed and can reliably fall back to the DOM path. Electron main focuses the overlay `WebContents` after acquire/render so `autoFocus` controls can receive input, then focuses the host `WebContents` on release so app shortcuts work immediately after closing the overlay.
 
-The native-overlay gate is intentionally stricter than "browser WebContents exists." `useNativeOverlayActive()` and `openNativeOverlay()` suppress native acquisition on full-page app surfaces such as `/settings`, because those routes cover the browser even if its `WebContentsView` is still mounted behind the host UI. The old DOM suspension helper uses the same relevance gate, so settings dropdowns render as ordinary DOM popups without native overlay acquisition and without `browser:suspendForModal`. Component-level `overlayItems` can remain wired for those surfaces as preemptive coverage; today they render through the normal DOM path until the layout makes the browser visible beside them.
+The native-overlay gate is intentionally stricter than "browser WebContents exists." `useNativeOverlayActive()` and `openNativeOverlay()` suppress native acquisition on full-page app surfaces such as `/settings`, because those routes cover the browser even if its `WebContentsView` is still mounted behind the host UI. The old DOM suspension helper uses the same relevance gate, so settings dropdowns render as ordinary DOM popups without native overlay acquisition and without `browser:suspendForModal`.
 
 `browser:unmount` clears the window's active embedded-browser project and advances the mount request generation. Otherwise a stale or late mount can reattach the browser `WebContentsView` after React has hidden the browser pane, leaving an invisible native view over the app that intercepts clicks and makes normal DOM dropdowns appear broken.
 
 Clipboard writes from host callbacks can run while focus is transitioning back from the overlay `WebContents`. `useCopyToClipboard` therefore prefers `desktopBridge.clipboard.writeText()` in Electron and only falls back to `navigator.clipboard.writeText()` in web builds. This avoids Chromium's "Document is not focused" clipboard rejection for native-overlay menu actions such as "Copy plan".
 
-Controlled overlay primitives must forward Base UI close requests back to the native overlay bridge. Menu and composer-command roots call `requestDismiss()` from `onOpenChange(false)`, and select/combobox/autocomplete roots do the same so outside clicks and Escape close the full-window transparent overlay instead of leaving it as an invisible glass pane over the host app.
+Routed overlay roots must forward Base UI close requests back to the native overlay bridge. `OverlayRouteMenu`, `OverlayRouteSelect`, `OverlayRouteCombobox`, popover/dialog/sheet route wrappers, and composer-command roots call `requestDismiss()` or `controller.cancel()` from explicit dismiss paths so outside clicks and Escape close the full-window transparent overlay instead of leaving it as an invisible glass pane over the host app.
 
-`Select` keeps a stable controlled `open` state inside the adapter even when it switches between DOM rendering and native overlay rendering. Do not pass `open={false}` only for native mode and `open={undefined}` for DOM mode; Base UI treats that as a controlled/uncontrolled mode switch and can leave dropdown state inconsistent after the embedded browser is shown/hidden.
+Native routed overlays must keep their anchor live while open. The overlay view cannot query the host DOM, so host adapters pass the trigger/input element to `trackNativeOverlayAnchor()` through `useRoutedOverlaySurface()` / `useRoutedPopoverSurface()`. The helper samples `getBoundingClientRect()` with `requestAnimationFrame` for the lifetime of the open overlay, with resize/scroll/ResizeObserver events waking the same loop, and only re-renders when the rounded rect changes. This keeps overlays following live window resize as closely as Electron/Chromium repaint cadence allows without sending IPC while the anchor is stationary. Do not pass a one-time rect unless the overlay is intentionally fixed to the original coordinates, such as pointer-position context menus.
 
-Primitive native overlays must keep their anchor live while open. The overlay view cannot query the host DOM, so host adapters pass the trigger/input element to `trackNativeOverlayAnchor()`. The helper samples `getBoundingClientRect()` with `requestAnimationFrame` for the lifetime of the open overlay, with resize/scroll/ResizeObserver events waking the same loop, and only re-renders when the rounded rect changes. This keeps overlays following live window resize as closely as Electron/Chromium repaint cadence allows without sending IPC while the anchor is stationary. Do not pass a one-time rect unless the overlay is intentionally fixed to the original coordinates.
+`OverlayShell` keys anchored overlay content by the rounded anchor rect. This intentionally remounts Base UI `Positioner` when the virtual anchor moves, because the overlay view only owns a synthetic fixed-position anchor div; updating its inline style alone is not enough for every Base UI primitive to recompute placement during live window resize. Content refreshes with the same anchor keep the same key, so route param/event updates do not remount just because host state changed.
 
-`OverlayShell` keys anchored overlay content by the rounded anchor rect. This intentionally remounts Base UI `Positioner` when the virtual anchor moves, because the overlay view only owns a synthetic fixed-position anchor div; updating its inline style alone is not enough for every Base UI primitive to recompute placement during live window resize. Content refreshes with the same anchor keep the same key, so search/menu state updates do not remount just because the serialized rows changed.
+`Menu`, `Select`, `Combobox`, and `Autocomplete` do not have native JSON adapter props. Any browser-visible native version of those surfaces must be a route that shares the host JSX. The chat header Git actions menu, project-script actions menu, sidebar sort menu, plan action menus, orchestration resume menu, orchestration thread switcher, compact composer controls menu, composer implement split-button menu, context-menu API, MCP servers picker, Open In picker, provider/model picker, Skills picker, traits picker, and Kanban ticket detail actions menu all use routed menu overlays. Their browser-hidden DOM path and browser-visible native route share the same menu body component; only result transport differs. `OverlayRouteMenu` owns the shared dismiss policy for routed menus: outside click, Escape, and explicit close buttons cancel the route, while Base UI focus-out, item-press, and hover bookkeeping are ignored so non-dismissing item events can update host state while the overlay remains open. Because the routed view mounts in a separate overlay React root, Base UI focus/highlight state can differ at open time, so pointer-hover affordances such as row backgrounds and secondary action buttons must be keyed to actual hover state unless keyboard focus is intentionally designed to reveal them.
 
-For primitive components, the host app should usually go through the component adapter instead of calling the bridge directly. `Menu` supports serialized `overlayItems` plus `overlayOnSelect(id)` / `overlayOnAction(id)`, and falls back to the normal DOM/suspension path if a native overlay cannot be acquired; uncontrolled menus must set their DOM open state during that fallback so the click that failed native acquisition still opens the host popup. `OverlayMenuItem` intentionally models the small set of menu semantics needed to preserve host UI parity today: separators, group labels (`labelOnly`), checked/radio-looking rows (`checked`), icons, shortcuts, disabled state, destructive state, submenus, status dots, badges/descriptions, header actions, and secondary row actions. Header/row action buttons emit non-dismissing `action` events by default so refresh/approve-style controls can keep the menu open while the host updates state and re-renders the same native overlay session; set `dismissOnAction` only for action buttons that intentionally close the menu, like edit/reveal actions that open another surface. The chat provider/model picker, traits picker, compact composer controls menu, Open In picker, MCP servers picker, Skills picker, chat header Git/project-script menus, orchestration thread switcher, proposed-plan/plan-sidebar action menus, Kanban ticket action menu, and sidebar project/thread sort menu use this path so opening them above a mounted embedded browser no longer hides Chromium. Rich popovers such as the Active Runs card are intentionally not forced through `OverlayMenuItem`; they route through Phase 2 when exact component parity matters.
+`OverlayRouteSelect` is the path for selects where exact JSX parity matters. The branch environment select and embedded-browser viewport toolbar device-preset/zoom selects use routed select overlays, so the browser-hidden DOM path and browser-visible native route share the same `SelectItem` tree. The wrapper treats item selection as a submitted route result rather than a cancellation; outside click, Escape, and resize still dismiss the full overlay. Full-page settings/admin selects, including prompt/ticket scope, managed-run filters, scheduled-task dialogs, prompt-editor block conditions, file-explorer editor settings, and main settings, intentionally use ordinary DOM select popups because the embedded browser is not a visually relevant sibling on those surfaces.
 
-Use the current primitive overlay path only when the popup can be faithfully represented as serializable menu/select/combobox/autocomplete data and discrete host callbacks. That includes normal command menus, checked menus, grouped menus, select lists, branch/model pickers, serialized typeahead rows, and menu-local buttons whose loading/disabled state can be refreshed by sending a new JSON message to the same overlay session. Keep the DOM/suspension fallback, or move the work to Phase 2, when exact UI parity requires arbitrary React children, forms, TanStack Query state, custom card layouts, routed dialog content, or any component tree that would have to be reimplemented differently inside `OverlayMenuItem`.
-
-`Select` has the same acquire-failure fallback for callsites that provide serialized `overlayItems`. `OverlaySelectItem` supports separators, icons, and `hideIndicator` so native selects can mirror host `SelectItem hideIndicator` menus. The embedded-browser viewport toolbar device-preset/zoom selects, branch environment select, proposed scheduled-task project select, scheduled-task editor type/project selects, file-explorer editor settings selects, prompt/ticket scope selects, managed-run filter selects, prompt-editor block-condition select, and main settings selects use this native path.
-
-`Combobox` also has an adapter for serialized result rows. The overlay view owns the search input and emits `search` events; the host can return a refreshed JSON item list through `overlayOnSearch`, then receive the selected value through `overlayOnSelect`. The chat branch selector uses this path so searching/selecting branches above a mounted embedded browser does not suspend Chromium.
-
-`Autocomplete` has the same opt-in constraint for serialized rows. Its native path opens from `AutocompleteInput` / `AutocompleteTrigger`, renders an overlay-owned input copy at the trigger/input rect using the same input classes, and renders the popup/list with the same autocomplete popup/list/item classes. It is not a `CommandDialog` migration: arbitrary command palettes, grouped custom JSX, and routed file-search behavior remain Phase 2 unless a callsite provides a plain JSON row list and discrete search/select callbacks.
+`OverlayRouteCombobox` is the path for searchable pickers where exact JSX parity matters. The chat branch selector uses a routed combobox so the browser-hidden DOM path and browser-visible native route share the same search/list/row JSX, including branch badges, create-branch rows, pull-request checkout rows, empty/loading status, and virtualization. Row selection submits a route result; outside click, Escape, and resize dismiss the native route.
 
 The chat composer `@` / `/` / `/model` suggestion menu is handled by a narrow `composer-command` overlay type rather than the generic `Autocomplete` adapter. It sends the already-derived `ComposerCommandItem[]` rows to the overlay and renders the exact `ComposerCommandMenu` component there, while selection/highlight events flow back to `ChatView`. This keeps the file icons, active row styling, loading/empty copy, keyboard navigation, and row spacing identical without treating arbitrary `CommandDialog` content as Phase 1 work.
 
@@ -653,7 +649,7 @@ if (result.status === "submitted") {
 }
 ```
 
-`openNativeOverlayRoute` still uses the same `OverlayPool`, `overlay.acquire`, `overlay.render`, result, dismiss, and focus-restore lifecycle as primitive overlays. It resolves to:
+`openNativeOverlayRoute` uses the same `OverlayPool`, `overlay.acquire`, `overlay.render`, result, dismiss, and focus-restore lifecycle as other native overlays. It resolves to:
 
 - `{ status: "submitted", value }` when the overlay route calls `controller.submit(value)`.
 - `{ status: "cancelled", reason? }` when the route calls `controller.cancel(reason)` or the user dismisses the overlay.
@@ -766,53 +762,40 @@ The overlay preload intentionally does not expose the full desktop bridge. Route
 
 Fallback is required for every migrated routed surface. If native overlay acquisition fails, or if the route is not registered/throws during bootstrap, host code should preserve the current DOM/suspension behavior. This keeps non-browser flows, web builds, and failure cases behaviorally stable.
 
-### Adding a new overlay type
+### Adding a new routed overlay
 
-**Step 1 — add a type to `packages/contracts/src/ipc.ts`:**
+**Step 1 — extract the shared body/content component from the original DOM surface.**
 
-```typescript
-export interface OverlayMyNewMessage {
-  type: "my-new";
-  anchor: OverlayAnchorRect; // for positional overlays
-  // ...serializable props only (no React elements, no callbacks)
-}
-// Add to OverlayRenderMessage union
-```
+The browser-hidden DOM path should keep rendering that component through the normal Base UI primitive. The native route should import the same body/content component.
 
-**Step 2 — add a render component in `apps/web/src/components/overlay/`:**
+**Step 2 — register a route in the surface module:**
 
 ```typescript
-export function OverlayMyNew({ message, bridge }: OverlayMyNewProps) {
-  // Render using Base UI + Tailwind. Use anchorRef for positioning if needed.
-  // bridge.emitEvent("result", payload)  → sends to host
-  // bridge.requestDismiss()              → triggers pool release
-}
+registerOverlayRoute<MyRouteParams>("my-route-key", ({ message, controller }) => (
+  <OverlayRouteMenu>
+    <OverlayRouteMenuPopup>
+      <MySharedMenuBody
+        params={message.params}
+        onSelect={(value) => controller.submit(value)}
+      />
+    </OverlayRouteMenuPopup>
+  </OverlayRouteMenu>
+));
 ```
 
-**Step 3 — add the case to `OverlayContent.tsx`.**
+Use the matching route wrapper for the surface semantics: `OverlayRouteMenu`, `OverlayRouteSelect`, `OverlayRouteCombobox`, `OverlayRoutePopover`, `OverlayRouteDialog`, `OverlayRouteSheet`, or `OverlayRouteAlertDialog`.
 
-**Step 4 — call it from the host trigger site:**
+**Step 3 — import the module in `apps/web/src/overlayRoutes.ts`.**
 
-```typescript
-const session = await openNativeOverlay(
-  { type: "my-new", anchor: rect, ...props },
-  {
-    dismissValue: null,
-    resolveEvent: (type, payload) => (type === "result" ? { value: payload } : null),
-  },
-);
+This side-effect registration is required in the overlay Vite entry.
 
-if (!session) {
-  // existing DOM/suspension fallback
-  return;
-}
+**Step 4 — open it from the host trigger site via `useRoutedOverlaySurface()` or `useRoutedPopoverSurface()`.**
 
-const result = await session.result;
-```
+Keep the existing DOM/suspension fallback wired through `routed.domOpen`, and handle submitted results/events in the host owner.
 
 ### Constraints and known limitations
 
-**Serialization:** All props must be JSON-serializable. Callbacks become event IDs (the overlay emits `{ type: "select", id: "..." }` and the host maps that back to the real callback).
+**Serialization:** Overlay messages still cross IPC, so route `params` and `context` must be JSON-serializable. Do not encode UI as generic JSON menu/select rows; pass only the data needed for the routed component to render the same JSX and return explicit route results/events.
 
 **Known explicit exceptions:** Responsive chat-layout sheets (`DiffPanelSheet` and `FileExplorerSheet`) remain DOM sheets because they are mobile/narrow-layout panels rather than browser-adjacent popups in the current desktop split layout. `OrchestrateConfirmDialog` also remains DOM-only for now because the current management/ticket layout is mutually exclusive with the embedded browser. These exceptions should be revisited if those surfaces become browser-adjacent.
 

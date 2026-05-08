@@ -137,7 +137,15 @@ describe("show", () => {
     expect(getTrackedEmbeddedBrowserOverlayCountForTests()).toBe(0);
     expect(browser.suspendForModal).not.toHaveBeenCalled();
 
-    emitOverlayEvent("select", { id: "a" });
+    expect(overlay.render).toHaveBeenCalledWith(
+      "overlay-test",
+      expect.objectContaining({
+        type: "route",
+        routeKey: "context-menu",
+      }),
+    );
+
+    emitOverlayEvent("result", { value: "a" });
 
     await expect(promise).resolves.toBe("a");
     expect(overlay.acquire).toHaveBeenCalledTimes(1);

@@ -212,7 +212,10 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
-import { useTraitsOverlayMenu } from "./chat/TraitsPicker";
+import {
+  buildTraitsPickerRouteParams,
+  useTraitsPickerRouteResultHandler,
+} from "./chat/TraitsPicker";
 import { McpServersPicker } from "./chat/McpServersPicker";
 import { SkillsPicker } from "./chat/SkillsPicker";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
@@ -3594,6 +3597,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        fileExplorerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -3644,6 +3648,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
 
       if (command === "fileExplorer.toggle") {
+        if (meta && event.key.toLowerCase() === "s" && !event.shiftKey && !event.altKey) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onToggleFileExplorer();
@@ -3677,6 +3684,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
+    fileExplorerOpen,
     keybindings,
     onToggleDiff,
     onToggleFileExplorer,
@@ -4941,7 +4949,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     prompt,
     onPromptChange: setPromptFromTraits,
   });
-  const providerTraitsOverlayMenu = useTraitsOverlayMenu({
+  const providerTraitsRouteParams = buildTraitsPickerRouteParams({
+    provider: selectedProvider,
+    model: selectedModel,
+    models: selectedProviderModels,
+    modelOptions: composerModelOptions?.[baseProviderKind(selectedProvider)],
+    prompt,
+    onPromptChange: setPromptFromTraits,
+  });
+  const handleProviderTraitsRouteResult = useTraitsPickerRouteResultHandler({
     provider: selectedProvider,
     threadId,
     model: selectedModel,
@@ -5412,7 +5428,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </header>
         )}
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
+          <div className="drag-region electron-titlebar-inset flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5">
             <CollapsedSidebarTrigger className="size-7 shrink-0" />
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
@@ -5445,6 +5461,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         className={cn(
           "flex h-[50px] items-center border-b border-border px-3 sm:px-5",
           isElectron && "drag-region",
+          isElectron && "electron-titlebar-inset",
         )}
       >
         <ChatHeader
@@ -5933,14 +5950,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   runtimeMode={runtimeMode}
                                   supportsPlan={supportsPlan}
                                   traitsMenuContent={providerTraitsMenuContent}
-                                  onTraitsOverlaySelect={(id) => {
-                                    providerTraitsOverlayMenu.overlaySelectionById.get(id)?.();
-                                  }}
-                                  {...(providerTraitsOverlayMenu.overlayItems !== undefined
-                                    ? {
-                                        traitsOverlayItems: providerTraitsOverlayMenu.overlayItems,
-                                      }
-                                    : {})}
+                                  traitsRouteParams={providerTraitsRouteParams}
+                                  onTraitsResult={handleProviderTraitsRouteResult}
                                   onInteractionModeChange={handleInteractionModeChange}
                                   onRuntimeModeChange={handleRuntimeModeChange}
                                 />

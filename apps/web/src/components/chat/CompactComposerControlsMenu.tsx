@@ -1,9 +1,5 @@
-import {
-  type OverlayMenuItem,
-  type ProviderInteractionMode,
-  type RuntimeMode,
-} from "@t3tools/contracts";
-import { memo, type ReactNode, useMemo } from "react";
+import { type ProviderInteractionMode, type RuntimeMode } from "@t3tools/contracts";
+import { memo, type ReactNode, useCallback } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -14,124 +10,196 @@ import {
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
+import {
+  type TraitsPickerResult,
+  type TraitsPickerRouteParams,
+  TraitsMenuRouteContent,
+} from "./TraitsPicker";
+
+const COMPACT_COMPOSER_CONTROLS_OVERLAY_ROUTE_KEY = "compact-composer-controls-menu";
+
+type CompactComposerControlsResult =
+  | { kind: "interaction"; mode: ProviderInteractionMode }
+  | { kind: "runtime"; mode: RuntimeMode }
+  | { kind: "traits"; result: TraitsPickerResult };
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   supportsPlan: boolean;
   traitsMenuContent?: ReactNode;
-  traitsOverlayItems?: OverlayMenuItem[];
-  onTraitsOverlaySelect?: (id: string) => void;
+  traitsRouteParams?: TraitsPickerRouteParams | undefined;
+  onTraitsResult?: (result: TraitsPickerResult) => void;
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
-  const overlayItems = useMemo<OverlayMenuItem[]>(() => {
-    const items: OverlayMenuItem[] = [
-      ...(props.traitsOverlayItems ?? []),
-      ...(props.traitsOverlayItems && props.traitsOverlayItems.length > 0
-        ? [{ id: "separator:access", label: "", separator: true } satisfies OverlayMenuItem]
-        : []),
-      { id: "label:access", label: "Access", labelOnly: true },
-      {
-        id: "runtime:approval-required",
-        label: "Supervised",
-        checked: props.runtimeMode === "approval-required",
-      },
-      {
-        id: "runtime:full-access",
-        label: "Full access",
-        checked: props.runtimeMode === "full-access",
-      },
-      { id: "separator:mode", label: "", separator: true },
-      { id: "label:mode", label: "Mode", labelOnly: true },
-      { id: "interaction:default", label: "Chat", checked: props.interactionMode === "default" },
-    ];
-
-    if (props.supportsPlan) {
-      items.push(
-        { id: "interaction:plan", label: "Plan", checked: props.interactionMode === "plan" },
-        {
-          id: "interaction:plan-accept",
-          label: "Plan + Accept",
-          checked: props.interactionMode === "plan-accept",
-        },
-      );
-    }
-
-    return items;
-  }, [props.interactionMode, props.runtimeMode, props.supportsPlan, props.traitsOverlayItems]);
+  const handleResult = useCallback(
+    (result: CompactComposerControlsResult) => {
+      switch (result.kind) {
+        case "interaction":
+          if (result.mode !== props.interactionMode) props.onInteractionModeChange(result.mode);
+          return;
+        case "runtime":
+          if (result.mode !== props.runtimeMode) props.onRuntimeModeChange(result.mode);
+          return;
+        case "traits":
+          props.onTraitsResult?.(result.result);
+      }
+    },
+    [props],
+  );
+  const route = useRoutedPopoverSurface<HTMLButtonElement, CompactComposerControlsResult>({
+    routeKey: COMPACT_COMPOSER_CONTROLS_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    params: {
+      hasTraitsContent: props.traitsMenuContent !== undefined && props.traitsMenuContent !== null,
+      interactionMode: props.interactionMode,
+      runtimeMode: props.runtimeMode,
+      supportsPlan: props.supportsPlan,
+      traitsRouteParams: props.traitsRouteParams,
+    },
+    onResult: handleResult,
+  });
 
   return (
-    <Menu
-      overlayMenuAlign="start"
-      overlayOnSelect={(id) => {
-        if (props.onTraitsOverlaySelect) {
-          props.onTraitsOverlaySelect(id);
-        }
-        if (id === "runtime:approval-required" || id === "runtime:full-access") {
-          const nextMode = id.slice("runtime:".length) as RuntimeMode;
-          if (nextMode !== props.runtimeMode) props.onRuntimeModeChange(nextMode);
-          return;
-        }
-        if (
-          id === "interaction:default" ||
-          id === "interaction:plan" ||
-          id === "interaction:plan-accept"
-        ) {
-          const nextMode = id.slice("interaction:".length) as ProviderInteractionMode;
-          if (nextMode !== props.interactionMode) props.onInteractionModeChange(nextMode);
-        }
-      }}
-      overlayItems={overlayItems}
-    >
+    <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
       <MenuTrigger
         render={
           <Button
             size="sm"
             variant="ghost"
-            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
+            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80 not-hover:data-pressed:bg-transparent! not-hover:data-popup-open:bg-transparent!"
             aria-label="More composer controls"
           />
         }
+        onFocusCapture={route.updateAnchor}
+        onMouseOverCapture={route.updateAnchor}
+        ref={route.triggerRef}
       >
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            <MenuDivider />
-          </>
-        ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
-        <MenuDivider />
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-        <MenuRadioGroup
-          value={props.interactionMode}
-          onValueChange={(value) => {
-            if (!value || value === props.interactionMode) return;
-            props.onInteractionModeChange(value as ProviderInteractionMode);
-          }}
-        >
-          <MenuRadioItem value="default">Chat</MenuRadioItem>
-          {props.supportsPlan ? (
-            <>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-              <MenuRadioItem value="plan-accept">Plan + Accept</MenuRadioItem>
-            </>
-          ) : null}
-        </MenuRadioGroup>
+        <CompactComposerControlsMenuContent
+          interactionMode={props.interactionMode}
+          runtimeMode={props.runtimeMode}
+          supportsPlan={props.supportsPlan}
+          traitsMenuContent={props.traitsMenuContent}
+          onInteractionModeChange={props.onInteractionModeChange}
+          onRuntimeModeChange={props.onRuntimeModeChange}
+        />
       </MenuPopup>
     </Menu>
   );
 });
+
+function CompactComposerControlsMenuContent({
+  interactionMode,
+  onInteractionModeChange,
+  onRuntimeModeChange,
+  runtimeMode,
+  supportsPlan,
+  traitsMenuContent,
+}: {
+  interactionMode: ProviderInteractionMode;
+  runtimeMode: RuntimeMode;
+  supportsPlan: boolean;
+  traitsMenuContent?: ReactNode;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
+}) {
+  return (
+    <>
+      {traitsMenuContent ? (
+        <>
+          {traitsMenuContent}
+          <MenuDivider />
+        </>
+      ) : null}
+      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+      <MenuRadioGroup
+        value={runtimeMode}
+        onValueChange={(value) => {
+          if (!value || value === runtimeMode) return;
+          onRuntimeModeChange(value as RuntimeMode);
+        }}
+      >
+        <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+        <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+      </MenuRadioGroup>
+      <MenuDivider />
+      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+      <MenuRadioGroup
+        value={interactionMode}
+        onValueChange={(value) => {
+          if (!value || value === interactionMode) return;
+          onInteractionModeChange(value as ProviderInteractionMode);
+        }}
+      >
+        <MenuRadioItem value="default">Chat</MenuRadioItem>
+        {supportsPlan ? (
+          <>
+            <MenuRadioItem value="plan">Plan</MenuRadioItem>
+            <MenuRadioItem value="plan-accept">Plan + Accept</MenuRadioItem>
+          </>
+        ) : null}
+      </MenuRadioGroup>
+    </>
+  );
+}
+
+function readRuntimeModeParam(value: unknown): RuntimeMode {
+  return value === "full-access" ? "full-access" : "approval-required";
+}
+
+function readInteractionModeParam(value: unknown): ProviderInteractionMode {
+  return value === "plan" || value === "plan-accept" ? value : "default";
+}
+
+function readBooleanParam(value: unknown): boolean {
+  return value === true;
+}
+
+registerOverlayRoute<{
+  hasTraitsContent?: unknown;
+  interactionMode?: unknown;
+  runtimeMode?: unknown;
+  supportsPlan?: unknown;
+  traitsRouteParams?: unknown;
+}>(
+  COMPACT_COMPOSER_CONTROLS_OVERLAY_ROUTE_KEY,
+  function CompactComposerControlsMenuOverlayRoute({ controller, message }) {
+    const hasTraitsContent = readBooleanParam(message.params.hasTraitsContent);
+    const traitsRouteParams = message.params.traitsRouteParams as
+      | TraitsPickerRouteParams
+      | undefined;
+    const runtimeMode = readRuntimeModeParam(message.params.runtimeMode);
+    const interactionMode = readInteractionModeParam(message.params.interactionMode);
+    const supportsPlan = readBooleanParam(message.params.supportsPlan);
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="start">
+          <CompactComposerControlsMenuContent
+            interactionMode={interactionMode}
+            runtimeMode={runtimeMode}
+            supportsPlan={supportsPlan}
+            traitsMenuContent={
+              hasTraitsContent && traitsRouteParams ? (
+                <TraitsMenuRouteContent
+                  params={traitsRouteParams}
+                  onResult={(result) => controller.submit({ kind: "traits", result })}
+                />
+              ) : null
+            }
+            onInteractionModeChange={(mode) => controller.submit({ kind: "interaction", mode })}
+            onRuntimeModeChange={(mode) => controller.submit({ kind: "runtime", mode })}
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);

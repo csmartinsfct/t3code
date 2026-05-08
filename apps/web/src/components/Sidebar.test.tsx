@@ -43,6 +43,8 @@ vi.mock("@tanstack/react-router", async () => {
     useNavigate: () => vi.fn(),
     useLocation: ({ select }: { select?: (value: { pathname: string }) => string } = {}) =>
       select ? select({ pathname: "/" }) : { pathname: "/" },
+    useSearch: ({ select }: { select?: (value: Record<string, unknown>) => unknown } = {}) =>
+      select ? select({}) : {},
     useParams: ({ select }: { select?: (value: { threadId?: string }) => unknown } = {}) =>
       select ? select({}) : {},
   };

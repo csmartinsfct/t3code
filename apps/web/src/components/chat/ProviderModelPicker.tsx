@@ -1,7 +1,6 @@
 import {
   baseProviderKind,
   type BaseProviderKind,
-  type OverlayMenuItem,
   providerProfileId,
   type ProviderKind,
   type ServerProvider,
@@ -11,7 +10,7 @@ import {
   resolveKnownProviderModelName,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo } from "react";
 import type { VariantProps } from "class-variance-authority";
 import {
   type ProviderPickerKind,
@@ -36,6 +35,9 @@ import {
 } from "../ui/menu";
 import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
 import { cn } from "~/lib/utils";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { getProviderModels, getProviderSnapshot } from "../../providerModels";
 
 function isAvailableProviderOption(option: ProviderOption): option is {
@@ -98,7 +100,42 @@ function providerIconClassName(
 const COMPACT_MODEL_ITEM_CLASS =
   "min-h-0 grid-cols-[0_1fr] gap-0 px-2.5 py-1 text-[13px] [&_svg]:hidden sm:min-h-0 sm:text-[13px]";
 const COMPACT_UNAVAILABLE_HEADER_CLASS = "h-auto min-h-0 flex-col items-start gap-0.5 px-2 py-1.5";
-const OVERLAY_MODEL_ID_PREFIX = "model:";
+const PROVIDER_MODEL_PICKER_OVERLAY_ROUTE_KEY = "provider-model-picker-menu";
+
+type ProviderModelPickerResult = {
+  model: string;
+  provider: ProviderKind;
+};
+
+type ProviderModelMenuModel = {
+  name: string;
+  slug: string;
+};
+
+type ProviderModelMenuProvider = {
+  label: string;
+  message?: string | null | undefined;
+  models: ProviderModelMenuModel[];
+  provider: ProviderKind;
+  selectable: boolean;
+  unavailableLabel?: string | undefined;
+};
+
+type ProviderModelMenuUnavailableProvider = {
+  label: string;
+  provider: ProviderPickerKind;
+};
+
+type ProviderModelMenuData =
+  | {
+      kind: "locked";
+      provider: ProviderModelMenuProvider;
+    }
+  | {
+      availableProviders: ProviderModelMenuProvider[];
+      kind: "unlocked";
+      unavailableProviders: ProviderModelMenuUnavailableProvider[];
+    };
 
 function allowAllProviders(_provider: ProviderKind): boolean {
   return true;
@@ -136,7 +173,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerClassName?: string;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
   const providerFilter = props.providerFilter ?? allowAllProviders;
   const unavailableProviderOptions = useMemo(
@@ -163,117 +199,54 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     resolveKnownProviderModelName(activeProvider, props.model) ??
     props.model;
   const ProviderIcon = getProviderIcon(activeProvider);
-  const handleModelChange = (provider: ProviderKind, value: string) => {
-    if (props.disabled) return;
-    if (!value) return;
-    const liveProvider = props.providers
-      ? getProviderSnapshot(props.providers, provider)
-      : undefined;
-    if (!isProviderSelectable(liveProvider)) return;
-    const resolvedModel = resolveSelectableModel(provider, value, getPickerModelOptions(provider));
-    if (!resolvedModel) return;
-    props.onProviderModelChange(provider, resolvedModel);
-    setIsMenuOpen(false);
-  };
-  const { overlayItems, overlaySelectionById } = useMemo(() => {
-    const selectionById = new Map<string, { provider: ProviderKind; model: string }>();
-    let separatorIndex = 0;
-    let disabledIndex = 0;
-
-    const separator = (): OverlayMenuItem => ({
-      id: `separator:${separatorIndex++}`,
-      label: "",
-      separator: true,
-    });
-    const disabledItem = (label: string): OverlayMenuItem => ({
-      id: `disabled:${disabledIndex++}`,
-      label,
-      disabled: true,
-    });
-    const modelItems = (
-      provider: ProviderKind,
-      models: ReadonlyArray<{ slug: string; name: string }>,
-      disabled = false,
-    ): OverlayMenuItem[] =>
-      models.map((modelOption) => {
-        const id = `${OVERLAY_MODEL_ID_PREFIX}${selectionById.size}`;
-        selectionById.set(id, { provider, model: modelOption.slug });
-        return {
-          id,
-          label: modelOption.name,
-          disabled,
-        };
-      });
-
+  const menuData = useMemo<ProviderModelMenuData>(() => {
     if (props.lockedProvider !== null) {
       const lockedProviderSnapshot = props.providers
         ? getProviderSnapshot(props.providers, props.lockedProvider)
         : undefined;
       const lockedProviderSelectable = isProviderSelectable(lockedProviderSnapshot);
-      const items: OverlayMenuItem[] = [];
-      if (lockedProviderSnapshot && !lockedProviderSelectable) {
-        items.push(disabledItem(getUnavailableProviderLabel(lockedProviderSnapshot)), separator());
-      }
-      items.push(
-        ...modelItems(
-          props.lockedProvider,
-          getPickerModelOptions(props.lockedProvider),
-          Boolean(lockedProviderSnapshot && !lockedProviderSelectable),
-        ),
-      );
-      return { overlayItems: items, overlaySelectionById: selectionById };
+      return {
+        kind: "locked",
+        provider: {
+          label: props.lockedProvider,
+          provider: props.lockedProvider,
+          selectable: lockedProviderSelectable,
+          unavailableLabel:
+            lockedProviderSnapshot && !lockedProviderSelectable
+              ? getUnavailableProviderLabel(lockedProviderSnapshot)
+              : undefined,
+          message: lockedProviderSnapshot?.message,
+          models: getPickerModelOptions(props.lockedProvider).map(toProviderModelMenuModel),
+        },
+      };
     }
 
-    const items: OverlayMenuItem[] = [];
-    for (const option of getAvailableProviderOptions(props.providers, providerFilter)) {
-      const liveProvider = props.providers
-        ? getProviderSnapshot(props.providers, option.value)
-        : undefined;
-      const providerSelectable = isProviderSelectable(liveProvider);
-      const providerModelOptions = getPickerModelOptions(option.value);
-      const base = baseProviderKind(option.value);
-      const children: OverlayMenuItem[] =
-        liveProvider && !providerSelectable
-          ? [
-              disabledItem(getUnavailableProviderLabel(liveProvider)),
-              separator(),
-              ...modelItems(option.value, providerModelOptions, true),
-            ]
-          : modelItems(option.value, providerModelOptions);
-
-      items.push({
-        id: `provider:${option.value}`,
+    return {
+      kind: "unlocked",
+      availableProviders: getAvailableProviderOptions(props.providers, providerFilter).map(
+        (option) => {
+          const liveProvider = props.providers
+            ? getProviderSnapshot(props.providers, option.value)
+            : undefined;
+          const providerSelectable = isProviderSelectable(liveProvider);
+          return {
+            label: option.label,
+            provider: option.value,
+            selectable: providerSelectable,
+            unavailableLabel:
+              liveProvider && !providerSelectable
+                ? getUnavailableProviderLabel(liveProvider)
+                : undefined,
+            message: liveProvider?.message,
+            models: getPickerModelOptions(option.value).map(toProviderModelMenuModel),
+          };
+        },
+      ),
+      unavailableProviders: unavailableProviderOptions.map((option) => ({
         label: option.label,
-        icon: `provider:${base}`,
-        iconClassName: cn(
-          "size-4 shrink-0",
-          providerSelectable
-            ? providerIconClassName(option.value, "text-muted-foreground/85")
-            : "text-muted-foreground/55 opacity-70",
-        ),
-        disabled: children.length === 0,
-        children,
-      });
-    }
-
-    const unavailableOptions = unavailableProviderOptions.map((option) => ({
-      id: `unavailable:${option.value}`,
-      label: `${option.label}    Coming soon`,
-      icon: `provider:${baseProviderKind(option.value)}`,
-      iconClassName: "size-4 shrink-0 text-muted-foreground/85 opacity-80",
-      disabled: true,
-    }));
-    if (unavailableOptions.length > 0) items.push(separator(), ...unavailableOptions);
-    if (unavailableOptions.length === 0) items.push(separator());
-    for (const option of COMING_SOON_PROVIDER_OPTIONS) {
-      items.push({
-        id: `coming-soon:${option.id}`,
-        label: `${option.label}    Coming soon`,
-        disabled: true,
-      });
-    }
-
-    return { overlayItems: items, overlaySelectionById: selectionById };
+        provider: option.value as ProviderPickerKind,
+      })),
+    };
   }, [
     getPickerModelOptions,
     props.lockedProvider,
@@ -281,25 +254,62 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     providerFilter,
     unavailableProviderOptions,
   ]);
+  const selectModel = useCallback(
+    (provider: ProviderKind, value: string) => {
+      if (props.disabled) return;
+      if (!value) return;
+      const liveProvider = props.providers
+        ? getProviderSnapshot(props.providers, provider)
+        : undefined;
+      if (!isProviderSelectable(liveProvider)) return;
+      const resolvedModel = resolveSelectableModel(
+        provider,
+        value,
+        getPickerModelOptions(provider),
+      );
+      if (!resolvedModel) return;
+      props.onProviderModelChange(provider, resolvedModel);
+    },
+    [getPickerModelOptions, props],
+  );
+  const handleRouteResult = useCallback(
+    (value: ProviderModelPickerResult) => {
+      if (!isProviderModelPickerResult(value, menuData)) return;
+      selectModel(value.provider, value.model);
+    },
+    [menuData, selectModel],
+  );
+  const route = useRoutedPopoverSurface<HTMLButtonElement, ProviderModelPickerResult>({
+    routeKey: PROVIDER_MODEL_PICKER_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "start",
+    params: {
+      menuData,
+      model: props.model,
+      provider: props.provider,
+    },
+    onResult: handleRouteResult,
+  });
+  const handleModelChange = useCallback(
+    (provider: ProviderKind, value: string) => {
+      selectModel(provider, value);
+      route.onOpenChange(false);
+    },
+    [route, selectModel],
+  );
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (props.disabled) {
+        route.onOpenChange(false);
+        return;
+      }
+      route.onOpenChange(open);
+    },
+    [props.disabled, route],
+  );
 
   return (
-    <Menu
-      overlayItems={overlayItems}
-      overlayMenuAlign="start"
-      overlayOnSelect={(id) => {
-        const selection = overlaySelectionById.get(id);
-        if (!selection) return;
-        handleModelChange(selection.provider, selection.model);
-      }}
-      open={isMenuOpen}
-      onOpenChange={(open) => {
-        if (props.disabled) {
-          setIsMenuOpen(false);
-          return;
-        }
-        setIsMenuOpen(open);
-      }}
-    >
+    <Menu open={route.domOpen} onOpenChange={handleOpenChange}>
       <MenuTrigger
         render={
           <Button
@@ -314,6 +324,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             disabled={props.disabled}
           />
         }
+        onFocusCapture={route.updateAnchor}
+        onMouseOverCapture={route.updateAnchor}
+        ref={route.triggerRef}
       >
         <span
           className={cn(
@@ -338,168 +351,324 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         </span>
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.lockedProvider !== null ? (
-          <MenuGroup>
-            {(() => {
-              const lockedProviderSnapshot = props.providers
-                ? getProviderSnapshot(props.providers, props.lockedProvider)
-                : undefined;
-              const lockedProviderSelectable = isProviderSelectable(lockedProviderSnapshot);
-              return lockedProviderSnapshot && !lockedProviderSelectable ? (
-                <>
-                  <MenuItem className={COMPACT_UNAVAILABLE_HEADER_CLASS} disabled>
-                    <span className="font-medium text-[13px]">
-                      {getUnavailableProviderLabel(lockedProviderSnapshot)}
-                    </span>
-                    {lockedProviderSnapshot.message ? (
-                      <span className="max-w-72 text-muted-foreground/80 text-xs leading-snug">
-                        {lockedProviderSnapshot.message}
-                      </span>
-                    ) : null}
-                  </MenuItem>
-                  <MenuDivider />
-                  <MenuRadioGroup value="">
-                    {getPickerModelOptions(props.lockedProvider).map((modelOption) => (
+        <ProviderModelMenuContent
+          menuData={menuData}
+          model={props.model}
+          provider={props.provider}
+          onModelChange={handleModelChange}
+        />
+      </MenuPopup>
+    </Menu>
+  );
+});
+
+function ProviderModelMenuContent({
+  menuData,
+  model,
+  onModelChange,
+  provider,
+}: {
+  menuData: ProviderModelMenuData;
+  model: string;
+  onModelChange: (provider: ProviderKind, model: string) => void;
+  provider: ProviderKind;
+}) {
+  if (menuData.kind === "locked") {
+    const lockedProvider = menuData.provider;
+    return (
+      <MenuGroup>
+        {!lockedProvider.selectable ? (
+          <>
+            <MenuItem className={COMPACT_UNAVAILABLE_HEADER_CLASS} disabled>
+              <span className="font-medium text-[13px]">{lockedProvider.unavailableLabel}</span>
+              {lockedProvider.message ? (
+                <span className="max-w-72 text-muted-foreground/80 text-xs leading-snug">
+                  {lockedProvider.message}
+                </span>
+              ) : null}
+            </MenuItem>
+            <MenuDivider />
+            <MenuRadioGroup value="">
+              {lockedProvider.models.map((modelOption) => (
+                <MenuRadioItem
+                  key={`${lockedProvider.provider}:${modelOption.slug}`}
+                  value={modelOption.slug}
+                  className={COMPACT_MODEL_ITEM_CLASS}
+                  disabled
+                >
+                  {modelOption.name}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </>
+        ) : (
+          <MenuRadioGroup
+            value={model}
+            onValueChange={(value) => onModelChange(lockedProvider.provider, value)}
+          >
+            {lockedProvider.models.map((modelOption) => (
+              <MenuRadioItem
+                key={`${lockedProvider.provider}:${modelOption.slug}`}
+                value={modelOption.slug}
+                className={COMPACT_MODEL_ITEM_CLASS}
+              >
+                {modelOption.name}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        )}
+      </MenuGroup>
+    );
+  }
+
+  return (
+    <>
+      {menuData.availableProviders.map((option) => {
+        const OptionIcon = getProviderIcon(option.provider);
+        return (
+          <MenuSub key={option.provider}>
+            <MenuSubTrigger
+              className={cn(
+                !option.selectable &&
+                  "text-muted-foreground/70 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground",
+              )}
+            >
+              <OptionIcon
+                aria-hidden="true"
+                className={cn(
+                  "size-4 shrink-0",
+                  option.selectable
+                    ? providerIconClassName(option.provider, "text-muted-foreground/85")
+                    : "text-muted-foreground/55 opacity-70",
+                )}
+              />
+              {option.label}
+            </MenuSubTrigger>
+            <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
+              <MenuGroup>
+                {!option.selectable ? (
+                  <>
+                    <MenuItem className={COMPACT_UNAVAILABLE_HEADER_CLASS} disabled>
+                      <span className="font-medium text-[13px]">{option.unavailableLabel}</span>
+                      {option.message ? (
+                        <span className="max-w-72 text-muted-foreground/80 text-xs leading-snug">
+                          {option.message}
+                        </span>
+                      ) : null}
+                    </MenuItem>
+                    <MenuDivider />
+                    <MenuRadioGroup value="">
+                      {option.models.map((modelOption) => (
+                        <MenuRadioItem
+                          key={`${option.provider}:${modelOption.slug}`}
+                          value={modelOption.slug}
+                          className={COMPACT_MODEL_ITEM_CLASS}
+                          disabled
+                        >
+                          {modelOption.name}
+                        </MenuRadioItem>
+                      ))}
+                    </MenuRadioGroup>
+                  </>
+                ) : (
+                  <MenuRadioGroup
+                    value={provider === option.provider ? model : ""}
+                    onValueChange={(value) => onModelChange(option.provider, value)}
+                  >
+                    {option.models.map((modelOption) => (
                       <MenuRadioItem
-                        key={`${props.lockedProvider}:${modelOption.slug}`}
+                        key={`${option.provider}:${modelOption.slug}`}
                         value={modelOption.slug}
                         className={COMPACT_MODEL_ITEM_CLASS}
-                        disabled
                       >
                         {modelOption.name}
                       </MenuRadioItem>
                     ))}
                   </MenuRadioGroup>
-                </>
-              ) : (
-                <MenuRadioGroup
-                  value={props.model}
-                  onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
-                >
-                  {getPickerModelOptions(props.lockedProvider).map((modelOption) => (
-                    <MenuRadioItem
-                      key={`${props.lockedProvider}:${modelOption.slug}`}
-                      value={modelOption.slug}
-                      className={COMPACT_MODEL_ITEM_CLASS}
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      {modelOption.name}
-                    </MenuRadioItem>
-                  ))}
-                </MenuRadioGroup>
-              );
-            })()}
-          </MenuGroup>
-        ) : (
-          <>
-            {getAvailableProviderOptions(props.providers, providerFilter).map((option) => {
-              const OptionIcon = getProviderIcon(option.value);
-              const liveProvider = props.providers
-                ? getProviderSnapshot(props.providers, option.value)
-                : undefined;
-              const providerSelectable = isProviderSelectable(liveProvider);
-              const providerModelOptions = getPickerModelOptions(option.value);
-              return (
-                <MenuSub key={option.value}>
-                  <MenuSubTrigger
-                    className={cn(
-                      !providerSelectable &&
-                        "text-muted-foreground/70 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground",
-                    )}
-                  >
-                    <OptionIcon
-                      aria-hidden="true"
-                      className={cn(
-                        "size-4 shrink-0",
-                        providerSelectable
-                          ? providerIconClassName(option.value, "text-muted-foreground/85")
-                          : "text-muted-foreground/55 opacity-70",
-                      )}
-                    />
-                    {option.label}
-                  </MenuSubTrigger>
-                  <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
-                    <MenuGroup>
-                      {liveProvider && !providerSelectable ? (
-                        <>
-                          <MenuItem className={COMPACT_UNAVAILABLE_HEADER_CLASS} disabled>
-                            <span className="font-medium text-[13px]">
-                              {getUnavailableProviderLabel(liveProvider)}
-                            </span>
-                            {liveProvider.message ? (
-                              <span className="max-w-72 text-muted-foreground/80 text-xs leading-snug">
-                                {liveProvider.message}
-                              </span>
-                            ) : null}
-                          </MenuItem>
-                          <MenuDivider />
-                          <MenuRadioGroup value="">
-                            {providerModelOptions.map((modelOption) => (
-                              <MenuRadioItem
-                                key={`${option.value}:${modelOption.slug}`}
-                                value={modelOption.slug}
-                                className={COMPACT_MODEL_ITEM_CLASS}
-                                disabled
-                              >
-                                {modelOption.name}
-                              </MenuRadioItem>
-                            ))}
-                          </MenuRadioGroup>
-                        </>
-                      ) : (
-                        <MenuRadioGroup
-                          value={props.provider === option.value ? props.model : ""}
-                          onValueChange={(value) => handleModelChange(option.value, value)}
-                        >
-                          {providerModelOptions.map((modelOption) => (
-                            <MenuRadioItem
-                              key={`${option.value}:${modelOption.slug}`}
-                              value={modelOption.slug}
-                              className={COMPACT_MODEL_ITEM_CLASS}
-                              onClick={() => setIsMenuOpen(false)}
-                            >
-                              {modelOption.name}
-                            </MenuRadioItem>
-                          ))}
-                        </MenuRadioGroup>
-                      )}
-                    </MenuGroup>
-                  </MenuSubPopup>
-                </MenuSub>
-              );
-            })}
-            {unavailableProviderOptions.length > 0 && <MenuDivider />}
-            {unavailableProviderOptions.map((option) => {
-              const OptionIcon = getProviderIcon(option.value);
-              return (
-                <MenuItem key={option.value} disabled>
-                  <OptionIcon
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
-                  />
-                  <span>{option.label}</span>
-                  <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                    Coming soon
-                  </span>
-                </MenuItem>
-              );
-            })}
-            {unavailableProviderOptions.length === 0 && <MenuDivider />}
-            {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
-              const OptionIcon = option.icon;
-              return (
-                <MenuItem key={option.id} disabled>
-                  <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
-                  <span>{option.label}</span>
-                  <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                    Coming soon
-                  </span>
-                </MenuItem>
-              );
-            })}
-          </>
-        )}
-      </MenuPopup>
-    </Menu>
+                )}
+              </MenuGroup>
+            </MenuSubPopup>
+          </MenuSub>
+        );
+      })}
+      {menuData.unavailableProviders.length > 0 && <MenuDivider />}
+      {menuData.unavailableProviders.map((option) => {
+        const OptionIcon = getProviderIcon(option.provider);
+        return (
+          <MenuItem key={option.provider} disabled>
+            <OptionIcon
+              aria-hidden="true"
+              className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
+            />
+            <span>{option.label}</span>
+            <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
+              Coming soon
+            </span>
+          </MenuItem>
+        );
+      })}
+      {menuData.unavailableProviders.length === 0 && <MenuDivider />}
+      {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
+        const OptionIcon = option.icon;
+        return (
+          <MenuItem key={option.id} disabled>
+            <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
+            <span>{option.label}</span>
+            <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
+              Coming soon
+            </span>
+          </MenuItem>
+        );
+      })}
+    </>
   );
-});
+}
+
+function toProviderModelMenuModel(model: { name: string; slug: string }): ProviderModelMenuModel {
+  return {
+    name: model.name,
+    slug: model.slug,
+  };
+}
+
+function isProviderModelPickerResult(
+  value: unknown,
+  menuData: ProviderModelMenuData,
+): value is ProviderModelPickerResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProviderModelPickerResult>;
+  if (typeof candidate.provider !== "string" || typeof candidate.model !== "string") return false;
+  if (menuData.kind === "locked") {
+    const option = menuData.provider;
+    return (
+      option.selectable &&
+      option.provider === candidate.provider &&
+      option.models.some((model) => model.slug === candidate.model)
+    );
+  }
+  const option = menuData.availableProviders.find(
+    (providerOption) => providerOption.provider === candidate.provider,
+  );
+  return Boolean(
+    option?.selectable && option.models.some((model) => model.slug === candidate.model),
+  );
+}
+
+function readStringParam(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readProviderKindParam(value: unknown): ProviderKind | null {
+  return typeof value === "string" ? (value as ProviderKind) : null;
+}
+
+function readProviderPickerKindParam(value: unknown): ProviderPickerKind | null {
+  return typeof value === "string" ? (value as ProviderPickerKind) : null;
+}
+
+function readProviderModelMenuModelsParam(value: unknown): ProviderModelMenuModel[] {
+  if (!Array.isArray(value)) return [];
+  const models: ProviderModelMenuModel[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as Partial<ProviderModelMenuModel>;
+    if (typeof candidate.name !== "string" || typeof candidate.slug !== "string") continue;
+    models.push({ name: candidate.name, slug: candidate.slug });
+  }
+  return models;
+}
+
+function readProviderModelMenuProviderParam(value: unknown): ProviderModelMenuProvider | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<ProviderModelMenuProvider>;
+  const provider = readProviderKindParam(candidate.provider);
+  if (!provider || typeof candidate.label !== "string") return null;
+  return {
+    label: candidate.label,
+    provider,
+    selectable: candidate.selectable === true,
+    ...(typeof candidate.unavailableLabel === "string"
+      ? { unavailableLabel: candidate.unavailableLabel }
+      : {}),
+    ...(typeof candidate.message === "string" ? { message: candidate.message } : {}),
+    models: readProviderModelMenuModelsParam(candidate.models),
+  };
+}
+
+function readUnavailableProviderParam(value: unknown): ProviderModelMenuUnavailableProvider | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<ProviderModelMenuUnavailableProvider>;
+  const provider = readProviderPickerKindParam(candidate.provider);
+  if (!provider || typeof candidate.label !== "string") return null;
+  return {
+    label: candidate.label,
+    provider,
+  };
+}
+
+function readProviderModelMenuDataParam(value: unknown): ProviderModelMenuData {
+  if (!value || typeof value !== "object") {
+    return { kind: "unlocked", availableProviders: [], unavailableProviders: [] };
+  }
+  const candidate = value as Partial<ProviderModelMenuData>;
+  if (candidate.kind === "locked") {
+    const provider = readProviderModelMenuProviderParam(
+      (candidate as { provider?: unknown }).provider,
+    );
+    if (provider) return { kind: "locked", provider };
+  }
+  const unlocked = candidate as {
+    availableProviders?: unknown;
+    unavailableProviders?: unknown;
+  };
+  return {
+    kind: "unlocked",
+    availableProviders: Array.isArray(unlocked.availableProviders)
+      ? unlocked.availableProviders
+          .map(readProviderModelMenuProviderParam)
+          .filter((provider): provider is ProviderModelMenuProvider => provider !== null)
+      : [],
+    unavailableProviders: Array.isArray(unlocked.unavailableProviders)
+      ? unlocked.unavailableProviders
+          .map(readUnavailableProviderParam)
+          .filter((provider): provider is ProviderModelMenuUnavailableProvider => provider !== null)
+      : [],
+  };
+}
+
+function firstProviderFromMenuData(menuData: ProviderModelMenuData): ProviderKind | null {
+  return menuData.kind === "locked"
+    ? menuData.provider.provider
+    : (menuData.availableProviders[0]?.provider ?? null);
+}
+
+registerOverlayRoute<{
+  menuData?: unknown;
+  model?: unknown;
+  provider?: unknown;
+}>(
+  PROVIDER_MODEL_PICKER_OVERLAY_ROUTE_KEY,
+  function ProviderModelPickerOverlayRoute({ controller, message }) {
+    const menuData = readProviderModelMenuDataParam(message.params.menuData);
+    const provider =
+      readProviderKindParam(message.params.provider) ??
+      firstProviderFromMenuData(menuData) ??
+      ("codex" as ProviderKind);
+    const model = readStringParam(message.params.model) ?? "";
+
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="start">
+          <ProviderModelMenuContent
+            menuData={menuData}
+            model={model}
+            provider={provider}
+            onModelChange={(nextProvider, nextModel) =>
+              controller.submit({ provider: nextProvider, model: nextModel })
+            }
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);

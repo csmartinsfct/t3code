@@ -1,4 +1,4 @@
-import type { GitBranch, OverlayComboboxItem } from "@t3tools/contracts";
+import type { GitBranch } from "@t3tools/contracts";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDownIcon } from "lucide-react";
@@ -13,6 +13,10 @@ import {
   useState,
   useTransition,
 } from "react";
+
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteCombobox, OverlayRouteComboboxPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 import {
   gitBranchSearchInfiniteQueryOptions,
@@ -42,6 +46,10 @@ import {
   ComboboxTrigger,
 } from "./ui/combobox";
 import { toastManager } from "./ui/toast";
+
+const BRANCH_SELECTOR_OVERLAY_ROUTE_KEY = "branch-selector-combobox";
+const CHECKOUT_PULL_REQUEST_PREFIX = "__checkout_pull_request__:";
+const CREATE_BRANCH_PREFIX = "__create_new_branch__:";
 
 interface BranchToolbarBranchSelectorProps {
   activeProjectCwd: string;
@@ -87,36 +95,153 @@ function getBranchBadge(branch: GitBranch, activeProjectCwd: string): string | n
           : null;
 }
 
-function toBranchOverlayItem(input: {
-  itemValue: string;
-  branchByName: ReadonlyMap<string, GitBranch>;
-  activeProjectCwd: string;
+type BranchPickerDisplayItem =
+  | { kind: "checkout-pull-request"; value: string; reference: string }
+  | { kind: "create-branch"; value: string; branchName: string }
+  | { kind: "branch"; value: string; branch: GitBranch };
+
+type BranchPickerResult =
+  | { kind: "checkout-pull-request"; reference: string }
+  | { kind: "create-branch"; branchName: string }
+  | { kind: "select-branch"; branch: GitBranch };
+
+function buildBranchPickerDisplayItems(input: {
+  branches: readonly GitBranch[];
   query: string;
-}): OverlayComboboxItem | null {
-  const { activeProjectCwd, branchByName, itemValue, query } = input;
-  if (itemValue.startsWith("__checkout_pull_request__:")) {
-    const reference = itemValue.slice("__checkout_pull_request__:".length);
-    return {
-      value: itemValue,
-      label: "Checkout Pull Request",
-      description: reference,
-    };
+  isSelectingWorktreeBase: boolean;
+  canCheckoutPullRequest: boolean;
+}): BranchPickerDisplayItem[] {
+  const { branches, canCheckoutPullRequest, isSelectingWorktreeBase, query } = input;
+  const trimmedQuery = query.trim();
+  const normalizedQuery = trimmedQuery.toLowerCase();
+  const prReference = parsePullRequestReference(trimmedQuery);
+  const checkoutPullRequestItemValue =
+    prReference && canCheckoutPullRequest ? `${CHECKOUT_PULL_REQUEST_PREFIX}${prReference}` : null;
+  const branchByName = new Map(branches.map((branch) => [branch.name, branch] as const));
+  const createBranchItemValue =
+    !isSelectingWorktreeBase && trimmedQuery.length > 0
+      ? `${CREATE_BRANCH_PREFIX}${trimmedQuery}`
+      : null;
+
+  const items: BranchPickerDisplayItem[] = branches.map((branch) => ({
+    kind: "branch",
+    value: branch.name,
+    branch,
+  }));
+  if (createBranchItemValue && !branchByName.has(trimmedQuery)) {
+    items.push({
+      kind: "create-branch",
+      value: createBranchItemValue,
+      branchName: trimmedQuery,
+    });
   }
-  if (itemValue.startsWith("__create_new_branch__:")) {
-    const branchName = itemValue.slice("__create_new_branch__:".length) || query;
-    return {
-      value: itemValue,
-      label: `Create new branch "${branchName}"`,
-    };
+  if (checkoutPullRequestItemValue && prReference) {
+    items.unshift({
+      kind: "checkout-pull-request",
+      value: checkoutPullRequestItemValue,
+      reference: prReference,
+    });
   }
 
-  const branch = branchByName.get(itemValue);
-  if (!branch) return null;
-  return {
-    value: itemValue,
-    label: itemValue,
-    badge: getBranchBadge(branch, activeProjectCwd) ?? undefined,
-  };
+  if (normalizedQuery.length === 0) return items;
+  return items.filter((item) =>
+    shouldIncludeBranchPickerItem({
+      itemValue: item.value,
+      normalizedQuery,
+      createBranchItemValue,
+      checkoutPullRequestItemValue,
+    }),
+  );
+}
+
+function branchPickerResultForItem(item: BranchPickerDisplayItem): BranchPickerResult {
+  if (item.kind === "checkout-pull-request") {
+    return { kind: "checkout-pull-request", reference: item.reference };
+  }
+  if (item.kind === "create-branch") {
+    return { kind: "create-branch", branchName: item.branchName };
+  }
+  return { kind: "select-branch", branch: item.branch };
+}
+
+function isBranchPickerResult(value: unknown): value is BranchPickerResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<BranchPickerResult>;
+  if (candidate.kind === "checkout-pull-request") {
+    return typeof candidate.reference === "string";
+  }
+  if (candidate.kind === "create-branch") {
+    return typeof candidate.branchName === "string";
+  }
+  if (candidate.kind === "select-branch") {
+    const branch = candidate.branch as Partial<GitBranch> | undefined;
+    return Boolean(branch && typeof branch.name === "string");
+  }
+  return false;
+}
+
+function BranchPickerComboboxItem({
+  activeProjectCwd,
+  index,
+  item,
+  onSelect,
+  style,
+}: {
+  activeProjectCwd: string;
+  index: number;
+  item: BranchPickerDisplayItem;
+  onSelect: (result: BranchPickerResult) => void;
+  style?: CSSProperties;
+}) {
+  if (item.kind === "checkout-pull-request") {
+    return (
+      <ComboboxItem
+        hideIndicator
+        key={item.value}
+        index={index}
+        value={item.value}
+        style={style}
+        onClick={() => onSelect(branchPickerResultForItem(item))}
+      >
+        <div className="flex min-w-0 flex-col items-start py-1">
+          <span className="truncate font-medium">Checkout Pull Request</span>
+          <span className="truncate text-muted-foreground text-xs">{item.reference}</span>
+        </div>
+      </ComboboxItem>
+    );
+  }
+
+  if (item.kind === "create-branch") {
+    return (
+      <ComboboxItem
+        hideIndicator
+        key={item.value}
+        index={index}
+        value={item.value}
+        style={style}
+        onClick={() => onSelect(branchPickerResultForItem(item))}
+      >
+        <span className="truncate">Create new branch "{item.branchName}"</span>
+      </ComboboxItem>
+    );
+  }
+
+  const badge = getBranchBadge(item.branch, activeProjectCwd);
+  return (
+    <ComboboxItem
+      hideIndicator
+      key={item.value}
+      index={index}
+      value={item.value}
+      style={style}
+      onClick={() => onSelect(branchPickerResultForItem(item))}
+    >
+      <div className="flex w-full items-center justify-between gap-2">
+        <span className="truncate">{item.value}</span>
+        {badge && <span className="shrink-0 text-[10px] text-muted-foreground/45">{badge}</span>}
+      </div>
+    </ComboboxItem>
+  );
 }
 
 export function BranchToolbarBranchSelector({
@@ -136,7 +261,6 @@ export function BranchToolbarBranchSelector({
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
   const branchStatusQuery = useQuery(gitStatusQueryOptions(branchCwd));
-  const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
 
   useEffect(() => {
@@ -172,75 +296,28 @@ export function BranchToolbarBranchSelector({
     activeThreadBranch,
     currentGitBranch,
   });
-  const branchNames = useMemo(() => branches.map((branch) => branch.name), [branches]);
-  const branchByName = useMemo(
-    () => new Map(branches.map((branch) => [branch.name, branch] as const)),
-    [branches],
-  );
-  const overlayBranchByNameRef = useRef<ReadonlyMap<string, GitBranch>>(branchByName);
-  useEffect(() => {
-    overlayBranchByNameRef.current = branchByName;
-  }, [branchByName]);
-  const normalizedDeferredBranchQuery = deferredTrimmedBranchQuery.toLowerCase();
-  const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
-  const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
-  const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
-  const hasExactBranchMatch = branchByName.has(trimmedBranchQuery);
-  const createBranchItemValue = canCreateBranch
-    ? `__create_new_branch__:${trimmedBranchQuery}`
-    : null;
-  const branchPickerItems = useMemo(() => {
-    const items = [...branchNames];
-    if (createBranchItemValue && !hasExactBranchMatch) {
-      items.push(createBranchItemValue);
-    }
-    if (checkoutPullRequestItemValue) {
-      items.unshift(checkoutPullRequestItemValue);
-    }
-    return items;
-  }, [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch]);
-  const filteredBranchPickerItems = useMemo(
+  const branchPickerItems = useMemo(
     () =>
-      normalizedDeferredBranchQuery.length === 0
-        ? branchPickerItems
-        : branchPickerItems.filter((itemValue) =>
-            shouldIncludeBranchPickerItem({
-              itemValue,
-              normalizedQuery: normalizedDeferredBranchQuery,
-              createBranchItemValue,
-              checkoutPullRequestItemValue,
-            }),
-          ),
-    [
-      branchPickerItems,
-      checkoutPullRequestItemValue,
-      createBranchItemValue,
-      normalizedDeferredBranchQuery,
-    ],
+      buildBranchPickerDisplayItems({
+        branches,
+        query: deferredTrimmedBranchQuery,
+        isSelectingWorktreeBase,
+        canCheckoutPullRequest: Boolean(onCheckoutPullRequestRequest),
+      }),
+    [branches, deferredTrimmedBranchQuery, isSelectingWorktreeBase, onCheckoutPullRequestRequest],
   );
-  const branchOverlayItems = useMemo(
-    () =>
-      filteredBranchPickerItems
-        .map((itemValue) =>
-          toBranchOverlayItem({
-            itemValue,
-            branchByName,
-            activeProjectCwd,
-            query: trimmedBranchQuery,
-          }),
-        )
-        .filter((item): item is OverlayComboboxItem => item !== null),
-    [activeProjectCwd, branchByName, filteredBranchPickerItems, trimmedBranchQuery],
+  const branchPickerItemValues = useMemo(
+    () => branchPickerItems.map((item) => item.value),
+    [branchPickerItems],
   );
   const [resolvedActiveBranch, setOptimisticBranch] = useOptimistic(
     canonicalActiveBranch,
     (_currentBranch: string | null, optimisticBranch: string | null) => optimisticBranch,
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
-  const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
+  const shouldVirtualizeBranchList = branchPickerItems.length > 40;
   const branchStatusText = isBranchesSearchPending
     ? "Loading branches..."
     : isFetchingNextPage
@@ -249,166 +326,55 @@ export function BranchToolbarBranchSelector({
         ? `Showing ${branches.length} branches`
         : null;
 
-  const runBranchAction = (action: () => Promise<void>) => {
-    startBranchActionTransition(async () => {
-      await action().catch(() => undefined);
-      await invalidateGitQueries(queryClient).catch(() => undefined);
-    });
-  };
+  const runBranchAction = useCallback(
+    (action: () => Promise<void>) => {
+      startBranchActionTransition(async () => {
+        await action().catch(() => undefined);
+        await invalidateGitQueries(queryClient).catch(() => undefined);
+      });
+    },
+    [queryClient, startBranchActionTransition],
+  );
 
-  const selectBranch = (branch: GitBranch) => {
-    const api = readNativeApi();
-    if (!api || !branchCwd || isBranchActionPending) return;
+  const selectBranch = useCallback(
+    (branch: GitBranch) => {
+      const api = readNativeApi();
+      if (!api || !branchCwd || isBranchActionPending) return;
 
-    // In new-worktree mode, selecting a branch sets the base branch.
-    if (isSelectingWorktreeBase) {
-      onSetThreadBranch(branch.name, null);
-      setIsBranchMenuOpen(false);
-      onComposerFocusRequest?.();
-      return;
-    }
-
-    const selectionTarget = resolveBranchSelectionTarget({
-      activeProjectCwd,
-      activeWorktreePath,
-      branch,
-    });
-
-    // If the branch already lives in a worktree, point the thread there.
-    if (selectionTarget.reuseExistingWorktree) {
-      onSetThreadBranch(branch.name, selectionTarget.nextWorktreePath);
-      setIsBranchMenuOpen(false);
-      onComposerFocusRequest?.();
-      return;
-    }
-
-    const selectedBranchName = branch.isRemote
-      ? deriveLocalBranchNameFromRemoteRef(branch.name)
-      : branch.name;
-
-    setIsBranchMenuOpen(false);
-    onComposerFocusRequest?.();
-
-    runBranchAction(async () => {
-      setOptimisticBranch(selectedBranchName);
-      try {
-        await api.git.checkout({ cwd: selectionTarget.checkoutCwd, branch: branch.name });
-        await invalidateGitQueries(queryClient);
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Failed to checkout branch.",
-          description: toBranchActionErrorMessage(error),
-        });
+      // In new-worktree mode, selecting a branch sets the base branch.
+      if (isSelectingWorktreeBase) {
+        onSetThreadBranch(branch.name, null);
+        setIsBranchMenuOpen(false);
+        onComposerFocusRequest?.();
         return;
       }
 
-      let nextBranchName = selectedBranchName;
-      if (branch.isRemote) {
-        const status = await api.git.status({ cwd: selectionTarget.checkoutCwd }).catch(() => null);
-        if (status?.branch) {
-          nextBranchName = status.branch;
-        }
+      const selectionTarget = resolveBranchSelectionTarget({
+        activeProjectCwd,
+        activeWorktreePath,
+        branch,
+      });
+
+      // If the branch already lives in a worktree, point the thread there.
+      if (selectionTarget.reuseExistingWorktree) {
+        onSetThreadBranch(branch.name, selectionTarget.nextWorktreePath);
+        setIsBranchMenuOpen(false);
+        onComposerFocusRequest?.();
+        return;
       }
 
-      setOptimisticBranch(nextBranchName);
-      onSetThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
-    });
-  };
+      const selectedBranchName = branch.isRemote
+        ? deriveLocalBranchNameFromRemoteRef(branch.name)
+        : branch.name;
 
-  const handleOverlayBranchSearch = useCallback(
-    async (query: string): Promise<OverlayComboboxItem[]> => {
-      setBranchQuery(query);
-      const trimmedQuery = query.trim();
-      const parsedPrReference = parsePullRequestReference(trimmedQuery);
-      const nextCheckoutPullRequestItemValue =
-        parsedPrReference && onCheckoutPullRequestRequest
-          ? `__checkout_pull_request__:${parsedPrReference}`
-          : null;
+      setIsBranchMenuOpen(false);
+      onComposerFocusRequest?.();
 
-      let nextBranches = branches;
-      if (branchCwd) {
-        const result = await queryClient
-          .fetchInfiniteQuery(
-            gitBranchSearchInfiniteQueryOptions({
-              cwd: branchCwd,
-              query: trimmedQuery,
-            }),
-          )
-          .catch(() => null);
-        if (result) {
-          nextBranches = filterVisibleBranchPickerBranches(
-            result.pages.flatMap((page) => page.branches),
-          );
-        }
-      }
-
-      const nextBranchByName = new Map(
-        nextBranches.map((branch) => [branch.name, branch] as const),
-      );
-      overlayBranchByNameRef.current = nextBranchByName;
-      const nextBranchNames = nextBranches.map((branch) => branch.name);
-      const nextCanCreateBranch = !isSelectingWorktreeBase && trimmedQuery.length > 0;
-      const nextCreateBranchItemValue = nextCanCreateBranch
-        ? `__create_new_branch__:${trimmedQuery}`
-        : null;
-      const nextItems = [...nextBranchNames];
-      if (nextCreateBranchItemValue && !nextBranchByName.has(trimmedQuery)) {
-        nextItems.push(nextCreateBranchItemValue);
-      }
-      if (nextCheckoutPullRequestItemValue) {
-        nextItems.unshift(nextCheckoutPullRequestItemValue);
-      }
-
-      const normalizedQuery = trimmedQuery.toLowerCase();
-      const nextFilteredItems =
-        normalizedQuery.length === 0
-          ? nextItems
-          : nextItems.filter((itemValue) =>
-              shouldIncludeBranchPickerItem({
-                itemValue,
-                normalizedQuery,
-                createBranchItemValue: nextCreateBranchItemValue,
-                checkoutPullRequestItemValue: nextCheckoutPullRequestItemValue,
-              }),
-            );
-
-      return nextFilteredItems
-        .map((itemValue) =>
-          toBranchOverlayItem({
-            itemValue,
-            branchByName: nextBranchByName,
-            activeProjectCwd,
-            query: trimmedQuery,
-          }),
-        )
-        .filter((item): item is OverlayComboboxItem => item !== null);
-    },
-    [
-      activeProjectCwd,
-      branchCwd,
-      branches,
-      isSelectingWorktreeBase,
-      onCheckoutPullRequestRequest,
-      queryClient,
-    ],
-  );
-
-  const createBranch = (rawName: string) => {
-    const name = rawName.trim();
-    const api = readNativeApi();
-    if (!api || !branchCwd || !name || isBranchActionPending) return;
-
-    setIsBranchMenuOpen(false);
-    onComposerFocusRequest?.();
-
-    runBranchAction(async () => {
-      setOptimisticBranch(name);
-
-      try {
-        await api.git.createBranch({ cwd: branchCwd, branch: name });
+      runBranchAction(async () => {
+        setOptimisticBranch(selectedBranchName);
         try {
-          await api.git.checkout({ cwd: branchCwd, branch: name });
+          await api.git.checkout({ cwd: selectionTarget.checkoutCwd, branch: branch.name });
+          await invalidateGitQueries(queryClient);
         } catch (error) {
           toastManager.add({
             type: "error",
@@ -417,40 +383,114 @@ export function BranchToolbarBranchSelector({
           });
           return;
         }
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Failed to create branch.",
-          description: toBranchActionErrorMessage(error),
-        });
+
+        let nextBranchName = selectedBranchName;
+        if (branch.isRemote) {
+          const status = await api.git
+            .status({ cwd: selectionTarget.checkoutCwd })
+            .catch(() => null);
+          if (status?.branch) {
+            nextBranchName = status.branch;
+          }
+        }
+
+        setOptimisticBranch(nextBranchName);
+        onSetThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
+      });
+    },
+    [
+      activeProjectCwd,
+      activeWorktreePath,
+      branchCwd,
+      isBranchActionPending,
+      isSelectingWorktreeBase,
+      onComposerFocusRequest,
+      onSetThreadBranch,
+      queryClient,
+      runBranchAction,
+      setOptimisticBranch,
+    ],
+  );
+
+  const createBranch = useCallback(
+    (rawName: string) => {
+      const name = rawName.trim();
+      const api = readNativeApi();
+      if (!api || !branchCwd || !name || isBranchActionPending) return;
+
+      setIsBranchMenuOpen(false);
+      onComposerFocusRequest?.();
+
+      runBranchAction(async () => {
+        setOptimisticBranch(name);
+
+        try {
+          await api.git.createBranch({ cwd: branchCwd, branch: name });
+          try {
+            await api.git.checkout({ cwd: branchCwd, branch: name });
+          } catch (error) {
+            toastManager.add({
+              type: "error",
+              title: "Failed to checkout branch.",
+              description: toBranchActionErrorMessage(error),
+            });
+            return;
+          }
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to create branch.",
+            description: toBranchActionErrorMessage(error),
+          });
+          return;
+        }
+
+        setOptimisticBranch(name);
+        onSetThreadBranch(name, activeWorktreePath);
+        setBranchQuery("");
+      });
+    },
+    [
+      activeWorktreePath,
+      branchCwd,
+      isBranchActionPending,
+      onComposerFocusRequest,
+      onSetThreadBranch,
+      runBranchAction,
+      setOptimisticBranch,
+    ],
+  );
+
+  const handleBranchPickerResult = useCallback(
+    (result: BranchPickerResult) => {
+      if (result.kind === "checkout-pull-request") {
+        if (!result.reference || !onCheckoutPullRequestRequest) return;
+        setIsBranchMenuOpen(false);
+        setBranchQuery("");
+        onComposerFocusRequest?.();
+        onCheckoutPullRequestRequest(result.reference);
         return;
       }
 
-      setOptimisticBranch(name);
-      onSetThreadBranch(name, activeWorktreePath);
-      setBranchQuery("");
-    });
-  };
+      if (result.kind === "create-branch") {
+        createBranch(result.branchName);
+        return;
+      }
 
-  const handleOverlayBranchSelect = (value: string) => {
-    if (value.startsWith("__checkout_pull_request__:")) {
-      const reference = value.slice("__checkout_pull_request__:".length);
-      if (!reference || !onCheckoutPullRequestRequest) return;
+      selectBranch(result.branch);
+    },
+    [createBranch, onCheckoutPullRequestRequest, onComposerFocusRequest, selectBranch],
+  );
+
+  const handleBranchRouteResult = useCallback(
+    (value: BranchPickerResult) => {
+      if (!isBranchPickerResult(value)) return;
       setIsBranchMenuOpen(false);
       setBranchQuery("");
-      onComposerFocusRequest?.();
-      onCheckoutPullRequestRequest(reference);
-      return;
-    }
-
-    if (value.startsWith("__create_new_branch__:")) {
-      createBranch(value.slice("__create_new_branch__:".length));
-      return;
-    }
-
-    const branch = branchByName.get(value) ?? overlayBranchByNameRef.current.get(value);
-    if (branch) selectBranch(branch);
-  };
+      handleBranchPickerResult(value);
+    },
+    [handleBranchPickerResult],
+  );
 
   useEffect(() => {
     if (
@@ -504,9 +544,8 @@ export function BranchToolbarBranchSelector({
     void fetchNextPage().catch(() => undefined);
   }, [fetchNextPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
   const branchListVirtualizer = useVirtualizer({
-    count: filteredBranchPickerItems.length,
-    estimateSize: (index) =>
-      filteredBranchPickerItems[index] === checkoutPullRequestItemValue ? 44 : 28,
+    count: branchPickerItems.length,
+    estimateSize: (index) => (branchPickerItems[index]?.kind === "checkout-pull-request" ? 44 : 28),
     getScrollElement: () => branchListScrollElementRef.current,
     overscan: 12,
     enabled: isBranchMenuOpen && shouldVirtualizeBranchList,
@@ -534,7 +573,7 @@ export function BranchToolbarBranchSelector({
     });
   }, [
     branchListVirtualizer,
-    filteredBranchPickerItems.length,
+    branchPickerItems.length,
     isBranchMenuOpen,
     shouldVirtualizeBranchList,
   ]);
@@ -573,105 +612,52 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
-
-  function renderPickerItem(itemValue: string, index: number, style?: CSSProperties) {
-    if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
-      return (
-        <ComboboxItem
-          hideIndicator
-          key={itemValue}
-          index={index}
-          value={itemValue}
-          style={style}
-          onClick={() => {
-            if (!prReference || !onCheckoutPullRequestRequest) {
-              return;
-            }
-            setIsBranchMenuOpen(false);
-            setBranchQuery("");
-            onComposerFocusRequest?.();
-            onCheckoutPullRequestRequest(prReference);
-          }}
-        >
-          <div className="flex min-w-0 flex-col items-start py-1">
-            <span className="truncate font-medium">Checkout Pull Request</span>
-            <span className="truncate text-muted-foreground text-xs">{prReference}</span>
-          </div>
-        </ComboboxItem>
-      );
-    }
-    if (createBranchItemValue && itemValue === createBranchItemValue) {
-      return (
-        <ComboboxItem
-          hideIndicator
-          key={itemValue}
-          index={index}
-          value={itemValue}
-          style={style}
-          onClick={() => createBranch(trimmedBranchQuery)}
-        >
-          <span className="truncate">Create new branch "{trimmedBranchQuery}"</span>
-        </ComboboxItem>
-      );
-    }
-
-    const branch = branchByName.get(itemValue);
-    if (!branch) return null;
-
-    const hasSecondaryWorktree = branch.worktreePath && branch.worktreePath !== activeProjectCwd;
-    const badge = branch.current
-      ? "current"
-      : hasSecondaryWorktree
-        ? "worktree"
-        : branch.isRemote
-          ? "remote"
-          : branch.isDefault
-            ? "default"
-            : null;
-    return (
-      <ComboboxItem
-        hideIndicator
-        key={itemValue}
-        index={index}
-        value={itemValue}
-        style={style}
-        onClick={() => selectBranch(branch)}
-      >
-        <div className="flex w-full items-center justify-between gap-2">
-          <span className="truncate">{itemValue}</span>
-          {badge && <span className="shrink-0 text-[10px] text-muted-foreground/45">{badge}</span>}
-        </div>
-      </ComboboxItem>
-    );
-  }
+  const branchRoute = useRoutedPopoverSurface<HTMLButtonElement, BranchPickerResult>({
+    routeKey: BRANCH_SELECTOR_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    side: "top",
+    params: {
+      activeProjectCwd,
+      activeThreadBranch,
+      activeWorktreePath,
+      branchCwd,
+      effectiveEnvMode,
+      envLocked,
+      resolvedActiveBranch,
+      canCheckoutPullRequest: Boolean(onCheckoutPullRequestRequest),
+    },
+    onResult: handleBranchRouteResult,
+  });
+  const handleComboboxOpenChange = useCallback(
+    (open: boolean) => {
+      handleOpenChange(open);
+      branchRoute.onOpenChange(open);
+    },
+    [branchRoute, handleOpenChange],
+  );
 
   return (
     <Combobox
-      items={branchPickerItems}
-      filteredItems={filteredBranchPickerItems}
+      items={branchPickerItemValues}
+      filteredItems={branchPickerItemValues}
       autoHighlight
-      overlayItems={branchOverlayItems}
-      overlayInputValue={branchQuery}
-      overlayPlaceholder="Search branches..."
-      overlayEmptyText="No branches found."
-      overlayStatusText={branchStatusText}
-      overlayComboboxSide="top"
-      overlayComboboxAlign="end"
-      overlayOnSearch={handleOverlayBranchSearch}
-      overlayOnSelect={handleOverlayBranchSelect}
       virtualized={shouldVirtualizeBranchList}
       onItemHighlighted={(_value, eventDetails) => {
         if (!isBranchMenuOpen || eventDetails.index < 0) return;
         branchListVirtualizer.scrollToIndex(eventDetails.index, { align: "auto" });
       }}
-      onOpenChange={handleOpenChange}
-      open={isBranchMenuOpen}
+      onOpenChange={handleComboboxOpenChange}
+      open={branchRoute.domOpen}
       value={resolvedActiveBranch}
     >
       <ComboboxTrigger
         render={<Button variant="ghost" size="xs" />}
         className="text-muted-foreground/70 hover:text-foreground/80"
         disabled={(isBranchesSearchPending && branches.length === 0) || isBranchActionPending}
+        onFocusCapture={branchRoute.updateAnchor}
+        onMouseOverCapture={branchRoute.updateAnchor}
+        ref={branchRoute.triggerRef}
       >
         <span className="max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon />
@@ -699,23 +685,243 @@ export function BranchToolbarBranchSelector({
               }}
             >
               {virtualBranchRows.map((virtualRow) => {
-                const itemValue = filteredBranchPickerItems[virtualRow.index];
-                if (!itemValue) return null;
-                return renderPickerItem(itemValue, virtualRow.index, {
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
-                });
+                const item = branchPickerItems[virtualRow.index];
+                if (!item) return null;
+                return (
+                  <BranchPickerComboboxItem
+                    activeProjectCwd={activeProjectCwd}
+                    index={virtualRow.index}
+                    item={item}
+                    key={item.value}
+                    onSelect={handleBranchPickerResult}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  />
+                );
               })}
             </div>
           ) : (
-            filteredBranchPickerItems.map((itemValue, index) => renderPickerItem(itemValue, index))
+            branchPickerItems.map((item, index) => (
+              <BranchPickerComboboxItem
+                activeProjectCwd={activeProjectCwd}
+                index={index}
+                item={item}
+                key={item.value}
+                onSelect={handleBranchPickerResult}
+              />
+            ))
           )}
         </ComboboxList>
         {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
       </ComboboxPopup>
     </Combobox>
   );
+}
+
+registerOverlayRoute<{
+  activeProjectCwd?: unknown;
+  activeThreadBranch?: unknown;
+  activeWorktreePath?: unknown;
+  branchCwd?: unknown;
+  canCheckoutPullRequest?: unknown;
+  effectiveEnvMode?: unknown;
+  envLocked?: unknown;
+  resolvedActiveBranch?: unknown;
+}>(
+  BRANCH_SELECTOR_OVERLAY_ROUTE_KEY,
+  function BranchSelectorComboboxOverlayRoute({ message, controller }) {
+    const activeProjectCwd = readStringParam(message.params.activeProjectCwd) ?? "";
+    const branchCwd = readStringParam(message.params.branchCwd);
+    const effectiveEnvMode = readEnvModeParam(message.params.effectiveEnvMode);
+    const activeWorktreePath = readStringParam(message.params.activeWorktreePath);
+    const envLocked = message.params.envLocked === true;
+    const canCheckoutPullRequest = message.params.canCheckoutPullRequest === true;
+    const resolvedActiveBranch = readStringParam(message.params.resolvedActiveBranch);
+    const [query, setQuery] = useState("");
+    const deferredQuery = useDeferredValue(query);
+    const trimmedQuery = deferredQuery.trim();
+
+    const {
+      data: branchesSearchData,
+      fetchNextPage,
+      hasNextPage,
+      isFetchingNextPage,
+      isPending,
+    } = useInfiniteQuery(
+      gitBranchSearchInfiniteQueryOptions({
+        cwd: branchCwd,
+        query: trimmedQuery,
+        enabled: branchCwd !== null,
+      }),
+    );
+    const allBranches = useMemo(
+      () => branchesSearchData?.pages.flatMap((page) => page.branches) ?? [],
+      [branchesSearchData?.pages],
+    );
+    const branches = useMemo(() => filterVisibleBranchPickerBranches(allBranches), [allBranches]);
+    const isSelectingWorktreeBase =
+      effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
+    const displayItems = useMemo(
+      () =>
+        buildBranchPickerDisplayItems({
+          branches,
+          query: trimmedQuery,
+          isSelectingWorktreeBase,
+          canCheckoutPullRequest,
+        }),
+      [branches, canCheckoutPullRequest, isSelectingWorktreeBase, trimmedQuery],
+    );
+    const itemValues = useMemo(() => displayItems.map((item) => item.value), [displayItems]);
+    const statusText = isPending
+      ? "Loading branches..."
+      : isFetchingNextPage
+        ? "Loading more branches..."
+        : hasNextPage && branches.length > 0
+          ? `Showing ${branches.length} branches`
+          : null;
+    const shouldVirtualize = displayItems.length > 40;
+    const scrollElementRef = useRef<HTMLDivElement | null>(null);
+    const maybeFetchNextPage = useCallback(() => {
+      if (!hasNextPage || isFetchingNextPage) return;
+      const scrollElement = scrollElementRef.current;
+      if (!scrollElement) return;
+      const distanceFromBottom =
+        scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
+      if (distanceFromBottom > 96) return;
+      void fetchNextPage().catch(() => undefined);
+    }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+    const virtualizer = useVirtualizer({
+      count: displayItems.length,
+      estimateSize: (index) => (displayItems[index]?.kind === "checkout-pull-request" ? 44 : 28),
+      getScrollElement: () => scrollElementRef.current,
+      overscan: 12,
+      enabled: shouldVirtualize,
+      initialRect: {
+        height: 224,
+        width: 0,
+      },
+    });
+    const virtualRows = virtualizer.getVirtualItems();
+    const setListRef = useCallback(
+      (element: HTMLDivElement | null) => {
+        scrollElementRef.current = (element?.parentElement as HTMLDivElement | null) ?? null;
+        if (element) {
+          virtualizer.measure();
+        }
+      },
+      [virtualizer],
+    );
+
+    useEffect(() => {
+      if (!shouldVirtualize) return;
+      queueMicrotask(() => {
+        virtualizer.measure();
+      });
+    }, [displayItems.length, shouldVirtualize, virtualizer]);
+
+    useEffect(() => {
+      scrollElementRef.current?.scrollTo({ top: 0 });
+    }, [trimmedQuery]);
+
+    useEffect(() => {
+      const scrollElement = scrollElementRef.current;
+      if (!scrollElement) return;
+      const handleScroll = () => {
+        maybeFetchNextPage();
+      };
+      scrollElement.addEventListener("scroll", handleScroll, { passive: true });
+      handleScroll();
+      return () => {
+        scrollElement.removeEventListener("scroll", handleScroll);
+      };
+    }, [maybeFetchNextPage]);
+
+    useEffect(() => {
+      maybeFetchNextPage();
+    }, [allBranches.length, maybeFetchNextPage]);
+
+    const submitItem = (result: BranchPickerResult) => {
+      controller.submit(result);
+    };
+
+    return (
+      <OverlayRouteCombobox
+        items={itemValues}
+        filteredItems={itemValues}
+        autoHighlight
+        virtualized={shouldVirtualize}
+        value={resolvedActiveBranch}
+      >
+        <OverlayRouteComboboxPopup align="end" side="top" className="w-80">
+          <div className="border-b p-1">
+            <ComboboxInput
+              className="[&_input]:font-sans rounded-md"
+              inputClassName="ring-0"
+              placeholder="Search branches..."
+              showTrigger={false}
+              size="sm"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <ComboboxEmpty>No branches found.</ComboboxEmpty>
+          <ComboboxList ref={setListRef} className="max-h-56">
+            {shouldVirtualize ? (
+              <div
+                className="relative"
+                style={{
+                  height: `${virtualizer.getTotalSize()}px`,
+                }}
+              >
+                {virtualRows.map((virtualRow) => {
+                  const item = displayItems[virtualRow.index];
+                  if (!item) return null;
+                  return (
+                    <BranchPickerComboboxItem
+                      activeProjectCwd={activeProjectCwd}
+                      index={virtualRow.index}
+                      item={item}
+                      key={item.value}
+                      onSelect={submitItem}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              displayItems.map((item, index) => (
+                <BranchPickerComboboxItem
+                  activeProjectCwd={activeProjectCwd}
+                  index={index}
+                  item={item}
+                  key={item.value}
+                  onSelect={submitItem}
+                />
+              ))
+            )}
+          </ComboboxList>
+          {statusText ? <ComboboxStatus>{statusText}</ComboboxStatus> : null}
+        </OverlayRouteComboboxPopup>
+      </OverlayRouteCombobox>
+    );
+  },
+);
+
+function readStringParam(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readEnvModeParam(value: unknown): EnvMode {
+  return value === "worktree" ? "worktree" : "local";
 }

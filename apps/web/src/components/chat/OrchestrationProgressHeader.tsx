@@ -13,6 +13,9 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -34,6 +37,22 @@ interface OrchestrationProgressHeaderProps {
 // ---------------------------------------------------------------------------
 
 type BadgeVariant = "info" | "success" | "warning" | "error" | "outline";
+const ORCHESTRATION_RESUME_MENU_OVERLAY_ROUTE_KEY = "orchestration-resume-menu";
+
+type OrchestrationResumeMenuResult = { action: "resume-fresh-agent" };
+
+function OrchestrationResumeMenuContent({
+  onResumeWithFreshAgent,
+}: {
+  onResumeWithFreshAgent: () => void;
+}) {
+  return (
+    <MenuItem onClick={onResumeWithFreshAgent}>
+      <PlayIcon className="size-3.5" />
+      Resume with fresh agent
+    </MenuItem>
+  );
+}
 
 function statusBadgeProps(status: OrchestrationRunStatus): {
   label: string;
@@ -117,6 +136,17 @@ export function OrchestrationProgressHeader({
   onResumeWithFreshAgent,
   onCancel,
 }: OrchestrationProgressHeaderProps) {
+  const resumeMenuRoute = useRoutedPopoverSurface<HTMLButtonElement, OrchestrationResumeMenuResult>(
+    {
+      routeKey: ORCHESTRATION_RESUME_MENU_OVERLAY_ROUTE_KEY,
+      kind: "menu",
+      align: "end",
+      onResult: (result) => {
+        if (result.action === "resume-fresh-agent") onResumeWithFreshAgent();
+      },
+    },
+  );
+
   if (!run) return null;
 
   const badge = statusBadgeProps(run.status);
@@ -203,19 +233,14 @@ export function OrchestrationProgressHeader({
                   Resume
                 </Button>
                 <GroupSeparator />
-                <Menu
-                  overlayItems={[
-                    { id: "resume-fresh-agent", label: "Resume with fresh agent", icon: "Play" },
-                  ]}
-                  overlayMenuAlign="end"
-                  overlayOnSelect={(id) => {
-                    if (id === "resume-fresh-agent") onResumeWithFreshAgent();
-                  }}
-                >
+                <Menu open={resumeMenuRoute.domOpen} onOpenChange={resumeMenuRoute.onOpenChange}>
                   <MenuTrigger
                     render={
                       <Button
                         aria-label="Resume options"
+                        onFocusCapture={resumeMenuRoute.updateAnchor}
+                        onMouseOverCapture={resumeMenuRoute.updateAnchor}
+                        ref={resumeMenuRoute.triggerRef}
                         size="icon-xs"
                         type="button"
                         variant="outline"
@@ -225,10 +250,9 @@ export function OrchestrationProgressHeader({
                     <ChevronDownIcon aria-hidden="true" className="size-4" />
                   </MenuTrigger>
                   <MenuPopup align="end">
-                    <MenuItem onClick={onResumeWithFreshAgent}>
-                      <PlayIcon className="size-3.5" />
-                      Resume with fresh agent
-                    </MenuItem>
+                    <OrchestrationResumeMenuContent
+                      onResumeWithFreshAgent={onResumeWithFreshAgent}
+                    />
                   </MenuPopup>
                 </Menu>
               </Group>
@@ -252,5 +276,24 @@ export function OrchestrationProgressHeader({
     </div>
   );
 }
+
+registerOverlayRoute(
+  ORCHESTRATION_RESUME_MENU_OVERLAY_ROUTE_KEY,
+  function OrchestrationResumeMenuOverlayRoute({ controller }) {
+    return (
+      <OverlayRouteMenu>
+        <OverlayRouteMenuPopup align="end">
+          <OrchestrationResumeMenuContent
+            onResumeWithFreshAgent={() =>
+              controller.submit({
+                action: "resume-fresh-agent",
+              } satisfies OrchestrationResumeMenuResult)
+            }
+          />
+        </OverlayRouteMenuPopup>
+      </OverlayRouteMenu>
+    );
+  },
+);
 
 export type { OrchestrationProgressHeaderProps };

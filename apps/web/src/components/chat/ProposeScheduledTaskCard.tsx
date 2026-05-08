@@ -140,16 +140,7 @@ function ProposeScheduledTaskCard({
           {disabled ? (
             <span className="text-xs text-foreground/80">{selectedProjectName}</span>
           ) : (
-            <Select
-              value={projectId}
-              onValueChange={(val) => setProjectId(val ?? projectId)}
-              overlayItems={projects.map((project) => ({
-                value: project.id,
-                label: project.title,
-                hideIndicator: true,
-              }))}
-              overlayAlignItemWithTrigger={false}
-            >
+            <Select value={projectId} onValueChange={(val) => setProjectId(val ?? projectId)}>
               <SelectTrigger size="xs" className="w-full">
                 <SelectValue>{selectedProjectName}</SelectValue>
               </SelectTrigger>

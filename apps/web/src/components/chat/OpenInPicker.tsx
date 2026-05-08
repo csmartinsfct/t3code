@@ -1,8 +1,11 @@
-import { EditorId, type OverlayMenuItem, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type { EditorId, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
+import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
+import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
+import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
@@ -17,6 +20,8 @@ import {
 } from "../Icons";
 import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
+
+const OPEN_IN_PICKER_OVERLAY_ROUTE_KEY = "open-in-picker-menu";
 
 const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) => {
   const baseOptions: ReadonlyArray<{ label: string; Icon: Icon; value: EditorId }> = [
@@ -73,8 +78,59 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
   return baseOptions.filter((option) => availableEditors.includes(option.value));
 };
 
-function getOverlayIconName(editorId: EditorId): string {
-  return editorId === "file-manager" ? "FolderClosed" : `editor:${editorId}`;
+type OpenInOption = ReturnType<typeof resolveOptions>[number];
+
+function isEditorId(value: unknown): value is EditorId {
+  return (
+    value === "antigravity" ||
+    value === "cursor" ||
+    value === "file-manager" ||
+    value === "idea" ||
+    value === "trae" ||
+    value === "vscode" ||
+    value === "vscode-insiders" ||
+    value === "vscodium" ||
+    value === "zed"
+  );
+}
+
+function readEditorIdsParam(value: unknown): EditorId[] {
+  return Array.isArray(value) ? value.filter(isEditorId) : [];
+}
+
+function readEditorIdParam(value: unknown): EditorId | null {
+  return isEditorId(value) ? value : null;
+}
+
+function readStringParam(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function OpenInMenuContent({
+  favoriteShortcutLabel,
+  onSelectEditor,
+  options,
+  preferredEditor,
+}: {
+  favoriteShortcutLabel: string | null;
+  onSelectEditor: (editor: EditorId) => void;
+  options: readonly OpenInOption[];
+  preferredEditor: EditorId | null;
+}) {
+  return (
+    <>
+      {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
+      {options.map(({ label, Icon, value }) => (
+        <MenuItem key={value} onClick={() => onSelectEditor(value)}>
+          <Icon aria-hidden="true" className="text-muted-foreground" />
+          {label}
+          {value === preferredEditor && favoriteShortcutLabel && (
+            <MenuShortcut>{favoriteShortcutLabel}</MenuShortcut>
+          )}
+        </MenuItem>
+      ))}
+    </>
+  );
 }
 
 export const OpenInPicker = memo(function OpenInPicker({
@@ -109,21 +165,18 @@ export const OpenInPicker = memo(function OpenInPicker({
     () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
     [keybindings],
   );
-  const overlayItems = useMemo<OverlayMenuItem[]>(() => {
-    if (options.length === 0) {
-      return [{ id: "none", label: "No installed editors found", disabled: true }];
-    }
-    return options.map(({ label, value }) => ({
-      id: value,
-      label,
-      icon: getOverlayIconName(value),
-      iconClassName: "text-muted-foreground",
-      shortcut:
-        value === preferredEditor && openFavoriteEditorShortcutLabel
-          ? openFavoriteEditorShortcutLabel
-          : undefined,
-    }));
-  }, [openFavoriteEditorShortcutLabel, options, preferredEditor]);
+  const openInRoute = useRoutedPopoverSurface<HTMLButtonElement, EditorId>({
+    routeKey: OPEN_IN_PICKER_OVERLAY_ROUTE_KEY,
+    kind: "menu",
+    align: "end",
+    params: {
+      availableEditors,
+      favoriteShortcutLabel: openFavoriteEditorShortcutLabel,
+      platform: navigator.platform,
+      preferredEditor,
+    },
+    onResult: openInEditor,
+  });
 
   useOpenFavoriteEditorShortcut({ keybindings, openInCwd, preferredEditor });
 
@@ -141,28 +194,22 @@ export const OpenInPicker = memo(function OpenInPicker({
         </span>
       </Button>
       <GroupSeparator className="hidden @3xl/header-actions:block" />
-      <Menu
-        overlayItems={overlayItems}
-        overlayMenuAlign="end"
-        overlayOnSelect={(id) => {
-          if (id === "none") return;
-          openInEditor(id as EditorId);
-        }}
-      >
-        <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
+      <Menu open={openInRoute.domOpen} onOpenChange={openInRoute.onOpenChange}>
+        <MenuTrigger
+          render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}
+          onFocusCapture={openInRoute.updateAnchor}
+          onMouseOverCapture={openInRoute.updateAnchor}
+          ref={openInRoute.triggerRef}
+        >
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
-          {options.length === 0 && <MenuItem disabled>No installed editors found</MenuItem>}
-          {options.map(({ label, Icon, value }) => (
-            <MenuItem key={value} onClick={() => openInEditor(value)}>
-              <Icon aria-hidden="true" className="text-muted-foreground" />
-              {label}
-              {value === preferredEditor && openFavoriteEditorShortcutLabel && (
-                <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
-              )}
-            </MenuItem>
-          ))}
+          <OpenInMenuContent
+            favoriteShortcutLabel={openFavoriteEditorShortcutLabel}
+            onSelectEditor={openInEditor}
+            options={options}
+            preferredEditor={preferredEditor}
+          />
         </MenuPopup>
       </Menu>
     </Group>
@@ -206,3 +253,29 @@ function useOpenFavoriteEditorShortcut({
     return () => window.removeEventListener("keydown", handler);
   }, [preferredEditor, keybindings, openInCwd]);
 }
+
+registerOverlayRoute<{
+  availableEditors?: unknown;
+  favoriteShortcutLabel?: unknown;
+  platform?: unknown;
+  preferredEditor?: unknown;
+}>(OPEN_IN_PICKER_OVERLAY_ROUTE_KEY, function OpenInPickerOverlayRoute({ message, controller }) {
+  const availableEditors = readEditorIdsParam(message.params.availableEditors);
+  const favoriteShortcutLabel = readStringParam(message.params.favoriteShortcutLabel);
+  const platform = readStringParam(message.params.platform) ?? navigator.platform;
+  const preferredEditor = readEditorIdParam(message.params.preferredEditor);
+  const options = resolveOptions(platform, availableEditors);
+
+  return (
+    <OverlayRouteMenu>
+      <OverlayRouteMenuPopup align="end">
+        <OpenInMenuContent
+          favoriteShortcutLabel={favoriteShortcutLabel}
+          onSelectEditor={(editor) => controller.submit(editor)}
+          options={options}
+          preferredEditor={preferredEditor}
+        />
+      </OverlayRouteMenuPopup>
+    </OverlayRouteMenu>
+  );
+});
