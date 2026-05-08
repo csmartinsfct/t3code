@@ -1350,36 +1350,53 @@ async function loadExtensionFromCrx(req: InstallExtensionRequest): Promise<Insta
 
   // CRX3: magic(4) + version(4) + header_size(4) + proto_header(header_size) + zip
   // CRX2: magic(4) + version(4) + pub_key_len(4) + sig_len(4) + pub_key + sig + zip
-  if (crxBuffer.subarray(0, 4).toString("ascii") !== "Cr24")
+  if (crxBuffer.length < 16 || crxBuffer.subarray(0, 4).toString("ascii") !== "Cr24")
     throw new Error("Not a valid CRX file (bad magic)");
 
   const version = crxBuffer.readUInt32LE(4);
   let zipOffset: number;
   if (version === 3) {
-    zipOffset = 12 + crxBuffer.readUInt32LE(8);
+    const headerSize = crxBuffer.readUInt32LE(8);
+    if (headerSize > crxBuffer.length - 12) throw new Error("Invalid CRX3 header size");
+    zipOffset = 12 + headerSize;
   } else if (version === 2) {
-    zipOffset = 16 + crxBuffer.readUInt32LE(8) + crxBuffer.readUInt32LE(12);
+    const keyLen = crxBuffer.readUInt32LE(8);
+    const sigLen = crxBuffer.readUInt32LE(12);
+    if (keyLen + sigLen > crxBuffer.length - 16) throw new Error("Invalid CRX2 header size");
+    zipOffset = 16 + keyLen + sigLen;
   } else {
     throw new Error(`Unsupported CRX version: ${version}`);
   }
+  if (zipOffset >= crxBuffer.length) throw new Error("CRX zip data missing");
 
   const zipData = new Uint8Array(crxBuffer.buffer, crxBuffer.byteOffset + zipOffset);
   const files = unzipSync(zipData);
 
   const manifestBytes = files["manifest.json"];
   if (!manifestBytes) throw new Error("No manifest.json in CRX zip");
-  const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf-8")) as {
+  let manifest: {
     name?: string;
     version?: string;
     background?: { service_worker?: string; scripts?: string[] };
   };
+  try {
+    manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf-8")) as typeof manifest;
+  } catch {
+    throw new Error("Invalid manifest.json in CRX");
+  }
 
   const extDir = Path.join(STATE_DIR, "browser", projectId, "extensions", extensionId);
+  const resolvedExtDir = Path.resolve(extDir);
   await FS.promises.mkdir(extDir, { recursive: true });
 
   for (const [filename, data] of Object.entries(files)) {
     if (filename.endsWith("/")) continue;
-    const dest = Path.join(extDir, filename);
+    const dest = Path.resolve(Path.join(extDir, filename));
+    // Reject path traversal attempts in CRX zip entries
+    if (!dest.startsWith(resolvedExtDir + Path.sep)) {
+      console.warn("[desktop/browser] rejected malicious CRX path", { filename });
+      continue;
+    }
     await FS.promises.mkdir(Path.dirname(dest), { recursive: true });
     await FS.promises.writeFile(dest, data);
   }
@@ -2632,11 +2649,14 @@ async function ensureExtensionPolyfill(extDir: string): Promise<void> {
     manifest.background?.service_worker ??
     (manifest.background?.scripts?.[0] as string | undefined);
   if (!bgScript) return;
-  const bgPath = Path.join(extDir, bgScript);
+  // Reject paths that could escape the extension directory
+  if (bgScript.startsWith("/") || bgScript.includes("..")) return;
+  const bgPath = Path.resolve(Path.join(extDir, bgScript));
+  if (!bgPath.startsWith(Path.resolve(extDir) + Path.sep)) return;
   try {
     const existing = await FS.promises.readFile(bgPath, "utf-8");
     if (!existing.startsWith(POLYFILL_SENTINEL)) {
-    const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
+      const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
   if(typeof requestAnimationFrame==='undefined'){
     globalThis.requestAnimationFrame=function(cb){return setTimeout(cb,16);};
     globalThis.cancelAnimationFrame=function(id){clearTimeout(id);};
@@ -2650,8 +2670,8 @@ async function ensureExtensionPolyfill(extDir: string): Promise<void> {
     if(!chrome.tabs.onReplaced)chrome.tabs.onReplaced=_evt();
   }
 })();\n`;
-    await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
-    console.log("[desktop/browser] applied extension polyfill", { extDir, bgScript });
+      await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
+      console.log("[desktop/browser] applied extension polyfill", { extDir, bgScript });
     }
   } catch {
     // Non-fatal — extension might still work without the polyfill.
@@ -2669,7 +2689,9 @@ async function patchExtensionJsFiles(extDir: string): Promise<void> {
     const entries = await FS.promises.readdir(extDir, { recursive: true, withFileTypes: true });
     jsFiles = (entries as FS.Dirent[])
       .filter((e) => e.isFile() && e.name.endsWith(".js"))
-      .map((e) => Path.join((e as FS.Dirent & { parentPath?: string }).parentPath ?? extDir, e.name));
+      .map((e) =>
+        Path.join((e as FS.Dirent & { parentPath?: string }).parentPath ?? extDir, e.name),
+      );
   } catch {
     return;
   }
@@ -2717,24 +2739,17 @@ async function reloadPersistedExtensions(projectId: string): Promise<void> {
         const ep = (e as unknown as { path?: string }).path;
         return ep && Path.resolve(ep) === Path.resolve(extDir);
       });
-      if (existing) await ses.removeExtension(existing.id);
-      // Clear V8 bytecode + service worker caches so Chromium re-compiles from
-      // our patched files rather than using cached pre-patch bytecode.
-      await ses.clearCodeCaches({});
-      // clearCodeCaches doesn't reach the service worker registration cache in
-      // all Electron versions. Delete the on-disk Service Worker and Code Cache
-      // directories for this session partition to guarantee a clean slate.
-      const partitionDir = Path.join(
-        app.getPath("userData"),
-        "Partitions",
-        projectId,
-      );
+      // Clear caches BEFORE patching and reloading so Chromium picks up the
+      // patched files rather than compiled bytecode from the previous session.
+      const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
       for (const cacheSubdir of ["Service Worker", "Code Cache"]) {
         await FS.promises.rm(Path.join(partitionDir, cacheSubdir), {
           recursive: true,
           force: true,
         });
       }
+      await ses.clearCodeCaches({});
+      if (existing) ses.removeExtension(existing.id);
       const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
       console.log("[desktop/browser] reloaded persisted extension", {
         projectId,
@@ -3066,24 +3081,26 @@ function createEmbeddedBrowserTab(
   view.webContents.on("console-message", (event) => {
     const message = typeof event.message === "string" ? event.message : "";
     if (!message.startsWith("__t3_ext_install__:")) return;
+    // Only accept from Chrome Web Store pages — reject the signal from any other origin
+    const origin = view.webContents.getURL();
+    const isWebStore =
+      origin.includes("chromewebstore.google.com") || origin.includes("chrome.google.com/webstore");
+    if (!isWebStore) return;
     const extensionId = message.slice("__t3_ext_install__:".length).trim();
     if (!/^[a-p]{32}$/.test(extensionId)) return;
     console.log("[desktop/browser] webstore install triggered", { projectId, extensionId });
     void loadExtensionFromCrx({ projectId, extensionId })
       .then((info) => {
         console.log("[desktop/browser] extension installed", info);
-        void view.webContents
-          .executeJavaScript(
-            `console.info('[T3] Extension installed: ${info.name} v${info.version}')`,
-          )
-          .catch(() => {});
+        // Use JSON.stringify to safely escape name/version into the JS string
+        const label = JSON.stringify(`[T3] Installed: ${info.name} v${info.version}`);
+        void view.webContents.executeJavaScript(`console.info(${label})`).catch(() => {});
       })
       .catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
         console.error("[desktop/browser] extension install failed", { extensionId, error });
-        void view.webContents
-          .executeJavaScript(`console.error('[T3] Extension install failed: ${msg}')`)
-          .catch(() => {});
+        const label = JSON.stringify(`[T3] Extension install failed: ${msg}`);
+        void view.webContents.executeJavaScript(`console.error(${label})`).catch(() => {});
       });
   });
 
