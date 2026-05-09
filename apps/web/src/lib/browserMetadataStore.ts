@@ -54,6 +54,24 @@ export function failExtensionFetch(projectId: ProjectId, error: string): void {
   }));
 }
 
+export function optimisticTogglePin(projectId: ProjectId, extensionId: string): void {
+  useBrowserMetadataStore.setState((s) => {
+    const current = s.entries[projectId];
+    if (!current) return s;
+    return {
+      entries: {
+        ...s.entries,
+        [projectId]: {
+          ...current,
+          extensions: current.extensions.map((e) =>
+            e.id === extensionId ? { ...e, pinned: !e.pinned } : e,
+          ),
+        },
+      },
+    };
+  });
+}
+
 export function invalidateBrowserMetadata(projectId: ProjectId): void {
   useBrowserMetadataStore.setState((s) => {
     const current = s.entries[projectId];

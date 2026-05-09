@@ -1,9 +1,10 @@
-import type { BrowserExtensionInfo, ContextMenuItem } from "@t3tools/contracts";
-import { PinIcon, PinOffIcon, PlusIcon, PuzzleIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import type { BrowserExtensionInfo } from "@t3tools/contracts";
+import { PinIcon, PlusIcon, PuzzleIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
-import { useBrowserMetadataStore } from "~/lib/browserMetadataStore";
+import { useBrowserMetadataStore, optimisticTogglePin } from "~/lib/browserMetadataStore";
 import { cn } from "~/lib/utils";
 import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
@@ -31,73 +32,106 @@ function parseExtensionsParam(raw: unknown): BrowserExtensionInfo[] {
 }
 
 // ---------------------------------------------------------------------------
-// Shared context menu helper
+// Portal context menu — renders at document.body to avoid Radix Menu conflicts
 // ---------------------------------------------------------------------------
 
-type ExtMenuBridge = {
-  showContextMenu: (
-    items: readonly ContextMenuItem<string>[],
-    position?: { x: number; y: number },
-  ) => Promise<string | null>;
-  setPinnedExtensions: (projectId: string, extensionIds: string[]) => Promise<void>;
-  uninstallExtension: (projectId: string, extensionId: string) => Promise<void>;
-  listExtensions: (projectId: string) => Promise<BrowserExtensionInfo[]>;
+type PanelContextMenuState = {
+  ext: BrowserExtensionInfo;
+  x: number;
+  y: number;
 };
 
-export async function handleExtensionContextMenu(
-  ext: BrowserExtensionInfo,
-  position: { x: number; y: number },
-  bridge: ExtMenuBridge,
-  projectId: string,
-): Promise<void> {
-  const items: readonly ContextMenuItem<string>[] = [
-    { id: "pin", label: ext.pinned ? "Unpin from toolbar" : "Pin to toolbar" },
-    { id: "remove", label: "Remove extension", destructive: true },
-  ];
-  const result = await bridge.showContextMenu(items, position);
-  if (!result) return;
-  if (result === "pin") {
-    const exts = await bridge.listExtensions(projectId);
-    const currentlyPinned = exts.filter((e) => e.pinned).map((e) => e.id);
-    const newPinned = ext.pinned
-      ? currentlyPinned.filter((id) => id !== ext.id)
-      : [...currentlyPinned, ext.id];
-    await bridge.setPinnedExtensions(projectId, newPinned);
-  } else if (result === "remove") {
-    await bridge.uninstallExtension(projectId, ext.id);
-  }
+function PanelContextMenu({
+  state,
+  onClose,
+  onTogglePin,
+  onRemove,
+}: {
+  state: PanelContextMenuState;
+  onClose: () => void;
+  onTogglePin: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [onClose]);
+
+  const x = Math.min(state.x, window.innerWidth - 176);
+  const y = Math.min(state.y, window.innerHeight - 80);
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-[9999] min-w-[168px] overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+      style={{ left: x, top: y }}
+    >
+      <button
+        type="button"
+        className="flex w-full items-center px-3 py-1.5 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
+        onClick={() => { onTogglePin(state.ext.id); onClose(); }}
+      >
+        {state.ext.pinned ? "Unpin from toolbar" : "Pin to toolbar"}
+      </button>
+      <div className="my-1 h-px bg-border" />
+      <button
+        type="button"
+        className="flex w-full items-center px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+        onClick={() => { onRemove(state.ext.id); onClose(); }}
+      >
+        Remove extension
+      </button>
+    </div>,
+    document.body,
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Shared panel content rendered in both main and overlay contexts
+// Extension tile
 // ---------------------------------------------------------------------------
 
 function ExtensionIcon({
   ext,
   onClick,
   onTogglePin,
+  onRemove,
   onContextMenu,
 }: {
   ext: BrowserExtensionInfo;
   onClick: () => void;
   onTogglePin: (id: string) => void;
-  onContextMenu: (id: string, pos: { x: number; y: number }) => void;
+  onRemove: (id: string) => void;
+  onContextMenu: (ext: BrowserExtensionInfo, x: number, y: number) => void;
 }) {
   const [imgError, setImgError] = useState(false);
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(ext, e.clientX, e.clientY);
+  };
+
   return (
-    <div className="group relative flex flex-col items-center">
+    <div className="group relative size-8 shrink-0">
+      {/* Main tile */}
       <button
         type="button"
         tabIndex={-1}
         onClick={onClick}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onContextMenu(ext.id, { x: e.clientX, y: e.clientY });
-        }}
+        onContextMenu={handleContextMenu}
         className={cn(
-          "flex size-7 shrink-0 items-center justify-center",
-          "rounded-md border border-transparent transition-all duration-150",
+          "flex size-full items-center justify-center rounded-md border border-border/40",
+          "bg-accent/20 transition-all duration-100",
           "hover:border-border hover:bg-accent",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
@@ -106,108 +140,119 @@ function ExtensionIcon({
           <img
             src={ext.iconUrl}
             alt={ext.name}
-            className="size-4 rounded-sm object-contain"
+            className="size-[18px] rounded-sm object-contain"
             onError={() => setImgError(true)}
           />
         ) : (
-          <div className="flex size-4 items-center justify-center rounded-sm bg-muted text-muted-foreground">
+          <div className="flex size-[18px] items-center justify-center rounded-sm bg-muted text-muted-foreground">
             <PuzzleIcon className="size-3" />
           </div>
         )}
       </button>
-      {/* Pin/unpin badge — appears on pointer-hover */}
+
+      {/* Pin badge — inside tile boundary at bottom-right */}
       <button
         type="button"
         tabIndex={-1}
+        onContextMenu={handleContextMenu}
         onClick={(e) => {
           e.stopPropagation();
           onTogglePin(ext.id);
         }}
-        title={ext.pinned ? "Unpin from toolbar" : "Pin to toolbar"}
         className={cn(
-          "absolute -right-0.5 -bottom-0.5 hidden size-3.5 items-center justify-center",
-          "rounded-full bg-background shadow-sm ring-1 ring-border/50",
-          "transition-colors group-hover:flex",
+          "absolute -bottom-[2px] -right-[2px] z-10 flex size-[14px] items-center justify-center",
+          "rounded-full bg-background/90 shadow-sm ring-1 transition-all duration-100",
           ext.pinned
-            ? "text-primary hover:text-primary/70"
-            : "text-muted-foreground hover:text-foreground",
+            ? "opacity-100 ring-primary/50"
+            : "opacity-0 ring-border/50 group-hover:opacity-100",
         )}
       >
-        {ext.pinned ? <PinOffIcon className="size-2" /> : <PinIcon className="size-2" />}
+        <PinIcon
+          className={cn(
+            "size-2",
+            ext.pinned ? "fill-primary text-primary" : "text-muted-foreground",
+          )}
+        />
       </button>
-      {/* Name label fades in on pointer-hover — immune to focus events */}
-      <span className="pointer-events-none absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-popover-foreground opacity-0 shadow transition-opacity delay-500 group-hover:opacity-100 max-w-20 truncate">
-        {ext.name}
-      </span>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Add extension button
+// ---------------------------------------------------------------------------
 
 function AddExtensionButton({ onClick }: { onClick: () => void }) {
   return (
-    <div className="group relative flex flex-col items-center">
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={onClick}
-        className={cn(
-          "flex size-7 shrink-0 items-center justify-center",
-          "rounded-md border border-dashed border-border/60 transition-all duration-150",
-          "text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        )}
-      >
-        <PlusIcon className="size-3.5" />
-      </button>
-      <span className="pointer-events-none absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-popover-foreground opacity-0 shadow transition-opacity delay-500 group-hover:opacity-100">
-        Browse Web Store
-      </span>
-    </div>
+    <button
+      type="button"
+      tabIndex={-1}
+      onClick={onClick}
+      className={cn(
+        "flex size-8 shrink-0 items-center justify-center rounded-md border border-dashed",
+        "border-border/50 text-muted-foreground/50 transition-all duration-100",
+        "hover:border-border hover:bg-accent hover:text-foreground",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+      )}
+    >
+      <PlusIcon className="size-3.5" />
+    </button>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Panel content — shared between main renderer and overlay
+// ---------------------------------------------------------------------------
+
 function ExtensionsPanelContent({
   extensions,
-  loading,
   onOpenExtension,
   onOpenWebStore,
   onTogglePin,
-  onContextMenu,
+  onRemove,
 }: {
   extensions: BrowserExtensionInfo[];
   loading?: boolean;
   onOpenExtension: (id: string) => void;
   onOpenWebStore: () => void;
   onTogglePin: (id: string) => void;
-  onContextMenu: (id: string, pos: { x: number; y: number }) => void;
+  onRemove: (id: string) => void;
 }) {
+  const [ctxMenu, setCtxMenu] = useState<PanelContextMenuState | null>(null);
+
   return (
-    <div className="flex flex-col gap-3 p-3 pb-6">
-      <p className="px-0.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+    <div className="flex flex-col gap-3 p-3 pb-5">
+      <p className="px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
         Extensions
       </p>
-      {loading ? (
-        <div className="flex h-12 items-center justify-center">
-          <div className="size-4 animate-spin rounded-full border-2 border-border border-t-foreground/40" />
-        </div>
+
+      {extensions.length === 0 ? (
+        <p className="px-0.5 text-[11px] text-muted-foreground/50">
+          No extensions installed. Click + to browse the Web Store.
+        </p>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {extensions.map((ext) => (
             <ExtensionIcon
               key={ext.id}
               ext={ext}
               onClick={() => onOpenExtension(ext.id)}
               onTogglePin={onTogglePin}
-              onContextMenu={onContextMenu}
+              onRemove={onRemove}
+              onContextMenu={(e, x, y) => setCtxMenu({ ext: e, x, y })}
             />
           ))}
           <AddExtensionButton onClick={onOpenWebStore} />
         </div>
       )}
-      {!loading && extensions.length === 0 && (
-        <p className="px-0.5 text-[11px] text-muted-foreground/50">
-          No extensions installed. Click + to browse the Web Store.
-        </p>
+
+      {ctxMenu && (
+        <PanelContextMenu
+          state={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          onTogglePin={(id) => { onTogglePin(id); setCtxMenu(null); }}
+          onRemove={(id) => { onRemove(id); setCtxMenu(null); }}
+        />
       )}
     </div>
   );
@@ -220,9 +265,6 @@ function ExtensionsPanelContent({
 export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: string }) {
   const bridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
 
-  // Data is pre-loaded by useBrowserMetadata in the parent (KanbanBoard).
-  // Select the array reference (stable when unchanged); memoize the cast to
-  // avoid creating a new array on every render when the store has no entry yet.
   const storeExtensions = useBrowserMetadataStore((s) => s.entries[projectId]?.extensions);
   const storeStatus = useBrowserMetadataStore((s) => s.entries[projectId]?.status);
   const extensions = useMemo(
@@ -236,6 +278,8 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
       if (!bridge) return;
       const ext = extensions.find((e) => e.id === extensionId);
       if (!ext) return;
+      // Optimistic update — no loading spinner, UI updates instantly
+      optimisticTogglePin(projectId as Parameters<typeof optimisticTogglePin>[0], extensionId);
       const currentlyPinned = extensions.filter((e) => e.pinned).map((e) => e.id);
       const newPinned = ext.pinned
         ? currentlyPinned.filter((id) => id !== extensionId)
@@ -245,26 +289,17 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
     [bridge, projectId, extensions],
   );
 
-  const handleContextMenu = useCallback(
-    (extensionId: string, pos: { x: number; y: number }) => {
+  const handleRemove = useCallback(
+    (extensionId: string) => {
       if (!bridge) return;
-      const ext = extensions.find((e) => e.id === extensionId);
-      if (!ext) return;
-      const fullBridge: ExtMenuBridge = {
-        showContextMenu: (items, position) =>
-          window.desktopBridge!.showContextMenu(items, position),
-        setPinnedExtensions: bridge.setPinnedExtensions,
-        uninstallExtension: bridge.uninstallExtension,
-        listExtensions: bridge.listExtensions,
-      };
-      void handleExtensionContextMenu(ext, pos, fullBridge, projectId);
+      void bridge.uninstallExtension(projectId, extensionId);
     },
-    [bridge, projectId, extensions],
+    [bridge, projectId],
   );
 
   const route = useRoutedPopoverSurface<
     HTMLButtonElement,
-    { kind: string; extensionId?: string; x?: number; y?: number } | null
+    { kind: string; extensionId?: string } | null
   >({
     routeKey: EXTENSIONS_PANEL_OVERLAY_ROUTE_KEY,
     kind: "menu",
@@ -273,31 +308,16 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
     params: { projectId, extensions, loading },
     onEvent: (_type, payload) => {
       if (typeof payload !== "object" || payload === null) return;
-      const p = payload as { kind?: string; extensionId?: string; x?: number; y?: number };
+      const p = payload as { kind?: string; extensionId?: string };
       if (p.kind === "open" && p.extensionId) {
         void bridge?.openExtension(projectId, p.extensionId);
       } else if (p.kind === "webstore") {
         void bridge?.navigate(projectId, WEBSTORE_URL);
       } else if (p.kind === "togglePin" && p.extensionId) {
         handleTogglePin(p.extensionId);
-        return; // don't close panel
-      } else if (
-        p.kind === "contextmenu" &&
-        p.extensionId &&
-        p.x !== undefined &&
-        p.y !== undefined
-      ) {
-        const ext = extensions.find((e) => e.id === p.extensionId);
-        if (ext && bridge) {
-          const fullBridge: ExtMenuBridge = {
-            showContextMenu: (items, position) =>
-              window.desktopBridge!.showContextMenu(items, position),
-            setPinnedExtensions: bridge.setPinnedExtensions,
-            uninstallExtension: bridge.uninstallExtension,
-            listExtensions: bridge.listExtensions,
-          };
-          void handleExtensionContextMenu(ext, { x: p.x, y: p.y }, fullBridge, projectId);
-        }
+        return;
+      } else if (p.kind === "remove" && p.extensionId) {
+        handleRemove(p.extensionId);
         return;
       }
       route.onOpenChange(false);
@@ -342,7 +362,7 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
             route.onOpenChange(false);
           }}
           onTogglePin={handleTogglePin}
-          onContextMenu={handleContextMenu}
+          onRemove={handleRemove}
         />
       </MenuPopup>
     </Menu>
@@ -374,13 +394,8 @@ registerOverlayRoute<{ projectId?: unknown; extensions?: unknown; loading?: unkn
             onTogglePin={(id) => {
               controller.bridge.emitEvent("event", { kind: "togglePin", extensionId: id });
             }}
-            onContextMenu={(id, pos) => {
-              controller.bridge.emitEvent("event", {
-                kind: "contextmenu",
-                extensionId: id,
-                x: pos.x,
-                y: pos.y,
-              });
+            onRemove={(id) => {
+              controller.bridge.emitEvent("event", { kind: "remove", extensionId: id });
             }}
           />
         </OverlayRouteMenuPopup>

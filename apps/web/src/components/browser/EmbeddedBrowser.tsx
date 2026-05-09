@@ -2,7 +2,6 @@ import type {
   BrowserExtensionInfo,
   BrowserTabListing,
   BrowserTabSummary,
-  ContextMenuItem,
   ProjectId,
 } from "@t3tools/contracts";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
@@ -25,14 +24,12 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent } from 
 import type { ViewportEmulationParams } from "@t3tools/contracts";
 
 import { setEmbeddedBrowserMountedForModalSuspension } from "~/embeddedBrowserModalSuspension";
+import { useContextMenuStore } from "~/contextMenuStore";
 import { useBrowserMetadataStore } from "~/lib/browserMetadataStore";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
-import {
-  EmbeddedBrowserExtensionsButton,
-  handleExtensionContextMenu,
-} from "./EmbeddedBrowserExtensionsPanel";
+import { EmbeddedBrowserExtensionsButton } from "./EmbeddedBrowserExtensionsPanel";
 import { EmbeddedBrowserViewportActions } from "./EmbeddedBrowserViewportActions";
 import { EmbeddedBrowserViewportToolbar } from "./EmbeddedBrowserViewportToolbar";
 import { ViewportResizeHandles } from "./ViewportResizeHandles";
@@ -187,22 +184,37 @@ function tabDisplayName(tab: BrowserTabSummary): string {
 function PinnedExtensionIcon({
   ext,
   onOpen,
-  onContextMenu,
+  onTogglePin,
+  onRemove,
 }: {
   ext: BrowserExtensionInfo;
   onOpen: (id: string) => void;
-  onContextMenu: (ext: BrowserExtensionInfo, pos: { x: number; y: number }) => void;
+  onTogglePin: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const showContextMenu = useContextMenuStore((s) => s.show);
+
+  const handleContextMenu = async (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const result = await showContextMenu(
+      [
+        { id: "pin", label: "Unpin from toolbar" },
+        { id: "remove", label: "Remove extension", destructive: true },
+      ],
+      { x: e.clientX, y: e.clientY },
+    );
+    if (result === "pin") onTogglePin(ext.id);
+    else if (result === "remove") onRemove(ext.id);
+  };
+
   return (
     <button
       type="button"
       title={ext.name}
       onClick={() => onOpen(ext.id)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onContextMenu(ext, { x: e.clientX, y: e.clientY });
-      }}
+      onContextMenu={handleContextMenu}
       className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       {ext.iconUrl && !imgError ? (
@@ -866,18 +878,17 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
             key={ext.id}
             ext={ext}
             onOpen={(id) => void browserBridge?.openExtension(projectId, id)}
-            onContextMenu={(pinnedExt, pos) => {
+            onTogglePin={(id) => {
               if (!browserBridge) return;
-              const bridge = {
-                showContextMenu: (
-                  items: readonly ContextMenuItem<string>[],
-                  position?: { x: number; y: number },
-                ) => window.desktopBridge!.showContextMenu(items, position),
-                setPinnedExtensions: browserBridge.setPinnedExtensions,
-                uninstallExtension: browserBridge.uninstallExtension,
-                listExtensions: browserBridge.listExtensions,
-              };
-              void handleExtensionContextMenu(pinnedExt, pos, bridge, projectId);
+              const currentlyPinned = pinnedExtensions.map((e) => e.id);
+              void browserBridge.setPinnedExtensions(
+                projectId,
+                currentlyPinned.filter((pid) => pid !== id),
+              );
+            }}
+            onRemove={(id) => {
+              if (!browserBridge) return;
+              void browserBridge.uninstallExtension(projectId, id);
             }}
           />
         ))}
