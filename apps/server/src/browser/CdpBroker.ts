@@ -86,6 +86,16 @@ export interface CdpBrokerTransport {
     readonly viewId: string;
     readonly extensionId: string;
   }) => Promise<{ popupKey: string }>;
+  readonly loadUnpacked?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly folderPath: string;
+  }) => Promise<import("@t3tools/contracts").BrowserExtensionInfo>;
+  readonly reloadExtension?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId: string;
+  }) => Promise<void>;
 }
 
 export interface InstalledExtensionInfo {
@@ -450,5 +460,24 @@ export class CdpBroker {
       });
     }
     return this.transport.extOpen({ id: this.requestId(), viewId, extensionId });
+  }
+
+  async loadUnpacked(
+    viewId: string,
+    folderPath: string,
+  ): Promise<import("@t3tools/contracts").BrowserExtensionInfo> {
+    if (!this.transport.loadUnpacked)
+      throw new CdpBrokerError("loadUnpacked unavailable", {
+        code: "CDP_LOAD_UNPACKED_UNAVAILABLE",
+      });
+    return this.transport.loadUnpacked({ id: this.requestId(), viewId, folderPath });
+  }
+
+  async reloadExtension(viewId: string, extensionId: string): Promise<void> {
+    if (!this.transport.reloadExtension)
+      throw new CdpBrokerError("reloadExtension unavailable", {
+        code: "CDP_RELOAD_EXTENSION_UNAVAILABLE",
+      });
+    return this.transport.reloadExtension({ id: this.requestId(), viewId, extensionId });
   }
 }

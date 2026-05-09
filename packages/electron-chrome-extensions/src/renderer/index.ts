@@ -511,6 +511,7 @@ export const injectExtensionAPIs = () => {
             onInstalled: new ExtensionEvent("runtime.onInstalled") as any,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             onStartup: new ExtensionEvent("runtime.onStartup") as any,
+            reload: invokeExtension("runtime.reload"),
             connectNative: (application: string) => {
               const port = new NativePort();
               const receive = port._receive.bind(port);
@@ -712,8 +713,7 @@ export const injectExtensionAPIs = () => {
   // directly in the global scope. The chrome object is already accessible.
   // Detect SW via multiple signals: window absent, importScripts present, or
   // contextBridge absent (service worker preloads don't have it).
-  const safeHref =
-    typeof location !== "undefined" && location.href ? location.href : "unknown";
+  const safeHref = typeof location !== "undefined" && location.href ? location.href : "unknown";
   const inSwContext =
     process.type === "service-worker" ||
     (typeof window === "undefined" && typeof importScripts === "function") ||

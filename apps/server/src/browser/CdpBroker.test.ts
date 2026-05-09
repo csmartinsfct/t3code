@@ -31,7 +31,7 @@ const DEFERRED_NATIVE_TOOLS = ["cookie-import-browser"] as const;
 const PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS = ["focus", "visibility"] as const;
 // Tools that work in native Electron but require specific browser state (e.g. a pending
 // Chrome Web Store install) that the headless test harness cannot provide.
-const BROWSER_PRECONDITION_TOOLS = ["load_extension"] as const;
+const BROWSER_PRECONDITION_TOOLS = ["load_extension", "load_unpacked", "reload_extension"] as const;
 const DAY_1_TOOLS = BROWSER_HOST_TOOL_NAMES.filter(
   (tool) =>
     !(DEFERRED_NATIVE_TOOLS as readonly string[]).includes(tool) &&
@@ -210,6 +210,19 @@ class HarnessTransport implements CdpBrokerTransport {
   ): Promise<{ popupKey: string }> {
     return { popupKey: "test-project:test-extension" };
   }
+
+  async loadUnpacked(_req: Parameters<NonNullable<CdpBrokerTransport["loadUnpacked"]>>[0]) {
+    return {
+      id: "test-unpacked-id",
+      name: "Test Extension",
+      iconUrl: null,
+      popupUrl: null,
+      pinned: false,
+      isUnpacked: true,
+    };
+  }
+
+  async reloadExtension(_req: Parameters<NonNullable<CdpBrokerTransport["reloadExtension"]>>[0]) {}
 
   private ensureRoot(): void {
     if (this.rootInitialized) return;
@@ -891,6 +904,43 @@ describe("extension agent tools (via harness)", () => {
   it("SPECS table includes all 4 new extension tools", () => {
     for (const name of ["list_extensions", "ext_windows", "ext_switch", "ext_close"]) {
       assert.property(SPECS, name, `SPECS missing tool: ${name}`);
+    }
+  });
+
+  it("load_unpacked returns loaded confirmation with [unpacked] tag", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["/path/to/ext"], {
+        __toolName: "load_unpacked",
+        folderPath: "/path/to/ext",
+      });
+      assert.include(result, "Loaded:");
+      assert.include(result, "[unpacked]");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("reload_extension returns reload confirmation", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["abcdefghijklmnopabcdefghijklmnop"], {
+        __toolName: "reload_extension",
+        extensionId: "abcdefghijklmnopabcdefghijklmnop",
+      });
+      assert.include(result, "Reloaded extension abcdefghijklmnopabcdefghijklmnop");
+    } finally {
+      await harness.dispose();
     }
   });
 });

@@ -46,16 +46,20 @@ function PanelContextMenu({
   onClose,
   onTogglePin,
   onRemove,
+  onReload,
 }: {
   state: PanelContextMenuState;
   onClose: () => void;
   onTogglePin: (id: string) => void;
   onRemove: (id: string) => void;
+  onReload?: (id: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
@@ -79,15 +83,37 @@ function PanelContextMenu({
       <button
         type="button"
         className="flex w-full items-center px-3 py-1.5 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
-        onClick={() => { onTogglePin(state.ext.id); onClose(); }}
+        onClick={() => {
+          onTogglePin(state.ext.id);
+          onClose();
+        }}
       >
         {state.ext.pinned ? "Unpin from toolbar" : "Pin to toolbar"}
       </button>
       <div className="my-1 h-px bg-border" />
+      {state.ext.isUnpacked && (
+        <>
+          <div className="my-1 h-px bg-border" />
+          <button
+            type="button"
+            className="flex w-full items-center px-3 py-1.5 text-[13px] text-popover-foreground transition-colors hover:bg-accent"
+            onClick={() => {
+              onReload?.(state.ext.id);
+              onClose();
+            }}
+          >
+            Reload extension
+          </button>
+        </>
+      )}
+      <div className="my-1 h-px bg-border" />
       <button
         type="button"
         className="flex w-full items-center px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-        onClick={() => { onRemove(state.ext.id); onClose(); }}
+        onClick={() => {
+          onRemove(state.ext.id);
+          onClose();
+        }}
       >
         Remove extension
       </button>
@@ -210,6 +236,8 @@ function ExtensionsPanelContent({
   onOpenWebStore,
   onTogglePin,
   onRemove,
+  onLoadUnpacked,
+  onReload,
 }: {
   extensions: BrowserExtensionInfo[];
   loading?: boolean;
@@ -217,6 +245,8 @@ function ExtensionsPanelContent({
   onOpenWebStore: () => void;
   onTogglePin: (id: string) => void;
   onRemove: (id: string) => void;
+  onLoadUnpacked?: () => void;
+  onReload?: (id: string) => void;
 }) {
   const [ctxMenu, setCtxMenu] = useState<PanelContextMenuState | null>(null);
 
@@ -246,12 +276,29 @@ function ExtensionsPanelContent({
         </div>
       )}
 
+      {onLoadUnpacked && (
+        <button
+          type="button"
+          onClick={onLoadUnpacked}
+          className="mt-0.5 w-full rounded px-1.5 py-1 text-left text-[11px] text-muted-foreground/50 transition-colors hover:text-muted-foreground/80"
+        >
+          Load unpacked...
+        </button>
+      )}
+
       {ctxMenu && (
         <PanelContextMenu
           state={ctxMenu}
           onClose={() => setCtxMenu(null)}
-          onTogglePin={(id) => { onTogglePin(id); setCtxMenu(null); }}
-          onRemove={(id) => { onRemove(id); setCtxMenu(null); }}
+          onTogglePin={(id) => {
+            onTogglePin(id);
+            setCtxMenu(null);
+          }}
+          onRemove={(id) => {
+            onRemove(id);
+            setCtxMenu(null);
+          }}
+          {...(onReload ? { onReload } : {})}
         />
       )}
     </div>
@@ -297,6 +344,17 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
     [bridge, projectId],
   );
 
+  const handleLoadUnpacked = useCallback(() => {
+    void bridge?.pickAndLoadUnpackedExtension(projectId);
+  }, [bridge, projectId]);
+
+  const handleReload = useCallback(
+    (extensionId: string) => {
+      void bridge?.reloadExtension(projectId, extensionId);
+    },
+    [bridge, projectId],
+  );
+
   const route = useRoutedPopoverSurface<
     HTMLButtonElement,
     { kind: string; extensionId?: string } | null
@@ -318,6 +376,12 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
         return;
       } else if (p.kind === "remove" && p.extensionId) {
         handleRemove(p.extensionId);
+        return;
+      } else if (p.kind === "loadUnpacked") {
+        handleLoadUnpacked();
+        return;
+      } else if (p.kind === "reload" && p.extensionId) {
+        handleReload(p.extensionId);
         return;
       }
       route.onOpenChange(false);
@@ -363,6 +427,8 @@ export function EmbeddedBrowserExtensionsButton({ projectId }: { projectId: stri
           }}
           onTogglePin={handleTogglePin}
           onRemove={handleRemove}
+          onLoadUnpacked={handleLoadUnpacked}
+          onReload={handleReload}
         />
       </MenuPopup>
     </Menu>
@@ -396,6 +462,12 @@ registerOverlayRoute<{ projectId?: unknown; extensions?: unknown; loading?: unkn
             }}
             onRemove={(id) => {
               controller.bridge.emitEvent("event", { kind: "remove", extensionId: id });
+            }}
+            onLoadUnpacked={() => {
+              controller.bridge.emitEvent("event", { kind: "loadUnpacked" });
+            }}
+            onReload={(id) => {
+              controller.bridge.emitEvent("event", { kind: "reload", extensionId: id });
             }}
           />
         </OverlayRouteMenuPopup>

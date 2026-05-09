@@ -136,6 +136,9 @@ const BROWSER_UNINSTALL_EXTENSION_CHANNEL = "browser:uninstallExtension";
 const BROWSER_SET_PINNED_EXTENSIONS_CHANNEL = "browser:setPinnedExtensions";
 const BROWSER_EXTENSIONS_CHANGED_CHANNEL = "browser:extensionsChanged";
 const BROWSER_POPOUT_STATE_CHANNEL = "browser:popout-state";
+const BROWSER_LOAD_UNPACKED_CHANNEL = "browser:loadUnpacked";
+const BROWSER_PICK_AND_LOAD_UNPACKED_CHANNEL = "browser:pickAndLoadUnpacked";
+const BROWSER_RELOAD_EXTENSION_CHANNEL = "browser:reloadExtension";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
@@ -1378,6 +1381,24 @@ async function handleBrowserCdpBrokerRequest(
       sendBrokerSuccess(response, { closed: true });
       return;
     }
+    if (url.pathname === "/extensions/load-unpacked") {
+      const b = body as Record<string, unknown>;
+      const folderPath = typeof b.folderPath === "string" ? b.folderPath : undefined;
+      const { projectId } = parseViewId(typeof b.viewId === "string" ? b.viewId : "");
+      if (!projectId || !folderPath)
+        throw new Error("load-unpacked: projectId and folderPath required");
+      sendBrokerSuccess(response, await loadUnpackedExtensionForProject(projectId, folderPath));
+      return;
+    }
+    if (url.pathname === "/extensions/reload") {
+      const b = body as Record<string, unknown>;
+      const extId = typeof b.extensionId === "string" ? b.extensionId : undefined;
+      const { projectId } = parseViewId(typeof b.viewId === "string" ? b.viewId : "");
+      if (!projectId || !extId) throw new Error("reload: projectId and extensionId required");
+      await reloadExtensionForProject(projectId, extId);
+      sendBrokerSuccess(response, { reloaded: true });
+      return;
+    }
     sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1483,6 +1504,47 @@ async function installExtensionForProject(
     name: (ext.manifest["name"] as string | undefined) ?? extensionId,
     version: (ext.manifest["version"] as string | undefined) ?? "unknown",
   };
+}
+
+async function loadUnpackedExtensionForProject(
+  projectId: string,
+  extPath: string,
+): Promise<import("@t3tools/contracts").BrowserExtensionInfo> {
+  const resolved = Path.resolve(extPath);
+  await FS.promises.access(resolved);
+  const stat = await FS.promises.stat(resolved);
+  if (!stat.isDirectory()) throw new Error(`load-unpacked: ${resolved} is not a directory`);
+  await FS.promises.access(Path.join(resolved, "manifest.json"));
+  getOrCreateChromeExtensions(projectId);
+  const ready = extensionsReadyByProjectId.get(projectId);
+  if (ready) await ready;
+  await ensureExtensionPolyfill(resolved);
+  const ses = session.fromPartition(`persist:${projectId}`);
+  const ext = await ses.loadExtension(resolved, { allowFileAccess: true });
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
+  }
+  const pinnedIds = await readPinnedExtensions(projectId);
+  return {
+    id: ext.id,
+    name: (ext.manifest["name"] as string | undefined) ?? Path.basename(resolved),
+    iconUrl: null,
+    popupUrl: null,
+    pinned: pinnedIds.includes(ext.id),
+    isUnpacked: true,
+  };
+}
+
+async function reloadExtensionForProject(projectId: string, extensionId: string): Promise<void> {
+  const ses = session.fromPartition(`persist:${projectId}`);
+  const ext = ses.getAllExtensions().find((e) => e.id === extensionId);
+  if (!ext) throw new Error(`reload: extension ${extensionId} not found`);
+  const extPath = (ext as { path?: string }).path;
+  if (!extPath) throw new Error(`reload: extension ${extensionId} has no known path`);
+  await ses.loadExtension(extPath, { allowFileAccess: true });
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
+  }
 }
 
 async function startBrowserCdpBrokerServer(): Promise<void> {
@@ -4516,6 +4578,7 @@ function registerIpcHandlers(): void {
 
     const ses = session.fromPartition(`persist:${projectId}`);
     const pinnedIds = await readPinnedExtensions(projectId);
+    const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
 
     return Promise.all(
       ses.getAllExtensions().map(async (ext) => {
@@ -4538,7 +4601,7 @@ function registerIpcHandlers(): void {
         // session partition) can display it. chrome-extension:// URLs only work
         // inside the extension's own session partition.
         let iconUrl: string | null = null;
-        const extLoadPath = (ext as unknown as { path?: string }).path;
+        const extLoadPath = (ext as unknown as { path?: string }).path ?? "";
         if (iconPath && extLoadPath) {
           try {
             const candidate = Path.join(extLoadPath, iconPath);
@@ -4556,12 +4619,16 @@ function registerIpcHandlers(): void {
           }
         }
 
+        // An extension is "unpacked" if its path is outside the managed extensions directory.
+        const isUnpacked = !Path.resolve(extLoadPath).startsWith(Path.resolve(extensionsPath));
+
         return {
           id: ext.id,
           name: ext.name,
           iconUrl,
           popupUrl: popupPath ? `chrome-extension://${ext.id}/${popupPath}` : null,
           pinned: pinnedIds.includes(ext.id),
+          isUnpacked,
         };
       }),
     );
@@ -4581,11 +4648,7 @@ function registerIpcHandlers(): void {
 
       // Full profile purge so the next install is always treated as fresh
       // (Chromium fires chrome.runtime.onInstalled with reason:"install").
-      const partitionDir = Path.join(
-        app.getPath("userData"),
-        "Partitions",
-        projectId,
-      );
+      const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
 
       // Remove the extension from Chromium's Preferences registry.
       const prefsPath = Path.join(partitionDir, "Preferences");
@@ -4656,6 +4719,38 @@ function registerIpcHandlers(): void {
         const msg = err instanceof Error ? err.message : String(err);
         new ElectronNotification({ title: "Extension", body: msg, silent: true }).show();
       }
+    },
+  );
+
+  ipcMain.removeHandler(BROWSER_LOAD_UNPACKED_CHANNEL);
+  ipcMain.handle(
+    BROWSER_LOAD_UNPACKED_CHANNEL,
+    async (_event, rawProjectId: unknown, rawExtPath: unknown) => {
+      const projectId = normalizeProjectId(rawProjectId);
+      if (!projectId || typeof rawExtPath !== "string") throw new Error("Invalid arguments");
+      return loadUnpackedExtensionForProject(projectId, rawExtPath);
+    },
+  );
+
+  ipcMain.removeHandler(BROWSER_PICK_AND_LOAD_UNPACKED_CHANNEL);
+  ipcMain.handle(BROWSER_PICK_AND_LOAD_UNPACKED_CHANNEL, async (_event, rawProjectId: unknown) => {
+    const projectId = normalizeProjectId(rawProjectId);
+    if (!projectId) throw new Error("Invalid projectId");
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const result = owner
+      ? await dialog.showOpenDialog(owner, { properties: ["openDirectory"] })
+      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return loadUnpackedExtensionForProject(projectId, result.filePaths[0]!);
+  });
+
+  ipcMain.removeHandler(BROWSER_RELOAD_EXTENSION_CHANNEL);
+  ipcMain.handle(
+    BROWSER_RELOAD_EXTENSION_CHANNEL,
+    async (_event, rawProjectId: unknown, rawExtId: unknown) => {
+      const projectId = normalizeProjectId(rawProjectId);
+      if (!projectId || typeof rawExtId !== "string") throw new Error("Invalid arguments");
+      await reloadExtensionForProject(projectId, rawExtId);
     },
   );
 

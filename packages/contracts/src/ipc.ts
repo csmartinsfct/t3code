@@ -275,6 +275,8 @@ export interface BrowserExtensionInfo {
   popupUrl: string | null;
   /** Whether this extension is pinned to the browser toolbar. */
   pinned: boolean;
+  /** Whether this extension was loaded from a local directory (unpacked) rather than the Web Store. */
+  isUnpacked: boolean;
 }
 
 export interface DesktopBrowserBridge {
@@ -303,6 +305,9 @@ export interface DesktopBrowserBridge {
   openExtension: (projectId: string, extensionId: string) => Promise<void>;
   uninstallExtension: (projectId: string, extensionId: string) => Promise<void>;
   setPinnedExtensions: (projectId: string, extensionIds: string[]) => Promise<void>;
+  loadUnpackedExtension: (projectId: string, extPath: string) => Promise<BrowserExtensionInfo>;
+  pickAndLoadUnpackedExtension: (projectId: string) => Promise<BrowserExtensionInfo | null>;
+  reloadExtension: (projectId: string, extensionId: string) => Promise<void>;
   onExtensionsChanged: (listener: (projectId: string) => void) => () => void;
   onTabsChanged: (
     listener: (payload: {

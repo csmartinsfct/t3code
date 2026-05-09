@@ -1,3 +1,4 @@
+import type { BrowserExtensionInfo } from "@t3tools/contracts";
 import {
   type BrowserTabListing,
   CdpBroker,
@@ -234,6 +235,18 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     request: Parameters<NonNullable<CdpBrokerTransport["extOpen"]>>[0],
   ): Promise<{ popupKey: string }> {
     return this.postJson<{ popupKey: string }>("ext/open", request);
+  }
+
+  async loadUnpacked(
+    req: Parameters<NonNullable<CdpBrokerTransport["loadUnpacked"]>>[0],
+  ): Promise<BrowserExtensionInfo> {
+    return this.postJson("extensions/load-unpacked", req);
+  }
+
+  async reloadExtension(
+    req: Parameters<NonNullable<CdpBrokerTransport["reloadExtension"]>>[0],
+  ): Promise<void> {
+    await this.postJson("extensions/reload", req);
   }
 
   private async postJson<T>(path: string, request: unknown): Promise<T> {

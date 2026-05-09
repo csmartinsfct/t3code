@@ -453,7 +453,24 @@ The browser this tool drives is the **embedded WebContentsView** in the T3 Code 
 
 One tool hasn't been ported to this mode yet and returns "tool X is not yet supported in native (Electron) mode" if called: \`cookie-import-browser\`. Use \`cookie-import\` (not \`cookie-import-browser\`) for cookie-jar imports — it works in both modes.
 
-Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.`;
+Everything else — \`goto\`, \`snapshot\`, \`click\`, \`fill\`, \`eval\`, \`console\`, \`network\`, \`dialog\`, \`screenshot\`, \`pdf\`, etc. — works the same as the headless mode.
+
+### Extension development
+
+You can develop and test Chrome extensions inside the embedded browser. The embedded browser fully supports Chrome extension APIs via the \`electron-chrome-extensions\` bridge.
+
+**Loading a local extension:**
+Use \`load_unpacked\` with the absolute path to the directory containing manifest.json. Calling it again with the same path reloads the extension after code changes.
+
+**Reloading by ID:**
+Use \`reload_extension <extensionId>\` when you have the ID from \`list_extensions\` but not the path.
+
+**HMR-capable frameworks (Vite+CRXJS, Plasmo, WXT):**
+1. Start the framework dev server via the managed runs system
+2. Use \`load_unpacked\` pointing at the build output directory (e.g. \`dist/\`)
+3. The framework calls \`chrome.runtime.reload()\` automatically on file changes
+
+**Plain/vanilla extensions:** write files → \`load_unpacked <dir>\` → edit → \`load_unpacked <dir>\` again to reload.`;
 
 const DYNAMIC_CHAT_UI_DEFAULT_TEXT = `## Dynamic Chat UI
 

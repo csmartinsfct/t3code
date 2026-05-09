@@ -29,9 +29,16 @@ When the install signal fires, `loadExtensionFromCrx` in `apps/desktop/src/main.
 5. Calls `session.loadExtension(extDir, { allowFileAccess: true })`.
 6. Notifies the renderer via `browser:extensionsChanged` so the extensions panel refreshes immediately.
 
-### Unpacked extensions (Settings UI — T3CO-468)
+### Unpacked extensions
 
-Not yet implemented. Planned: folder picker in Settings → Browser → Extensions.
+Local extension directories can be loaded for development via:
+
+- **Agent tools:** `load_unpacked <folderPath>` and `reload_extension <extensionId>` (see below).
+- **UI:** "Load unpacked..." button in the extensions panel, which opens a native folder picker.
+
+The extension must contain a `manifest.json` at its root. The call is idempotent — calling `load_unpacked` again with the same path reloads the extension (equivalent to clicking "Reload" in `chrome://extensions/`).
+
+`chrome.runtime.reload()` is supported via the `electron-chrome-extensions` bridge. HMR-capable frameworks (Vite+CRXJS, Plasmo, WXT) call this automatically when files change.
 
 ---
 
@@ -66,6 +73,7 @@ npx tsc --noEmit false --rootDir src --ignoreDeprecations 6.0  # generates dist/
 ```
 
 Both steps are required before running `bun run dev:desktop`:
+
 - `bun run build` is needed because `dist/` is gitignored — a fresh clone has no compiled output.
 - The type declaration step is needed once to satisfy `apps/desktop` typecheck (`moduleResolution: "Bundler"` resolves types from the `exports.types` field).
 
@@ -208,6 +216,38 @@ When extensions call `chrome.windows.create()` for dapp approvals (MetaMask conn
 | [T3CO-473](t3://ticket/T3CO-473)     | Full-screen popup via NSPanel (N-API port incompatible with Electron 40 NAN)       |
 | [T3CO-474](t3://ticket/T3CO-474)     | Production build integration for `panel-window` native addon                       |
 | [T3CO-475](t3://ticket/T3CO-475)     | Fork `electron-chrome-extensions` — done; remaining upstream gaps tracked here     |
+
+---
+
+## Extension development
+
+T3 Code supports loading and reloading local Chrome extension directories for development, without packaging or publishing to the Web Store.
+
+### Agent tools
+
+| Tool                             | Description                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `load_unpacked <folderPath>`     | Load (or reload) an extension from an absolute path to the directory containing `manifest.json`. Returns the extension name, ID, and `[unpacked]` tag. |
+| `reload_extension <extensionId>` | Reload an already-loaded extension by ID. Use when you have the ID from `list_extensions` but not the path.                                            |
+| `list_extensions`                | List all installed extensions; unpacked extensions are marked `isUnpacked: true`.                                                                      |
+
+### UI
+
+The extensions panel ("Load unpacked..." button) opens a native macOS folder picker. The selected directory is validated (must contain `manifest.json`) and loaded into the project browser session.
+
+### HMR framework workflow (Vite+CRXJS, Plasmo, WXT)
+
+1. Start the framework dev server via the managed runs system (e.g. `bun run dev`).
+2. Use `load_unpacked` pointing at the build output directory (e.g. `dist/`).
+3. The framework calls `chrome.runtime.reload()` automatically when files change — T3's `electron-chrome-extensions` bridge handles this via `runtime.reload`.
+
+### Plain/vanilla extension workflow
+
+Write files → `load_unpacked <dir>` → edit files → `load_unpacked <dir>` again to reload.
+
+### `chrome.runtime.reload()` support
+
+`chrome.runtime.reload()` is wired in `packages/electron-chrome-extensions/src/browser/api/runtime.ts` (`runtime.reload` handler) and exposed to extension renderers via `packages/electron-chrome-extensions/src/renderer/index.ts`. The handler re-calls `session.loadExtension(extPath, { allowFileAccess: true })` which causes Chromium to reload the extension service worker.
 
 ---
 

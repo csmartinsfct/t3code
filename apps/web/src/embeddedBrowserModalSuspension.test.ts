@@ -34,12 +34,22 @@ function installBrowserBridge() {
     uninstallExtension: vi.fn(async () => undefined),
     setPinnedExtensions: vi.fn(async () => undefined),
     onExtensionsChanged: vi.fn(() => () => undefined),
+    loadUnpackedExtension: vi.fn(async () => ({
+      id: "",
+      name: "",
+      iconUrl: null,
+      popupUrl: null,
+      pinned: false,
+      isUnpacked: true,
+    })),
+    pickAndLoadUnpackedExtension: vi.fn(async () => null),
+    reloadExtension: vi.fn(async () => undefined),
   } satisfies DesktopBrowserBridge;
 
   vi.stubGlobal("window", {
     desktopBridge: {
       browser: browserBridge,
-    } as Partial<DesktopBridge>,
+    } as unknown as Partial<DesktopBridge>,
   });
 
   return browserBridge;

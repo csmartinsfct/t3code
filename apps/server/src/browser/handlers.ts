@@ -817,6 +817,36 @@ export const SPECS: Record<string, CommandSpec> = {
       ),
     },
   },
+  load_unpacked: {
+    command: "load_unpacked",
+    category: "meta",
+    argsFromInput: (i: Record<string, unknown>, t: string) => [reqString(i, "folderPath", t)],
+    title: "Load unpacked extension",
+    description:
+      "Load a Chrome extension from a local directory (the folder containing manifest.json). " +
+      "Use this to test extensions under development without packaging them. " +
+      "Calling again with the same path reloads the extension after code changes. " +
+      "Works with Vite+CRXJS, Plasmo, WXT, or plain extensions. " +
+      "For framework-based builds, point to the build output directory (e.g. dist/).",
+    inputSchema: {
+      folderPath: s.str("Absolute path to the extension directory containing manifest.json"),
+    },
+  },
+  reload_extension: {
+    command: "reload_extension",
+    category: "meta",
+    argsFromInput: (i: Record<string, unknown>, t: string) => [reqString(i, "extensionId", t)],
+    title: "Reload extension",
+    description:
+      "Reload a loaded extension by its ID. The extension service worker restarts. " +
+      "Use after editing extension files to apply changes. " +
+      "Prefer load_unpacked (which also reloads) when you have the path; use this when you only have the ID.",
+    inputSchema: {
+      extensionId: s.str(
+        "Extension ID (32-char a-p string) as returned by load_unpacked or list_extensions",
+      ),
+    },
+  },
   open_extension: {
     command: "open_extension",
     category: "meta",

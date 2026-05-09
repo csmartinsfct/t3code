@@ -38,6 +38,9 @@ const BROWSER_OPEN_EXTENSION_CHANNEL = "browser:openExtension";
 const BROWSER_UNINSTALL_EXTENSION_CHANNEL = "browser:uninstallExtension";
 const BROWSER_SET_PINNED_EXTENSIONS_CHANNEL = "browser:setPinnedExtensions";
 const BROWSER_EXTENSIONS_CHANGED_CHANNEL = "browser:extensionsChanged";
+const BROWSER_LOAD_UNPACKED_CHANNEL = "browser:loadUnpacked";
+const BROWSER_PICK_AND_LOAD_UNPACKED_CHANNEL = "browser:pickAndLoadUnpacked";
+const BROWSER_RELOAD_EXTENSION_CHANNEL = "browser:reloadExtension";
 const OVERLAY_ACQUIRE_CHANNEL = "overlay:acquire";
 const OVERLAY_RELEASE_CHANNEL = "overlay:release";
 const OVERLAY_RENDER_CHANNEL = "overlay:render";
@@ -138,6 +141,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(BROWSER_UNINSTALL_EXTENSION_CHANNEL, projectId, extensionId),
     setPinnedExtensions: (projectId, extensionIds) =>
       ipcRenderer.invoke(BROWSER_SET_PINNED_EXTENSIONS_CHANNEL, projectId, extensionIds),
+    loadUnpackedExtension: (projectId: string, extPath: string) =>
+      ipcRenderer.invoke(BROWSER_LOAD_UNPACKED_CHANNEL, projectId, extPath),
+    pickAndLoadUnpackedExtension: (projectId: string) =>
+      ipcRenderer.invoke(BROWSER_PICK_AND_LOAD_UNPACKED_CHANNEL, projectId),
+    reloadExtension: (projectId: string, extensionId: string) =>
+      ipcRenderer.invoke(BROWSER_RELOAD_EXTENSION_CHANNEL, projectId, extensionId),
     onExtensionsChanged: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, changedProjectId: unknown) => {
         if (typeof changedProjectId === "string") listener(changedProjectId);

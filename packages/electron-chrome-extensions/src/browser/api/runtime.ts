@@ -16,6 +16,7 @@ export class RuntimeAPI extends EventEmitter {
     handle("runtime.disconnectNative", this.disconnectNative, { permission: "nativeMessaging" });
     handle("runtime.openOptionsPage", this.openOptionsPage);
     handle("runtime.sendNativeMessage", this.sendNativeMessage, { permission: "nativeMessaging" });
+    handle("runtime.reload", this.reload.bind(this), { extensionContext: true });
   }
 
   private connectNative = async (
@@ -56,6 +57,20 @@ export class RuntimeAPI extends EventEmitter {
    */
   notifyInstalled(extensionId: string, reason: "install" | "update" | "chrome_update") {
     this.ctx.router.sendEvent(extensionId, "runtime.onInstalled", { reason });
+  }
+
+  private async reload(event: ExtensionEvent): Promise<void> {
+    const { session } = this.ctx;
+    const extPath = (event.extension as unknown as { path?: string }).path;
+    if (!extPath) {
+      console.warn(`[crx-runtime] reload() called for ${event.extension.id} but path is unknown`);
+      return;
+    }
+    const ses = (session as Record<string, unknown>).extensions ?? session;
+    await (ses as { loadExtension: (p: string, o: object) => Promise<unknown> }).loadExtension(
+      extPath,
+      { allowFileAccess: true },
+    );
   }
 
   private openOptionsPage = async ({ extension }: ExtensionEvent) => {

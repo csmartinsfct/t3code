@@ -60,6 +60,8 @@ export const BROWSER_HOST_TOOL_NAMES = [
   "ux-audit",
   "visibility",
   "load_extension",
+  "load_unpacked",
+  "reload_extension",
   "list_extensions",
   "open_extension",
   "ext_windows",

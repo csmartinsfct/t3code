@@ -555,6 +555,10 @@ export class ElectronWebContentsBrowserHost {
         return this.evaluateJson(UX_AUDIT_SCRIPT);
       case "load_extension":
         return this.loadExtension(requiredArg(args, "load_extension", "extensionId"));
+      case "load_unpacked":
+        return this.loadUnpacked(requiredArg(args, "load_unpacked", "folderPath"));
+      case "reload_extension":
+        return this.reloadExtension(requiredArg(args, "reload_extension", "extensionId"));
       case "open_extension":
         return this.openExtension(requiredArg(args, "open_extension", "extensionId"));
       case "list_extensions":
@@ -643,6 +647,18 @@ export class ElectronWebContentsBrowserHost {
       extensionId,
     );
     return `Installed: ${info.name} v${info.version} (${info.id})`;
+  }
+
+  private async loadUnpacked(folderPath: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const ext = await this.broker.loadUnpacked(this.viewId, folderPath);
+    return `Loaded: ${ext.name} (${ext.id})${ext.isUnpacked ? " [unpacked]" : ""}`;
+  }
+
+  private async reloadExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    await this.broker.reloadExtension(this.viewId, extensionId);
+    return `Reloaded extension ${extensionId}.`;
   }
 
   private async openExtension(extensionId: string): Promise<string> {
