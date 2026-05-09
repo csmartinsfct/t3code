@@ -720,7 +720,17 @@ export const injectExtensionAPIs = () => {
     typeof contextBridge === "undefined";
 
   if (inSwContext) {
-    mainWorldScript();
+    // In Electron 40+, SW preloads have context isolation: the preload runs in
+    // an isolated world, separate from background.js's main world. Direct calls
+    // to mainWorldScript() only affect the isolated world — background.js never
+    // sees the overrides. Use contextBridge.executeInMainWorld when available so
+    // the overrides land in the same world as the extension's background script.
+    if (contextBridge && "executeInMainWorld" in contextBridge) {
+      contextBridge.exposeInMainWorld("electron", electronContext);
+      (contextBridge as any).executeInMainWorld({ func: mainWorldScript });
+    } else {
+      mainWorldScript();
+    }
     return;
   }
 

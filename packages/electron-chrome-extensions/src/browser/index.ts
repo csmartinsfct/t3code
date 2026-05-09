@@ -187,16 +187,16 @@ export class ElectronChromeExtensions extends EventEmitter {
     const preloadPath = resolvePreloadPath(modulePath);
 
     if ("registerPreloadScript" in session) {
-      session.registerPreloadScript({
-        id: "crx-mv2-preload",
-        type: "frame",
-        filePath: preloadPath,
-      });
-      session.registerPreloadScript({
-        id: "crx-mv3-preload",
-        type: "service-worker",
-        filePath: preloadPath,
-      });
+      try {
+        session.registerPreloadScript({ id: "crx-mv2-preload", type: "frame", filePath: preloadPath });
+      } catch (e: any) {
+        console.error("electron-chrome-extensions: failed to register frame preload", e);
+      }
+      try {
+        session.registerPreloadScript({ id: "crx-mv3-preload", type: "service-worker", filePath: preloadPath });
+      } catch (e: any) {
+        console.error("electron-chrome-extensions: failed to register service-worker preload", e);
+      }
     } else {
       // @ts-expect-error Deprecated electron@<35
       session.setPreloads([...session.getPreloads(), preloadPath]);

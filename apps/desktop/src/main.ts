@@ -4067,8 +4067,6 @@ async function openExtensionPopupForProject(
   const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
 
   if (!popupPath) {
-    // No popup page — dispatch chrome.action.onClicked to the extension SW,
-    // which is the Chrome-standard behaviour for action-button extensions.
     const chromeExt = chromeExtsByProjectId.get(projectId);
     if (chromeExt) {
       (chromeExt as any).ctx?.router?.sendEvent(extensionId, "browserAction.onClicked", {});

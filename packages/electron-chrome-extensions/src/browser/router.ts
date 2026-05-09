@@ -75,11 +75,11 @@ class RoutingDelegate {
       runningStatus,
       versionId,
     }: Electron.Event<Electron.ServiceWorkersRunningStatusChangedEventParams>) => {
-      if (runningStatus !== "starting") return;
-
       const serviceWorker = (observer.session as any).serviceWorkers.getWorkerFromVersionID(
         versionId,
       );
+      if (runningStatus !== "starting") return;
+
       if (
         serviceWorker?.scope?.startsWith("chrome-extension://") &&
         !this.workers.has(serviceWorker)
