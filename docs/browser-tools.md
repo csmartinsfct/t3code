@@ -349,14 +349,39 @@ Electron allows only one `webContents.debugger` client per `WebContents`. When t
 
 ### Extension Support
 
-Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electron `Session`, so loaded extensions apply only when the project is Electron-authoritative. Playwright projects do not see Electron-loaded extensions, and full extension management UI must gate on host kind.
+Extensions are host-scoped. `session.loadExtension(path)` attaches to an Electron `Session`, so loaded extensions apply only when the project is Electron-authoritative. Playwright projects do not see Electron-loaded extensions.
 
-The Phase 4 smoke audit used `scripts/embedded-browser-extension-audit.cjs` against Electron 40.6.0:
+For the full extension system — Chrome Web Store install flow, the `electron-chrome-extensions` fork, background polyfill, extensions panel UI, popup windows, and dapp approval flow — see [Browser Extensions](./browser-extensions.md).
 
-- MV2 content-script extension loaded with the expected deprecation warning; its JS injected and its CSS hiding rule applied.
-- MV3 extension loaded; content script messaged the service worker successfully; `chrome.runtime`, `chrome.storage.local`, `chrome.tabs.query`, `chrome.scripting.executeScript`, and `chrome.action` were present in the tested contexts.
-- The MV3 action popup was directly loaded in a hidden Electron `BrowserWindow` at its `chrome-extension://<id>/popup.html` URL. It rendered successfully, messaged the service worker, and `chrome.tabs.query({ active: true, currentWindow: true })` returned the active audit page tab.
-- No interactive permission prompts surfaced during install, content-script injection, service-worker messaging, or popup rendering; permissions came from the manifest. The current embedded UI still has no native toolbar/action affordance, so user-invoked popup UI remains future extension-management work.
+#### Eager metadata loading
+
+Extension metadata (installed extensions, icons, pinned state) is loaded **eagerly** when a project thread is selected — not lazily when the browser panel is toggled open. This eliminates race conditions and ensures pinned toolbar icons and the extensions panel are always instant.
+
+**Architecture:**
+
+- `useBrowserMetadata(projectId)` — hook called in `KanbanBoard` the moment a project thread mounts. Fires `bridge.listExtensions()` → populates `useBrowserMetadataStore` (Zustand, keyed by `projectId`). Subscribes to `bridge.onExtensionsChanged()` for live updates on install/uninstall/pin.
+- `useBrowserMetadataStore` (`apps/web/src/lib/browserMetadataStore.ts`) — shared Zustand store. Both `EmbeddedBrowser` (toolbar pinned icons) and `EmbeddedBrowserExtensionsPanel` (panel icons) read from this store; neither fetches independently.
+- Main process — `BROWSER_LIST_EXTENSIONS_CHANNEL` handler calls `getOrCreateChromeExtensions(projectId)` (idempotent) and `await extensionsReadyByProjectId.get(projectId)` before querying `ses.getAllExtensions()`. This ensures the handler always returns the complete extension list even when called before the browser is mounted.
+- `extensionsLoadedByProjectId` set — prevents the `extension-loaded` event hook from sending redundant `BROWSER_EXTENSIONS_CHANGED_CHANNEL` notifications during the initial startup batch load; only new installs trigger a notification after startup completes.
+
+Tab state (URLs, titles, navigation) remains lazy — it is tightly coupled to the live `WebContentsView` lifecycle and only meaningful while the browser is mounted.
+
+#### Extension popup visibility
+
+Extension popup windows (`BrowserWindow` instances created when the user opens an extension or a dapp triggers `chrome.windows.create`) are **project-scoped** and follow the project's mount lifecycle:
+
+- **`BROWSER_UNMOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(projectId)`: all open popups for the outgoing project are hidden (`BrowserWindow.hide()`). The extension keeps running in the background; no reload occurs.
+- **`BROWSER_MOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(previousProjectId)` for the outgoing project (handles the transition case where unmount was not called explicitly), then `showExtensionPopupsForProject(projectId)` for the incoming project to restore any previously hidden popups.
+
+This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
+
+**Extension signature verification (T3CO-471):** Two layers protect against tampered or mismatched extensions:
+
+1. _CRX3 cryptographic verification (agent installs)_: When `load_extension` is called, the CRX is fetched to a buffer and `verifyCrxSignature()` verifies the RSA-SHA256 signature in the CRX3 protobuf header over the signed header data + zip archive using `node:crypto`. The install is aborted if verification fails.
+
+2. _`manifest.key` → ID consistency check (all loads)_: At every `extension-loaded` event and in `loadLegacyFlatExtensions`, `verifyManifestKeyMatchesId()` derives the extension ID from the base64 public key stored in `manifest.json` (`SHA256(base64(key))[0:16]` → a-p alphabet) and verifies it matches the directory name. Extensions that fail this check are unloaded immediately. Dev/unpacked extensions without a `manifest.key` field are exempt.
+
+**Native addon (production):** `panel_window.node` is compiled from `apps/desktop/native/panel-window/panel-window.mm` during the production build (`scripts/build-desktop-artifact.ts`), staged at `apps/desktop/native/panel-window/build/Release/`, and listed in electron-builder's `asarUnpack` so Electron can `dlopen` it outside the asar archive at runtime. Without this the addon's `try/catch` fallback fires silently and popups do not float above macOS full-screen Spaces.
 
 ### Chromium bundle
 

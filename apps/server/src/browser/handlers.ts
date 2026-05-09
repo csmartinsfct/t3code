@@ -118,7 +118,7 @@ function valueFlag(flag: string, key: string, input: Record<string, unknown>): s
   return v === undefined ? [] : [flag, String(v)];
 }
 
-const SPECS: Record<string, CommandSpec> = {
+export const SPECS: Record<string, CommandSpec> = {
   // ─── Navigate ─────────────────────────────────────────────
   goto: {
     command: "goto",
@@ -803,6 +803,75 @@ const SPECS: Record<string, CommandSpec> = {
     title: "UX audit",
     description: "Heuristic UX/accessibility audit of the current page.",
     inputSchema: {},
+  },
+  load_extension: {
+    command: "load_extension",
+    category: "meta",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Install Chrome extension by ID",
+    description:
+      "Download and install a Chrome extension from the Web Store by its 32-character extension ID. The extension is fetched, unpacked, and loaded into the project browser session. Returns the installed extension name, version, and ID. Note: users can also install extensions by visiting the Chrome Web Store in the embedded browser and clicking 'Add to Chrome' — no agent action needed for that flow. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str(
+        "Chrome extension ID (32 lowercase a-p chars). Find it in the Web Store URL: chromewebstore.google.com/detail/<name>/<ID>",
+      ),
+    },
+  },
+  open_extension: {
+    command: "open_extension",
+    category: "meta",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Open extension popup",
+    description:
+      "Open a Chrome extension's action popup as a real floating window (same as clicking the extension icon in the toolbar). The popup is registered so subsequent ext_switch + snapshot/click/fill commands can interact with it. Use list_extensions to get extension IDs. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str("Extension ID to open (32-char a-p string)"),
+    },
+  },
+  list_extensions: {
+    command: "list_extensions",
+    category: "meta",
+    argsFromInput: () => [],
+    title: "List installed extensions",
+    description:
+      "List all Chrome extensions installed in the embedded browser for this project. Returns extension ID, name, version, and whether a popup window is currently open. Use the ID with ext_switch to target a popup for snapshot/click/fill commands. Desktop (Electron) host only.",
+    inputSchema: {},
+  },
+  ext_windows: {
+    command: "ext_windows",
+    category: "meta",
+    argsFromInput: () => [],
+    title: "List open extension popup windows",
+    description:
+      "List all open extension popup windows — both user-opened action popups and dapp approval/notification windows from chrome.windows.create(). Returns extension ID, title, URL, and whether it is the current active CDP target. Use ext_switch with an extension ID to target one for snapshot/click/fill commands. Desktop (Electron) host only.",
+    inputSchema: {},
+  },
+  ext_switch: {
+    command: "ext_switch",
+    category: "meta",
+    argsFromInput: (i) => {
+      const id = optString(i, "extensionId");
+      return id ? [id] : [];
+    },
+    title: "Switch CDP target to extension popup",
+    description:
+      "Route subsequent snapshot/click/fill/js commands to an extension popup window instead of the main browser tab. Pass extensionId to switch; omit to revert to the main browser tab. The popup must already be open (use ext_windows to check). Note: CDP event subscriptions (console, network) are not supported while targeting a popup. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.optStr(
+        "Extension ID (32-char a-p string, e.g. dgdongbhnogjdmalcjmoaohehadoolep). Omit to revert to main tab.",
+      ),
+    },
+  },
+  ext_close: {
+    command: "ext_close",
+    category: "meta",
+    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    title: "Close extension popup",
+    description:
+      "Close an open extension popup window by extension ID. Automatically reverts the active CDP target to the main browser tab if the popup being closed was the active target. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str("Extension ID of the popup to close"),
+    },
   },
 };
 

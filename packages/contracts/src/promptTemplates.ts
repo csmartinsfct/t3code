@@ -59,6 +59,9 @@ export const OrchestrationPromptOverridesPatch = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(() => ({})));
 export type OrchestrationPromptOverridesPatch = typeof OrchestrationPromptOverridesPatch.Type;
 
+// This version tracks the prompt document format, not the shipped prompt text.
+// Text-only default prompt updates must keep the same version so persisted
+// settings, project overrides, and orchestration-run overrides remain readable.
 export const PROMPT_TEMPLATE_VERSION = 1 as const;
 export const PromptTemplateVersion = Schema.Literal(PROMPT_TEMPLATE_VERSION);
 export type PromptTemplateVersion = typeof PromptTemplateVersion.Type;
@@ -420,7 +423,21 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 - **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
 - **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
 - **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`status\`, \`ux-audit\`
+- **Extensions (desktop only):** \`load_extension\`, \`open_extension\`, \`list_extensions\`, \`ext_windows\`, \`ext_switch\`, \`ext_close\`
 - **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
+
+### Chrome extension tools (desktop only)
+
+Install and interact with Chrome extensions (e.g. MetaMask, Rainbow wallet) in the embedded browser:
+
+- **\`load_extension <extensionId>\`** — install a Chrome extension by its 32-char Web Store ID (find it in the Web Store URL). Users can also click "Add to Chrome" directly in the embedded browser — that flow is fully automatic and requires no agent action.
+- **\`list_extensions\`** — list all installed extensions with their IDs, names, versions
+- **\`open_extension <extensionId>\`** — open an extension's action popup as a real floating window (same as clicking the extension icon). Required before \`ext_switch\` if no popup is open yet.
+- **\`ext_windows\`** — list all open extension popup windows, including dapp approval windows from \`chrome.windows.create()\`
+- **\`ext_switch <extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` calls to an extension popup. Call with no argument to revert to the main tab.
+- **\`ext_close <extensionId>\`** — close an extension popup window
+
+Typical wallet dapp flow: \`open_extension <id>\` → \`ext_switch <id>\` → \`snapshot\` → \`click\` approve → \`ext_switch\` (revert). Use \`ext_windows\` to find approval popups that appeared automatically from dapp interactions.
 
 ### Known issues
 

@@ -4,7 +4,12 @@ import * as nodePath from "node:path";
 
 import type { ProjectId } from "@t3tools/contracts";
 
-import type { CdpBroker } from "../../CdpBroker.ts";
+import type {
+  CdpBroker,
+  InstalledExtensionInfo,
+  ExtensionInfo,
+  ExtensionWindowInfo,
+} from "../../CdpBroker.ts";
 import { installBrowserHostCommands, type BrowserHostCommand } from "../../BrowserHost.ts";
 import { ElectronWebContentsHost } from "./host.ts";
 import type { CdpClient } from "./types.ts";
@@ -238,6 +243,80 @@ const DIALOG_OVERRIDE_SCRIPT = `(function(){
     }, policy);
     return response;
   };
+})();`;
+
+// Injected into every page to:
+//   1. Override navigator.userAgent so Google's client-side Chrome detection passes
+//   2. Implement chrome.webstore.install() so the install flow has somewhere to go
+//   3. On webstore pages: use MutationObserver to re-enable the disabled button and
+//      wire a click handler that stores the extension ID for load_extension to consume
+//
+// Approach based on https://github.com/nicholasgasior/electron-chrome-web-store and
+// https://github.com/NeverDecaf/chromium-web-store.
+const WEBSTORE_SHIM_SCRIPT = `(function(){
+  // 1. UA override — remove Electron brand so navigator.userAgent looks like Chrome.
+  //    Object.defineProperty is required; assignment is a no-op on the native getter.
+  try {
+    var ua = navigator.userAgent
+      .replace(/Electron\\/[^\\s]+ /, '')
+      .replace(/Chrome\\/(\\d+)/, function(_, v) { return parseInt(v) < 100 ? 'Chrome/130' : 'Chrome/' + v; });
+    if (!ua.includes('Chrome/')) {
+      ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+    }
+    Object.defineProperty(navigator, 'userAgent', { value: ua, configurable: true });
+  } catch(e) {}
+
+  // 2. chrome.webstore shim — records the extension ID so load_extension can act on it.
+  if (!window.chrome) window.chrome = {};
+  if (!window.chrome.webstore) {
+    window.chrome.webstore = {
+      install: function(url, onSuccess, onFailure) {
+        try {
+          var src = url
+            || (document.querySelector('link[rel="chrome-webstore-item"]') || {}).href
+            || window.location.href;
+          var m = src.match(/\\/detail\\/(?:[^\\/]+\\/)?([a-p]{32})/);
+          window.__t3_ext_install_pending = m ? m[1] : src;
+        } catch(e) {
+          window.__t3_ext_install_pending = url || window.location.href;
+        }
+        if (typeof onSuccess === 'function') onSuccess();
+      },
+      onInstallStageChanged: { addListener: function() {} },
+      onDownloadProgress: { addListener: function() {} },
+    };
+  }
+
+  // 3. Button re-enablement — only on webstore domains.
+  var isWebStore = /chromewebstore\\.google\\.com|chrome\\.google\\.com\\/webstore/.test(
+    location.hostname + location.pathname
+  );
+  if (!isWebStore) return;
+
+  function enableInstallButtons() {
+    document.querySelectorAll('button[disabled]').forEach(function(btn) {
+      var text = (btn.textContent || '').toLowerCase();
+      if (!text.includes('add to') && !text.includes('install')) return;
+      btn.removeAttribute('disabled');
+      btn.disabled = false;
+      if (btn.__t3_wired) return;
+      btn.__t3_wired = true;
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var m = window.location.href.match(/\\/detail\\/(?:[^\\/]+\\/)?([a-p]{32})/);
+        if (m) window.__t3_ext_install_pending = m[1];
+        if (window.chrome && window.chrome.webstore) window.chrome.webstore.install();
+      }, true);
+    });
+  }
+
+  enableInstallButtons();
+  var obs = new MutationObserver(enableInstallButtons);
+  function startObserver() {
+    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+  }
+  if (document.body) { startObserver(); }
+  else { document.addEventListener('DOMContentLoaded', function() { startObserver(); enableInstallButtons(); }); }
 })();`;
 
 function dialogPolicyScript(policy: { accept: boolean; text?: string }): string {
@@ -474,6 +553,18 @@ export class ElectronWebContentsBrowserHost {
       }
       case "ux-audit":
         return this.evaluateJson(UX_AUDIT_SCRIPT);
+      case "load_extension":
+        return this.loadExtension(requiredArg(args, "load_extension", "extensionId"));
+      case "open_extension":
+        return this.openExtension(requiredArg(args, "open_extension", "extensionId"));
+      case "list_extensions":
+        return this.listExtensionsChromeApi();
+      case "ext_windows":
+        return this.extWindows();
+      case "ext_switch":
+        return this.extSwitch(args[0]);
+      case "ext_close":
+        return this.extClose(requiredArg(args, "ext_close", "extensionId"));
       default:
         throw new Error(`unknown Electron browser tool '${tool}'`);
     }
@@ -524,6 +615,7 @@ export class ElectronWebContentsBrowserHost {
       // and apply to all current and future contexts in the page.
       await this.send("Runtime.addBinding", { name: DIALOG_BINDING_NAME });
       await this.installDialogInterceptor();
+      await this.installWebstoreShim();
     } catch (cause) {
       // The host may be constructed before the desktop bridge is fully re-announced.
       console.warn("ElectronWebContentsBrowserHost failed to prime CDP event domains", cause);
@@ -540,6 +632,74 @@ export class ElectronWebContentsBrowserHost {
     if (!this.client) return;
     await this.send("Runtime.evaluate", {
       expression: dialogPolicyScript(policy),
+      silent: true,
+    }).catch(() => {});
+  }
+
+  private async loadExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const info: InstalledExtensionInfo = await this.broker.installExtension(
+      this.viewId,
+      extensionId,
+    );
+    return `Installed: ${info.name} v${info.version} (${info.id})`;
+  }
+
+  private async openExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const result = await this.broker.extOpen(this.viewId, extensionId);
+    return (
+      `Opened extension popup for ${extensionId} (popupKey: ${result.popupKey}). ` +
+      `Call ext_switch ${extensionId} to target it for snapshot/click/fill commands.`
+    );
+  }
+
+  private async listExtensionsChromeApi(): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const exts: ExtensionInfo[] = await this.broker.listExtensions(this.viewId);
+    if (exts.length === 0) return "(no extensions installed)";
+    return exts
+      .map((e) => `${e.id}  ${e.name} v${e.version}${e.hasPopup ? "  [popup open]" : ""}`)
+      .join("\n");
+  }
+
+  private async extWindows(): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const wins: ExtensionWindowInfo[] = await this.broker.listExtensionWindows(this.viewId);
+    if (wins.length === 0) return "(no extension popup windows open)";
+    return wins
+      .map(
+        (w) =>
+          `${w.extensionId}  ${w.title || "(untitled)"}  ${w.url}${w.isActive ? "  [active CDP target]" : ""}`,
+      )
+      .join("\n");
+  }
+
+  private async extSwitch(extensionId?: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    const result = await this.broker.extSwitch(this.viewId, extensionId);
+    if (!extensionId || result.popupKey === null) {
+      return "Reverted CDP target to main browser tab.";
+    }
+    return (
+      `Switched CDP target to extension popup ${result.popupKey}. ` +
+      `Use snapshot/click/fill/js to interact with it. ` +
+      `Call ext_switch (no extensionId) to revert to the main tab.`
+    );
+  }
+
+  private async extClose(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    await this.broker.extClose(this.viewId, extensionId);
+    return `Closed popup for extension ${extensionId}.`;
+  }
+
+  private async installWebstoreShim(): Promise<void> {
+    await this.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: WEBSTORE_SHIM_SCRIPT,
+    });
+    await this.send("Runtime.evaluate", {
+      expression: WEBSTORE_SHIM_SCRIPT,
       silent: true,
     }).catch(() => {});
   }
