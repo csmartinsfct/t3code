@@ -4131,7 +4131,15 @@ async function openExtensionPopupForProject(
   if (!popupPath) {
     const chromeExt = chromeExtsByProjectId.get(projectId);
     if (chromeExt) {
-      (chromeExt as any).ctx?.router?.sendEvent(extensionId, "browserAction.onClicked", {});
+      const ctx = (chromeExt as any).ctx;
+      // Get the active tab details so the extension handler receives a real
+      // tab object with a valid id — chrome.tabs.sendMessage(tab.id, ...) would
+      // silently fail if tab is an empty object.
+      const activeTab = ctx?.store?.getActiveTabOfCurrentWindow?.();
+      const tabDetails = activeTab
+        ? (ctx?.store?.tabDetailsCache?.get(activeTab.id) ?? {})
+        : {};
+      ctx?.router?.sendEvent(extensionId, "browserAction.onClicked", tabDetails);
     }
     return "";
   }
