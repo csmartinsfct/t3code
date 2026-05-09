@@ -6,6 +6,28 @@ Electron provides [basic support for Chrome extensions](https://www.electronjs.o
 
 This library aims to bring extension support in Electron up to the level you'd come to expect from a browser like Google Chrome. API behavior is customizable so you can define how to handle things like tab or window creation specific to your application's needs.
 
+## T3 Fork — Development
+
+This package is a local workspace fork used by T3 Code (`packages/electron-chrome-extensions`). It is **not published to npm** and is resolved via `"electron-chrome-extensions": "workspace:*"` in the desktop app.
+
+### Building
+
+The `dist/` directory is gitignored. After cloning or making source changes, build before running the desktop dev server:
+
+```bash
+cd packages/electron-chrome-extensions
+bun run build          # JS bundles + preload (dist/cjs, dist/esm, dist/chrome-extension-api.preload.js)
+npx tsc --noEmit false --rootDir src --ignoreDeprecations 6.0  # TypeScript declarations (dist/types/)
+```
+
+### Electron 40 service worker isolated world
+
+In Electron 40+, service worker preloads run in an **isolated world** separate from the extension's background script. Calling `mainWorldScript()` directly from the SW preload only patched the isolated world — `chrome.tabs` in background.js remained native and non-intercepted.
+
+**Fix**: when `contextBridge.executeInMainWorld` is available in the SW preload (Electron 40+), use it to run the API overrides in background.js's main world. This is handled in `src/renderer/index.ts` — the SW path mirrors the frame path (`exposeInMainWorld` + `executeInMainWorld`) rather than calling `mainWorldScript()` directly.
+
+---
+
 ## Install
 
 ```

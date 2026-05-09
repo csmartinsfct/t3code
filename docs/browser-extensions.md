@@ -61,10 +61,32 @@ To rebuild after source changes:
 
 ```bash
 cd packages/electron-chrome-extensions
-bun run build
+bun run build          # compiles JS + preload (dist/cjs, dist/esm, dist/chrome-extension-api.preload.js)
+npx tsc --noEmit false --rootDir src --ignoreDeprecations 6.0  # generates dist/types/
 ```
 
+Both steps are required before running `bun run dev:desktop`:
+- `bun run build` is needed because `dist/` is gitignored — a fresh clone has no compiled output.
+- The type declaration step is needed once to satisfy `apps/desktop` typecheck (`moduleResolution: "Bundler"` resolves types from the `exports.types` field).
+
 `apps/desktop/package.json` references it as `"electron-chrome-extensions": "workspace:*"` — never published to npm, resolved locally by bun.
+
+### Electron 40 service worker isolated world
+
+**Context**: Electron 35 introduced `session.registerPreloadScript({ type: "service-worker" })`. In Electron 35, SW preloads ran in the same JS realm as the extension's background script, so calling `mainWorldScript()` directly patched the same `chrome` object the extension used.
+
+**Electron 40 change**: SW preloads now run in an **isolated world**, separate from background.js. Direct calls to `mainWorldScript()` only affected the isolated world — `chrome.tabs.create` in background.js remained native and non-intercepted, silently doing nothing.
+
+**Fix** (in `src/renderer/index.ts`): When `contextBridge.executeInMainWorld` is available in the SW preload context (Electron 40+), use it instead of calling `mainWorldScript()` directly. This executes the API overrides in the main world where background.js runs, making `chrome.tabs.create` and other APIs route through the IPC bridge.
+
+```typescript
+if (contextBridge && "executeInMainWorld" in contextBridge) {
+  contextBridge.exposeInMainWorld("electron", electronContext);
+  (contextBridge as any).executeInMainWorld({ func: mainWorldScript });
+} else {
+  mainWorldScript(); // older Electron — same realm, direct call works
+}
+```
 
 ### Integration in `main.ts`
 
