@@ -665,18 +665,43 @@ export const injectExtensionAPIs = () => {
           configurable: true,
         });
       } catch {
-        // Some native Chrome properties (e.g. chrome.runtime in service workers)
-        // are non-configurable. Skip this API rather than aborting the loop —
-        // other APIs like chrome.tabs and chrome.storage may still be settable.
+        // Full object replacement failed (e.g. non-configurable native property in SW).
+        // Fall back to patching individual methods on the existing object so that
+        // chrome.tabs.create, chrome.storage.local, etc. still route through our IPC.
+        try {
+          const overlay = api.factory(baseApi) as Record<string, unknown>;
+          const target = (chrome as Record<string, unknown>)[apiName];
+          if (target !== null && typeof target === "object") {
+            for (const k of Object.keys(overlay)) {
+              try {
+                Object.defineProperty(target as object, k, {
+                  value: (overlay as Record<string, unknown>)[k],
+                  writable: true,
+                  configurable: true,
+                });
+              } catch {
+                // individual method override also failed; native stays
+              }
+            }
+          }
+        } catch {
+          // method-level patching failed entirely
+        }
       }
     });
 
     // Remove access to internals
     delete (globalThis as any).electron;
 
-    // Don't freeze chrome in service workers — extension polyfills need to
-    // patch chrome.runtime.onInstalled and other APIs after this runs.
-    if (!inSwContext) {
+    // Don't freeze chrome in service workers — the native Chromium chrome object
+    // in SW context cannot be frozen (causes V8 SIGTRAP). Use inline detection
+    // rather than the outer `inSwContext` var (which isn't available when this
+    // function is serialized for executeInMainWorld / webFrame.executeJavaScript).
+    const _swCtx =
+      process.type === "service-worker" ||
+      (typeof window === "undefined" &&
+        (typeof importScripts === "function" || typeof contextBridge === "undefined"));
+    if (!_swCtx) {
       Object.freeze(chrome);
     }
 
@@ -690,6 +715,7 @@ export const injectExtensionAPIs = () => {
   const safeHref =
     typeof location !== "undefined" && location.href ? location.href : "unknown";
   const inSwContext =
+    process.type === "service-worker" ||
     (typeof window === "undefined" && typeof importScripts === "function") ||
     typeof contextBridge === "undefined";
 

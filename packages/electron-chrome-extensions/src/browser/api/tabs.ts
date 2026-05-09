@@ -167,6 +167,7 @@ export class TabsAPI {
   }
 
   private async create(event: ExtensionEvent, details: chrome.tabs.CreateProperties = {}) {
+    console.log("[crx-tabs] create", event.type, event.extension.id, details.url);
     const url = details.url ? validateExtensionUrl(details.url, event.extension) : undefined;
     const tab = await this.ctx.store.createTab({ ...details, url });
     const tabDetails = this.getTabDetails(tab);

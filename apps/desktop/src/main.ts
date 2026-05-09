@@ -2853,7 +2853,7 @@ async function verifyManifestKeyMatchesId(extPath: string, extId: string): Promi
 }
 
 // Bump version when the polyfill content changes so existing extensions are re-patched.
-const POLYFILL_SENTINEL = "/*__t3_polyfill_v5__*/";
+const POLYFILL_SENTINEL = "/*__t3_polyfill_v6__*/";
 
 // Returns true if the background script was newly patched.
 // The caller should clear service worker caches only when true — wiping on
@@ -4067,14 +4067,13 @@ async function openExtensionPopupForProject(
   const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
 
   if (!popupPath) {
-    // Extension has no action popup — it likely works as a content script or
-    // sidebar. Return the extension info so the caller knows it has no popup.
-    const name = (ext.manifest["name"] as string | undefined) ?? extensionId;
-    throw new Error(
-      `"${name}" has no action popup. It works as a content script or sidebar ` +
-        `and can't be opened as a floating window. ` +
-        `Use it by navigating to a web page where it activates automatically.`,
-    );
+    // No popup page — dispatch chrome.action.onClicked to the extension SW,
+    // which is the Chrome-standard behaviour for action-button extensions.
+    const chromeExt = chromeExtsByProjectId.get(projectId);
+    if (chromeExt) {
+      (chromeExt as any).ctx?.router?.sendEvent(extensionId, "browserAction.onClicked", {});
+    }
+    return "";
   }
 
   const popupKey = `${projectId}:${extensionId}`;
