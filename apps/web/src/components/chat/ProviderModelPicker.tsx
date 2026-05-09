@@ -10,7 +10,7 @@ import {
   resolveKnownProviderModelName,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import {
   type ProviderPickerKind,
@@ -373,6 +373,8 @@ function ProviderModelMenuContent({
   onModelChange: (provider: ProviderKind, model: string) => void;
   provider: ProviderKind;
 }) {
+  const [openSubmenuProvider, setOpenSubmenuProvider] = useState<ProviderKind | null>(null);
+
   if (menuData.kind === "locked") {
     const lockedProvider = menuData.provider;
     return (
@@ -425,13 +427,21 @@ function ProviderModelMenuContent({
     <>
       {menuData.availableProviders.map((option) => {
         const OptionIcon = getProviderIcon(option.provider);
+        const open = openSubmenuProvider === option.provider;
         return (
-          <MenuSub key={option.provider}>
+          <MenuSub
+            key={option.provider}
+            open={open}
+            onOpenChange={(nextOpen) => {
+              if (nextOpen) setOpenSubmenuProvider(option.provider);
+            }}
+          >
             <MenuSubTrigger
               className={cn(
                 !option.selectable &&
                   "text-muted-foreground/70 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground",
               )}
+              onPointerEnter={() => setOpenSubmenuProvider(option.provider)}
             >
               <OptionIcon
                 aria-hidden="true"
@@ -444,7 +454,11 @@ function ProviderModelMenuContent({
               />
               {option.label}
             </MenuSubTrigger>
-            <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
+            <MenuSubPopup
+              className="[--available-height:min(24rem,70vh)]"
+              sideOffset={4}
+              onPointerEnter={() => setOpenSubmenuProvider(option.provider)}
+            >
               <MenuGroup>
                 {!option.selectable ? (
                   <>
@@ -495,7 +509,11 @@ function ProviderModelMenuContent({
       {menuData.unavailableProviders.map((option) => {
         const OptionIcon = getProviderIcon(option.provider);
         return (
-          <MenuItem key={option.provider} disabled>
+          <MenuItem
+            key={option.provider}
+            disabled
+            onPointerEnter={() => setOpenSubmenuProvider(null)}
+          >
             <OptionIcon
               aria-hidden="true"
               className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
@@ -511,7 +529,7 @@ function ProviderModelMenuContent({
       {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
         const OptionIcon = option.icon;
         return (
-          <MenuItem key={option.id} disabled>
+          <MenuItem key={option.id} disabled onPointerEnter={() => setOpenSubmenuProvider(null)}>
             <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
             <span>{option.label}</span>
             <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">

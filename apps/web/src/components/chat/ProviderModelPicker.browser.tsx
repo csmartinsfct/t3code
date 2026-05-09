@@ -415,6 +415,30 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("keeps a provider submenu open while moving onto a model item", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("menuitem", { name: "Codex", exact: true }).hover();
+      await expect
+        .element(page.getByRole("menuitemradio", { name: "GPT-5 Codex" }))
+        .toBeInTheDocument();
+
+      await page.getByRole("menuitemradio", { name: "GPT-5 Codex" }).hover();
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      await expect
+        .element(page.getByRole("menuitemradio", { name: "GPT-5 Codex" }))
+        .toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows models directly when the provider is locked mid-thread", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
