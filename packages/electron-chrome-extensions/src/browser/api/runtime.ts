@@ -66,10 +66,12 @@ export class RuntimeAPI extends EventEmitter {
       console.warn(`[crx-runtime] reload() called for ${event.extension.id} but path is unknown`);
       return;
     }
-    const ses = (session as Record<string, unknown>).extensions ?? session;
-    await (ses as { loadExtension: (p: string, o: object) => Promise<unknown> }).loadExtension(
+    const ses = ((session as unknown as Record<string, unknown>).extensions ?? session) as {
+      loadExtension: (p: string, o: object) => Promise<unknown>;
+    };
+    await ses.loadExtension(
       extPath,
-      { allowFileAccess: true },
+      { allowFileAccess: true }
     );
   }
 
