@@ -423,7 +423,7 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 - **Read:** \`text\`, \`html\`, \`links\`, \`forms\`, \`accessibility\`, \`js\`, \`evaluate\`, \`eval\`, \`css\`, \`attrs\`, \`is\`, \`console\`, \`network\`, \`dialog\`, \`cookies\`, \`storage\`, \`perf\`, \`inspect\`, \`media\`, \`data\`
 - **Interact:** \`click\`, \`fill\`, \`select\`, \`hover\`, \`type\`, \`press\`, \`scroll\`, \`wait\`, \`viewport\`, \`cookie\`, \`cookie-import\`, \`cookie-import-browser\`, \`header\`, \`upload\`, \`dialog-accept\`, \`dialog-dismiss\`, \`style\`, \`cleanup\`, \`prettyscreenshot\`
 - **Visual/Meta:** \`snapshot\`, \`screenshot\`, \`pdf\`, \`responsive\`, \`diff\`, \`tabs\`, \`tab\`, \`newtab\`, \`closetab\`, \`status\`, \`ux-audit\`
-- **Extensions (desktop only):** \`load_extension\`, \`open_extension\`, \`list_extensions\`, \`ext_windows\`, \`ext_switch\`, \`ext_close\`
+- **Extensions (desktop only):** \`load_extension\`, \`remove_extension\`, \`open_extension\`, \`list_extensions\`, \`ext_windows\`, \`ext_switch\`, \`ext_close\`
 - **Batch:** \`batch\` runs up to 50 commands sequentially in one request. Entries are \`{tool, input}\` objects, same shape as top-level calls. Nested \`batch\` is rejected.
 
 ### Chrome extension tools (desktop only)
@@ -431,13 +431,14 @@ Prefer @refs over CSS selectors. Selectors still work as a fallback but are frag
 Install and interact with Chrome extensions (e.g. MetaMask, Rainbow wallet) in the embedded browser:
 
 - **\`load_extension <extensionId>\`** — install a Chrome extension by its 32-char Web Store ID (find it in the Web Store URL). Users can also click "Add to Chrome" directly in the embedded browser — that flow is fully automatic and requires no agent action.
+- **\`remove_extension <extensionId>\`** — remove a loaded extension. Web Store extensions are uninstalled from T3's managed extension directory; unpacked dev extensions are unloaded without deleting the source folder.
 - **\`list_extensions\`** — list all installed extensions with their IDs, names, versions
 - **\`open_extension <extensionId>\`** — open an extension's action popup as a real floating window (same as clicking the extension icon). Required before \`ext_switch\` if no popup is open yet.
-- **\`ext_windows\`** — list all open extension popup windows, including dapp approval windows from \`chrome.windows.create()\`
-- **\`ext_switch <extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` calls to an extension popup. Call with no argument to revert to the main tab.
-- **\`ext_close <extensionId>\`** — close an extension popup window
+- **\`ext_windows\`** — list all open extension popup windows, including dapp approval windows from \`chrome.windows.create()\`; use the returned \`popupKey\` to disambiguate multiple windows for the same extension
+- **\`ext_switch <popupKey|extensionId>\`** — redirect subsequent \`snapshot\`/\`click\`/\`fill\`/\`js\` calls to an extension popup. Prefer \`popupKey\` when \`ext_windows\` lists more than one popup; call with no argument to revert to the main tab.
+- **\`ext_close <popupKey|extensionId>\`** — close an extension popup window. Prefer \`popupKey\` when multiple popups are open for the same extension.
 
-Typical wallet dapp flow: \`open_extension <id>\` → \`ext_switch <id>\` → \`snapshot\` → \`click\` approve → \`ext_switch\` (revert). Use \`ext_windows\` to find approval popups that appeared automatically from dapp interactions.
+Typical wallet dapp flow: \`open_extension <id>\` → \`ext_windows\` → \`ext_switch <popupKey>\` → \`snapshot\` → \`click\` approve → \`ext_switch\` (revert). Use \`ext_windows\` to find approval popups that appeared automatically from dapp interactions.
 
 ### Known issues
 
@@ -464,6 +465,9 @@ Use \`load_unpacked\` with the absolute path to the directory containing manifes
 
 **Reloading by ID:**
 Use \`reload_extension <extensionId>\` when you have the ID from \`list_extensions\` but not the path.
+
+**Removing by ID:**
+Use \`remove_extension <extensionId>\` to uninstall a Web Store extension or unload an unpacked dev extension. Unpacked source folders are never deleted.
 
 **HMR-capable frameworks (Vite+CRXJS, Plasmo, WXT):**
 1. Start the framework dev server via the managed runs system

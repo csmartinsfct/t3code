@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "types": ["node", "electron"],
+    "types": ["node", "electron", "chrome"],
     "lib": ["ES2023", "DOM", "esnext.disposable"]
   },
   "include": ["src", "tsdown.config.ts"]

@@ -32,8 +32,8 @@
     "./preload": "./dist/chrome-extension-api.preload.js"
   },
   "scripts": {
-    "build": "node esbuild.config.js",
-    "clean": "node -e \"const fs=require('fs');['dist/cjs','dist/esm'].forEach(d=>{try{fs.rmSync(d,{recursive:true})}catch{}})\"",
+    "build": "bun run clean && node esbuild.config.js && tsc --project tsconfig.json --noCheck",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "echo 'skip'",
     "fmt": "echo 'skip'"
   },
@@ -53,7 +53,7 @@
     "minimist": "^1.2.7",
     "mocha": "^8.2.1",
     "ts-node": "^10.9.1",
-    "typescript": "^4.9.4",
+    "typescript": "catalog:",
     "walkdir": "^0.4.1"
   },
   "peerDependencies": {}

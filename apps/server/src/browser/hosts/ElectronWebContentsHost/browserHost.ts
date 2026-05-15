@@ -559,6 +559,8 @@ export class ElectronWebContentsBrowserHost {
         return this.loadUnpacked(requiredArg(args, "load_unpacked", "folderPath"));
       case "reload_extension":
         return this.reloadExtension(requiredArg(args, "reload_extension", "extensionId"));
+      case "remove_extension":
+        return this.removeExtension(requiredArg(args, "remove_extension", "extensionId"));
       case "open_extension":
         return this.openExtension(requiredArg(args, "open_extension", "extensionId"));
       case "list_extensions":
@@ -568,7 +570,7 @@ export class ElectronWebContentsBrowserHost {
       case "ext_switch":
         return this.extSwitch(args[0]);
       case "ext_close":
-        return this.extClose(requiredArg(args, "ext_close", "extensionId"));
+        return this.extClose(requiredArg(args, "ext_close", "popupKey or extensionId"));
       default:
         throw new Error(`unknown Electron browser tool '${tool}'`);
     }
@@ -661,12 +663,18 @@ export class ElectronWebContentsBrowserHost {
     return `Reloaded extension ${extensionId}.`;
   }
 
+  private async removeExtension(extensionId: string): Promise<string> {
+    if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
+    await this.broker.removeExtension(this.viewId, extensionId);
+    return `Removed extension ${extensionId}.`;
+  }
+
   private async openExtension(extensionId: string): Promise<string> {
     if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
     const result = await this.broker.extOpen(this.viewId, extensionId);
     return (
       `Opened extension popup for ${extensionId} (popupKey: ${result.popupKey}). ` +
-      `Call ext_switch ${extensionId} to target it for snapshot/click/fill commands.`
+      `Call ext_switch ${result.popupKey} to target it, or ext_switch ${extensionId} if it is the only popup for that extension.`
     );
   }
 
@@ -686,28 +694,28 @@ export class ElectronWebContentsBrowserHost {
     return wins
       .map(
         (w) =>
-          `${w.extensionId}  ${w.title || "(untitled)"}  ${w.url}${w.isActive ? "  [active CDP target]" : ""}`,
+          `${w.popupKey}  ${w.extensionId}  ${w.popupType ?? "popup"}  ${w.title || "(untitled)"}  ${w.url}${w.isActive ? "  [active CDP target]" : ""}`,
       )
       .join("\n");
   }
 
-  private async extSwitch(extensionId?: string): Promise<string> {
+  private async extSwitch(selector?: string): Promise<string> {
     if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
-    const result = await this.broker.extSwitch(this.viewId, extensionId);
-    if (!extensionId || result.popupKey === null) {
+    const result = await this.broker.extSwitch(this.viewId, selector);
+    if (!selector || result.popupKey === null) {
       return "Reverted CDP target to main browser tab.";
     }
     return (
       `Switched CDP target to extension popup ${result.popupKey}. ` +
       `Use snapshot/click/fill/js to interact with it. ` +
-      `Call ext_switch (no extensionId) to revert to the main tab.`
+      `Call ext_switch with no target to revert to the main tab.`
     );
   }
 
-  private async extClose(extensionId: string): Promise<string> {
+  private async extClose(selector: string): Promise<string> {
     if (!this.broker) throw new Error(ELECTRON_NATIVE_UNAVAILABLE_MESSAGE);
-    await this.broker.extClose(this.viewId, extensionId);
-    return `Closed popup for extension ${extensionId}.`;
+    await this.broker.extClose(this.viewId, selector);
+    return `Closed extension popup ${selector}.`;
   }
 
   private async installWebstoreShim(): Promise<void> {

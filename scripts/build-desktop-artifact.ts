@@ -464,10 +464,50 @@ function resolveDesktopRuntimeDependencies(
   }
 
   const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
+    Object.entries(dependencies)
+      .filter(([dependencyName]) => dependencyName !== "electron")
+      .map(([dependencyName, spec]) => {
+        if (dependencyName === "electron-chrome-extensions" && spec === "workspace:*") {
+          return [dependencyName, "file:packages/electron-chrome-extensions"];
+        }
+        return [dependencyName, spec];
+      }),
   );
 
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
+}
+
+function stageElectronChromeExtensionsPackage(repoRoot: string, stageAppDir: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const sourceDir = path.join(repoRoot, "packages", "electron-chrome-extensions");
+    const distDir = path.join(sourceDir, "dist");
+    const preloadPath = path.join(distDir, "chrome-extension-api.preload.js");
+    const cjsEntryPath = path.join(distDir, "cjs", "index.js");
+    const typesEntryPath = path.join(distDir, "types", "index.d.ts");
+
+    for (const requiredPath of [preloadPath, cjsEntryPath, typesEntryPath]) {
+      if (!(yield* fs.exists(requiredPath))) {
+        return yield* new BuildScriptError({
+          message: `Missing built electron-chrome-extensions artifact at ${requiredPath}. Run 'bun run build:desktop' first.`,
+        });
+      }
+    }
+
+    const stagedDir = path.join(stageAppDir, "packages", "electron-chrome-extensions");
+    yield* fs.makeDirectory(stagedDir, { recursive: true });
+    yield* fs.copyFile(path.join(sourceDir, "package.json"), path.join(stagedDir, "package.json"));
+
+    for (const fileName of ["README.md", "LICENSE.md", "LICENSE-GPL", "LICENSE-PATRON.md"]) {
+      const sourcePath = path.join(sourceDir, fileName);
+      if (yield* fs.exists(sourcePath)) {
+        yield* fs.copyFile(sourcePath, path.join(stagedDir, fileName));
+      }
+    }
+
+    yield* fs.copy(distDir, path.join(stagedDir, "dist"));
+  });
 }
 
 function resolveEffectCatalogOverrides(catalog: Record<string, unknown>): Record<string, string> {
@@ -782,6 +822,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* stageElectronChromeExtensionsPackage(repoRoot, stageAppDir);
 
   // Stage the compiled panel-window addon so electron-builder can unpack it from
   // app.asar at runtime. main.ts requires it via a __dirname-relative path that

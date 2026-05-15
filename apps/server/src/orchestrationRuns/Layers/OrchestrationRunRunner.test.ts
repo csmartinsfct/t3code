@@ -15,7 +15,7 @@ import {
   type OrchestrationRun,
   OrchestrationRunError,
 } from "@t3tools/contracts";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, PubSub, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { type DeepPartial } from "@t3tools/shared/Struct";
@@ -25,6 +25,11 @@ import {
 } from "../../checkpointing/Services/CheckpointDiffQuery.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  RuntimeReceiptBus,
+  type OrchestrationRuntimeReceipt,
+  type RuntimeReceiptBusShape,
+} from "../../orchestration/Services/RuntimeReceiptBus.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
@@ -42,7 +47,10 @@ import {
   type OrchestrationRunServiceShape,
 } from "../Services/OrchestrationRuns.ts";
 import { OrchestrationRunRunner } from "../Services/OrchestrationRunRunner.ts";
-import { OrchestrationRunRunnerLive } from "./OrchestrationRunRunner.ts";
+import {
+  OrchestrationRunRunnerLive,
+  OrchestrationRunRunnerLiveWith,
+} from "./OrchestrationRunRunner.ts";
 
 const projectId = ProjectId.makeUnsafe("project-runner-test");
 const runId = OrchestrationRunId.makeUnsafe("run-1");
@@ -358,6 +366,34 @@ const makeProviderService = (
   ...overrides,
 });
 
+// In production the CheckpointReactor consumes `turn.completed` provider
+// runtime events and, after capturing the git checkpoint, publishes
+// `turn.processing.quiesced` on the receipt bus. Tests don't run that
+// reactor, so we tap the providerEvents stream and auto-publish a synthetic
+// quiesced receipt whenever a working-thread `turn.completed` event flows
+// past. This mirrors the production sequence closely enough for the runner's
+// quiesced gate to unblock and proceed. Tests that want to exercise the
+// timeout path pass `suppressQuiescedAutoPublish: true`.
+const isWorkingThreadId = (threadId: ThreadId): boolean =>
+  threadId === workingThread1 || threadId === workingThread2;
+
+const makeTestReceiptBus = (): {
+  readonly shape: RuntimeReceiptBusShape;
+  readonly publish: (receipt: OrchestrationRuntimeReceipt) => void;
+} => {
+  const pubSub = Effect.runSync(PubSub.unbounded<OrchestrationRuntimeReceipt>());
+  const shape: RuntimeReceiptBusShape = {
+    publish: (receipt) => PubSub.publish(pubSub, receipt).pipe(Effect.asVoid),
+    stream: Stream.fromPubSub(pubSub),
+  };
+  return {
+    shape,
+    publish: (receipt) => {
+      Effect.runFork(shape.publish(receipt));
+    },
+  };
+};
+
 const makeLayer = (opts: {
   runService?: Partial<OrchestrationRunServiceShape>;
   ticketing?: Partial<TicketingServiceShape>;
@@ -369,8 +405,36 @@ const makeLayer = (opts: {
   readModelProjects?: ReadonlyArray<OrchestrationProject>;
   readModelThreads?: ReadonlyArray<OrchestrationThread>;
   serverSettingsOverrides?: DeepPartial<typeof DEFAULT_SERVER_SETTINGS>;
+  suppressQuiescedAutoPublish?: boolean;
+  receiptBus?: { shape: RuntimeReceiptBusShape; publish: (r: OrchestrationRuntimeReceipt) => void };
+  quiescedWaitMs?: number;
 }) => {
   const dispatchedCommands = opts.dispatchedCommands ?? [];
+  const receiptBus = opts.receiptBus ?? makeTestReceiptBus();
+  let quiescedCount = 0;
+  const baseProviderEvents = opts.providerEvents ?? Stream.empty;
+  const providerEvents = opts.suppressQuiescedAutoPublish
+    ? baseProviderEvents
+    : baseProviderEvents.pipe(
+        Stream.tap((event) =>
+          Effect.sync(() => {
+            if (
+              event.type === "turn.completed" &&
+              event.payload.state === "completed" &&
+              isWorkingThreadId(event.threadId)
+            ) {
+              quiescedCount += 1;
+              receiptBus.publish({
+                type: "turn.processing.quiesced",
+                threadId: event.threadId,
+                turnId: event.turnId ?? TurnId.makeUnsafe(`turn-quiesced-${quiescedCount}`),
+                checkpointTurnCount: quiescedCount as never,
+                createdAt: event.createdAt,
+              });
+            }
+          }),
+        ),
+      );
   const readModelProjects =
     opts.readModelProjects ??
     ([
@@ -484,7 +548,11 @@ const makeLayer = (opts: {
         session: null,
       },
     ] as const satisfies ReadonlyArray<OrchestrationThread>);
-  return OrchestrationRunRunnerLive.pipe(
+  const runnerLayer =
+    opts.quiescedWaitMs !== undefined
+      ? OrchestrationRunRunnerLiveWith({ quiescedWaitMs: opts.quiescedWaitMs })
+      : OrchestrationRunRunnerLive;
+  return runnerLayer.pipe(
     Layer.provide(Layer.succeed(OrchestrationRunService, makeRunService(opts.runService))),
     Layer.provide(Layer.succeed(TicketingService, makeTicketingService(opts.ticketing))),
     Layer.provide(
@@ -492,7 +560,9 @@ const makeLayer = (opts: {
         ProviderService,
         makeProviderService({
           ...opts.providerService,
-          streamEvents: opts.providerEvents ?? opts.providerService?.streamEvents ?? Stream.empty,
+          streamEvents: opts.providerEvents
+            ? providerEvents
+            : (opts.providerService?.streamEvents ?? Stream.empty),
         }),
       ),
     ),
@@ -597,6 +667,7 @@ const makeLayer = (opts: {
         hasThreadUserMessages: () => Effect.succeed(null as any),
       }),
     ),
+    Layer.provide(Layer.succeed(RuntimeReceiptBus, receiptBus.shape)),
   );
 };
 
@@ -3460,5 +3531,192 @@ describe("OrchestrationRunRunner", () => {
     expect(activityKinds).toContain("orchestration.run.completed");
     // The watcher must not have stalled and hit the idle path.
     expect(activityKinds).not.toContain("orchestration.run.paused");
+  });
+
+  it("waits for turn.processing.quiesced before computing the review diff", async () => {
+    // Drives a working→review flow with auto-publish disabled. Manually
+    // controls when the quiesced receipt is published, and asserts that
+    // `getFullThreadDiff` is NOT called until after publish. This is the
+    // direct regression test for the METR-321 race.
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const receiptBus = makeTestReceiptBus();
+    const getFullThreadDiff = vi.fn(({ toTurnCount }: { toTurnCount: number }) =>
+      Effect.succeed({
+        threadId: workingThread1,
+        fromTurnCount: 0,
+        toTurnCount,
+        diff: `full-${toTurnCount}`,
+      }),
+    );
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 1,
+    });
+    const completedSingleTicketRun = makeRun({
+      ...singleTicketRun,
+      status: "completed",
+    });
+    const initialThreads = makeCompletedWorkAndReviewThreads(
+      JSON.stringify({ changesNeeded: false, summary: "ok", comments: [] }),
+    );
+    const orchestrationThreadState = makeOrchestrationParentThread();
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      receiptBus,
+      suppressQuiescedAutoPublish: true,
+      checkpointDiffQuery: { getFullThreadDiff },
+      readModelThreads: [orchestrationThreadState, ...initialThreads],
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        complete: () => Effect.succeed(completedSingleTicketRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnStartedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: reviewThread1, turnId: "turn-review-1" }),
+      ]),
+      serverSettingsOverrides: {
+        prompts: {
+          orchestration: {
+            review: {
+              version: 1,
+              blocks: [{ when: null, text: "Review ${ticketId}" }],
+            },
+          },
+        },
+      },
+    });
+
+    // Start the run and let it progress until it's waiting for quiesced.
+    const runPromise = Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+
+    // Give the runner time to dispatch the working turn, process turn.completed
+    // and reach the quiesced wait. Without auto-publish it will block there.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(getFullThreadDiff).not.toHaveBeenCalled();
+
+    // Now publish quiesced. The runner should unblock and dispatch review.
+    receiptBus.publish({
+      type: "turn.processing.quiesced",
+      threadId: workingThread1,
+      turnId: TurnId.makeUnsafe("turn-work-1"),
+      checkpointTurnCount: 1 as never,
+      createdAt: "2026-04-09T10:00:05.000Z",
+    });
+
+    await runPromise;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(getFullThreadDiff).toHaveBeenCalledTimes(1);
+    const reviewTurnStart = dispatchedCommands.find(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.turn.start" }> =>
+        command.type === "thread.turn.start" && command.threadId === reviewThread1,
+    );
+    expect(reviewTurnStart).toBeDefined();
+  });
+
+  it("pauses with an explicit reason when quiesced does not arrive within the timeout", async () => {
+    // Working turn completes, but the test layer never publishes quiesced.
+    // With a short timeout configured the runner should pause the run with
+    // a precise message instead of silently wedging or surfacing a confusing
+    // wrapper error.
+    const dispatchedCommands: OrchestrationCommand[] = [];
+    const getFullThreadDiff = vi.fn(({ toTurnCount }: { toTurnCount: number }) =>
+      Effect.succeed({
+        threadId: workingThread1,
+        fromTurnCount: 0,
+        toTurnCount,
+        diff: `full-${toTurnCount}`,
+      }),
+    );
+    const singleTicketRun = makeRun({
+      ticketOrder: [
+        { ticketId: ticket1Id, workingThreadId: workingThread1, reviewThreadId: reviewThread1 },
+      ],
+      maxReviewIterations: 0,
+    });
+    const pausedRun = makeRun({ ...singleTicketRun, status: "paused" });
+    const orchestrationThreadState = makeOrchestrationParentThread();
+    const workingThreadState: OrchestrationThread = {
+      id: workingThread1,
+      projectId,
+      title: ticket1.title,
+      modelSelection: { provider: "codex", model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      parentThreadId: orchestrationThreadId,
+      isOrchestrationThread: false,
+      ticketId: ticket1Id,
+      latestTurn: {
+        turnId: TurnId.makeUnsafe("turn-work-1"),
+        state: "completed",
+        requestedAt: "2026-04-09T10:00:00.000Z",
+        startedAt: "2026-04-09T10:00:00.000Z",
+        completedAt: "2026-04-09T10:00:01.000Z",
+        assistantMessageId: MessageId.makeUnsafe("assistant-work"),
+      },
+      createdAt: "2026-04-09T10:00:00.000Z",
+      updatedAt: "2026-04-09T10:00:01.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    };
+
+    const layer = makeLayer({
+      dispatchedCommands,
+      suppressQuiescedAutoPublish: true,
+      quiescedWaitMs: 150,
+      checkpointDiffQuery: { getFullThreadDiff },
+      readModelThreads: [orchestrationThreadState, workingThreadState],
+      runService: {
+        get: () => Effect.succeed(singleTicketRun),
+        start: () => Effect.succeed(singleTicketRun),
+        updateRunProgress: () => Effect.succeed(singleTicketRun),
+        pause: () => Effect.succeed(pausedRun),
+      },
+      providerEvents: Stream.fromIterable([
+        makeTurnStartedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+        makeTurnCompletedRuntimeEvent({ threadId: workingThread1, turnId: "turn-work-1" }),
+      ]),
+    });
+
+    await Effect.runPromise(
+      Effect.flatMap(Effect.service(OrchestrationRunRunner), (runner) =>
+        runner.startRun({ runId }),
+      ).pipe(Effect.provide(layer)),
+    );
+    // Allow timeout (150ms) plus margin for pause-and-record activities.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(getFullThreadDiff).not.toHaveBeenCalled();
+
+    const parentActivities = dispatchedCommands.filter(
+      (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
+        command.type === "thread.activity.append" && command.threadId === orchestrationThreadId,
+    );
+    const pauseActivity = parentActivities.find(
+      (command) => command.activity.kind === "orchestration.run.paused",
+    );
+    expect(pauseActivity).toBeDefined();
+    // Surface the precise reason rather than a generic wrapper.
+    expect(pauseActivity?.activity.summary ?? "").toContain(
+      "Post-turn checkpoint did not finalize",
+    );
   });
 });

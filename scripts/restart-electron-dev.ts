@@ -18,6 +18,7 @@ const desktopRoot = join(repoRoot, "apps", "desktop");
 const webRoot = join(repoRoot, "apps", "web");
 const rendererPort = Number(process.env.ELECTRON_RENDERER_PORT ?? process.env.PORT ?? 5733);
 const dryRun = process.argv.includes("--dry-run");
+const stopOnly = process.argv.includes("--stop-only");
 const supervisorMode = process.argv.includes("--supervisor");
 const logPath =
   process.env.T3CODE_RESTART_ELECTRON_LOG ??
@@ -299,6 +300,12 @@ async function main(): Promise<void> {
   if (dryRun) {
     await stopElectronDevProcesses();
     log("dry run complete; not starting Electron dev stack");
+    return;
+  }
+
+  if (stopOnly) {
+    await stopElectronDevProcesses();
+    log("stop complete; not starting Electron dev stack");
     return;
   }
 

@@ -847,6 +847,19 @@ export const SPECS: Record<string, CommandSpec> = {
       ),
     },
   },
+  remove_extension: {
+    command: "remove_extension",
+    category: "meta",
+    argsFromInput: (i: Record<string, unknown>, t: string) => [reqString(i, "extensionId", t)],
+    title: "Remove extension",
+    description:
+      "Remove a loaded Chrome extension by its ID. Managed Web Store extensions are uninstalled from T3's managed extension directory; unpacked development extensions are unloaded without deleting the source folder. Also clears pinned state and refreshes extension metadata. Desktop (Electron) host only.",
+    inputSchema: {
+      extensionId: s.str(
+        "Extension ID (32-char a-p string) as returned by load_extension, load_unpacked, or list_extensions",
+      ),
+    },
+  },
   open_extension: {
     command: "open_extension",
     category: "meta",
@@ -873,34 +886,48 @@ export const SPECS: Record<string, CommandSpec> = {
     argsFromInput: () => [],
     title: "List open extension popup windows",
     description:
-      "List all open extension popup windows — both user-opened action popups and dapp approval/notification windows from chrome.windows.create(). Returns extension ID, title, URL, and whether it is the current active CDP target. Use ext_switch with an extension ID to target one for snapshot/click/fill commands. Desktop (Electron) host only.",
+      "List all open extension popup windows — both user-opened action popups and dapp approval/notification windows from chrome.windows.create(). Returns popupKey, extension ID, popup type, title, URL, and whether it is the current active CDP target. Use ext_switch with a popupKey to target a specific window. Desktop (Electron) host only.",
     inputSchema: {},
   },
   ext_switch: {
     command: "ext_switch",
     category: "meta",
     argsFromInput: (i) => {
+      const popupKey = optString(i, "popupKey");
       const id = optString(i, "extensionId");
-      return id ? [id] : [];
+      const target = optString(i, "target");
+      return popupKey ? [popupKey] : id ? [id] : target ? [target] : [];
     },
     title: "Switch CDP target to extension popup",
     description:
-      "Route subsequent snapshot/click/fill/js commands to an extension popup window instead of the main browser tab. Pass extensionId to switch; omit to revert to the main browser tab. The popup must already be open (use ext_windows to check). Note: CDP event subscriptions (console, network) are not supported while targeting a popup. Desktop (Electron) host only.",
+      "Route subsequent snapshot/click/fill/js commands to an extension popup window instead of the main browser tab. Pass popupKey from ext_windows to target a specific window, pass extensionId for the common single-popup case, or omit popupKey/extensionId/target to revert to the main browser tab. Note: CDP event subscriptions (console, network) are not supported while targeting a popup. Desktop (Electron) host only.",
     inputSchema: {
       extensionId: s.optStr(
-        "Extension ID (32-char a-p string, e.g. dgdongbhnogjdmalcjmoaohehadoolep). Omit to revert to main tab.",
+        "Extension ID (32-char a-p string, e.g. dgdongbhnogjdmalcjmoaohehadoolep). Use only when one popup is open for that extension.",
       ),
+      popupKey: s.optStr(
+        "Stable popupKey from ext_windows, e.g. popup-3. Omit to revert to main tab.",
+      ),
+      target: s.optStr("Alias for popupKey or extensionId."),
     },
   },
   ext_close: {
     command: "ext_close",
     category: "meta",
-    argsFromInput: (i, t) => [reqString(i, "extensionId", t)],
+    argsFromInput: (i, t) => {
+      const popupKey = optString(i, "popupKey");
+      const extensionId = optString(i, "extensionId");
+      return [popupKey ?? extensionId ?? reqString(i, "target", t)];
+    },
     title: "Close extension popup",
     description:
-      "Close an open extension popup window by extension ID. Automatically reverts the active CDP target to the main browser tab if the popup being closed was the active target. Desktop (Electron) host only.",
+      "Close an open extension popup window by popupKey from ext_windows, by extension ID for the common single-popup case, or by target alias. Automatically reverts the active CDP target to the main browser tab if the popup being closed was the active target. Desktop (Electron) host only.",
     inputSchema: {
-      extensionId: s.str("Extension ID of the popup to close"),
+      extensionId: s.optStr(
+        "Extension ID of the popup to close, only when one popup is open for that extension",
+      ),
+      popupKey: s.optStr("Stable popupKey from ext_windows, e.g. popup-3"),
+      target: s.optStr("Alias for popupKey or extensionId."),
     },
   },
 };

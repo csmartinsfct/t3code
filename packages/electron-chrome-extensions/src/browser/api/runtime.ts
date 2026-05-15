@@ -66,13 +66,14 @@ export class RuntimeAPI extends EventEmitter {
       console.warn(`[crx-runtime] reload() called for ${event.extension.id} but path is unknown`);
       return;
     }
+    if (typeof this.ctx.store.impl.reloadExtension === "function") {
+      await this.ctx.store.impl.reloadExtension(event.extension, extPath);
+      return;
+    }
     const ses = ((session as unknown as Record<string, unknown>).extensions ?? session) as {
       loadExtension: (p: string, o: object) => Promise<unknown>;
     };
-    await ses.loadExtension(
-      extPath,
-      { allowFileAccess: true }
-    );
+    await ses.loadExtension(extPath, { allowFileAccess: true });
   }
 
   private openOptionsPage = async ({ extension }: ExtensionEvent) => {

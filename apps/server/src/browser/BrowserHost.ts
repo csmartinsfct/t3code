@@ -62,6 +62,7 @@ export const BROWSER_HOST_TOOL_NAMES = [
   "load_extension",
   "load_unpacked",
   "reload_extension",
+  "remove_extension",
   "list_extensions",
   "open_extension",
   "ext_windows",

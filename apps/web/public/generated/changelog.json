@@ -1,11 +1,360 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-04T22:51:41.594Z",
-  "lastProcessedCommit": "129277594eb7efb16b0d3de461356d7dd8f360b1",
+  "generatedAt": "2026-05-10T00:03:49.350Z",
+  "lastProcessedCommit": "e9a07975bc350e4b81a6359a70b5eb72f203fa62",
   "groups": [
+    {
+      "date": "2026-05-10",
+      "entries": [
+        {
+          "id": "2e52eecd37912919",
+          "title": "Added extension reload tools and improved extension click handling",
+          "summary": "Added support for loading unpacked extensions and reloading them during development, and fixed extension toolbar clicks so extensions receive the active tab details they need to respond correctly.",
+          "category": "feature",
+          "commitShas": [
+            "9900014e55aa6a01655d6fb202ba64bdd3aea4d0",
+            "b29a42efaec19576f0929d18f8258686dc4a7df8",
+            "e9a07975bc350e4b81a6359a70b5eb72f203fa62"
+          ]
+        },
+        {
+          "id": "db426174d2fa7dc8",
+          "title": "Fixed model picker submenu hover behavior",
+          "summary": "Resolved a hover issue in the model picker submenu to make model selection more consistent.",
+          "category": "fix",
+          "commitShas": ["893a566519066476a0ffbdf290063d26b74b18b6"]
+        },
+        {
+          "id": "4b82bf92526ed244",
+          "title": "Redesigned the browser extensions panel",
+          "summary": "The extensions panel now uses a cleaner tile-based layout with improved pinning controls, faster pin and unpin feedback, and more reliable context menus inside the panel.",
+          "category": "improvement",
+          "commitShas": ["64f1559616d83e2a345d829d8fb648a7591379a2"]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-09",
+      "entries": [
+        {
+          "id": "42160bc01a4ead89",
+          "title": "Improved extension onboarding and action handling",
+          "summary": "Fixed several issues affecting extension onboarding flows, action clicks, and service worker behavior, improving compatibility with modern Chrome extensions.",
+          "category": "fix",
+          "commitShas": [
+            "5f6481b57c620654bc0023d20a5cfcb4c0b232dc",
+            "9dcf6a63579bab701bff05588215d21756e0c808",
+            "e5e39a07d1e9e7268e65ce25ef4f1e6be5b782d5"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-08",
+      "entries": [
+        {
+          "id": "fa430346d0a370f5",
+          "title": "Chrome extensions can now be installed directly from the Chrome Web Store",
+          "summary": "T3 Code now supports installing browser extensions from the Chrome Web Store inside the embedded browser, with persistence across restarts and built-in safeguards for safer installs.",
+          "category": "feature",
+          "commitShas": [
+            "54e575582696409e75d2d8d6a6f80aa94589204d",
+            "56a09c4b886dc6cc7c70eed9ab6212180f007b68",
+            "7578819002206cb261c8ea5c2178be5d9d8a6b74"
+          ]
+        },
+        {
+          "id": "2a33bbf116e7eeb5",
+          "title": "Extension popups now behave more like native app windows",
+          "summary": "Extension popups and approval windows now open more reliably, stay visible in full-screen workflows, and better support wallet and dapp interactions.",
+          "category": "improvement",
+          "commitShas": [
+            "54b8727914a70cc68630cb3f4dfa50cae0b25e74",
+            "968ace70ef513baa8e60ab5735fffb822f3632be",
+            "c9d4abf63aec8ba0ceb0101898b33d09a1eeb3fc"
+          ]
+        },
+        {
+          "id": "dc355e1301beea66",
+          "title": "Extension popups now follow project context",
+          "summary": "Extension popups are now scoped to the active project: they hide when you switch away and reappear when you return, without forcing the extension to reload.",
+          "category": "improvement",
+          "commitShas": ["6e2a60aa3864ea08010c67e3371b13ae7723e777"]
+        },
+        {
+          "id": "0e26d91bd21ab3bd",
+          "title": "New extensions panel and toolbar controls",
+          "summary": "The embedded browser now includes an extensions panel and toolbar integration, making it easier to view installed extensions, access their actions, pin or unpin favorites, and remove extensions.",
+          "category": "feature",
+          "commitShas": [
+            "13597902adde025cba8b8ff759ff6ad49f252123",
+            "7ecb2014e36f74a798536c2fc00a8eb4abbf03f8",
+            "8902be4fbd1efcf904850fc17d3a23d992ece24b",
+            "c36da67acf9003f20e4104ad0eaeb108cf7d2795"
+          ]
+        },
+        {
+          "id": "fcbf2fbb9437bfd5",
+          "title": "Agents can control browser extensions",
+          "summary": "Agents can now list installed extensions, open extension popups, switch control to extension windows, inspect open extension popups, and close them when finished.",
+          "category": "feature",
+          "commitShas": [
+            "074bc66b8761b0b75826e6918a6d7f874d59f031",
+            "6267d67819d283485bd4bcda2b54a03978c791b4",
+            "92b918377f736eeccd99d9fd5242883a9310f3d6"
+          ]
+        },
+        {
+          "id": "2f7a7bbfd4930079",
+          "title": "Fixed an extension popup crash",
+          "summary": "Resolved a crash when closing certain extension popups, improving stability during extension-heavy browsing sessions.",
+          "category": "fix",
+          "commitShas": ["093b6c64a858962064a742ae6a2d2e4798112820"]
+        },
+        {
+          "id": "f902f577c83c22a3",
+          "title": "Polished browser emulator controls",
+          "summary": "Streamlined the browser emulator controls with a more cohesive layout and interaction model, making viewport and device emulation easier to use.",
+          "category": "improvement",
+          "commitShas": [
+            "a346e2ae31e3f0cf6c67536748db1802252eb574",
+            "e633db6a67fc0d35b5002a392e362ad719330e75"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-07",
+      "entries": [
+        {
+          "id": "5191c08c32f498ac",
+          "title": "Browser viewport dimensions can now be edited directly",
+          "summary": "Added direct editing for browser viewport width and height, making device and layout checks faster during browser-based workflows.",
+          "category": "feature",
+          "commitShas": ["2d0a5fa292ed8638e8de9621e54f2e002e950161"]
+        },
+        {
+          "id": "f07a9ff098109673",
+          "title": "Fixed Claude question responses in interactive prompts",
+          "summary": "Resolved an issue that could send incorrect answer keys when replying to Claude questions, improving reliability during interactive flows.",
+          "category": "fix",
+          "commitShas": ["46971dd547ff0daf0defae7ff9b8739a9526696f"]
+        },
+        {
+          "id": "a79410aef3e8bf2a",
+          "title": "More reliable hover behavior in context menu submenus",
+          "summary": "Adjusted context menus so submenus stay open more consistently while moving the pointer between menu items.",
+          "category": "fix",
+          "commitShas": ["0133466523ef6215628d534aadf37552d191e130"]
+        },
+        {
+          "id": "08c5043c3cf9bf32",
+          "title": "Refined button and composer menu focus states",
+          "summary": "Improved focus styling across buttons and composer icon menus for a cleaner, less distracting interface while preserving keyboard accessibility.",
+          "category": "improvement",
+          "commitShas": [
+            "657eb0b5fb64cc34a00e203cb663feabeeecefeb",
+            "d0d31ad45bb320083a7b7fbd2102a2b3392febab"
+          ]
+        },
+        {
+          "id": "5106b620c87775fb",
+          "title": "Overlay menus and pickers now behave more consistently across the app",
+          "summary": "A broad set of menus, dropdowns, and pickers now use the same routed overlay system, improving consistency for opening, hovering, selecting, and dismissing actions throughout the interface, including header controls, plan actions, thread switching, branch selection, model and skill pickers, and composer controls.",
+          "category": "improvement",
+          "commitShas": [
+            "1a907fd9edf152458d17980257a9b198d02f8f1a",
+            "2a67e9b26d19cce86b0e713fa8b4b847e3224118",
+            "3fbb8ed276d79725c634367eea6624e3ca9dc3aa",
+            "42f1570079717859acd463c91e29c6c13cf9ee91",
+            "49fa12a2caf8697a449852cbd163f240bca593ab",
+            "538de65879b31652083e95292264153bcd58814a",
+            "604ccb53bb5102707d75848ca8261d6d1a693906",
+            "6512af0e7572562106f0d840d35d325bd4b1674e",
+            "68513f736bae7a1785e3c97814dd89085ba056bf",
+            "82a3c7f226e4287598df34a3e87ac7c4ae697548",
+            "a4d72937fb6786f1872f78811342f8df8573923e",
+            "a8a87af29e65c1e5c965b6abd4ed5f3cd1ee42de",
+            "d1aaa6a300a8db95b473997ec7c98445cf20b983",
+            "d870267b38f1f5674c7b2ef96c8531dfb6c3a0cd",
+            "efe93ccda0dd100bbce16cb5f59b1a2dbee80f9c"
+          ]
+        },
+        {
+          "id": "a7a8025f21830656",
+          "title": "Sidebar sorting menus are more predictable to use",
+          "summary": "The sidebar sort menu now stays open when appropriate during selection, dismisses correctly on outside click, and avoids unintended hover-driven closing, making repeated sorting changes smoother.",
+          "category": "fix",
+          "commitShas": [
+            "041a9de55f2c14c7abbc7fa95a45772554860993",
+            "10729c90b0273661a5257ea3d25804d45ab8a4ee",
+            "26e64ad4e1435f47da8cb84501c02de630c337f3",
+            "698240c908217873c6d3456a188b7face0b389d1"
+          ]
+        },
+        {
+          "id": "b420faeb460919cb",
+          "title": "Native overlay interactions were refined to better match in-page menus",
+          "summary": "Native overlay fallbacks and menu behavior were polished so hover states, fallback rendering, and menu interactions more closely match standard in-page menus, reducing UI friction when navigating actions.",
+          "category": "fix",
+          "commitShas": [
+            "345b589ee92469b8ff519a4fd7b6bcf525b664a0",
+            "6d0924ee82d0bad68982148977c94d0a01592403",
+            "8369597e6211f68f62f52b9c90a1863bad629bde",
+            "fe701d88ad62be3914b723a1d049f450b9f1d689"
+          ]
+        },
+        {
+          "id": "7b598d929071a44d",
+          "title": "Ticket details remain intact during metadata updates",
+          "summary": "Updating ticket metadata no longer clears the main ticket description, so detail views stay stable while edits are applied.",
+          "category": "fix",
+          "commitShas": ["8453871c9b349fc2e049e27ea44b5a45ff9488ca"]
+        },
+        {
+          "id": "9ff35b6a5b9068a1",
+          "title": "Faster board switching with per-project ticket caching",
+          "summary": "Ticket and board data now stays cached per project, making it quicker to move between chat and management views and reducing unnecessary reloads when revisiting a project.",
+          "category": "performance",
+          "commitShas": ["15d74221eab62270cf5a117e814b65feb2c3f443"]
+        },
+        {
+          "id": "5f01368cd5109437",
+          "title": "Added a default shortcut to toggle the file explorer",
+          "summary": "You can now use `mod+s` by default to show or hide the file explorer.",
+          "category": "feature",
+          "commitShas": ["01063614864b689d91906a4f1dacf61b02405408"]
+        },
+        {
+          "id": "aa12d43ed65daa9c",
+          "title": "Embedded browser tools gained broader native support",
+          "summary": "The desktop embedded browser now supports native `eval` and responsive capture workflows, bringing it closer to feature parity with the standalone browser tooling.",
+          "category": "feature",
+          "commitShas": [
+            "401e9bbb2138ca1835b06ecb19094ab5eaac5345",
+            "d4bac62b86726bab5e16fd851099d059300d8fc7",
+            "f2eef3725e15b76374041d9308b8837b3f9e4c8f"
+          ]
+        },
+        {
+          "id": "3bd55666e05aee19",
+          "title": "Browser guidance now better reflects desktop behavior",
+          "summary": "Updated browser tool guidance so agents better match what users see in the desktop app and avoid unsupported browser actions.",
+          "category": "improvement",
+          "commitShas": [
+            "a5f5ef59f4732c12b0954bf277a8e22c471da037",
+            "ec56ee233bd7dac4e17a458b2af70ef1c5cfebc8"
+          ]
+        },
+        {
+          "id": "2c94f36ebadc6366",
+          "title": "Browser event handling is more reliable in the desktop app",
+          "summary": "Fixed missing console, network, dialog, and runtime event subscriptions in the embedded browser host, improving the reliability of browser-driven agent actions.",
+          "category": "fix",
+          "commitShas": [
+            "e1ede5cf80d6a5d53fcb309df069c6c099d9fdc0",
+            "e745b57f9ecedac3d954c8bf16f61fa30a59e4c3"
+          ]
+        },
+        {
+          "id": "dff122b3338fb02e",
+          "title": "Embedded browser resizing is more stable",
+          "summary": "Fixed viewport resize issues in the embedded browser, reducing flashing and incorrect sizing during drag-resize interactions.",
+          "category": "fix",
+          "commitShas": ["ca43848cec808ccf6193e214f55fae0900d212a9"]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-06",
+      "entries": [
+        {
+          "id": "465d43280e20f3a9",
+          "title": "Embedded browser tab switching is smoother",
+          "summary": "Fixed dark flashes and blank-page color flicker when opening or switching browser tabs, improving visual stability during tab changes.",
+          "category": "fix",
+          "commitShas": ["e990b2fb3ca75729ab0061b6e0e07758c167ad8c"]
+        },
+        {
+          "id": "81ca9cd289418b43",
+          "title": "Overlay dialogs now behave more consistently across settings and chat",
+          "summary": "Confirmation dialogs, plan views, pull request threads, and proposed task surfaces now open through the app’s routed overlay system for more consistent navigation and dismissal behavior.",
+          "category": "improvement",
+          "commitShas": [
+            "526baac3fefaf632ba1d954cd9aab992f895f6b9",
+            "cbf7ac63ea60932a6ac4622113628077be210727",
+            "ce38804ffabb32420cb1258f25af3bf35fbfe6bc"
+          ]
+        },
+        {
+          "id": "ee2cc4d77a7b4c21",
+          "title": "Expanded native overlays across management and settings",
+          "summary": "Applied the native overlay system to managed runs, ticket workflows, board filters, confirmations, editors, and settings dialogs for a more consistent desktop UI.",
+          "category": "improvement",
+          "commitShas": [
+            "0c241b71b44edbd4d5e49e4245d14891b166a94b",
+            "2e14c0820a872339261288fa748d9927f1f22c60",
+            "5269b882ef01c9a2d68a5413adfbdcd499613825",
+            "6d8483054007c0e5f7cad6786e914f35c9629b93",
+            "74e4d8d9cb0643079a0d4d3e9ef64c45e33cc958",
+            "894a819e597e01e58df4c2220edc1aff49f08084",
+            "b7435e3dc88b7c6b94d9c666c4e6fe5eaffcf36a",
+            "c6a2425446e4ea2008a730b4007f09852c21f276",
+            "cc270c9d9a03a87c65a3ce3031faca31f566fd9b",
+            "d5be06840078543b40260816c98c19b09f2a7ff2",
+            "e9588157f2d01958cc14fc5a4d1eda5a74786fec",
+            "ea53e28699d59892553122dd67242cffb9b93f6d"
+          ]
+        },
+        {
+          "id": "71f6b6f6ab1a4c74",
+          "title": "Additional desktop overlay coverage for task actions and confirmations",
+          "summary": "Extended native overlays to icon picking, terminal tooltips, image extension confirmation, and scheduled task deletion flows.",
+          "category": "improvement",
+          "commitShas": [
+            "0d669f56e1f3b6c0d3034612a7f536e38f9f4e18",
+            "3d38ec342e5ca3cca72b3bbc9b787b7af1200107",
+            "bf415eed39f9706f043c5620450ff39cf1ab953e",
+            "fa41f2e039f41002116f61d603302b33337b0543"
+          ]
+        }
+      ]
+    },
     {
       "date": "2026-05-05",
       "entries": [
+        {
+          "id": "9055d9a78153bc7d",
+          "title": "Git, scripts, and usage popovers now use native overlays",
+          "summary": "Git actions, project scripts, and chat usage popovers now open through the native overlay system for more predictable behavior.",
+          "category": "improvement",
+          "commitShas": [
+            "00024a27a42eee4bf87f45509b63e3fe37ce2f87",
+            "3c1f3b13c0080d426257ccdbc600900677658078"
+          ]
+        },
+        {
+          "id": "6cf895d2f091ae75",
+          "title": "More stable file search overlay",
+          "summary": "Moved file search into the new native overlay system and fixed early render timing issues to make opening and using search more consistent.",
+          "category": "improvement",
+          "commitShas": [
+            "903a324bdd457c100e2c12ac63d12c9c84ece7c4",
+            "ce75054ee9b3efb6becb5c5cb640ed0cb13a6074",
+            "fdcb6306e43b242f780d7381f1418273c3b9ff1a"
+          ]
+        },
+        {
+          "id": "6b08723c980aaaba",
+          "title": "Native desktop overlays for popups and menus",
+          "summary": "Introduced native overlay surfaces across the app so popups, menus, selectors, and hover panels render more reliably in the embedded browser experience.",
+          "category": "feature",
+          "commitShas": [
+            "a5134e29ec5f500618bcbf47e86a6923e0174fe0",
+            "b35e4f47067a7fff7dfceabd76ca280e68464d08",
+            "ea9e407f2d7aa848ec3c805ad7febae7332959d1"
+          ]
+        },
         {
           "id": "ed5b18743e0d83c0",
           "title": "Improved markdown table rendering",
@@ -3176,6 +3525,183 @@
         "toInclusiveCommit": "129277594eb7efb16b0d3de461356d7dd8f360b1",
         "commitShas": ["129277594eb7efb16b0d3de461356d7dd8f360b1"],
         "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-07T02:48:52.146Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "129277594eb7efb16b0d3de461356d7dd8f360b1",
+        "toInclusiveCommit": "b7435e3dc88b7c6b94d9c666c4e6fe5eaffcf36a",
+        "commitShas": [
+          "ea9e407f2d7aa848ec3c805ad7febae7332959d1",
+          "b35e4f47067a7fff7dfceabd76ca280e68464d08",
+          "a5134e29ec5f500618bcbf47e86a6923e0174fe0",
+          "ce75054ee9b3efb6becb5c5cb640ed0cb13a6074",
+          "fdcb6306e43b242f780d7381f1418273c3b9ff1a",
+          "903a324bdd457c100e2c12ac63d12c9c84ece7c4",
+          "3c1f3b13c0080d426257ccdbc600900677658078",
+          "00024a27a42eee4bf87f45509b63e3fe37ce2f87",
+          "d5be06840078543b40260816c98c19b09f2a7ff2",
+          "3d38ec342e5ca3cca72b3bbc9b787b7af1200107",
+          "0d669f56e1f3b6c0d3034612a7f536e38f9f4e18",
+          "5269b882ef01c9a2d68a5413adfbdcd499613825",
+          "0c241b71b44edbd4d5e49e4245d14891b166a94b",
+          "cc270c9d9a03a87c65a3ce3031faca31f566fd9b",
+          "e9588157f2d01958cc14fc5a4d1eda5a74786fec",
+          "894a819e597e01e58df4c2220edc1aff49f08084",
+          "fa41f2e039f41002116f61d603302b33337b0543",
+          "bf415eed39f9706f043c5620450ff39cf1ab953e",
+          "c6a2425446e4ea2008a730b4007f09852c21f276",
+          "ea53e28699d59892553122dd67242cffb9b93f6d",
+          "2e14c0820a872339261288fa748d9927f1f22c60",
+          "74e4d8d9cb0643079a0d4d3e9ef64c45e33cc958",
+          "6d8483054007c0e5f7cad6786e914f35c9629b93",
+          "b7435e3dc88b7c6b94d9c666c4e6fe5eaffcf36a"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-07T02:49:08.132Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "b7435e3dc88b7c6b94d9c666c4e6fe5eaffcf36a",
+        "toInclusiveCommit": "9e633a587fb5796e0aae469d7e2d51f5d8e1cfdc",
+        "commitShas": [
+          "cbf7ac63ea60932a6ac4622113628077be210727",
+          "526baac3fefaf632ba1d954cd9aab992f895f6b9",
+          "ce38804ffabb32420cb1258f25af3bf35fbfe6bc",
+          "e990b2fb3ca75729ab0061b6e0e07758c167ad8c",
+          "ca43848cec808ccf6193e214f55fae0900d212a9",
+          "e1ede5cf80d6a5d53fcb309df069c6c099d9fdc0",
+          "e745b57f9ecedac3d954c8bf16f61fa30a59e4c3",
+          "f2eef3725e15b76374041d9308b8837b3f9e4c8f",
+          "a5f5ef59f4732c12b0954bf277a8e22c471da037",
+          "ec56ee233bd7dac4e17a458b2af70ef1c5cfebc8",
+          "401e9bbb2138ca1835b06ecb19094ab5eaac5345",
+          "d4bac62b86726bab5e16fd851099d059300d8fc7",
+          "01063614864b689d91906a4f1dacf61b02405408",
+          "9e633a587fb5796e0aae469d7e2d51f5d8e1cfdc"
+        ],
+        "commitCount": 14,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-07T11:13:53.461Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "9e633a587fb5796e0aae469d7e2d51f5d8e1cfdc",
+        "toInclusiveCommit": "8453871c9b349fc2e049e27ea44b5a45ff9488ca",
+        "commitShas": [
+          "15d74221eab62270cf5a117e814b65feb2c3f443",
+          "8453871c9b349fc2e049e27ea44b5a45ff9488ca"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-08T00:27:52.735Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "8453871c9b349fc2e049e27ea44b5a45ff9488ca",
+        "toInclusiveCommit": "d870267b38f1f5674c7b2ef96c8531dfb6c3a0cd",
+        "commitShas": [
+          "6d0924ee82d0bad68982148977c94d0a01592403",
+          "345b589ee92469b8ff519a4fd7b6bcf525b664a0",
+          "8369597e6211f68f62f52b9c90a1863bad629bde",
+          "fe701d88ad62be3914b723a1d049f450b9f1d689",
+          "604ccb53bb5102707d75848ca8261d6d1a693906",
+          "538de65879b31652083e95292264153bcd58814a",
+          "3fbb8ed276d79725c634367eea6624e3ca9dc3aa",
+          "1a907fd9edf152458d17980257a9b198d02f8f1a",
+          "a4d72937fb6786f1872f78811342f8df8573923e",
+          "82a3c7f226e4287598df34a3e87ac7c4ae697548",
+          "efe93ccda0dd100bbce16cb5f59b1a2dbee80f9c",
+          "26e64ad4e1435f47da8cb84501c02de630c337f3",
+          "10729c90b0273661a5257ea3d25804d45ab8a4ee",
+          "698240c908217873c6d3456a188b7face0b389d1",
+          "041a9de55f2c14c7abbc7fa95a45772554860993",
+          "2a67e9b26d19cce86b0e713fa8b4b847e3224118",
+          "68513f736bae7a1785e3c97814dd89085ba056bf",
+          "0540f202dfdf6c183caf9d5a189a66b1bbcd53ef",
+          "a8a87af29e65c1e5c965b6abd4ed5f3cd1ee42de",
+          "49fa12a2caf8697a449852cbd163f240bca593ab",
+          "d1aaa6a300a8db95b473997ec7c98445cf20b983",
+          "6512af0e7572562106f0d840d35d325bd4b1674e",
+          "42f1570079717859acd463c91e29c6c13cf9ee91",
+          "d870267b38f1f5674c7b2ef96c8531dfb6c3a0cd"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-08T00:28:05.838Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d870267b38f1f5674c7b2ef96c8531dfb6c3a0cd",
+        "toInclusiveCommit": "e633db6a67fc0d35b5002a392e362ad719330e75",
+        "commitShas": [
+          "657eb0b5fb64cc34a00e203cb663feabeeecefeb",
+          "d0d31ad45bb320083a7b7fbd2102a2b3392febab",
+          "0133466523ef6215628d534aadf37552d191e130",
+          "46971dd547ff0daf0defae7ff9b8739a9526696f",
+          "2d0a5fa292ed8638e8de9621e54f2e002e950161",
+          "a346e2ae31e3f0cf6c67536748db1802252eb574",
+          "e633db6a67fc0d35b5002a392e362ad719330e75"
+        ],
+        "commitCount": 7,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-10T00:03:38.086Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e633db6a67fc0d35b5002a392e362ad719330e75",
+        "toInclusiveCommit": "88bc450ea53378e756a659f43bcf1b60fddb7d21",
+        "commitShas": [
+          "7578819002206cb261c8ea5c2178be5d9d8a6b74",
+          "56a09c4b886dc6cc7c70eed9ab6212180f007b68",
+          "13597902adde025cba8b8ff759ff6ad49f252123",
+          "7ecb2014e36f74a798536c2fc00a8eb4abbf03f8",
+          "c36da67acf9003f20e4104ad0eaeb108cf7d2795",
+          "54b8727914a70cc68630cb3f4dfa50cae0b25e74",
+          "ef8a85f248cc934b1477103acd82d18ffc1a3771",
+          "968ace70ef513baa8e60ab5735fffb822f3632be",
+          "1c4acab4675f394a52c69c51e309d35cd3ca3c4e",
+          "3c3bb42700a2030b5f81b35101e3b9b96a3be61b",
+          "92b918377f736eeccd99d9fd5242883a9310f3d6",
+          "093b6c64a858962064a742ae6a2d2e4798112820",
+          "6267d67819d283485bd4bcda2b54a03978c791b4",
+          "074bc66b8761b0b75826e6918a6d7f874d59f031",
+          "8902be4fbd1efcf904850fc17d3a23d992ece24b",
+          "6e2a60aa3864ea08010c67e3371b13ae7723e777",
+          "c9d4abf63aec8ba0ceb0101898b33d09a1eeb3fc",
+          "54e575582696409e75d2d8d6a6f80aa94589204d",
+          "e5e39a07d1e9e7268e65ce25ef4f1e6be5b782d5",
+          "9dcf6a63579bab701bff05588215d21756e0c808",
+          "de2880c7e95d724c9229c882eebfd4b96de6a3b9",
+          "5f6481b57c620654bc0023d20a5cfcb4c0b232dc",
+          "0259d7ae31c7c68d3573d09663cbb77d3234eab0",
+          "88bc450ea53378e756a659f43bcf1b60fddb7d21"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-10T00:03:49.165Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "88bc450ea53378e756a659f43bcf1b60fddb7d21",
+        "toInclusiveCommit": "e9a07975bc350e4b81a6359a70b5eb72f203fa62",
+        "commitShas": [
+          "64f1559616d83e2a345d829d8fb648a7591379a2",
+          "893a566519066476a0ffbdf290063d26b74b18b6",
+          "9900014e55aa6a01655d6fb202ba64bdd3aea4d0",
+          "b29a42efaec19576f0929d18f8258686dc4a7df8",
+          "e9a07975bc350e4b81a6359a70b5eb72f203fa62"
+        ],
+        "commitCount": 5,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

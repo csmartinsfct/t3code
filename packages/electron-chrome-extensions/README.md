@@ -12,13 +12,14 @@ This package is a local workspace fork used by T3 Code (`packages/electron-chrom
 
 ### Building
 
-The `dist/` directory is gitignored. After cloning or making source changes, build before running the desktop dev server:
+The `dist/` directory is gitignored and must be treated as generated output, not source. The package `build` script creates all runtime artifacts exported by `package.json`: CJS, ESM, browser-action bundles, the extension preload, and TypeScript declarations. Declaration emit uses TypeScript `--noCheck` because this fork preserves loose upstream typing while still needing reproducible `.d.ts` output.
 
 ```bash
 cd packages/electron-chrome-extensions
-bun run build          # JS bundles + preload (dist/cjs, dist/esm, dist/chrome-extension-api.preload.js)
-npx tsc --noEmit false --rootDir src --ignoreDeprecations 6.0  # TypeScript declarations (dist/types/)
+bun run build
 ```
+
+Normal T3 desktop workflows also run this build before Electron needs the package. Root `bun run dev:desktop`, direct `apps/desktop` `bun run dev`, direct `apps/desktop` `bun run build`, and release artifact builds all regenerate `dist/` from source, so a clean checkout or `bun run clean` does not require a manual package build step.
 
 ### Electron 40 service worker isolated world
 

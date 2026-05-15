@@ -249,6 +249,12 @@ class ElectronCdpHttpTransport implements CdpBrokerTransport {
     await this.postJson("extensions/reload", req);
   }
 
+  async removeExtension(
+    req: Parameters<NonNullable<CdpBrokerTransport["removeExtension"]>>[0],
+  ): Promise<void> {
+    await this.postJson("extensions/remove", req);
+  }
+
   private async postJson<T>(path: string, request: unknown): Promise<T> {
     try {
       const response = await fetch(brokerUrl(this.baseUrl, path), {

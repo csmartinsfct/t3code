@@ -13,6 +13,7 @@ import { Open } from "./open";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
+import { RuntimeReceiptBus } from "./orchestration/Services/RuntimeReceiptBus";
 import { makeOrchestrationRunRunnerFromDeps } from "./orchestrationRuns/Layers/OrchestrationRunRunner.ts";
 import { makeOrchestrationRunServiceFromDeps } from "./orchestrationRuns/Layers/OrchestrationRuns.ts";
 import { OrchestrationRunRepository } from "./persistence/Services/OrchestrationRuns.ts";
@@ -152,6 +153,7 @@ const runStartupRecovery = Effect.gen(function* () {
   const orchestrationRunRepo = yield* OrchestrationRunRepository;
   const projectionThreadRepo = yield* ProjectionThreadRepository;
   const serverSettings = yield* ServerSettingsService;
+  const receiptBus = yield* RuntimeReceiptBus;
   const lifecycle = yield* ProviderLifecycleLogger;
   const lfcyl = (threadId: ThreadId | null, entry: LifecycleEntry) =>
     lifecycle.log(threadId, entry).pipe(Effect.ignoreCause({ log: true }));
@@ -183,6 +185,7 @@ const runStartupRecovery = Effect.gen(function* () {
     ticketing,
     startup: inlineStartup,
     serverSettings,
+    receiptBus,
   });
 
   const childThreadIdsByParent = new Map<ThreadId, ThreadId[]>();

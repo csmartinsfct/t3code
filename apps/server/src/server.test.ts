@@ -43,6 +43,7 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 
 import { BrowserManagerService } from "./browser/Services/BrowserManager.ts";
 import { ManagedRunService } from "./managedRuns/Services/ManagedRuns.ts";
@@ -326,6 +327,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.checkpointDiffQuery,
         }),
       ),
+      Layer.provide(RuntimeReceiptBusLive),
       Layer.provide(
         Layer.mock(ServerLifecycleEvents)({
           publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),

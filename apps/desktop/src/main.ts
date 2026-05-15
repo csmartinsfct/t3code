@@ -24,7 +24,6 @@ import {
   WebContentsView,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
-import { ElectronChromeExtensions } from "electron-chrome-extensions";
 
 // N-API port of @egoist/electron-panel-window — loads our local build.
 // Falls back gracefully if the native module isn't compiled yet.
@@ -33,7 +32,6 @@ let _panelWindow: {
   MakeWindow: (buf: Buffer) => boolean;
 } | null = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   _panelWindow = require(
     Path.join(__dirname, "../native/panel-window/build/Release/panel_window.node"),
   ) as typeof _panelWindow;
@@ -84,12 +82,10 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { shouldSuspendForIdle } from "./embeddedBrowserIdleReaper";
+import { DesktopExtensionManager } from "./desktopExtensionManager";
+import { ExtensionPopupRegistry } from "./extensionPopupRegistry";
+import type { ExtensionPopupKind, ExtensionPopupSelector } from "./extensionPopupRegistry";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
-import {
-  downloadExtension as webStoreDownloadExtension,
-  installChromeWebStore,
-  uninstallExtension as webStoreUninstallExtension,
-} from "electron-chrome-web-store";
 import {
   broadcastThemeToAllOverlays,
   configureOverlayUrl,
@@ -200,19 +196,6 @@ type EmbeddedBrowserTabState = {
   title: string;
   favicon: string | null;
 };
-// Tracks a BrowserWindow opened as a Chrome extension popup (either from the
-// user clicking the extension icon or from the extension calling
-// chrome.windows.create for a dapp approval). Key: `${projectId}:${extensionId}`.
-type EmbeddedBrowserPopupState = {
-  readonly popupKey: string;
-  readonly projectId: string;
-  readonly extensionId: string;
-  readonly popupWin: BrowserWindow;
-  readonly subscriptions: Set<EmbeddedBrowserCdpSubscription>;
-  devtoolsOpen: boolean;
-  debuggerAttached: boolean;
-};
-
 type EmbeddedBrowserProjectState = {
   readonly projectId: string;
   readonly handle: string;
@@ -229,8 +212,8 @@ type EmbeddedBrowserProjectState = {
   // True while the project's WebContents have been background-throttled and
   // audio-muted by the idle reaper. Cleared on the next activity signal.
   suspended: boolean;
-  // Non-null while ext_switch has targeted an extension popup. Subsequent CDP
-  // send calls are routed to that popup's debugger instead of the active tab.
+  // Non-null while ext_switch has targeted an extension popup by stable popupKey.
+  // Subsequent CDP send calls are routed to that popup's debugger instead of the active tab.
   // Cleared by ext_switch (no arg), ext_close, or when the popup closes.
   activeExtensionPopupKey: string | null;
 };
@@ -299,6 +282,15 @@ const embeddedBrowserProjectsByProjectId = new Map<string, EmbeddedBrowserProjec
 const popoutWindowsByProjectId = new Map<string, BrowserWindow>();
 const EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE =
   "DevTools is open on this project's embedded browser — close DevTools to resume agent tools.";
+const extensionPopupRegistry = new ExtensionPopupRegistry();
+const extensionManager = new DesktopExtensionManager({
+  stateDir: STATE_DIR,
+  notifyExtensionsChanged,
+  createTab: createExtensionTabForProject,
+  selectTab: selectExtensionTabForProject,
+  removeTab: removeExtensionTabForProject,
+  createWindow: createExtensionWindowForProject,
+});
 const EMBEDDED_BROWSER_IDLE_REAPER_INTERVAL_MS = 60_000;
 let embeddedBrowserIdleReaperTimer: NodeJS.Timeout | null = null;
 let backendObservabilitySettings: {
@@ -1339,12 +1331,12 @@ async function handleBrowserCdpBrokerRequest(
     }
     if (url.pathname === "/extensions/load") {
       const { projectId, extensionId } = parseInstallExtensionRequest(body);
-      const result = await installExtensionForProject(projectId, extensionId);
+      const result = await extensionManager.install(projectId, extensionId);
       sendBrokerSuccess(response, result);
       return;
     }
     if (url.pathname === "/ext/open") {
-      const req = parseExtCloseRequest(body); // same shape: viewId + extensionId
+      const req = parseExtOpenRequest(body);
       const { projectId } = parseViewId(req.viewId);
       if (!projectId) throw new Error("invalid viewId for ext/open");
       const anchor = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
@@ -1370,14 +1362,14 @@ async function handleBrowserCdpBrokerRequest(
       const req = parseExtSwitchRequest(body);
       const { projectId } = parseViewId(req.viewId);
       if (!projectId) throw new Error("invalid viewId for ext/switch");
-      sendBrokerSuccess(response, switchToExtensionPopup(projectId, req.extensionId));
+      sendBrokerSuccess(response, switchToExtensionPopup(projectId, req));
       return;
     }
     if (url.pathname === "/ext/close") {
       const req = parseExtCloseRequest(body);
       const { projectId } = parseViewId(req.viewId);
       if (!projectId) throw new Error("invalid viewId for ext/close");
-      closeExtensionPopupWindow(projectId, req.extensionId);
+      closeExtensionPopupWindow(projectId, req);
       sendBrokerSuccess(response, { closed: true });
       return;
     }
@@ -1387,7 +1379,7 @@ async function handleBrowserCdpBrokerRequest(
       const { projectId } = parseViewId(typeof b.viewId === "string" ? b.viewId : "");
       if (!projectId || !folderPath)
         throw new Error("load-unpacked: projectId and folderPath required");
-      sendBrokerSuccess(response, await loadUnpackedExtensionForProject(projectId, folderPath));
+      sendBrokerSuccess(response, await extensionManager.loadUnpacked(projectId, folderPath));
       return;
     }
     if (url.pathname === "/extensions/reload") {
@@ -1395,8 +1387,17 @@ async function handleBrowserCdpBrokerRequest(
       const extId = typeof b.extensionId === "string" ? b.extensionId : undefined;
       const { projectId } = parseViewId(typeof b.viewId === "string" ? b.viewId : "");
       if (!projectId || !extId) throw new Error("reload: projectId and extensionId required");
-      await reloadExtensionForProject(projectId, extId);
+      await extensionManager.reload(projectId, extId);
       sendBrokerSuccess(response, { reloaded: true });
+      return;
+    }
+    if (url.pathname === "/extensions/remove") {
+      const b = body as Record<string, unknown>;
+      const extId = typeof b.extensionId === "string" ? b.extensionId : undefined;
+      const { projectId } = parseViewId(typeof b.viewId === "string" ? b.viewId : "");
+      if (!projectId || !extId) throw new Error("remove: projectId and extensionId required");
+      await extensionManager.uninstall(projectId, extId, closeExtensionPopupsForExtension);
+      sendBrokerSuccess(response, { removed: true });
       return;
     }
     sendBrokerError(response, 404, "Unknown CDP broker route", "ELECTRON_CDP_NOT_FOUND");
@@ -1418,12 +1419,6 @@ interface InstallExtensionRequest {
   readonly extensionId: string;
 }
 
-interface InstalledExtensionInfo {
-  readonly id: string;
-  readonly name: string;
-  readonly version: string;
-}
-
 function parseInstallExtensionRequest(body: unknown): InstallExtensionRequest {
   if (!isRecord(body)) throw new Error("install-extension: body must be an object");
   // projectId is derived from viewId (same as all other broker routes)
@@ -1442,106 +1437,7 @@ function parseInstallExtensionRequest(body: unknown): InstallExtensionRequest {
   return { projectId: resolvedProjectId, extensionId: body.extensionId };
 }
 
-async function readPinnedExtensions(projectId: string): Promise<string[]> {
-  const filePath = Path.join(STATE_DIR, "browser", projectId, "pinned-extensions.json");
-  try {
-    const raw = await FS.promises.readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as string[]).filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-async function writePinnedExtensions(projectId: string, ids: string[]): Promise<void> {
-  const dir = Path.join(STATE_DIR, "browser", projectId);
-  await FS.promises.mkdir(dir, { recursive: true });
-  await FS.promises.writeFile(
-    Path.join(dir, "pinned-extensions.json"),
-    JSON.stringify(ids),
-    "utf-8",
-  );
-}
-
-async function installExtensionForProject(
-  projectId: string,
-  extensionId: string,
-): Promise<InstalledExtensionInfo> {
-  // Download the CRX and verify its RSA-SHA256 signature before the package
-  // installs it. This catches MITM attacks and corrupted downloads. The package
-  // will also download the CRX independently — the double fetch is intentional.
-  const crxUrl =
-    `https://clients2.google.com/service/update2/crx` +
-    `?response=redirect&prodversion=130.0.0.0&acceptformat=crx3` +
-    `&x=id%3D${extensionId}%26installsource%3Dondemand%26uc`;
-  const crxResponse = await fetch(crxUrl, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    },
-  });
-  if (!crxResponse.ok)
-    throw new Error(
-      `CRX download failed (${crxResponse.status}) for ${extensionId} — cannot verify signature`,
-    );
-  const crxBuffer = Buffer.from(await crxResponse.arrayBuffer());
-  verifyCrxSignature(crxBuffer, extensionId); // throws if signature invalid
-  console.log("[desktop/browser] CRX signature verified", { extensionId });
-
-  const ses = session.fromPartition(`persist:${projectId}`);
-  const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
-
-  // Download and unpack the extension, then apply the polyfill BEFORE the
-  // first session.loadExtension call. This ensures chrome.runtime.onInstalled
-  // fires into a working worker (with sidePanel/offscreen stubs) on the very
-  // first load rather than into a crashed worker.
-  const extDir = await webStoreDownloadExtension(extensionId, extensionsPath);
-  await ensureExtensionPolyfill(extDir);
-  const ext = await ses.loadExtension(extDir, { allowFileAccess: true });
-  return {
-    id: ext.id,
-    name: (ext.manifest["name"] as string | undefined) ?? extensionId,
-    version: (ext.manifest["version"] as string | undefined) ?? "unknown",
-  };
-}
-
-async function loadUnpackedExtensionForProject(
-  projectId: string,
-  extPath: string,
-): Promise<import("@t3tools/contracts").BrowserExtensionInfo> {
-  const resolved = Path.resolve(extPath);
-  await FS.promises.access(resolved);
-  const stat = await FS.promises.stat(resolved);
-  if (!stat.isDirectory()) throw new Error(`load-unpacked: ${resolved} is not a directory`);
-  await FS.promises.access(Path.join(resolved, "manifest.json"));
-  getOrCreateChromeExtensions(projectId);
-  const ready = extensionsReadyByProjectId.get(projectId);
-  if (ready) await ready;
-  await ensureExtensionPolyfill(resolved);
-  const ses = session.fromPartition(`persist:${projectId}`);
-  const ext = await ses.loadExtension(resolved, { allowFileAccess: true });
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-  }
-  const pinnedIds = await readPinnedExtensions(projectId);
-  return {
-    id: ext.id,
-    name: (ext.manifest["name"] as string | undefined) ?? Path.basename(resolved),
-    iconUrl: null,
-    popupUrl: null,
-    pinned: pinnedIds.includes(ext.id),
-    isUnpacked: true,
-  };
-}
-
-async function reloadExtensionForProject(projectId: string, extensionId: string): Promise<void> {
-  const ses = session.fromPartition(`persist:${projectId}`);
-  const ext = ses.getAllExtensions().find((e) => e.id === extensionId);
-  if (!ext) throw new Error(`reload: extension ${extensionId} not found`);
-  const extPath = (ext as { path?: string }).path;
-  if (!extPath) throw new Error(`reload: extension ${extensionId} has no known path`);
-  await ses.loadExtension(extPath, { allowFileAccess: true });
+function notifyExtensionsChanged(projectId: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
   }
@@ -1888,20 +1784,32 @@ function parseTabIdRequest(value: unknown): BrowserTabIdRequest {
   return { ...base, tabId };
 }
 
-function parseExtSwitchRequest(body: unknown): { viewId: string; extensionId: string | undefined } {
+function parseExtOpenRequest(body: unknown): { viewId: string; extensionId: string } {
+  if (!isRecord(body)) throw new Error("invalid ext/open request");
+  const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
+  const extensionId = typeof body.extensionId === "string" ? body.extensionId : undefined;
+  if (!viewId || !extensionId) throw new Error("ext/open: viewId and extensionId required");
+  return { viewId, extensionId };
+}
+
+function parseExtSwitchRequest(body: unknown): ExtensionPopupSelector & { viewId: string } {
   if (!isRecord(body)) throw new Error("invalid ext/switch request");
   const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
   if (!viewId) throw new Error("ext/switch: viewId required");
   const extensionId = typeof body.extensionId === "string" ? body.extensionId : undefined;
-  return { viewId, extensionId };
+  const popupKey = typeof body.popupKey === "string" ? body.popupKey : undefined;
+  return { viewId, ...(extensionId ? { extensionId } : {}), ...(popupKey ? { popupKey } : {}) };
 }
 
-function parseExtCloseRequest(body: unknown): { viewId: string; extensionId: string } {
+function parseExtCloseRequest(body: unknown): ExtensionPopupSelector & { viewId: string } {
   if (!isRecord(body)) throw new Error("invalid ext/close request");
   const viewId = typeof body.viewId === "string" ? body.viewId : undefined;
   const extensionId = typeof body.extensionId === "string" ? body.extensionId : undefined;
-  if (!viewId || !extensionId) throw new Error("ext/close: viewId and extensionId required");
-  return { viewId, extensionId };
+  const popupKey = typeof body.popupKey === "string" ? body.popupKey : undefined;
+  if (!viewId || (!extensionId && !popupKey)) {
+    throw new Error("ext/close: viewId and extensionId or popupKey required");
+  }
+  return { viewId, ...(extensionId ? { extensionId } : {}), ...(popupKey ? { popupKey } : {}) };
 }
 
 function parsePrintPdfRequest(value: unknown): BrowserPrintPdfRequest {
@@ -2334,7 +2242,7 @@ async function sendEmbeddedBrowserCdpCommand(request: BrowserCdpSendRequest): Pr
   if (projectId) {
     const project = embeddedBrowserProjectsByProjectId.get(projectId);
     if (project?.activeExtensionPopupKey) {
-      const popup = extensionPopupsByProjectId.get(project.activeExtensionPopupKey);
+      const popup = extensionPopupRegistry.get(project.activeExtensionPopupKey);
       if (popup && !popup.popupWin.isDestroyed()) {
         if (popup.devtoolsOpen || !popup.popupWin.webContents.debugger.isAttached()) {
           throw new Error(EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE);
@@ -2746,633 +2654,115 @@ function closePopoutWindow(projectId: string): void {
   window.close();
 }
 
+function getOrCreateChromeExtensions(projectId: string) {
+  return extensionManager.getOrCreate(projectId);
+}
+
+async function createExtensionTabForProject(
+  projectId: string,
+  details: chrome.tabs.CreateProperties,
+): Promise<[Electron.WebContents, Electron.BaseWindow]> {
+  const project = ensureEmbeddedBrowserProject(projectId);
+  const url = details.url ?? "about:blank";
+  const newTabId = openNewBrowserTab(project, url);
+  const tab = project.tabs.get(newTabId);
+  if (!tab) throw new Error("Tab creation failed");
+  const win = findEmbeddedBrowserOwnerWindow(tab) ?? mainWindow;
+  if (!win) throw new Error("No owner window for new tab");
+  return [tab.view.webContents, win] as [Electron.WebContents, Electron.BaseWindow];
+}
+
+function selectExtensionTabForProject(projectId: string, tab: Electron.WebContents): void {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (!project) return;
+  for (const [tabId, t] of project.tabs) {
+    if (t.view.webContents === tab) {
+      const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
+      if (win) void switchBrowserTab(project, tabId, win);
+      break;
+    }
+  }
+}
+
+function removeExtensionTabForProject(projectId: string, tab: Electron.WebContents): void {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  if (!project) return;
+  for (const [tabId, t] of project.tabs) {
+    if (t.view.webContents === tab) {
+      const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
+      if (win) void closeBrowserTab(project, tabId, win);
+      break;
+    }
+  }
+}
+
+async function createExtensionWindowForProject(
+  projectId: string,
+  details: chrome.windows.CreateData,
+): Promise<BaseWindow> {
+  const url = Array.isArray(details.url)
+    ? (details.url[0] ?? "about:blank")
+    : (details.url ?? "about:blank");
+  const width = details.width ?? 360;
+  const height = details.height ?? 600;
+
+  const ses = session.fromPartition(`persist:${projectId}`);
+  const notifWin = new BrowserWindow({
+    width,
+    height,
+    frame: true,
+    title: "",
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      session: ses,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      ...(extensionManager.preloadPath ? { preload: extensionManager.preloadPath } : {}),
+    },
+  });
+
+  makePanel(notifWin);
+  notifWin.setAlwaysOnTop(true);
+
+  const ownerBounds =
+    mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow.getBounds()
+      : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  notifWin.setPosition(
+    ownerBounds.x + Math.round((ownerBounds.width - width) / 2),
+    ownerBounds.y + Math.round((ownerBounds.height - height) / 2),
+  );
+
+  if (url && url !== "about:blank") {
+    await notifWin.loadURL(url).catch((err: unknown) => {
+      console.warn("[desktop/browser] extension window loadURL failed", { url, err });
+    });
+  }
+  notifWin.show();
+
+  const extIdMatch = url ? /chrome-extension:\/\/([^/]+)/.exec(url) : null;
+  if (extIdMatch) {
+    registerExtensionPopup(projectId, extIdMatch[1]!, notifWin, "extension-window");
+  }
+
+  console.log("[desktop/browser] extension notification window created", {
+    projectId,
+    url,
+    width,
+    height,
+  });
+  return notifWin;
+}
+
 // Returns the live project for projectId, creating it (and its root tab)
 // offscreen if it does not exist or has been fully destroyed. Called from
 // the agent CDP broker handler (lazy first-touch) and BROWSER_MOUNT_CHANNEL
 // (reuse the warm view if it exists, create one if the agent raced ahead).
 // Per T3CO-421 a project's lifecycle is decoupled from window mount state.
-// ---------------------------------------------------------------------------
-// CRX3 signature verification (T3CO-471)
-// ---------------------------------------------------------------------------
-
-// Minimal protobuf decoder for the two CRX3 field types we care about.
-// CrxFileHeader field 2 = sha256_with_rsa (repeated AsymmetricKeyProof)
-// CrxFileHeader field 10000 = signed_header_data (bytes)
-// AsymmetricKeyProof field 1 = public_key, field 2 = signature
-
-function _crxReadVarInt(buf: Buffer, pos: number): { value: number; next: number } {
-  let result = 0;
-  let shift = 0;
-  let p = pos;
-  while (p < buf.length) {
-    const byte = buf[p++]!;
-    result |= (byte & 0x7f) << shift;
-    if (!(byte & 0x80)) break;
-    shift += 7;
-  }
-  return { value: result, next: p };
-}
-
-interface Crx3Header {
-  sha256_with_rsa: Array<{ public_key: Buffer; signature: Buffer }>;
-  signed_header_data: Buffer | null;
-}
-
-function decodeCrx3Header(buf: Buffer): Crx3Header {
-  const result: Crx3Header = { sha256_with_rsa: [], signed_header_data: null };
-  let pos = 0;
-  while (pos < buf.length) {
-    const tag = _crxReadVarInt(buf, pos);
-    pos = tag.next;
-    const fieldNumber = tag.value >>> 3;
-    const wireType = tag.value & 0x7;
-    if (wireType !== 2) {
-      // skip non-length-delimited fields
-      if (wireType === 0) {
-        const v = _crxReadVarInt(buf, pos);
-        pos = v.next;
-      } else if (wireType === 5) {
-        pos += 4;
-      } else if (wireType === 1) {
-        pos += 8;
-      }
-      continue;
-    }
-    const lenV = _crxReadVarInt(buf, pos);
-    pos = lenV.next;
-    const fieldBuf = buf.subarray(pos, pos + lenV.value);
-    pos += lenV.value;
-    if (fieldNumber === 2) {
-      // AsymmetricKeyProof submessage
-      const proof = { public_key: Buffer.alloc(0), signature: Buffer.alloc(0) };
-      let pp = 0;
-      while (pp < fieldBuf.length) {
-        const t2 = _crxReadVarInt(fieldBuf, pp);
-        pp = t2.next;
-        const f2 = t2.value >>> 3;
-        const w2 = t2.value & 0x7;
-        if (w2 !== 2) {
-          if (w2 === 0) {
-            const v2 = _crxReadVarInt(fieldBuf, pp);
-            pp = v2.next;
-          } else if (w2 === 5) {
-            pp += 4;
-          } else if (w2 === 1) {
-            pp += 8;
-          }
-          continue;
-        }
-        const l2 = _crxReadVarInt(fieldBuf, pp);
-        pp = l2.next;
-        const fb2 = fieldBuf.subarray(pp, pp + l2.value);
-        pp += l2.value;
-        if (f2 === 1) proof.public_key = Buffer.from(fb2);
-        if (f2 === 2) proof.signature = Buffer.from(fb2);
-      }
-      result.sha256_with_rsa.push(proof);
-    } else if (fieldNumber === 10000) {
-      result.signed_header_data = Buffer.from(fieldBuf);
-    }
-  }
-  return result;
-}
-
-// Derive a Chrome extension ID (32 lowercase a-p chars) from a base64-encoded
-// SubjectPublicKeyInfo (DER) key, matching Chrome's ID derivation algorithm.
-function deriveCrxId(publicKeyBase64: string): string {
-  const hash = Crypto.createHash("sha256").update(publicKeyBase64, "base64").digest();
-  let id = "";
-  for (let i = 0; i < 16; i++) {
-    id += String.fromCharCode(97 + (hash[i]! >> 4));
-    id += String.fromCharCode(97 + (hash[i]! & 0xf));
-  }
-  return id;
-}
-
-// Verify the RSA-SHA256 signature in a CRX3 buffer against the expected
-// extension ID.  Throws a descriptive error if verification fails.
-function verifyCrxSignature(crxBuffer: Buffer, expectedId: string): void {
-  if (crxBuffer.toString("ascii", 0, 4) !== "Cr24")
-    throw new Error(`CRX verification failed: invalid magic bytes for ${expectedId}`);
-  const version = crxBuffer.readUInt32LE(4);
-  if (version !== 3)
-    throw new Error(`CRX verification failed: unsupported version ${version} for ${expectedId}`);
-  const headerSize = crxBuffer.readUInt32LE(8);
-  if (12 + headerSize > crxBuffer.length)
-    throw new Error(`CRX verification failed: header size exceeds file length for ${expectedId}`);
-  const headerBuf = crxBuffer.subarray(12, 12 + headerSize);
-  const zipBuf = crxBuffer.subarray(12 + headerSize);
-  const header = decodeCrx3Header(headerBuf);
-  if (!header.signed_header_data)
-    throw new Error(`CRX verification failed: missing signed_header_data for ${expectedId}`);
-  // Construct the signed message per Chrome's CRX3 spec:
-  //   "CRX3 SignedData\x00" || uint32LE(len(signed_header_data)) || signed_header_data || zip
-  const signedHeaderData = header.signed_header_data;
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32LE(signedHeaderData.length, 0);
-  const message = Buffer.concat([
-    Buffer.from("CRX3 SignedData\x00", "ascii"),
-    lenBuf,
-    signedHeaderData,
-    zipBuf,
-  ]);
-  let verified = false;
-  for (const proof of header.sha256_with_rsa) {
-    if (!proof.public_key.length || !proof.signature.length) continue;
-    const keyBase64 = proof.public_key.toString("base64");
-    if (deriveCrxId(keyBase64) !== expectedId) continue;
-    try {
-      const pubKey = Crypto.createPublicKey({ key: proof.public_key, format: "der", type: "spki" });
-      const verifier = Crypto.createVerify("RSA-SHA256");
-      verifier.update(message);
-      if (verifier.verify(pubKey, proof.signature)) {
-        verified = true;
-        break;
-      }
-    } catch {
-      // malformed key — try the next proof entry
-    }
-  }
-  if (!verified)
-    throw new Error(
-      `CRX verification failed: RSA-SHA256 signature invalid for ${expectedId}. ` +
-        `The extension may have been tampered with or downloaded incorrectly.`,
-    );
-}
-
-// Verify that the public key stored in an unpacked extension's manifest.json
-// correctly derives to its extension ID.  Returns true if the check passes or
-// if no key is present (dev/unpacked extensions have no manifest.key).
-async function verifyManifestKeyMatchesId(extPath: string, extId: string): Promise<boolean> {
-  try {
-    const raw = await FS.promises.readFile(Path.join(extPath, "manifest.json"), "utf-8");
-    const manifest = JSON.parse(raw) as { key?: string };
-    if (!manifest.key) return true; // no key — dev/unpacked extension, skip check
-    return deriveCrxId(manifest.key) === extId;
-  } catch {
-    return true; // non-fatal; Electron's loader will handle malformed manifests
-  }
-}
-
-// Bump version when the polyfill content changes so existing extensions are re-patched.
-const POLYFILL_SENTINEL = "/*__t3_polyfill_v6__*/";
-
-// Returns true if the background script was newly patched.
-// The caller should clear service worker caches only when true — wiping on
-// every startup disrupts a running service worker (background connection drops).
-async function ensureExtensionPolyfill(extDir: string): Promise<boolean> {
-  let manifest: { background?: { service_worker?: string; scripts?: string[] } };
-  try {
-    manifest = JSON.parse(
-      await FS.promises.readFile(Path.join(extDir, "manifest.json"), "utf-8"),
-    ) as typeof manifest;
-  } catch {
-    return false;
-  }
-  const bgScript =
-    manifest.background?.service_worker ??
-    (manifest.background?.scripts?.[0] as string | undefined);
-  if (!bgScript) return false;
-  if (bgScript.startsWith("/") || bgScript.includes("..")) return false;
-  const bgPath = Path.resolve(Path.join(extDir, bgScript));
-  if (!bgPath.startsWith(Path.resolve(extDir) + Path.sep)) return false;
-
-  let changed = false;
-  try {
-    const existing = await FS.promises.readFile(bgPath, "utf-8");
-    if (!existing.startsWith(POLYFILL_SENTINEL)) {
-      // Stub Chrome APIs that are absent in Electron's extension environment but
-      // commonly called during service-worker startup. Without these stubs the
-      // worker crashes before it can set up chrome.runtime.onInstalled listeners,
-      // preventing onboarding tabs from opening. The stubs are no-ops — they keep
-      // the worker alive; actual functionality is handled elsewhere or not needed.
-      const EXTENSION_POLYFILL = `${POLYFILL_SENTINEL}(function(){
-  if(typeof requestAnimationFrame==='undefined'){
-    globalThis.requestAnimationFrame=function(cb){return setTimeout(cb,16);};
-    globalThis.cancelAnimationFrame=function(id){clearTimeout(id);};
-  }
-  if(typeof chrome!=='undefined'){
-    var _nev=function(){return{addListener:function(){},removeListener:function(){},hasListener:function(){return false;}};};
-    // chrome.sidePanel — always stub: Electron does not implement it even when
-    // Chromium 130+ defines the API object. Calling methods on the native object
-    // throws internally and kills the service worker.
-    chrome.sidePanel={
-      setOptions:function(){return Promise.resolve();},
-      getOptions:function(){return Promise.resolve({});},
-      open:function(){return Promise.resolve();},
-      setPanelBehavior:function(){return Promise.resolve();},
-      getPanelBehavior:function(){return Promise.resolve({openPanelOnActionClick:false});},
-      onPanelShown:_nev(),onOptionsChanged:_nev()
-    };
-    // chrome.offscreen — always stub: offscreen documents require a browser UI
-    // surface that doesn't exist in Electron's extension environment.
-    chrome.offscreen={
-      createDocument:function(){return Promise.resolve();},
-      closeDocument:function(){return Promise.resolve();},
-      hasDocument:function(){return Promise.resolve(false);},
-      Reason:{AUDIO_PLAYBACK:'AUDIO_PLAYBACK',CLIPBOARD:'CLIPBOARD',DOM_PARSER:'DOM_PARSER',DOM_SCRAPING:'DOM_SCRAPING',LOCAL_STORAGE:'LOCAL_STORAGE',USER_MEDIA:'USER_MEDIA',WEB_RTC:'WEB_RTC',BLOBS:'BLOBS'},
-    };
-    // chrome.alarms — only stub if absent; Electron may provide a working implementation.
-    if(!chrome.alarms){
-      chrome.alarms={create:function(){},get:function(a,cb){if(cb)cb(undefined);return Promise.resolve(undefined);},getAll:function(cb){if(cb)cb([]);return Promise.resolve([]);},clear:function(a,cb){if(cb)cb(true);return Promise.resolve(true);},clearAll:function(cb){if(cb)cb(true);return Promise.resolve(true);},onAlarm:_nev()};
-    }
-    // Mark first run so uninstall can clear the flag and the next install
-    // is treated as fresh. chrome.runtime.onInstalled fires natively from
-    // Chromium — no emulation needed now that the polyfill is applied before
-    // the first session.loadExtension call via the beforeInstall callback.
-    if(chrome.storage&&chrome.storage.local){
-      var _t3K='__t3_first_run_v5__';
-      chrome.storage.local.get(_t3K,function(r){
-        if(!r[_t3K]){var _s={};_s[_t3K]=true;chrome.storage.local.set(_s);}
-      });
-    }
-  }
-})();\n`;
-      await FS.promises.writeFile(bgPath, EXTENSION_POLYFILL + existing, "utf-8");
-      console.log("[desktop/browser] applied extension polyfill", { extDir, bgScript });
-      changed = true;
-    }
-  } catch {
-    // Non-fatal — extension might still work without the polyfill.
-  }
-
-  return changed;
-}
-
-// ---------------------------------------------------------------------------
-// electron-chrome-extensions — per-project Chrome API bridge
-// ---------------------------------------------------------------------------
-
-const chromeExtsByProjectId = new Map<string, ElectronChromeExtensions>();
-// Resolves when installChromeWebStore + loadLegacyFlatExtensions complete for a project.
-const extensionsReadyByProjectId = new Map<string, Promise<void>>();
-// Populated once the initial load chain finishes; guards extension-loaded notifications
-// so only new installs (not startup batch-loading) broadcast BROWSER_EXTENSIONS_CHANGED.
-const extensionsLoadedByProjectId = new Set<string>();
-const extensionPopupsByProjectId = new Map<string, EmbeddedBrowserPopupState>();
-// Cancellation callbacks for popups that haven't been shown yet —
-// keyed by `projectId:extensionId`. Called when chrome.tabs.create fires
-// from within the popup so we abort the show and keep only the tab.
-const pendingPopupCancels = new Map<string, () => void>();
-
-// Resolve the library's preload script once at startup. In production builds
-// this file must be copied to the app resources; in dev it's in node_modules.
-let chromeExtPreloadPath: string | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  chromeExtPreloadPath = require.resolve("electron-chrome-extensions/preload");
-} catch {
-  console.warn(
-    "[desktop/browser] electron-chrome-extensions preload not found — Chrome APIs will be limited",
-  );
-}
-
-// Migrate extensions stored in the old flat format ({extensionId}/manifest.json)
-// to the versioned format electron-chrome-web-store expects ({extensionId}/{ver}_0/).
-// Idempotent: skips any extensionId directory that already contains versioned subdirs.
-// Load extensions that are still stored in the old flat format ({extensionId}/manifest.json)
-// that electron-chrome-web-store's loadAllExtensions won't pick up (it only handles the
-// versioned layout). Does NOT restructure the directory — leaves it flat so a fresh Web
-// Store install can create the versioned dir without hitting ENOTEMPTY conflicts.
-async function loadLegacyFlatExtensions(
-  ses: Electron.Session,
-  extensionsPath: string,
-  projectId: string,
-): Promise<void> {
-  let entries: FS.Dirent[];
-  try {
-    entries = await FS.promises.readdir(extensionsPath, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const extDir = Path.join(extensionsPath, entry.name);
-    // Skip if no flat manifest.json at the top level.
-    try {
-      await FS.promises.access(Path.join(extDir, "manifest.json"));
-    } catch {
-      continue;
-    }
-    // Skip if a versioned subdir exists — installChromeWebStore already loaded it.
-    const children = await FS.promises.readdir(extDir, { withFileTypes: true });
-    const hasVersionedDir = children.some((c) => c.isDirectory() && /_\d+$/.test(c.name));
-    if (hasVersionedDir) continue;
-    // Skip if this path is already loaded in the session.
-    const alreadyLoaded = ses.getAllExtensions().some((e) => {
-      const ep = (e as unknown as { path?: string }).path;
-      return ep && Path.resolve(ep) === Path.resolve(extDir);
-    });
-    if (alreadyLoaded) continue;
-    // Verify manifest.key → ID consistency (skipped for dev extensions without a key).
-    const idValid = await verifyManifestKeyMatchesId(extDir, entry.name);
-    if (!idValid) {
-      console.warn("[desktop/browser] legacy extension manifest.key mismatch — skipping", {
-        projectId,
-        extensionId: entry.name,
-        extDir,
-      });
-      continue;
-    }
-    try {
-      await ensureExtensionPolyfill(extDir);
-      await ses.loadExtension(extDir, { allowFileAccess: true });
-      console.log("[desktop/browser] loaded legacy flat extension", {
-        projectId,
-        extensionId: entry.name,
-      });
-    } catch (err) {
-      console.warn("[desktop/browser] failed to load legacy flat extension", {
-        projectId,
-        extDir,
-        err,
-      });
-    }
-  }
-}
-
-// Recursively apply the service-worker polyfill to every extension directory
-// under extensionsPath BEFORE the session loads them. When a file is newly
-// patched, also clears the Service Worker and Code Cache directories so
-// Chromium cannot serve stale bytecode from a previous session.
-async function preApplyPolyfillsToExtensions(
-  extensionsPath: string,
-  ses: Electron.Session,
-  projectId: string,
-): Promise<void> {
-  let idDirs: FS.Dirent[];
-  try {
-    idDirs = await FS.promises.readdir(extensionsPath, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  let anyCacheCleared = false;
-  for (const idDir of idDirs) {
-    if (!idDir.isDirectory()) continue;
-    const idPath = Path.join(extensionsPath, idDir.name);
-    // Collect candidate dirs: the id dir itself (flat) or versioned subdirs.
-    const candidates: string[] = [];
-    try {
-      const children = await FS.promises.readdir(idPath, { withFileTypes: true });
-      const versionedDirs = children.filter((c) => c.isDirectory() && /_\d+$/.test(c.name));
-      if (versionedDirs.length > 0) {
-        for (const v of versionedDirs) candidates.push(Path.join(idPath, v.name));
-      } else {
-        candidates.push(idPath);
-      }
-    } catch {
-      continue;
-    }
-    for (const dir of candidates) {
-      try {
-        const wasPatched = await ensureExtensionPolyfill(dir);
-        if (wasPatched && !anyCacheCleared) {
-          // Clear cached bytecode so Chromium doesn't serve the old polyfill.
-          const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
-          for (const sub of ["Service Worker", "Code Cache"]) {
-            await FS.promises.rm(Path.join(partitionDir, sub), { recursive: true, force: true });
-          }
-          await ses.clearCodeCaches({});
-          anyCacheCleared = true;
-          console.log("[desktop/browser] pre-patch: cleared SW cache after polyfill update", {
-            projectId,
-          });
-        }
-      } catch {
-        // Non-fatal — extension will still be loaded, just without the pre-patch.
-      }
-    }
-  }
-}
-
-function getOrCreateChromeExtensions(projectId: string): ElectronChromeExtensions {
-  const existing = chromeExtsByProjectId.get(projectId);
-  if (existing) return existing;
-
-  const ses = session.fromPartition(`persist:${projectId}`);
-  const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
-
-  // Inject the library's preload into all frames for this session so
-  // chrome.tabs, chrome.windows, chrome.offscreen, etc. work in extensions.
-  if (chromeExtPreloadPath) {
-    ses.registerPreloadScript({ id: "chrome-ext", type: "frame", filePath: chromeExtPreloadPath });
-  }
-
-  // Apply requestAnimationFrame polyfill whenever an extension is loaded (service
-  // workers don't have it natively). If files were patched, clear SW caches so
-  // Chromium recompiles from the patched source, then reload the extension.
-  ses.on("extension-loaded", async (_, ext) => {
-    const extPath = (ext as { path?: string }).path;
-    if (!extPath) return;
-    // Verify manifest.key → ID consistency. Catches disk tampering and mismatched
-    // installs. Skipped for dev/unpacked extensions that have no manifest.key.
-    const idValid = await verifyManifestKeyMatchesId(extPath, ext.id);
-    if (!idValid) {
-      console.error("[desktop/browser] extension manifest.key/ID mismatch — unloading", {
-        extId: ext.id,
-        extPath,
-        projectId,
-      });
-      ses.removeExtension(ext.id);
-      return;
-    }
-    const wasPatched = await ensureExtensionPolyfill(extPath);
-    if (wasPatched) {
-      const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
-      for (const cacheSubdir of ["Service Worker", "Code Cache"]) {
-        await FS.promises.rm(Path.join(partitionDir, cacheSubdir), {
-          recursive: true,
-          force: true,
-        });
-      }
-      await ses.clearCodeCaches({});
-      ses.removeExtension(ext.id);
-      await ses.loadExtension(extPath, { allowFileAccess: true });
-      // chrome.runtime.onInstalled is handled by the polyfill in background.js —
-      // it detects first run via chrome.storage.local and fires the event itself.
-    }
-    // Always notify so the extensions panel updates immediately after any load
-    // (new install, polyfill reload, or startup). The startup batch also sends
-    // one consolidated notification via the .then() chain below, so the UI
-    // may refresh a few extra times during startup — that is harmless.
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-    }
-  });
-
-  // Pre-patch all already-installed extension service workers before the first
-  // load so chrome.runtime.onInstalled fires into a running worker. Without this,
-  // extensions load once without the polyfill (worker may crash), Chromium fires
-  // onInstalled into the crashed worker, and the second (patched) load never
-  // receives it. Pre-patching ensures the very first load has the correct stubs.
-  // Set up Chrome Web Store integration (loads versioned-format extensions, registers
-  // the Web Store preload, schedules auto-updates), then load any remaining flat-format
-  // extensions from before the switch to electron-chrome-web-store.
-  // Store the ready promise so listExtensions can await it before querying.
-  const readyPromise = preApplyPolyfillsToExtensions(extensionsPath, ses, projectId)
-    .catch((err: unknown) => {
-      console.warn("[desktop/browser] pre-patch failed", { projectId, err });
-    })
-    .then(() =>
-      installChromeWebStore({
-        session: ses,
-        extensionsPath,
-        autoUpdate: true,
-        // Intercept every Web Store UI install to apply the service-worker
-        // polyfill BEFORE the first session.loadExtension call. Without this,
-        // electron-chrome-web-store loads the extension without the polyfill,
-        // the worker may crash (no chrome.sidePanel stubs) before registering
-        // its chrome.runtime.onInstalled listener, and Chromium never re-fires
-        // the event on the subsequent patched reload.
-        beforeInstall: async ({ id }: { id: string }) => {
-          try {
-            const extDir = await webStoreDownloadExtension(id, extensionsPath);
-            await ensureExtensionPolyfill(extDir);
-            await ses.loadExtension(extDir, { allowFileAccess: true });
-            console.log("[desktop/browser] pre-patched Web Store install", { id });
-          } catch (err) {
-            console.warn("[desktop/browser] beforeInstall pre-patch failed — falling through", {
-              id,
-              err,
-            });
-            // Don't return 'deny' on error; let the package attempt its own install.
-            return { action: "allow" as const };
-          }
-          // We already loaded the extension; tell the package not to load it again.
-          return { action: "deny" as const };
-        },
-      }),
-    )
-    .then(() => loadLegacyFlatExtensions(ses, extensionsPath, projectId))
-    .then(() => {
-      extensionsLoadedByProjectId.add(projectId);
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-      }
-    })
-    .catch((error: unknown) => {
-      console.warn("[desktop/browser] extension startup failed", { projectId, error });
-    });
-  extensionsReadyByProjectId.set(projectId, readyPromise);
-
-  const ext = new ElectronChromeExtensions({
-    license: "GPL-3.0",
-    session: ses,
-
-    createTab: async (details) => {
-      const project = ensureEmbeddedBrowserProject(projectId);
-      const url = details.url ?? "about:blank";
-      const newTabId = await openNewBrowserTab(project, url);
-      const tab = project.tabs.get(newTabId);
-      if (!tab) throw new Error("Tab creation failed");
-      const win = findEmbeddedBrowserOwnerWindow(tab) ?? mainWindow;
-      if (!win) throw new Error("No owner window for new tab");
-      return [tab.view.webContents, win];
-    },
-
-    selectTab: (tab) => {
-      const project = embeddedBrowserProjectsByProjectId.get(projectId);
-      if (!project) return;
-      for (const [tabId, t] of project.tabs) {
-        if (t.view.webContents === tab) {
-          const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
-          if (win) void switchBrowserTab(project, tabId, win);
-          break;
-        }
-      }
-    },
-
-    removeTab: (tab) => {
-      const project = embeddedBrowserProjectsByProjectId.get(projectId);
-      if (!project) return;
-      for (const [tabId, t] of project.tabs) {
-        if (t.view.webContents === tab) {
-          const win = findEmbeddedBrowserOwnerWindow(t) ?? mainWindow;
-          if (win) void closeBrowserTab(project, tabId, win);
-          break;
-        }
-      }
-    },
-
-    // Handle chrome.windows.create() — used by MetaMask/Rainbow for approval
-    // popups (connect, sign, send). Without this, dapp requests silently fail.
-    createWindow: async (details) => {
-      const url = Array.isArray(details.url)
-        ? (details.url[0] ?? "about:blank")
-        : (details.url ?? "about:blank");
-      const width = details.width ?? 360;
-      const height = details.height ?? 600;
-
-      const ses2 = session.fromPartition(`persist:${projectId}`);
-      const notifWin = new BrowserWindow({
-        width,
-        height,
-        frame: true,
-        title: "",
-        resizable: false,
-        show: false,
-        skipTaskbar: true,
-        alwaysOnTop: true,
-        webPreferences: {
-          session: ses2,
-          sandbox: true,
-          contextIsolation: true,
-          nodeIntegration: false,
-          ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
-        },
-      });
-
-      makePanel(notifWin);
-      notifWin.setAlwaysOnTop(true);
-
-      // Centre on the owner window (or fall back to cursor display centre).
-      const ob =
-        mainWindow && !mainWindow.isDestroyed()
-          ? mainWindow.getBounds()
-          : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-      notifWin.setPosition(
-        ob.x + Math.round((ob.width - width) / 2),
-        ob.y + Math.round((ob.height - height) / 2),
-      );
-
-      // URL is now fully resolved by electron-chrome-extensions before
-      // reaching createWindow (gap fix 1 in store.ts). Only load if present.
-      if (url && url !== "about:blank") {
-        await notifWin.loadURL(url).catch((err: unknown) => {
-          console.warn("[desktop/browser] extension window loadURL failed", { url, err });
-        });
-      }
-      notifWin.show();
-
-      // Register in the unified popup registry so agents can target this window
-      // via ext_switch. Extract extension ID from the resolved chrome-extension:// URL.
-      const extIdMatch = url ? /chrome-extension:\/\/([^/]+)/.exec(url) : null;
-      if (extIdMatch) {
-        registerExtensionPopup(projectId, extIdMatch[1]!, notifWin);
-      }
-
-      console.log("[desktop/browser] extension notification window created", {
-        projectId,
-        url,
-        width,
-        height,
-      });
-      return notifWin;
-    },
-  });
-
-  ext.on("browser-action-popup-created", (popup) => {
-    console.log("[desktop/browser] extension action popup created", { projectId });
-    void popup.whenReady().then(() => {
-      if (!popup.browserWindow) return;
-      popup.browserWindow.show();
-    });
-  });
-
-  chromeExtsByProjectId.set(projectId, ext);
-  return ext;
-}
-
 function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProjectState {
   const existing = embeddedBrowserProjectsByProjectId.get(projectId);
   if (existing && !isEmbeddedBrowserProjectDestroyed(existing)) return existing;
@@ -3699,7 +3089,7 @@ function createEmbeddedBrowserTab(
     }
     // Register/update the tab with electron-chrome-extensions so chrome.tabs
     // API calls inside extensions reflect T3's tab state.
-    const chromeExt = chromeExtsByProjectId.get(projectId);
+    const chromeExt = extensionManager.getExisting(projectId);
     if (chromeExt) {
       const win = findEmbeddedBrowserOwnerWindow(tab) ?? mainWindow ?? ensureOffscreenBrowserHost();
       chromeExt.addTab(view.webContents, win);
@@ -3719,7 +3109,7 @@ function createEmbeddedBrowserTab(
   // wrapped in try/catch — the library throws if the webContents is already gone.
   view.webContents.on("destroyed", () => {
     try {
-      chromeExtsByProjectId.get(projectId)?.removeTab(view.webContents);
+      extensionManager.getExisting(projectId)?.removeTab(view.webContents);
     } catch {
       // Best-effort — webContents already invalid or tab not registered.
     }
@@ -3869,7 +3259,7 @@ async function switchBrowserTab(
   // Notify electron-chrome-extensions that the active tab changed.
   const newActive = project.tabs.get(tabId);
   if (newActive) {
-    chromeExtsByProjectId.get(project.projectId)?.selectTab(newActive.view.webContents);
+    extensionManager.getExisting(project.projectId)?.selectTab(newActive.view.webContents);
   }
   notifyEmbeddedBrowserTabsChanged(project);
 }
@@ -3937,44 +3327,16 @@ async function closeBrowserTab(
 // Registers a BrowserWindow as a tracked extension popup. Called both when
 // the user clicks an extension icon (BROWSER_OPEN_EXTENSION_CHANNEL) and when
 // an extension calls chrome.windows.create() (dapp approval notifications).
-// Last-write-wins: notification popups replace stale action popups for the same
-// extension, which is the desired behaviour for MetaMask-style approval flows.
+// Each BrowserWindow gets a stable popupKey so multiple approval/options
+// windows from the same extension can coexist and be targeted independently.
 function registerExtensionPopup(
   projectId: string,
   extensionId: string,
   popupWin: BrowserWindow,
-): void {
-  const popupKey = `${projectId}:${extensionId}`;
-  const existing = extensionPopupsByProjectId.get(popupKey);
-  if (existing && !existing.popupWin.isDestroyed()) {
-    try {
-      existing.popupWin.close();
-    } catch {}
-  }
-  const state: EmbeddedBrowserPopupState = {
-    popupKey,
-    projectId,
-    extensionId,
-    popupWin,
-    subscriptions: new Set(),
-    devtoolsOpen: false,
-    debuggerAttached: false,
-  };
-  extensionPopupsByProjectId.set(popupKey, state);
-
-  popupWin.once("closed", () => {
-    if (extensionPopupsByProjectId.get(popupKey) === state) {
-      extensionPopupsByProjectId.delete(popupKey);
-    }
-    const project = embeddedBrowserProjectsByProjectId.get(projectId);
-    if (project?.activeExtensionPopupKey === popupKey) {
-      project.activeExtensionPopupKey = null;
-    }
-    for (const sub of state.subscriptions) {
-      sub.closeWithError("Extension popup closed");
-    }
-    state.subscriptions.clear();
-  });
+  kind: ExtensionPopupKind,
+): string {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  return extensionPopupRegistry.register(projectId, extensionId, popupWin, kind, project).popupKey;
 }
 
 // ---------------------------------------------------------------------------
@@ -3982,41 +3344,19 @@ function registerExtensionPopup(
 // ---------------------------------------------------------------------------
 
 function listProjectExtensions(projectId: string) {
-  const ses = session.fromPartition(`persist:${projectId}`);
-  return ses.getAllExtensions().map((ext) => ({
-    id: ext.id,
-    name: ext.name,
-    version: (ext.manifest["version"] as string | undefined) ?? "unknown",
-    hasPopup: extensionPopupsByProjectId.has(`${projectId}:${ext.id}`),
-  }));
+  return extensionManager.listLoadedExtensions(projectId, (extensionId) =>
+    extensionPopupRegistry.has(projectId, extensionId),
+  );
 }
 
 function listExtensionPopupWindows(projectId: string) {
   const project = embeddedBrowserProjectsByProjectId.get(projectId);
-  const activeKey = project?.activeExtensionPopupKey ?? null;
-  const results: Array<{
-    extensionId: string;
-    title: string;
-    url: string;
-    isActive: boolean;
-    popupKey: string;
-  }> = [];
-  for (const [key, popup] of extensionPopupsByProjectId) {
-    if (!key.startsWith(`${projectId}:`) || popup.popupWin.isDestroyed()) continue;
-    results.push({
-      extensionId: popup.extensionId,
-      title: popup.popupWin.webContents.getTitle(),
-      url: popup.popupWin.webContents.getURL(),
-      isActive: key === activeKey,
-      popupKey: key,
-    });
-  }
-  return results;
+  return extensionPopupRegistry.list(projectId, project?.activeExtensionPopupKey ?? null);
 }
 
 function switchToExtensionPopup(
   projectId: string,
-  extensionId: string | undefined,
+  selector: ExtensionPopupSelector,
 ): { switched: boolean; popupKey: string | null } {
   const project = embeddedBrowserProjectsByProjectId.get(projectId);
   if (!project) {
@@ -4024,64 +3364,34 @@ function switchToExtensionPopup(
       "Embedded browser host is not connected yet; retry once the desktop process re-announces active browser views.",
     );
   }
-  if (!extensionId) {
-    project.activeExtensionPopupKey = null;
-    return { switched: true, popupKey: null };
-  }
-  const popupKey = `${projectId}:${extensionId}`;
-  const popup = extensionPopupsByProjectId.get(popupKey);
-  if (!popup || popup.popupWin.isDestroyed()) {
-    extensionPopupsByProjectId.delete(popupKey);
-    throw new Error(`No open popup for extension ${extensionId}`);
-  }
-  // Attach debugger on first switch so CDP commands can reach the popup.
-  if (!popup.popupWin.webContents.debugger.isAttached()) {
-    try {
-      popup.popupWin.webContents.debugger.attach("1.3");
-      popup.debuggerAttached = true;
-      popup.devtoolsOpen = false;
-    } catch (err) {
-      popup.devtoolsOpen = true;
-      throw new Error(
-        `Failed to attach debugger to extension popup ${extensionId}: ${String(err)}`,
-      );
-    }
-  }
-  project.activeExtensionPopupKey = popupKey;
-  return { switched: true, popupKey };
+  return extensionPopupRegistry.switchTo(
+    projectId,
+    selector,
+    project,
+    EMBEDDED_BROWSER_DEVTOOLS_OPEN_MESSAGE,
+  );
 }
 
 // Hide all open extension popups that belong to a project without destroying them.
 // Called when the project's browser panel is unmounted (user switches thread/project).
 // Popups are restored by showExtensionPopupsForProject when the user returns.
 function hideExtensionPopupsForProject(projectId: string): void {
-  for (const [, popup] of extensionPopupsByProjectId) {
-    if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
-      popup.popupWin.hide();
-    }
-  }
+  extensionPopupRegistry.hideProject(projectId);
 }
 
 // Re-show extension popups that were hidden when the user left a project.
 function showExtensionPopupsForProject(projectId: string): void {
-  for (const [, popup] of extensionPopupsByProjectId) {
-    if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
-      popup.popupWin.show();
-    }
-  }
+  extensionPopupRegistry.showProject(projectId);
 }
 
-function closeExtensionPopupWindow(projectId: string, extensionId: string): void {
-  const popupKey = `${projectId}:${extensionId}`;
+function closeExtensionPopupWindow(projectId: string, selector: ExtensionPopupSelector): void {
   const project = embeddedBrowserProjectsByProjectId.get(projectId);
-  if (project?.activeExtensionPopupKey === popupKey) {
-    project.activeExtensionPopupKey = null;
-  }
-  const popup = extensionPopupsByProjectId.get(popupKey);
-  if (popup && !popup.popupWin.isDestroyed()) popup.popupWin.close();
-  extensionPopupsByProjectId.delete(popupKey);
-  pendingPopupCancels.get(popupKey)?.();
-  pendingPopupCancels.delete(popupKey);
+  extensionPopupRegistry.close(projectId, selector, project);
+}
+
+function closeExtensionPopupsForExtension(projectId: string, extensionId: string): void {
+  const project = embeddedBrowserProjectsByProjectId.get(projectId);
+  extensionPopupRegistry.closeExtension(projectId, extensionId, project);
 }
 
 function summarizeEmbeddedBrowserTabs(
@@ -4129,26 +3439,23 @@ async function openExtensionPopupForProject(
   const popupPath = manifest.action?.default_popup ?? manifest.browser_action?.default_popup;
 
   if (!popupPath) {
-    const chromeExt = chromeExtsByProjectId.get(projectId);
+    const chromeExt = extensionManager.getExisting(projectId);
     if (chromeExt) {
       const ctx = (chromeExt as any).ctx;
       // Get the active tab details so the extension handler receives a real
       // tab object with a valid id — chrome.tabs.sendMessage(tab.id, ...) would
       // silently fail if tab is an empty object.
       const activeTab = ctx?.store?.getActiveTabOfCurrentWindow?.();
-      const tabDetails = activeTab
-        ? (ctx?.store?.tabDetailsCache?.get(activeTab.id) ?? {})
-        : {};
+      const tabDetails = activeTab ? (ctx?.store?.tabDetailsCache?.get(activeTab.id) ?? {}) : {};
       ctx?.router?.sendEvent(extensionId, "browserAction.onClicked", tabDetails);
     }
     return "";
   }
 
-  const popupKey = `${projectId}:${extensionId}`;
-  const existing = extensionPopupsByProjectId.get(popupKey);
+  const existing = extensionPopupRegistry.getActionPopup(projectId, extensionId);
   if (existing && !existing.popupWin.isDestroyed()) {
     existing.popupWin.focus();
-    return popupKey;
+    return existing.popupKey;
   }
 
   const popupWin = new BrowserWindow({
@@ -4165,13 +3472,13 @@ async function openExtensionPopupForProject(
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      ...(chromeExtPreloadPath ? { preload: chromeExtPreloadPath } : {}),
+      ...(extensionManager.preloadPath ? { preload: extensionManager.preloadPath } : {}),
     },
   });
   makePanel(popupWin);
   popupWin.setAlwaysOnTop(true);
 
-  const chromeExt = chromeExtsByProjectId.get(projectId);
+  const chromeExt = extensionManager.getExisting(projectId);
   if (chromeExt) {
     chromeExt.addTab(popupWin.webContents, popupWin);
     chromeExt.selectTab(popupWin.webContents);
@@ -4193,7 +3500,7 @@ async function openExtensionPopupForProject(
   }
   popupWin.setPosition(px, py);
 
-  registerExtensionPopup(projectId, extensionId, popupWin);
+  const popupKey = registerExtensionPopup(projectId, extensionId, popupWin, "action");
 
   await popupWin.loadURL(`chrome-extension://${extensionId}/${popupPath}`);
   popupWin.show();
@@ -4575,71 +3882,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(BROWSER_LIST_EXTENSIONS_CHANNEL, async (_event, rawProjectId: unknown) => {
     const projectId = normalizeProjectId(rawProjectId);
     if (!projectId) return [];
-
-    // Initialise the chrome extensions session (idempotent) so the session
-    // exists and starts loading extensions even if the browser hasn't been
-    // mounted yet. Then await the ready promise so getAllExtensions() is
-    // guaranteed to return the full list.
-    getOrCreateChromeExtensions(projectId);
-    const ready = extensionsReadyByProjectId.get(projectId);
-    if (ready) await ready;
-
-    const ses = session.fromPartition(`persist:${projectId}`);
-    const pinnedIds = await readPinnedExtensions(projectId);
-    const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
-
-    return Promise.all(
-      ses.getAllExtensions().map(async (ext) => {
-        const manifest = ext.manifest as {
-          icons?: Record<string, string>;
-          action?: { default_popup?: string };
-          browser_action?: { default_popup?: string };
-        };
-        const icons = manifest.icons ?? {};
-        const bestSize = Object.keys(icons)
-          .map(Number)
-          .filter((n) => !isNaN(n))
-          .sort((a, b) => b - a)[0];
-        const iconPath = bestSize !== undefined ? icons[String(bestSize)] : undefined;
-        const popupPath =
-          manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? undefined;
-
-        // Read icon from the extension's actual load path and encode as a base64
-        // data URL so any renderer (including the overlay, which uses a different
-        // session partition) can display it. chrome-extension:// URLs only work
-        // inside the extension's own session partition.
-        let iconUrl: string | null = null;
-        const extLoadPath = (ext as unknown as { path?: string }).path ?? "";
-        if (iconPath && extLoadPath) {
-          try {
-            const candidate = Path.join(extLoadPath, iconPath);
-            const data = await FS.promises.readFile(candidate);
-            const extExt = Path.extname(iconPath).toLowerCase();
-            const mime =
-              extExt === ".svg"
-                ? "image/svg+xml"
-                : extExt === ".jpg" || extExt === ".jpeg"
-                  ? "image/jpeg"
-                  : "image/png";
-            iconUrl = `data:${mime};base64,${data.toString("base64")}`;
-          } catch {
-            // icon file not readable — fall through to null
-          }
-        }
-
-        // An extension is "unpacked" if its path is outside the managed extensions directory.
-        const isUnpacked = !Path.resolve(extLoadPath).startsWith(Path.resolve(extensionsPath));
-
-        return {
-          id: ext.id,
-          name: ext.name,
-          iconUrl,
-          popupUrl: popupPath ? `chrome-extension://${ext.id}/${popupPath}` : null,
-          pinned: pinnedIds.includes(ext.id),
-          isUnpacked,
-        };
-      }),
-    );
+    return extensionManager.listPanelExtensions(projectId);
   });
 
   ipcMain.removeHandler(BROWSER_UNINSTALL_EXTENSION_CHANNEL);
@@ -4650,41 +3893,7 @@ function registerIpcHandlers(): void {
       if (!projectId) return;
       const extensionId = typeof rawExtensionId === "string" ? rawExtensionId : null;
       if (!extensionId) return;
-      const ses = session.fromPartition(`persist:${projectId}`);
-      const extensionsPath = Path.join(STATE_DIR, "browser", projectId, "extensions");
-      await webStoreUninstallExtension(extensionId, { session: ses, extensionsPath });
-
-      // Full profile purge so the next install is always treated as fresh
-      // (Chromium fires chrome.runtime.onInstalled with reason:"install").
-      const partitionDir = Path.join(app.getPath("userData"), "Partitions", projectId);
-
-      // Remove the extension from Chromium's Preferences registry.
-      const prefsPath = Path.join(partitionDir, "Preferences");
-      try {
-        const prefs = JSON.parse(await FS.promises.readFile(prefsPath, "utf-8")) as {
-          extensions?: { settings?: Record<string, unknown> };
-        };
-        if (prefs.extensions?.settings?.[extensionId]) {
-          delete prefs.extensions.settings[extensionId];
-          await FS.promises.writeFile(prefsPath, JSON.stringify(prefs), "utf-8");
-        }
-      } catch {
-        // Preferences may not exist yet — not fatal.
-      }
-
-      // Remove Local Extension Settings (localStorage / chrome.storage.local).
-      await FS.promises.rm(Path.join(partitionDir, "Local Extension Settings", extensionId), {
-        recursive: true,
-        force: true,
-      });
-
-      // Remove from pinned list if present.
-      const pinned = await readPinnedExtensions(projectId);
-      const updated = pinned.filter((id) => id !== extensionId);
-      if (updated.length !== pinned.length) await writePinnedExtensions(projectId, updated);
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-      }
+      await extensionManager.uninstall(projectId, extensionId, closeExtensionPopupsForExtension);
     },
   );
 
@@ -4695,15 +3904,7 @@ function registerIpcHandlers(): void {
       const projectId = normalizeProjectId(rawProjectId);
       if (!projectId) return;
       if (!Array.isArray(rawExtensionIds)) return;
-      const ses = session.fromPartition(`persist:${projectId}`);
-      const installedIds = new Set(ses.getAllExtensions().map((e) => e.id));
-      const ids = (rawExtensionIds as unknown[]).filter(
-        (id): id is string => typeof id === "string" && installedIds.has(id),
-      );
-      await writePinnedExtensions(projectId, ids);
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(BROWSER_EXTENSIONS_CHANGED_CHANNEL, projectId);
-      }
+      await extensionManager.setPinned(projectId, rawExtensionIds);
     },
   );
 
@@ -4736,7 +3937,7 @@ function registerIpcHandlers(): void {
     async (_event, rawProjectId: unknown, rawExtPath: unknown) => {
       const projectId = normalizeProjectId(rawProjectId);
       if (!projectId || typeof rawExtPath !== "string") throw new Error("Invalid arguments");
-      return loadUnpackedExtensionForProject(projectId, rawExtPath);
+      return extensionManager.loadUnpacked(projectId, rawExtPath);
     },
   );
 
@@ -4749,7 +3950,7 @@ function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(owner, { properties: ["openDirectory"] })
       : await dialog.showOpenDialog({ properties: ["openDirectory"] });
     if (result.canceled || !result.filePaths[0]) return null;
-    return loadUnpackedExtensionForProject(projectId, result.filePaths[0]!);
+    return extensionManager.loadUnpacked(projectId, result.filePaths[0]!);
   });
 
   ipcMain.removeHandler(BROWSER_RELOAD_EXTENSION_CHANNEL);
@@ -4758,7 +3959,7 @@ function registerIpcHandlers(): void {
     async (_event, rawProjectId: unknown, rawExtId: unknown) => {
       const projectId = normalizeProjectId(rawProjectId);
       if (!projectId || typeof rawExtId !== "string") throw new Error("Invalid arguments");
-      await reloadExtensionForProject(projectId, rawExtId);
+      await extensionManager.reload(projectId, rawExtId);
     },
   );
 
@@ -5145,10 +4346,7 @@ app.on("before-quit", () => {
   stopBrowserCdpBrokerServer();
   restoreStdIoCapture?.();
   // Close all open extension popups so they don't block app quit.
-  for (const popup of extensionPopupsByProjectId.values()) {
-    if (!popup.popupWin.isDestroyed()) popup.popupWin.destroy();
-  }
-  extensionPopupsByProjectId.clear();
+  extensionPopupRegistry.closeAll();
 });
 
 app

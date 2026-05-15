@@ -19,4 +19,6 @@ export interface ChromeExtensionImpl {
     extension: Electron.Extension,
     permissions: chrome.permissions.Permissions,
   ): Promise<boolean>;
+
+  reloadExtension?(extension: Electron.Extension, extensionPath: string): Promise<void>;
 }

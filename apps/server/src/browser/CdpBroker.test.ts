@@ -31,7 +31,12 @@ const DEFERRED_NATIVE_TOOLS = ["cookie-import-browser"] as const;
 const PERMANENTLY_UNSUPPORTED_NATIVE_TOOLS = ["focus", "visibility"] as const;
 // Tools that work in native Electron but require specific browser state (e.g. a pending
 // Chrome Web Store install) that the headless test harness cannot provide.
-const BROWSER_PRECONDITION_TOOLS = ["load_extension", "load_unpacked", "reload_extension"] as const;
+const BROWSER_PRECONDITION_TOOLS = [
+  "load_extension",
+  "load_unpacked",
+  "reload_extension",
+  "remove_extension",
+] as const;
 const DAY_1_TOOLS = BROWSER_HOST_TOOL_NAMES.filter(
   (tool) =>
     !(DEFERRED_NATIVE_TOOLS as readonly string[]).includes(tool) &&
@@ -185,13 +190,15 @@ class HarnessTransport implements CdpBrokerTransport {
     return this.activeTabId;
   }
 
-  async listExtensions(_request: Parameters<NonNullable<CdpBrokerTransport["listExtensions"]>>[0]) {
+  async listExtensions(
+    _request: Parameters<NonNullable<CdpBrokerTransport["listExtensions"]>>[0],
+  ): ReturnType<NonNullable<CdpBrokerTransport["listExtensions"]>> {
     return [];
   }
 
   async listExtensionWindows(
     _request: Parameters<NonNullable<CdpBrokerTransport["listExtensionWindows"]>>[0],
-  ) {
+  ): ReturnType<NonNullable<CdpBrokerTransport["listExtensionWindows"]>> {
     return [];
   }
 
@@ -223,6 +230,8 @@ class HarnessTransport implements CdpBrokerTransport {
   }
 
   async reloadExtension(_req: Parameters<NonNullable<CdpBrokerTransport["reloadExtension"]>>[0]) {}
+
+  async removeExtension(_req: Parameters<NonNullable<CdpBrokerTransport["removeExtension"]>>[0]) {}
 
   private ensureRoot(): void {
     if (this.rootInitialized) return;
@@ -845,6 +854,34 @@ describe("extension agent tools (via harness)", () => {
     }
   });
 
+  it("ext_windows includes popupKey and popup type for disambiguation", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      transport.listExtensionWindows = async () => [
+        {
+          popupKey: "popup-7",
+          extensionId: "aaabbbcccdddeeefff00011122233344",
+          popupType: "extension-window",
+          title: "Approval",
+          url: "chrome-extension://aaabbbcccdddeeefff00011122233344/approve.html",
+          isActive: true,
+          createdAt: 1,
+        },
+      ];
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool([], { __toolName: "ext_windows" });
+      assert.include(result, "popup-7");
+      assert.include(result, "extension-window");
+      assert.include(result, "[active CDP target]");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it("ext_switch without extensionId reverts to main browser tab", async () => {
     const harness = await createElectronWebContentsHarness();
     try {
@@ -883,6 +920,37 @@ describe("extension agent tools (via harness)", () => {
     }
   });
 
+  it("ext_switch with popupKey sends popupKey selector", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      let receivedPopupKey: string | undefined;
+      transport.extSwitch = async (request) => {
+        receivedPopupKey = request.popupKey;
+        return { switched: true, popupKey: request.popupKey ?? null };
+      };
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["popup-7"], {
+        __toolName: "ext_switch",
+        popupKey: "popup-7",
+      });
+      assert.equal(receivedPopupKey, "popup-7");
+      assert.include(result, "Switched CDP target to extension popup popup-7");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_switch target alias maps to the popup selector argument", () => {
+    assert.isDefined(SPECS.ext_switch);
+    assert.deepEqual(SPECS.ext_switch.argsFromInput({ target: "popup-7" }, "ext_switch"), [
+      "popup-7",
+    ]);
+  });
+
   it("ext_close returns closed confirmation", async () => {
     const harness = await createElectronWebContentsHarness();
     try {
@@ -895,14 +963,54 @@ describe("extension agent tools (via harness)", () => {
         __toolName: "ext_close",
         extensionId: "aaabbbcccdddeeefff00011122233344",
       });
-      assert.include(result, "Closed popup for extension aaabbbcccdddeeefff00011122233344");
+      assert.include(result, "Closed extension popup aaabbbcccdddeeefff00011122233344");
     } finally {
       await harness.dispose();
     }
   });
 
-  it("SPECS table includes all 4 new extension tools", () => {
-    for (const name of ["list_extensions", "ext_windows", "ext_switch", "ext_close"]) {
+  it("ext_close with popupKey sends popupKey selector", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      let receivedPopupKey: string | undefined;
+      transport.extClose = async (request) => {
+        receivedPopupKey = request.popupKey;
+      };
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["popup-7"], {
+        __toolName: "ext_close",
+        popupKey: "popup-7",
+      });
+      assert.equal(receivedPopupKey, "popup-7");
+      assert.include(result, "Closed extension popup popup-7");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("ext_close target alias maps to the popup selector argument", () => {
+    assert.isDefined(SPECS.ext_close);
+    assert.deepEqual(SPECS.ext_close.argsFromInput({ target: "popup-7" }, "ext_close"), [
+      "popup-7",
+    ]);
+  });
+
+  it("SPECS table includes all desktop extension tools", () => {
+    for (const name of [
+      "load_extension",
+      "load_unpacked",
+      "reload_extension",
+      "remove_extension",
+      "list_extensions",
+      "open_extension",
+      "ext_windows",
+      "ext_switch",
+      "ext_close",
+    ]) {
       assert.property(SPECS, name, `SPECS missing tool: ${name}`);
     }
   });
@@ -939,6 +1047,24 @@ describe("extension agent tools (via harness)", () => {
         extensionId: "abcdefghijklmnopabcdefghijklmnop",
       });
       assert.include(result, "Reloaded extension abcdefghijklmnopabcdefghijklmnop");
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("remove_extension returns removed confirmation", async () => {
+    const harness = await createElectronWebContentsHarness();
+    try {
+      const transport = new HarnessTransport(harness);
+      const broker = new CdpBroker(transport);
+      const host = new ElectronWebContentsBrowserHost(ProjectId.makeUnsafe("project-ext-test"), {
+        broker,
+      });
+      const result = await host.runTool(["abcdefghijklmnopabcdefghijklmnop"], {
+        __toolName: "remove_extension",
+        extensionId: "abcdefghijklmnopabcdefghijklmnop",
+      });
+      assert.include(result, "Removed extension abcdefghijklmnopabcdefghijklmnop");
     } finally {
       await harness.dispose();
     }

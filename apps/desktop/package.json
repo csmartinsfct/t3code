@@ -4,10 +4,10 @@
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "bun run --parallel dev:bundle dev:electron",
+    "dev": "cd ../../packages/electron-chrome-extensions && bun run build && cd ../../apps/desktop && bun run --parallel dev:bundle dev:electron",
     "dev:bundle": "tsdown --watch",
     "dev:electron": "bun run scripts/dev-electron.mjs",
-    "build": "tsdown",
+    "build": "cd ../../packages/electron-chrome-extensions && bun run build && cd ../../apps/desktop && tsdown",
     "start": "bun run scripts/start-electron.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -16,6 +16,7 @@
   "dependencies": {
     "effect": "catalog:",
     "electron": "40.6.0",
+    "electron-chrome-extensions": "workspace:*",
     "electron-chrome-web-store": "^0.13.0",
     "electron-updater": "^6.6.2",
     "fflate": "^0.8.2"
@@ -23,8 +24,8 @@
   "devDependencies": {
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
+    "@types/chrome": "^0.0.300",
     "@types/node": "catalog:",
-    "electron-chrome-extensions": "workspace:*",
     "node-gyp": "^10",
     "tsdown": "catalog:",
     "typescript": "catalog:",

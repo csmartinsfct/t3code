@@ -198,6 +198,17 @@ Follow the timeline sequence from [Observability](observability.md#reading-a-stu
 
 Look for `session.start.existing-cleanup` — this means a new session is being started while an old one was still alive. The old one is stopped with `emitExitEvent: false` to prevent it from corrupting the new session's state.
 
+### Orchestration review failed with "Post-turn checkpoint did not finalize"
+
+The orchestration runner gates the working→review transition on the `turn.processing.quiesced` receipt published by `CheckpointReactor` after the post-turn git checkpoint is captured. If the capture never completes within `QUIESCED_WAIT_MS` (default 60s) the runner pauses the run with a precise reason instead of attempting to compute a diff against state that isn't there yet.
+
+Walk the timeline in `~/.t3/userdata/logs/server-child.log` filtered by `[timeline]` and look for:
+
+1. `runner.turn-watcher.resolved` with `result: "completed"` — provider reported the working turn done.
+2. `runner.turn-watcher.quiesced` — the receipt arrived; the runner is unblocked. **If missing, the gate timed out.**
+3. `runner.turn-watcher.quiesce-timeout` with the working `threadId`, `turnId`, and `quiescedWaitMs`. The reactor either crashed, the workspace has no git repo (so capture is skipped), or the capture pipeline is genuinely backed up.
+4. `runner.ticket.turn-completed` with `outcome: "failed"` and `error: "Post-turn checkpoint did not finalize within Nms"`. When the failure is a dispatch error (not a quiesced timeout), the same event now also carries a `causeDetail` field containing the rendered `Effect.Cause` — use it to identify the underlying subsystem rather than relying on the wrapped message alone.
+
 ## Useful Commands
 
 ### Read lifecycle log for a thread

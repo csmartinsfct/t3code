@@ -19,7 +19,7 @@ Agent calls reach the embedded view through an Electron-main-owned loopback CDP 
 | Endpoint          | `/api/browser`                                                              |
 | Auth              | Bearer token (per-thread, `managedRunService.issueMcpAccess`) or dev-bypass |
 | Response envelope | `{ data: { message, data: { output: string } }, error: null }`              |
-| Total tools       | 58 (navigate, read, interact, snapshot/screenshot, meta, batch)             |
+| Total tools       | 59 (navigate, read, interact, snapshot/screenshot, meta, batch)             |
 | Desktop host      | Electron `WebContentsView` + `webContents.debugger` CDP (always on)         |
 | Server-only host  | Playwright Chromium, `launchPersistentContext`                              |
 | Profile dir       | `<dataDir>/browser/<projectId>/chromium-profile/`                           |
@@ -361,8 +361,8 @@ Extension metadata (installed extensions, icons, pinned state) is loaded **eager
 
 - `useBrowserMetadata(projectId)` — hook called in `KanbanBoard` the moment a project thread mounts. Fires `bridge.listExtensions()` → populates `useBrowserMetadataStore` (Zustand, keyed by `projectId`). Subscribes to `bridge.onExtensionsChanged()` for live updates on install/uninstall/pin.
 - `useBrowserMetadataStore` (`apps/web/src/lib/browserMetadataStore.ts`) — shared Zustand store. Both `EmbeddedBrowser` (toolbar pinned icons) and `EmbeddedBrowserExtensionsPanel` (panel icons) read from this store; neither fetches independently.
-- Main process — `BROWSER_LIST_EXTENSIONS_CHANNEL` handler calls `getOrCreateChromeExtensions(projectId)` (idempotent) and `await extensionsReadyByProjectId.get(projectId)` before querying `ses.getAllExtensions()`. This ensures the handler always returns the complete extension list even when called before the browser is mounted.
-- `extensionsLoadedByProjectId` set — prevents the `extension-loaded` event hook from sending redundant `BROWSER_EXTENSIONS_CHANGED_CHANNEL` notifications during the initial startup batch load; only new installs trigger a notification after startup completes.
+- Main process — `BROWSER_LIST_EXTENSIONS_CHANNEL` delegates to `DesktopExtensionManager.listPanelExtensions(projectId)`, which initializes the per-project bridge if needed, waits for its startup reload/install preparation, then returns installed extension metadata plus icon and pinned state.
+- `DesktopExtensionManager` emits `browser:extensionsChanged` after install, reload, remove, pin changes, and startup reload so the shared metadata store refreshes from one path.
 
 Tab state (URLs, titles, navigation) remains lazy — it is tightly coupled to the live `WebContentsView` lifecycle and only meaningful while the browser is mounted.
 
@@ -375,11 +375,15 @@ Extension popup windows (`BrowserWindow` instances created when the user opens a
 
 This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
 
+Each extension popup window is tracked by a stable runtime `popupKey`, not just extension ID. `ext_switch <extensionId>` and `ext_close <extensionId>` still work when only one popup is open for that extension; when there are multiple dapp approval/options windows, `ext_windows` exposes each `popupKey`, popup type, title, URL, and active-target state so agents can use `ext_switch <popupKey>` or `ext_close <popupKey>`.
+
 **Extension signature verification (T3CO-471):** Two layers protect against tampered or mismatched extensions:
 
-1. _CRX3 cryptographic verification (agent installs)_: When `load_extension` is called, the CRX is fetched to a buffer and `verifyCrxSignature()` verifies the RSA-SHA256 signature in the CRX3 protobuf header over the signed header data + zip archive using `node:crypto`. The install is aborted if verification fails.
+1. _CRX3 cryptographic verification (agent installs)_: When `load_extension` is called, `DesktopExtensionManager` fetches the CRX to a buffer and `verifyCrxSignature()` verifies the RSA-SHA256 signature in the CRX3 protobuf header over the signed header data + zip archive using `node:crypto`. The install is aborted if verification fails.
 
 2. _`manifest.key` → ID consistency check (all loads)_: At every `extension-loaded` event and in `loadLegacyFlatExtensions`, `verifyManifestKeyMatchesId()` derives the extension ID from the base64 public key stored in `manifest.json` (`SHA256(base64(key))[0:16]` → a-p alphabet) and verifies it matches the directory name. Extensions that fail this check are unloaded immediately. Dev/unpacked extensions without a `manifest.key` field are exempt.
+
+**Extension removal:** Agents can call `remove_extension <extensionId>`. Managed Web Store extensions are uninstalled from T3's managed extensions directory; unpacked extensions are unloaded with `session.removeExtension()` without deleting the source folder. Both paths clear pinned state and emit `browser:extensionsChanged`.
 
 **Native addon (production):** `panel_window.node` is compiled from `apps/desktop/native/panel-window/panel-window.mm` during the production build (`scripts/build-desktop-artifact.ts`), staged at `apps/desktop/native/panel-window/build/Release/`, and listed in electron-builder's `asarUnpack` so Electron can `dlopen` it outside the asar archive at runtime. Without this the addon's `try/catch` fallback fires silently and popups do not float above macOS full-screen Spaces.
 

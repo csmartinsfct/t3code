@@ -23,6 +23,7 @@
       "dependencies": {
         "effect": "catalog:",
         "electron": "40.6.0",
+        "electron-chrome-extensions": "workspace:*",
         "electron-chrome-web-store": "^0.13.0",
         "electron-updater": "^6.6.2",
         "fflate": "^0.8.2",
@@ -30,8 +31,8 @@
       "devDependencies": {
         "@t3tools/contracts": "workspace:*",
         "@t3tools/shared": "workspace:*",
+        "@types/chrome": "^0.0.300",
         "@types/node": "catalog:",
-        "electron-chrome-extensions": "workspace:*",
         "node-gyp": "^10",
         "tsdown": "catalog:",
         "typescript": "catalog:",
@@ -195,7 +196,7 @@
         "minimist": "^1.2.7",
         "mocha": "^8.2.1",
         "ts-node": "^10.9.1",
-        "typescript": "^4.9.4",
+        "typescript": "catalog:",
         "walkdir": "^0.4.1",
       },
     },
@@ -2629,8 +2630,6 @@
     "csso/css-tree": ["css-tree@2.2.1", "", { "dependencies": { "mdn-data": "2.0.28", "source-map-js": "^1.0.1" } }, "sha512-OA0mILzGc1kCOCSJerOeqDxDQ4HOh+G8NbOJFOTgOCzpw7fCBubk0fEyxp8AgOL/jvLgYA/uV0cMbe43ElF1JA=="],
 
     "electron-chrome-extensions/electron": ["electron@37.10.3", "", { "dependencies": { "@electron/get": "^2.0.0", "@types/node": "^22.7.7", "extract-zip": "^2.0.1" }, "bin": { "electron": "cli.js" } }, "sha512-3IjCGSjQmH50IbW2PFveaTzK+KwcFX9PEhE7KXb9v5IT8cLAiryAN7qezm/XzODhDRlLu0xKG1j8xWBtZ/bx/g=="],
-
-    "electron-chrome-extensions/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
 
     "electron-chrome-web-store/@types/chrome": ["@types/chrome@0.0.287", "", { "dependencies": { "@types/filesystem": "*", "@types/har-format": "*" } }, "sha512-wWhBNPNXZHwycHKNYnexUcpSbrihVZu++0rdp6GEk5ZgAglenLx+RwdEouh6FrHS0XQiOxSd62yaujM1OoQlZQ=="],
 

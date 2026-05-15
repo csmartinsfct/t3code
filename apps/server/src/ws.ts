@@ -59,6 +59,7 @@ import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { RuntimeReceiptBus } from "./orchestration/Services/RuntimeReceiptBus";
 
 import {
   observeRpcEffect,
@@ -139,6 +140,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const workspaceFileSystem = yield* WorkspaceFileSystem;
     const orchestrationRunRepo = yield* OrchestrationRunRepository;
     const projectionThreadRepo = yield* ProjectionThreadRepository;
+    const receiptBus = yield* RuntimeReceiptBus;
     const orchestrationRuns = yield* makeOrchestrationRunServiceFromDeps({
       repo: orchestrationRunRepo,
       orchestrationEngine,
@@ -157,6 +159,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       ticketing,
       startup,
       serverSettings,
+      receiptBus,
     });
 
     const loadServerConfig = Effect.gen(function* () {

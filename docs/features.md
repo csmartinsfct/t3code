@@ -544,7 +544,7 @@ Prompts are block-based documents (version 1). Each block has:
 
 Per-project headless Chromium automation for QA testing, web scraping, and UI verification. See [browser-tools.md](browser-tools.md) for the full reference.
 
-**What it is:** 58 plaintext-returning tools exposed at `/api/browser` — navigate, click/fill/hover/type, accessibility snapshots with stable `@ref` element IDs, screenshots (full page / viewport / clipped / element / base64), PDF export, JavaScript evaluation, multi-tab management, and a batch endpoint that sequences up to 50 commands in one request.
+**What it is:** 59 plaintext-returning tools exposed at `/api/browser` — navigate, click/fill/hover/type, accessibility snapshots with stable `@ref` element IDs, screenshots (full page / viewport / clipped / element / base64), PDF export, JavaScript evaluation, multi-tab management, extension install/reload/remove helpers, and a batch endpoint that sequences up to 50 commands in one request.
 
 **Per-project isolation.** Each T3 project gets its own Chromium persistent context at `<dataDir>/browser/<projectId>/chromium-profile/`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed across projects. Chromium runs headless by default.
 

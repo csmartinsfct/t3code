@@ -75,11 +75,13 @@ export interface CdpBrokerTransport {
     readonly id: string;
     readonly viewId: string;
     readonly extensionId?: string;
+    readonly popupKey?: string;
   }) => Promise<ExtSwitchResult>;
   readonly extClose?: (request: {
     readonly id: string;
     readonly viewId: string;
-    readonly extensionId: string;
+    readonly extensionId?: string;
+    readonly popupKey?: string;
   }) => Promise<void>;
   readonly extOpen?: (request: {
     readonly id: string;
@@ -92,6 +94,11 @@ export interface CdpBrokerTransport {
     readonly folderPath: string;
   }) => Promise<import("@t3tools/contracts").BrowserExtensionInfo>;
   readonly reloadExtension?: (request: {
+    readonly id: string;
+    readonly viewId: string;
+    readonly extensionId: string;
+  }) => Promise<void>;
+  readonly removeExtension?: (request: {
     readonly id: string;
     readonly viewId: string;
     readonly extensionId: string;
@@ -112,11 +119,13 @@ export interface ExtensionInfo {
 }
 
 export interface ExtensionWindowInfo {
+  readonly popupKey: string;
   readonly extensionId: string;
+  readonly popupType?: string;
   readonly title: string;
   readonly url: string;
   readonly isActive: boolean;
-  readonly popupKey: string;
+  readonly createdAt?: number;
 }
 
 export interface ExtSwitchResult {
@@ -135,6 +144,13 @@ export interface BrowserTabSummary {
 export interface BrowserTabListing {
   readonly tabs: ReadonlyArray<BrowserTabSummary>;
   readonly activeTabId: number;
+}
+
+function extensionPopupSelectorFromArg(value: string): {
+  readonly extensionId?: string;
+  readonly popupKey?: string;
+} {
+  return value.startsWith("popup-") ? { popupKey: value } : { extensionId: value };
 }
 
 export class CdpBrokerError extends Error {
@@ -428,28 +444,44 @@ export class CdpBroker {
     return this.transport.listExtensionWindows({ id: this.requestId(), viewId });
   }
 
-  async extSwitch(viewId: string, extensionId?: string): Promise<ExtSwitchResult> {
+  async extSwitch(
+    viewId: string,
+    selector?: string | { readonly extensionId?: string; readonly popupKey?: string },
+  ): Promise<ExtSwitchResult> {
     if (!this.transport.extSwitch) {
       throw new CdpBrokerError("extSwitch is not available for this transport", {
         code: "CDP_EXT_SWITCH_UNAVAILABLE",
         details: { viewId },
       });
     }
+    const resolved =
+      typeof selector === "string" ? extensionPopupSelectorFromArg(selector) : selector;
     return this.transport.extSwitch({
       id: this.requestId(),
       viewId,
-      ...(extensionId ? { extensionId } : {}),
+      ...(resolved?.extensionId ? { extensionId: resolved.extensionId } : {}),
+      ...(resolved?.popupKey ? { popupKey: resolved.popupKey } : {}),
     });
   }
 
-  async extClose(viewId: string, extensionId: string): Promise<void> {
+  async extClose(
+    viewId: string,
+    selector: string | { readonly extensionId?: string; readonly popupKey?: string },
+  ): Promise<void> {
     if (!this.transport.extClose) {
       throw new CdpBrokerError("extClose is not available for this transport", {
         code: "CDP_EXT_CLOSE_UNAVAILABLE",
         details: { viewId },
       });
     }
-    await this.transport.extClose({ id: this.requestId(), viewId, extensionId });
+    const resolved =
+      typeof selector === "string" ? extensionPopupSelectorFromArg(selector) : selector;
+    await this.transport.extClose({
+      id: this.requestId(),
+      viewId,
+      ...(resolved.extensionId ? { extensionId: resolved.extensionId } : {}),
+      ...(resolved.popupKey ? { popupKey: resolved.popupKey } : {}),
+    });
   }
 
   async extOpen(viewId: string, extensionId: string): Promise<{ popupKey: string }> {
@@ -479,5 +511,13 @@ export class CdpBroker {
         code: "CDP_RELOAD_EXTENSION_UNAVAILABLE",
       });
     return this.transport.reloadExtension({ id: this.requestId(), viewId, extensionId });
+  }
+
+  async removeExtension(viewId: string, extensionId: string): Promise<void> {
+    if (!this.transport.removeExtension)
+      throw new CdpBrokerError("removeExtension unavailable", {
+        code: "CDP_REMOVE_EXTENSION_UNAVAILABLE",
+      });
+    return this.transport.removeExtension({ id: this.requestId(), viewId, extensionId });
   }
 }

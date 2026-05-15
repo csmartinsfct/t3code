@@ -57,6 +57,10 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../../orchestration/Services/OrchestrationEngine.ts";
+import {
+  RuntimeReceiptBus,
+  type RuntimeReceiptBusShape,
+} from "../../orchestration/Services/RuntimeReceiptBus.ts";
 import { ProviderRateLimitsCache } from "../../provider/Services/ProviderRateLimitsCache.ts";
 import {
   ProviderService,
@@ -94,6 +98,14 @@ const TURN_IDLE_TIMEOUT = Duration.minutes(30);
 // provider to emit turn.aborted/turn.completed before declaring the turn
 // failed without confirmation.
 const TURN_INTERRUPT_GRACE = Duration.seconds(30);
+// After a working turn completes, the checkpoint reactor still needs to
+// finish capturing the post-turn git checkpoint and dispatch
+// thread.turn-diff-completed before the review prompt can compute a
+// thread diff. Wait this long for the `turn.processing.quiesced` receipt
+// before failing with an explicit "checkpoint did not finalize" reason.
+// Observed worst case is ~30 s under load; 60 s leaves room without
+// wedging the user.
+const QUIESCED_WAIT_MS = 60_000;
 
 type TurnOutcome =
   | { readonly result: "completed"; readonly turnId: TurnId | null }
@@ -257,6 +269,13 @@ interface OrchestrationRunRunnerDeps {
   readonly ticketing: TicketingServiceShape;
   readonly startup: ServerRuntimeStartupShape;
   readonly serverSettings: ServerSettingsShape;
+  readonly receiptBus: RuntimeReceiptBusShape;
+  /**
+   * Override the maximum time to wait for `turn.processing.quiesced` after a
+   * working turn completes. Defaults to `QUIESCED_WAIT_MS`. Exposed for tests
+   * (so the timeout path can be exercised quickly).
+   */
+  readonly quiescedWaitMs?: number;
 }
 
 export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerDeps) =>
@@ -270,7 +289,9 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
       ticketing,
       startup,
       serverSettings,
+      receiptBus,
     } = deps;
+    const quiescedWaitMs = deps.quiescedWaitMs ?? QUIESCED_WAIT_MS;
 
     // Background orchestration work must outlive the individual RPC request
     // that triggered it, so keep these fibers in their own detached scope
@@ -645,6 +666,48 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
         },
         `Failed to stop session on thread ${threadId}`,
       ).pipe(Effect.catch(() => Effect.void));
+
+    /**
+     * Subscribe to the runtime receipt bus and resolve with the first
+     * `turn.processing.quiesced` receipt that matches the given thread.
+     *
+     * Callers MUST fork this before the provider turn even starts. The bus is
+     * a PubSub with no replay, so a subscription opened after the receipt has
+     * already been published will block forever. By starting it before the
+     * turn dispatch we are guaranteed to be subscribed before the checkpoint
+     * reactor can publish.
+     *
+     * `turnId` is the turn whose post-processing we are waiting for. When the
+     * caller hasn't observed a `turn.started` yet (initial fork), it passes
+     * `null` and the helper resolves on the first quiesced for this thread —
+     * which is correct because the receipt bus filter is already scoped to
+     * the working thread and only one turn is in flight per thread at a time.
+     */
+    const waitForTurnQuiesced = (input: {
+      readonly threadId: ThreadId;
+      readonly expectedTurnId: TurnId | null;
+    }) =>
+      Stream.runForEach(
+        receiptBus.stream.pipe(
+          Stream.filter(
+            (receipt) =>
+              receipt.type === "turn.processing.quiesced" &&
+              receipt.threadId === input.threadId &&
+              (input.expectedTurnId === null || receipt.turnId === input.expectedTurnId),
+          ),
+        ),
+        (receipt) => Effect.fail(receipt),
+      ).pipe(
+        // Stream.runForEach above only completes when the stream ends; we
+        // abuse Effect.fail to short-circuit on the first matching receipt
+        // and surface it as the success channel.
+        Effect.flip,
+        Effect.flatMap((receipt) =>
+          receipt.type === "turn.processing.quiesced"
+            ? Effect.succeed(receipt)
+            : Effect.die("waitForTurnQuiesced: receipt filter let through a non-quiesced receipt"),
+        ),
+      );
 
     /**
      * Wait for a turn to settle on a working thread by observing the canonical
@@ -1322,15 +1385,33 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
           activeRunState.activeChildThreadId = input.threadId;
         }
 
+        let dispatchCauseDetail: string | null = null;
+
         const outcome: TurnOutcome = yield* Effect.scoped(
           Effect.gen(function* () {
             const completionFiber = yield* waitForTurnCompletion(input.threadId).pipe(
               Effect.forkScoped,
             );
 
+            // For the working phase we also need the post-turn checkpoint
+            // capture to settle before review prompts can compute a diff.
+            // Subscribe BEFORE dispatching so we don't miss a fast-arriving
+            // quiesced receipt — the receipt bus is a PubSub with no replay.
+            const quiescedFiber =
+              input.phase === "working"
+                ? yield* waitForTurnQuiesced({
+                    threadId: input.threadId,
+                    expectedTurnId: null,
+                  }).pipe(Effect.forkScoped)
+                : null;
+
             const dispatchExit = yield* Effect.exit(input.dispatch);
             if (dispatchExit._tag === "Failure") {
               yield* Fiber.interrupt(completionFiber);
+              if (quiescedFiber) {
+                yield* Fiber.interrupt(quiescedFiber);
+              }
+              dispatchCauseDetail = Cause.pretty(dispatchExit.cause);
               const dispatchFailure = Option.getOrNull(Cause.findErrorOption(dispatchExit.cause));
               return {
                 result: "failed" as const,
@@ -1367,7 +1448,44 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               }),
             );
 
-            return yield* Fiber.join(completionFiber);
+            const completionOutcome = yield* Fiber.join(completionFiber);
+
+            // Only gate on quiesced when the working turn actually completed.
+            // For interrupted/failed turns the review phase never runs, so
+            // there's no diff query to race.
+            if (quiescedFiber && completionOutcome.result === "completed") {
+              const quiescedResult = yield* Fiber.join(quiescedFiber).pipe(
+                Effect.timeoutOption(Duration.millis(quiescedWaitMs)),
+              );
+              if (Option.isNone(quiescedResult)) {
+                yield* Effect.logWarning(
+                  formatTimelineLog(SCOPE, "runner.turn-watcher.quiesce-timeout", {
+                    threadId: input.threadId,
+                    turnId: completionOutcome.turnId,
+                    quiescedWaitMs,
+                  }),
+                );
+                yield* Fiber.interrupt(quiescedFiber);
+                return {
+                  result: "failed" as const,
+                  error: `Post-turn checkpoint did not finalize within ${quiescedWaitMs}ms`,
+                  turnId: completionOutcome.turnId,
+                };
+              }
+              yield* Effect.logInfo(
+                formatTimelineLog(SCOPE, "runner.turn-watcher.quiesced", {
+                  threadId: input.threadId,
+                  turnId: quiescedResult.value.turnId,
+                  checkpointTurnCount: quiescedResult.value.checkpointTurnCount,
+                }),
+              );
+            } else if (quiescedFiber) {
+              // Working turn was interrupted or failed: no review will run,
+              // so don't wait for a checkpoint we won't use.
+              yield* Fiber.interrupt(quiescedFiber);
+            }
+
+            return completionOutcome;
           }),
         );
 
@@ -1387,6 +1505,7 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
               ? {
                   error: outcome.error,
                   promptId: outcome.promptId ?? null,
+                  ...(dispatchCauseDetail ? { causeDetail: dispatchCauseDetail } : {}),
                 }
               : {}),
           }),
@@ -2449,30 +2568,42 @@ export const makeOrchestrationRunRunnerFromDeps = (deps: OrchestrationRunRunnerD
     return { startRun, pauseRun, resumeRun, cancelRun } satisfies OrchestrationRunRunnerShape;
   });
 
-export const makeOrchestrationRunRunner = Effect.gen(function* () {
-  const runService = yield* OrchestrationRunService;
-  const orchestrationEngine = yield* OrchestrationEngineService;
-  const providerService = yield* ProviderService;
-  yield* ProviderRateLimitsCache;
-  const checkpointDiffQuery = yield* CheckpointDiffQuery;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const ticketing = yield* TicketingService;
-  const startup = yield* ServerRuntimeStartup;
-  const serverSettings = yield* ServerSettingsService;
+export const makeOrchestrationRunRunner = (config: { readonly quiescedWaitMs?: number } = {}) =>
+  Effect.gen(function* () {
+    const runService = yield* OrchestrationRunService;
+    const orchestrationEngine = yield* OrchestrationEngineService;
+    const providerService = yield* ProviderService;
+    yield* ProviderRateLimitsCache;
+    const checkpointDiffQuery = yield* CheckpointDiffQuery;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const ticketing = yield* TicketingService;
+    const startup = yield* ServerRuntimeStartup;
+    const serverSettings = yield* ServerSettingsService;
+    const receiptBus = yield* RuntimeReceiptBus;
 
-  return yield* makeOrchestrationRunRunnerFromDeps({
-    runService,
-    orchestrationEngine,
-    providerService,
-    checkpointDiffQuery,
-    projectionSnapshotQuery,
-    ticketing,
-    startup,
-    serverSettings,
+    return yield* makeOrchestrationRunRunnerFromDeps({
+      runService,
+      orchestrationEngine,
+      providerService,
+      checkpointDiffQuery,
+      projectionSnapshotQuery,
+      ticketing,
+      startup,
+      serverSettings,
+      receiptBus,
+      ...(config.quiescedWaitMs !== undefined ? { quiescedWaitMs: config.quiescedWaitMs } : {}),
+    });
   });
-});
 
 export const OrchestrationRunRunnerLive = Layer.effect(
   OrchestrationRunRunner,
-  makeOrchestrationRunRunner,
+  makeOrchestrationRunRunner(),
 );
+
+/**
+ * Layer constructor that allows tests (or future ops overrides) to configure
+ * the runner without rewriting the layer composition. Currently only
+ * `quiescedWaitMs` is exposed.
+ */
+export const OrchestrationRunRunnerLiveWith = (config: { readonly quiescedWaitMs?: number }) =>
+  Layer.effect(OrchestrationRunRunner, makeOrchestrationRunRunner(config));

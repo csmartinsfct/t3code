@@ -6,7 +6,7 @@ Chrome extension support for T3 Code's embedded browser. Covers installation, th
 
 ## Overview
 
-Extensions are loaded per-project into the Electron session partition `persist:<projectId>`. Each project gets an independent extension registry — MetaMask in project A has no access to project B's state. Extensions persist across restarts: on startup, `reloadPersistedExtensions` scans `<dataDir>/browser/<projectId>/extensions/` and reloads each one.
+Extensions are loaded per-project into the Electron session partition `persist:<projectId>`. Each project gets an independent extension registry — MetaMask in project A has no access to project B's state. Extensions persist across restarts: `DesktopExtensionManager` initializes the Web Store loader for `<dataDir>/browser/<projectId>/extensions/` and reloads any legacy flat-format extension directories.
 
 ---
 
@@ -20,25 +20,30 @@ The embedded browser injects a shim into every page that:
 2. Sets `window.chrome.webstore.install()` to capture the extension ID and signal Electron main via a prefixed `console.log` message (`__t3_ext_install__:<id>`).
 3. Uses a `MutationObserver` to re-enable disabled install buttons (Google detects non-Chrome browsers and greys the button).
 
-When the install signal fires, `loadExtensionFromCrx` in `apps/desktop/src/main.ts`:
+When the install signal fires, T3 uses a shared verified Web Store install helper in `apps/desktop/src/desktopExtensionManager.ts`:
 
 1. Fetches the CRX from Google's CDN (`clients2.google.com/service/update2/crx?...`).
-2. Strips the CRX3 header and extracts the ZIP using `fflate`.
-3. Validates paths to prevent ZIP traversal attacks.
-4. Runs `ensureExtensionPolyfill` to prepend a `requestAnimationFrame` shim to the background service worker (MV3 service workers don't have this DOM API).
-5. Calls `session.loadExtension(extDir, { allowFileAccess: true })`.
-6. Notifies the renderer via `browser:extensionsChanged` so the extensions panel refreshes immediately.
+2. Verifies the CRX3 RSA-SHA256 signature and extension ID against the exact downloaded bytes.
+3. Strips the CRX3 header and extracts the ZIP using `fflate`, validating paths to prevent ZIP traversal attacks.
+4. Writes `manifest.key` from the verified CRX public key so Chromium derives the same stable extension ID.
+5. Runs `ensureExtensionPolyfill` to prepend the service-worker shim before the first `session.loadExtension` call.
+6. Loads the extension from the verified unpacked directory and notifies the renderer via `browser:extensionsChanged`.
+
+The agent-facing `load_extension <extensionId>` tool uses the same helper, so Web Store UI installs and agent-triggered installs verify and load the same CRX payload.
 
 ### Unpacked extensions
 
 Local extension directories can be loaded for development via:
 
-- **Agent tools:** `load_unpacked <folderPath>` and `reload_extension <extensionId>` (see below).
+- **Agent tools:** `load_unpacked <folderPath>`, `reload_extension <extensionId>`, and `remove_extension <extensionId>` (see below).
 - **UI:** "Load unpacked..." button in the extensions panel, which opens a native folder picker.
 
 The extension must contain a `manifest.json` at its root. The call is idempotent — calling `load_unpacked` again with the same path reloads the extension (equivalent to clicking "Reload" in `chrome://extensions/`).
 
 `chrome.runtime.reload()` is supported via the `electron-chrome-extensions` bridge. HMR-capable frameworks (Vite+CRXJS, Plasmo, WXT) call this automatically when files change.
+T3 wires the bridge's reload hook back into the desktop extension loader, so HMR reloads re-apply the background service-worker polyfill and clear stale worker/code caches before `session.loadExtension()` runs.
+
+Removal uses two paths: managed Web Store extensions are removed through `electron-chrome-web-store` and the managed extension directory is deleted; unpacked extensions are removed with `session.removeExtension()` only, so the source folder is never deleted. Both paths close every open popup for that extension, remove the extension from T3's pinned-extension list, purge only that extension's Chromium Preferences/storage entries, and emit `browser:extensionsChanged` so the panel refreshes immediately.
 
 ---
 
@@ -59,23 +64,19 @@ packages/electron-chrome-extensions/
 ├── src/                    # TypeScript source (the fork)
 ├── dist/cjs/               # Built CJS output (esbuild)
 ├── dist/esm/               # Built ESM output (esbuild)
-├── dist/types/             # Type declarations (vendored from npm 4.9.0)
+├── dist/types/             # Type declarations (tsc)
 ├── esbuild.config.js       # Standalone build config (no monorepo tooling)
 └── tsconfig.json           # Standalone tsconfig (avoids T3 TS5 incompatibilities)
 ```
 
-To rebuild after source changes:
+`dist/` is gitignored generated output. To rebuild after source changes:
 
 ```bash
 cd packages/electron-chrome-extensions
-bun run build          # compiles JS + preload (dist/cjs, dist/esm, dist/chrome-extension-api.preload.js)
-npx tsc --noEmit false --rootDir src --ignoreDeprecations 6.0  # generates dist/types/
+bun run build
 ```
 
-Both steps are required before running `bun run dev:desktop`:
-
-- `bun run build` is needed because `dist/` is gitignored — a fresh clone has no compiled output.
-- The type declaration step is needed once to satisfy `apps/desktop` typecheck (`moduleResolution: "Bundler"` resolves types from the `exports.types` field).
+The build script compiles JS bundles, the preload file, browser-action bundles, and `dist/types/`. Declaration emit uses TypeScript `--noCheck` because this fork preserves loose upstream typing while still needing reproducible `.d.ts` output. Root `bun run dev:desktop`, direct `apps/desktop` `bun run dev`, direct `apps/desktop` `bun run build`, and release artifact builds run this package build first, so a clean checkout or `bun run clean` should not require a manual package build step.
 
 `apps/desktop/package.json` references it as `"electron-chrome-extensions": "workspace:*"` — never published to npm, resolved locally by bun.
 
@@ -96,9 +97,9 @@ if (contextBridge && "executeInMainWorld" in contextBridge) {
 }
 ```
 
-### Integration in `main.ts`
+### Desktop integration
 
-`getOrCreateChromeExtensions(projectId)` creates one `ElectronChromeExtensions` instance per project and wires it to T3's tab system:
+`DesktopExtensionManager.getOrCreate(projectId)` creates one `ElectronChromeExtensions` instance per project and wires it to T3's tab system through narrow callbacks supplied by `main.ts`:
 
 ```typescript
 const ext = new ElectronChromeExtensions({
@@ -150,7 +151,7 @@ if (typeof requestAnimationFrame === "undefined") {
 }
 ```
 
-The cache-clear strategy: if `ensureExtensionPolyfill` writes new bytes (first install or polyfill version bump), the `Service Worker` and `Code Cache` directories are deleted from the Electron partition and `session.clearCodeCaches()` is called before reloading. This forces Chromium to recompile the patched scripts. **Cache is never cleared on subsequent restarts** — clearing on every startup disrupts a running service worker and causes "Background connection unresponsive".
+The cache-clear strategy: if `ensureExtensionPolyfill` writes new bytes (first install, polyfill version bump, unpacked extension rebuild, or HMR rewrite), the `Service Worker` and `Code Cache` directories are deleted from the Electron partition and `session.clearCodeCaches()` is called before loading or reloading the extension. This forces Chromium to recompile the patched scripts. **Cache is never cleared on subsequent restarts** unless a file is patched — clearing on every startup disrupts a running service worker and causes "Background connection unresponsive".
 
 ---
 
@@ -158,7 +159,7 @@ The cache-clear strategy: if `ensureExtensionPolyfill` writes new bytes (first i
 
 A puzzle-piece icon in the embedded browser URL bar opens a panel showing installed extensions. See `apps/web/src/components/browser/EmbeddedBrowserExtensionsPanel.tsx`.
 
-- **Extension list**: fetched via `browser:listExtensions` IPC on panel open; cached in a module-level Map keyed by `projectId`. The main process emits `browser:extensionsChanged` after install or startup reload, which invalidates the cache and triggers a refresh.
+- **Extension list**: eagerly fetched by `useBrowserMetadata(projectId)` when a project thread mounts, then shared through `useBrowserMetadataStore` with the toolbar and panel. The main process emits `browser:extensionsChanged` after install, reload, remove, pin changes, or startup reload, which invalidates the store and triggers a refresh.
 - **Icons**: returned as `data:image/png;base64,...` URLs from the IPC handler (reading from disk). `chrome-extension://` URLs can't be used in the overlay renderer, which runs in a different session partition.
 - **Opening an extension**: `browser:openExtension` creates a floating `BrowserWindow` for popup extensions or opens `home.html` in a tab for full-page extensions.
 
@@ -201,21 +202,19 @@ Popups are positioned below the URL bar on the right side of the screen. In macO
 
 ### Dapp approval popups
 
-When extensions call `chrome.windows.create()` for dapp approvals (MetaMask connect, sign, send), the `createWindow` callback in `getOrCreateChromeExtensions` handles it identically to action popups — creates a `BrowserWindow`, resolves the URL (now done in the library, not in `main.ts`), and shows it.
+When extensions call `chrome.windows.create()` for dapp approvals (MetaMask connect, sign, send), the `createWindow` callback supplied to `DesktopExtensionManager` handles it identically to action popups — creates a `BrowserWindow`, resolves the URL (now done in the library, not in `main.ts`), registers it with `ExtensionPopupRegistry`, and shows it.
+
+`ExtensionPopupRegistry` gives every popup window a stable runtime `popupKey` (`popup-1`, `popup-2`, ...). `open_extension`, `ext_switch <extensionId>`, and `ext_close <extensionId>` remain compatible for the common single-popup case. When multiple windows exist for one extension, `ext_windows` lists each `popupKey`, popup type (`action` or `extension-window`), title, and URL; agents should use `ext_switch <popupKey>` / `ext_close <popupKey>` to target the intended window.
 
 ---
 
-## Known limitations and open tickets
+## Current limitations and regression anchors
 
-| Ticket                               | Description                                                                        |
-| ------------------------------------ | ---------------------------------------------------------------------------------- |
-| [T3CO-465–467](t3://ticket/T3CO-465) | Agent tools for extension popup windows (`ext_windows`, `ext_switch`, `ext_close`) |
-| [T3CO-468](t3://ticket/T3CO-468)     | Settings UI for loading unpacked extensions                                        |
-| [T3CO-469](t3://ticket/T3CO-469)     | Docs update pass                                                                   |
-| [T3CO-471](t3://ticket/T3CO-471)     | CRX signature verification (currently skipped)                                     |
-| [T3CO-473](t3://ticket/T3CO-473)     | Full-screen popup via NSPanel (N-API port incompatible with Electron 40 NAN)       |
-| [T3CO-474](t3://ticket/T3CO-474)     | Production build integration for `panel-window` native addon                       |
-| [T3CO-475](t3://ticket/T3CO-475)     | Fork `electron-chrome-extensions` — done; remaining upstream gaps tracked here     |
+- Extension support is Electron-desktop only. Server-only Playwright projects do not load Electron session extensions.
+- `ext_windows` lists tracked action popups and extension windows registered through T3's popup registry. If a future extension flow opens a standalone Electron `BrowserWindow` outside that registry, add the flow to `ExtensionPopupRegistry` and cover it in the broker tests.
+- The `panel-window` native addon is still macOS-specific. Production builds must keep staging `panel_window.node` outside the asar so full-screen popup behavior keeps working.
+- Web Store and agent installs must continue sharing the same verified CRX helper. Do not reintroduce a path that verifies one download and loads a different payload.
+- Unpacked extension removal must continue unloading the extension without deleting the developer's source directory.
 
 ---
 
@@ -229,6 +228,7 @@ T3 Code supports loading and reloading local Chrome extension directories for de
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `load_unpacked <folderPath>`     | Load (or reload) an extension from an absolute path to the directory containing `manifest.json`. Returns the extension name, ID, and `[unpacked]` tag. |
 | `reload_extension <extensionId>` | Reload an already-loaded extension by ID. Use when you have the ID from `list_extensions` but not the path.                                            |
+| `remove_extension <extensionId>` | Remove a loaded extension by ID. Web Store extensions are uninstalled from T3's managed directory; unpacked source folders are left untouched.         |
 | `list_extensions`                | List all installed extensions; unpacked extensions are marked `isUnpacked: true`.                                                                      |
 
 ### UI
@@ -239,7 +239,7 @@ The extensions panel ("Load unpacked..." button) opens a native macOS folder pic
 
 1. Start the framework dev server via the managed runs system (e.g. `bun run dev`).
 2. Use `load_unpacked` pointing at the build output directory (e.g. `dist/`).
-3. The framework calls `chrome.runtime.reload()` automatically when files change — T3's `electron-chrome-extensions` bridge handles this via `runtime.reload`.
+3. The framework calls `chrome.runtime.reload()` automatically when files change — T3's `electron-chrome-extensions` bridge delegates this to the desktop reload hook so the service-worker polyfill is re-applied before the extension reloads.
 
 ### Plain/vanilla extension workflow
 
@@ -247,17 +247,19 @@ Write files → `load_unpacked <dir>` → edit files → `load_unpacked <dir>` a
 
 ### `chrome.runtime.reload()` support
 
-`chrome.runtime.reload()` is wired in `packages/electron-chrome-extensions/src/browser/api/runtime.ts` (`runtime.reload` handler) and exposed to extension renderers via `packages/electron-chrome-extensions/src/renderer/index.ts`. The handler re-calls `session.loadExtension(extPath, { allowFileAccess: true })` which causes Chromium to reload the extension service worker.
+`chrome.runtime.reload()` is wired in `packages/electron-chrome-extensions/src/browser/api/runtime.ts` (`runtime.reload` handler) and exposed to extension renderers via `packages/electron-chrome-extensions/src/renderer/index.ts`. In T3, the bridge calls the desktop-provided `reloadExtension` hook, which runs the same polyfill/cache preparation as UI reloads before calling `session.loadExtension(extPath, { allowFileAccess: true })`.
 
 ---
 
 ## File map
 
-| Path                                                                 | Purpose                                                                                                                              |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/electron-chrome-extensions/`                               | Forked Chrome API bridge (workspace package)                                                                                         |
-| `apps/desktop/native/panel-window/`                                  | NSPanel N-API addon source + prebuilt binary                                                                                         |
-| `apps/desktop/src/main.ts`                                           | `getOrCreateChromeExtensions`, `loadExtensionFromCrx`, `reloadPersistedExtensions`, `ensureExtensionPolyfill`, popup window creation |
-| `apps/desktop/src/preload.ts`                                        | `browser:listExtensions`, `browser:openExtension`, `browser:extensionsChanged` IPC channels                                          |
-| `packages/contracts/src/ipc.ts`                                      | `DesktopBrowserBridge` — `listExtensions`, `openExtension`, `onExtensionsChanged` types                                              |
-| `apps/web/src/components/browser/EmbeddedBrowserExtensionsPanel.tsx` | Extensions panel UI component + overlay route                                                                                        |
+| Path                                                                 | Purpose                                                                                                         |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `packages/electron-chrome-extensions/`                               | Forked Chrome API bridge (workspace package)                                                                    |
+| `apps/desktop/native/panel-window/`                                  | NSPanel N-API addon source + prebuilt binary                                                                    |
+| `apps/desktop/src/main.ts`                                           | Extension orchestration glue: IPC/broker routes, tab/window callbacks, popup placement                          |
+| `apps/desktop/src/desktopExtensionManager.ts`                        | Per-project Chrome API bridge lifecycle, verified Web Store installs, unpacked load/reload/remove, pin metadata |
+| `apps/desktop/src/extensionPopupRegistry.ts`                         | Extension popup tracking, CDP target switching, project hide/show, and quit cleanup                             |
+| `apps/desktop/src/preload.ts`                                        | `browser:listExtensions`, `browser:openExtension`, `browser:extensionsChanged` IPC channels                     |
+| `packages/contracts/src/ipc.ts`                                      | `DesktopBrowserBridge` — `listExtensions`, `openExtension`, `onExtensionsChanged` types                         |
+| `apps/web/src/components/browser/EmbeddedBrowserExtensionsPanel.tsx` | Extensions panel UI component + overlay route                                                                   |
