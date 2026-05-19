@@ -5,34 +5,15 @@ import { ensureNativeApi } from "../../../nativeApi";
 import { resolveInlineEditBlurAction } from "../../management/KanbanTicketDetail";
 import { ImageExtensionConfirmDialog } from "../ImageExtensionConfirmDialog";
 import { extensionFromMimeType, extractExtension } from "../extension";
+import { getImagePayload, resolveImageUrl } from "./ImageArtifact.logic";
 import type { AttachmentRendererProps } from "./index";
 
-interface ImagePayloadShape {
-  readonly storage?: string;
-  readonly attachmentId?: string;
-  readonly url?: string;
-  readonly name?: string;
-  readonly mimeType?: string;
-  readonly alt?: string;
-  readonly width?: number;
-  readonly height?: number;
-}
-
-function resolveImageUrl(payload: ImagePayloadShape): string | null {
-  if (payload.storage === "local" && typeof payload.attachmentId === "string") {
-    return `/attachments/${encodeURIComponent(payload.attachmentId)}`;
-  }
-  if (typeof payload.url === "string" && payload.url.length > 0) return payload.url;
-  return null;
-}
-
-export function ImageArtifact({ artifact, onDelete }: AttachmentRendererProps) {
-  const payload = (artifact.payload ?? {}) as ImagePayloadShape;
+export function ImageArtifact({ artifact, onDelete, onOpen }: AttachmentRendererProps) {
+  const payload = getImagePayload(artifact);
   const src = resolveImageUrl(payload);
   const displayName = artifact.title ?? payload.name ?? "Image";
   const label = payload.alt ?? displayName;
 
-  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(displayName);
   const [saving, setSaving] = useState(false);
@@ -122,7 +103,7 @@ export function ImageArtifact({ artifact, onDelete }: AttachmentRendererProps) {
         <button
           type="button"
           className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden bg-background"
-          onClick={() => setExpanded(true)}
+          onClick={() => onOpen?.(artifact)}
           aria-label={`Preview ${label}`}
         >
           <img src={src} alt={label} className="h-full w-full object-cover" loading="lazy" />
@@ -181,20 +162,6 @@ export function ImageArtifact({ artifact, onDelete }: AttachmentRendererProps) {
           </button>
         ) : null}
       </div>
-      {expanded ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setExpanded(false)}
-        >
-          <img
-            src={src}
-            alt={label}
-            className="max-h-full max-w-full rounded-md object-contain shadow-2xl"
-          />
-        </div>
-      ) : null}
       <ImageExtensionConfirmDialog
         open={pendingExtChange !== null}
         onOpenChange={(open) => {

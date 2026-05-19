@@ -34,9 +34,12 @@ import { useTicketSelectionStore } from "../../ticketSelectionStore";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
+import { buildExpandedImagePreview } from "../chat/ExpandedImagePreview";
 import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
 import { TicketMermaidArtifactView } from "./TicketMermaidArtifactView";
+import { useImagePreviewOverlay } from "../imagePreview/ImagePreviewOverlay";
+import { resolveImageArtifactPreview } from "../attachments/renderers/ImageArtifact.logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -600,6 +603,7 @@ export function KanbanTicketDetail({
   const [movingToBoard, setMovingToBoard] = useState(false);
   const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
   const [openArtifactId, setOpenArtifactId] = useState<ArtifactId | null>(null);
+  const { openImagePreview, imagePreviewOverlay } = useImagePreviewOverlay();
   const ticketRef = useRef<Ticket | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Saved scroll positions keyed by ticketId — used to restore on back navigation. */
@@ -962,11 +966,23 @@ export function KanbanTicketDetail({
     handleMoveToBoardRequest([toTicketSummary(ticket)]);
   }, [handleMoveToBoardRequest, ticket, toTicketSummary]);
 
-  const handleOpenArtifact = useCallback((artifact: Artifact) => {
-    if (artifact.type === "mermaid") {
-      setOpenArtifactId(artifact.id);
-    }
-  }, []);
+  const handleOpenArtifact = useCallback(
+    (artifact: Artifact) => {
+      if (artifact.type === "mermaid") {
+        setOpenArtifactId(artifact.id);
+        return;
+      }
+      if (artifact.type !== "image") return;
+
+      const imageItems = (ticketRef.current?.artifacts ?? []).flatMap((item) => {
+        const preview = resolveImageArtifactPreview(item);
+        return preview ? [preview] : [];
+      });
+      const preview = buildExpandedImagePreview(imageItems, artifact.id);
+      if (preview) openImagePreview(preview);
+    },
+    [openImagePreview],
+  );
 
   const handleCloseOpenArtifact = useCallback(() => {
     setOpenArtifactId(null);
@@ -1054,35 +1070,134 @@ export function KanbanTicketDetail({
   }
 
   return (
-    <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
-        {/* Header */}
-        <div className="flex flex-col gap-3">
-          <div className="flex items-start justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
-                <span className="shrink-0 font-mono text-md text-muted-foreground">
-                  {ticket.identifier}
-                </span>
+    <>
+      <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 py-8">
+          {/* Header */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-start justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="shrink-0 font-mono text-md text-muted-foreground">
+                    {ticket.identifier}
+                  </span>
+                  <input
+                    type="text"
+                    className="min-w-0 flex-1 cursor-text bg-transparent font-[inherit]! text-lg font-medium text-foreground outline-none"
+                    value={editingTitle ? titleDraft : ticket.title}
+                    onFocus={() => {
+                      setTitleDraft(ticket.title);
+                      setEditingTitle(true);
+                    }}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={() => {
+                      const blurAction = resolveInlineEditBlurAction({
+                        cancelRequested: cancelEditRef.current,
+                        isEditing: editingTitle,
+                      });
+                      if (blurAction === "cancel") {
+                        cancelEditRef.current = false;
+                        setEditingTitle(false);
+                      } else if (blurAction === "save") {
+                        void handleTitleSave();
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.currentTarget.blur();
+                      }
+                      if (e.key === "Escape") {
+                        cancelEditRef.current = true;
+                        e.currentTarget.blur();
+                      }
+                    }}
+                  />
+                </div>
+                {parentSummary && (
+                  <ParentTicketIndicator
+                    parent={{
+                      identifier: parentSummary.identifier,
+                      title: parentSummary.title,
+                    }}
+                    onClick={() => onNavigateToTicket(parentSummary.id)}
+                  />
+                )}
+              </div>
+              <TicketDetailActionsMenu
+                ticket={ticket}
+                onOrchestrate={onOrchestrate}
+                onDecompose={handleDecompose}
+                onMoveToBoard={handleMoveCurrentTicketToBoard}
+                onArchive={() => setArchiveDialogOpen(true)}
+                onDelete={() => setDeleteDialogOpen(true)}
+              />
+            </div>
+
+            {/* Status + Priority inline selectors */}
+            <div className="flex flex-wrap items-center gap-3">
+              {threadLinks?.originThread && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() =>
+                      void navigate({
+                        to: "/$threadId",
+                        params: { threadId: threadLinks.originThread!.threadId },
+                      })
+                    }
+                  >
+                    Origin Thread
+                  </Button>
+                  <span className="text-border">|</span>
+                </>
+              )}
+
+              <TicketDetailStatusSelect value={ticket.status} onValueChange={handleStatusChange} />
+
+              <span className="text-border">|</span>
+
+              <TicketDetailPrioritySelect
+                value={ticket.priority}
+                onValueChange={handlePriorityChange}
+              />
+
+              <span className="text-border">|</span>
+              <TicketLabelPicker
+                ticketId={ticketId}
+                projectId={projectId}
+                labels={ticket.labels}
+                onUpdated={() => void fetchTicket()}
+                inline
+              />
+              <span className="text-border">|</span>
+              <div className="flex items-center gap-1.5">
+                <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
                 <input
                   type="text"
-                  className="min-w-0 flex-1 cursor-text bg-transparent font-[inherit]! text-lg font-medium text-foreground outline-none"
-                  value={editingTitle ? titleDraft : ticket.title}
+                  className={`min-w-[120px] max-w-[200px] cursor-text bg-transparent font-[inherit]! text-[11px] outline-none ${
+                    editingWorktree || ticket.worktree
+                      ? "text-foreground"
+                      : "italic text-muted-foreground/60"
+                  }`}
+                  value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
+                  placeholder="No worktree specified"
                   onFocus={() => {
-                    setTitleDraft(ticket.title);
-                    setEditingTitle(true);
+                    setWorktreeDraft(ticket.worktree ?? "");
+                    setEditingWorktree(true);
                   }}
-                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onChange={(e) => setWorktreeDraft(e.target.value)}
                   onBlur={() => {
                     const blurAction = resolveInlineEditBlurAction({
                       cancelRequested: cancelEditRef.current,
-                      isEditing: editingTitle,
+                      isEditing: editingWorktree,
                     });
                     if (blurAction === "cancel") {
                       cancelEditRef.current = false;
-                      setEditingTitle(false);
+                      setEditingWorktree(false);
                     } else if (blurAction === "save") {
-                      void handleTitleSave();
+                      void handleWorktreeSave();
                     }
                   }}
                   onKeyDown={(e) => {
@@ -1097,215 +1212,119 @@ export function KanbanTicketDetail({
                   }}
                 />
               </div>
-              {parentSummary && (
-                <ParentTicketIndicator
-                  parent={{
-                    identifier: parentSummary.identifier,
-                    title: parentSummary.title,
-                  }}
-                  onClick={() => onNavigateToTicket(parentSummary.id)}
-                />
-              )}
+              <span className="text-border">|</span>
+              <span className="text-[11px] text-muted-foreground">
+                Created {formatRelativeDate(ticket.createdAt)}
+              </span>
             </div>
-            <TicketDetailActionsMenu
-              ticket={ticket}
-              onOrchestrate={onOrchestrate}
-              onDecompose={handleDecompose}
-              onMoveToBoard={handleMoveCurrentTicketToBoard}
-              onArchive={() => setArchiveDialogOpen(true)}
-              onDelete={() => setDeleteDialogOpen(true)}
+          </div>
+
+          {/* Description */}
+          <div className="rounded-md py-2">
+            <TicketDescriptionEditor
+              ticketId={ticketId}
+              initialContent={ticket.description}
+              onSave={saveDescription}
             />
           </div>
 
-          {/* Status + Priority inline selectors */}
-          <div className="flex flex-wrap items-center gap-3">
-            {threadLinks?.originThread && (
-              <>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() =>
-                    void navigate({
-                      to: "/$threadId",
-                      params: { threadId: threadLinks.originThread!.threadId },
-                    })
-                  }
-                >
-                  Origin Thread
-                </Button>
-                <span className="text-border">|</span>
-              </>
-            )}
+          {/* Attachments */}
+          <TicketAttachments
+            ticketId={ticketId}
+            artifacts={ticket.artifacts}
+            onUpdated={() => void fetchTicket()}
+            onOpenArtifact={handleOpenArtifact}
+          />
 
-            <TicketDetailStatusSelect value={ticket.status} onValueChange={handleStatusChange} />
+          {/* Acceptance Criteria */}
+          <TicketAcceptanceCriteria
+            ticketId={ticketId}
+            criteria={ticket.acceptanceCriteria ?? []}
+            criteriaRevision={ticket.criteriaRevision ?? 1}
+            onUpdated={() => void fetchTicket()}
+            onCriteriaChange={handleCriteriaChange}
+          />
 
-            <span className="text-border">|</span>
+          {/* Dependencies */}
+          {ticket.dependencies.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-medium text-muted-foreground">
+                Dependencies ({ticket.dependencies.length})
+              </h3>
+              <div className="flex flex-col gap-1">
+                {ticket.dependencies.map((dep) => {
+                  return (
+                    <DependencyTicketRow
+                      key={dep.dependsOnTicketId}
+                      dependency={dep}
+                      onNavigateToTicket={onNavigateToTicket}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-            <TicketDetailPrioritySelect
-              value={ticket.priority}
-              onValueChange={handlePriorityChange}
-            />
-
-            <span className="text-border">|</span>
-            <TicketLabelPicker
+          {/* Sub-tickets — recursive tree, default open, per-node collapse persisted. */}
+          {ticket.subTickets.length > 0 && (
+            <SubTicketsTree
               ticketId={ticketId}
               projectId={projectId}
-              labels={ticket.labels}
-              onUpdated={() => void fetchTicket()}
-              inline
+              onNavigateToTicket={onNavigateToTicket}
+              onMoveToBoardRequest={handleMoveToBoardRequest}
+              onArchiveRequest={handleArchiveSubTicketsRequest}
             />
-            <span className="text-border">|</span>
-            <div className="flex items-center gap-1.5">
-              <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
-              <input
-                type="text"
-                className={`min-w-[120px] max-w-[200px] cursor-text bg-transparent font-[inherit]! text-[11px] outline-none ${
-                  editingWorktree || ticket.worktree
-                    ? "text-foreground"
-                    : "italic text-muted-foreground/60"
-                }`}
-                value={editingWorktree ? worktreeDraft : (ticket.worktree ?? "")}
-                placeholder="No worktree specified"
-                onFocus={() => {
-                  setWorktreeDraft(ticket.worktree ?? "");
-                  setEditingWorktree(true);
-                }}
-                onChange={(e) => setWorktreeDraft(e.target.value)}
-                onBlur={() => {
-                  const blurAction = resolveInlineEditBlurAction({
-                    cancelRequested: cancelEditRef.current,
-                    isEditing: editingWorktree,
-                  });
-                  if (blurAction === "cancel") {
-                    cancelEditRef.current = false;
-                    setEditingWorktree(false);
-                  } else if (blurAction === "save") {
-                    void handleWorktreeSave();
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    e.currentTarget.blur();
-                  }
-                  if (e.key === "Escape") {
-                    cancelEditRef.current = true;
-                    e.currentTarget.blur();
-                  }
-                }}
-              />
-            </div>
-            <span className="text-border">|</span>
-            <span className="text-[11px] text-muted-foreground">
-              Created {formatRelativeDate(ticket.createdAt)}
-            </span>
-          </div>
-        </div>
+          )}
 
-        {/* Description */}
-        <div className="rounded-md py-2">
-          <TicketDescriptionEditor
+          {/* Comments */}
+          <TicketComments
             ticketId={ticketId}
-            initialContent={ticket.description}
-            onSave={saveDescription}
+            comments={ticket.comments}
+            onUpdated={() => void fetchTicket()}
           />
+
+          {/* History */}
+          <TicketHistory ticketId={ticketId} />
         </div>
-
-        {/* Attachments */}
-        <TicketAttachments
-          ticketId={ticketId}
-          artifacts={ticket.artifacts}
-          onUpdated={() => void fetchTicket()}
-          onOpenArtifact={handleOpenArtifact}
+        <MoveTicketToBoardDialog
+          open={moveToBoardDialogOpen}
+          onOpenChange={(open) => {
+            setMoveToBoardDialogOpen(open);
+            if (!open && !movingToBoard) {
+              setMoveToBoardTickets([]);
+            }
+          }}
+          tickets={moveToBoardTickets}
+          pending={movingToBoard}
+          onConfirm={() => void handleConfirmMoveToBoard()}
         />
-
-        {/* Acceptance Criteria */}
-        <TicketAcceptanceCriteria
-          ticketId={ticketId}
-          criteria={ticket.acceptanceCriteria ?? []}
-          criteriaRevision={ticket.criteriaRevision ?? 1}
-          onUpdated={() => void fetchTicket()}
-          onCriteriaChange={handleCriteriaChange}
+        <TicketDeleteConfirmDialog
+          open={deleteDialogOpen}
+          onOpenChange={setDeleteDialogOpen}
+          ticket={ticket}
+          onConfirm={handleDelete}
         />
-
-        {/* Dependencies */}
-        {ticket.dependencies.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Dependencies ({ticket.dependencies.length})
-            </h3>
-            <div className="flex flex-col gap-1">
-              {ticket.dependencies.map((dep) => {
-                return (
-                  <DependencyTicketRow
-                    key={dep.dependsOnTicketId}
-                    dependency={dep}
-                    onNavigateToTicket={onNavigateToTicket}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Sub-tickets — recursive tree, default open, per-node collapse persisted. */}
-        {ticket.subTickets.length > 0 && (
-          <SubTicketsTree
-            ticketId={ticketId}
-            projectId={projectId}
-            onNavigateToTicket={onNavigateToTicket}
-            onMoveToBoardRequest={handleMoveToBoardRequest}
-            onArchiveRequest={handleArchiveSubTicketsRequest}
-          />
-        )}
-
-        {/* Comments */}
-        <TicketComments
-          ticketId={ticketId}
-          comments={ticket.comments}
-          onUpdated={() => void fetchTicket()}
+        <TicketArchiveConfirmDialog
+          open={archiveDialogOpen}
+          onOpenChange={setArchiveDialogOpen}
+          ticket={ticket}
+          onConfirm={handleArchive}
         />
-
-        {/* History */}
-        <TicketHistory ticketId={ticketId} />
+        {/* Archive sub-tickets confirmation (multi-select / context-menu archive). */}
+        <SubTicketsArchiveConfirmDialog
+          open={archiveSubTicketsDialog !== null}
+          onOpenChange={(open) => {
+            if (!open && !archivingSubTickets) {
+              setArchiveSubTicketsDialog(null);
+            }
+          }}
+          count={archiveSubTicketsDialog?.length ?? 0}
+          pending={archivingSubTickets}
+          onConfirm={handleConfirmArchiveSubTickets}
+        />
       </div>
-      <MoveTicketToBoardDialog
-        open={moveToBoardDialogOpen}
-        onOpenChange={(open) => {
-          setMoveToBoardDialogOpen(open);
-          if (!open && !movingToBoard) {
-            setMoveToBoardTickets([]);
-          }
-        }}
-        tickets={moveToBoardTickets}
-        pending={movingToBoard}
-        onConfirm={() => void handleConfirmMoveToBoard()}
-      />
-      <TicketDeleteConfirmDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        ticket={ticket}
-        onConfirm={handleDelete}
-      />
-      <TicketArchiveConfirmDialog
-        open={archiveDialogOpen}
-        onOpenChange={setArchiveDialogOpen}
-        ticket={ticket}
-        onConfirm={handleArchive}
-      />
-      {/* Archive sub-tickets confirmation (multi-select / context-menu archive). */}
-      <SubTicketsArchiveConfirmDialog
-        open={archiveSubTicketsDialog !== null}
-        onOpenChange={(open) => {
-          if (!open && !archivingSubTickets) {
-            setArchiveSubTicketsDialog(null);
-          }
-        }}
-        count={archiveSubTicketsDialog?.length ?? 0}
-        pending={archivingSubTickets}
-        onConfirm={handleConfirmArchiveSubTickets}
-      />
-    </div>
+      {imagePreviewOverlay}
+    </>
   );
 }
 

@@ -42,10 +42,8 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { useMultiRepoGitStatus } from "../hooks/useMultiRepoGitStatus";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import { useEmbeddedBrowserOverlayLifecycle } from "../embeddedBrowserModalSuspension";
 import {
   acquireNativeOverlay,
-  openNativeOverlay,
   type NativeOverlayHandle,
   useNativeOverlayActive,
 } from "../nativeOverlayBridge";
@@ -133,8 +131,6 @@ import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   Loader2Icon,
   LockIcon,
@@ -207,7 +203,8 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { RateLimitMeter } from "./chat/RateLimitMeter";
-import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+import { buildExpandedImagePreview } from "./chat/ExpandedImagePreview";
+import { useImagePreviewOverlay } from "./imagePreview/ImagePreviewOverlay";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
@@ -766,19 +763,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const promptRef = useRef(prompt);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
-  const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const nativeOverlayActive = useNativeOverlayActive();
-  // When native overlay is active: render the image preview in a transparent
-  // WebContentsView above the embedded browser so the browser stays visible.
-  // When NOT active: fall back to the suspension approach (browser hides briefly).
-  useEmbeddedBrowserOverlayLifecycle(
-    !nativeOverlayActive && expandedImage !== null,
-    "expanded-image",
-  );
-  // Native overlay handle for the image preview.
-  const nativeImageOverlayHandleRef = useRef<
-    import("../nativeOverlayBridge").NativeOverlaySession<void> | null
-  >(null);
+  const { openImagePreview, closeImagePreview, imagePreviewOverlay } = useImagePreviewOverlay();
   const nativeComposerMenuOverlayHandleRef = useRef<NativeOverlayHandle | null>(null);
   const nativeComposerMenuOpeningRef = useRef(false);
   const composerMenuAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -3377,8 +3363,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
-    setExpandedImage(null);
-  }, [resetLocalDispatch, threadId]);
+    closeImagePreview();
+  }, [closeImagePreview, resetLocalDispatch, threadId]);
 
   useEffect(() => {
     if (!activeThread || !isWorking) {
@@ -3499,56 +3485,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     syncComposerDraftPersistedAttachments,
     threadId,
   ]);
-
-  const closeExpandedImage = useCallback(() => {
-    nativeImageOverlayHandleRef.current?.release();
-    nativeImageOverlayHandleRef.current = null;
-    setExpandedImage(null);
-  }, []);
-  const navigateExpandedImage = useCallback((direction: -1 | 1) => {
-    setExpandedImage((existing) => {
-      if (!existing || existing.images.length <= 1) {
-        return existing;
-      }
-      const nextIndex =
-        (existing.index + direction + existing.images.length) % existing.images.length;
-      if (nextIndex === existing.index) {
-        return existing;
-      }
-      return { ...existing, index: nextIndex };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!expandedImage) {
-      return;
-    }
-
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeExpandedImage();
-        return;
-      }
-      if (expandedImage.images.length <= 1) {
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        event.stopPropagation();
-        navigateExpandedImage(-1);
-        return;
-      }
-      if (event.key !== "ArrowRight") return;
-      event.preventDefault();
-      event.stopPropagation();
-      navigateExpandedImage(1);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeExpandedImage, expandedImage, navigateExpandedImage]);
 
   const activeWorktreePath = activeThread?.worktreePath;
   const envMode: DraftThreadEnvMode = activeWorktreePath
@@ -5352,46 +5288,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       [groupId]: !existing[groupId],
     }));
   }, []);
-  const openImagePreview = useCallback(
-    (preview: ExpandedImagePreview) => {
-      if (nativeOverlayActive) {
-        // Native overlay path: render entirely in the overlay WebContentsView.
-        // Do NOT set host DOM expandedImage state — that would render a fixed
-        // div in the host renderer which sits BEHIND the embedded browser.
-        void openNativeOverlay<void>(
-          {
-            type: "image-preview",
-            images: preview.images.map((img) => ({ src: img.src, name: img.name })),
-            initialIndex: preview.index,
-          },
-          {
-            resolveEvent: (type) => (type === "close" ? { value: undefined } : null),
-          },
-        ).then((session) => {
-          if (!session) {
-            // Acquire failed — fall back to host DOM + suspension.
-            setExpandedImage(preview);
-            return;
-          }
-          nativeImageOverlayHandleRef.current = session;
-          void session.result.finally(() => {
-            if (nativeImageOverlayHandleRef.current === session) {
-              nativeImageOverlayHandleRef.current = null;
-            }
-          });
-        });
-      } else {
-        // Non-native path: host DOM rendering + suspension (original behavior).
-        setExpandedImage(preview);
-      }
-    },
-    [nativeOverlayActive],
-  );
-  const onExpandTimelineImage = useCallback(
-    (preview: ExpandedImagePreview) => openImagePreview(preview),
-    [openImagePreview],
-  );
-  const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
+  const onExpandTimelineImage = openImagePreview;
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
       void navigate({
@@ -6195,73 +6092,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         />
       ))}
 
-      {expandedImage && expandedImageItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Expanded image preview"
-        >
-          <button
-            type="button"
-            className="absolute inset-0 z-0 cursor-zoom-out"
-            aria-label="Close image preview"
-            onClick={closeExpandedImage}
-          />
-          {expandedImage.images.length > 1 && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="absolute left-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:left-6"
-              aria-label="Previous image"
-              onClick={() => {
-                navigateExpandedImage(-1);
-              }}
-            >
-              <ChevronLeftIcon className="size-5" />
-            </Button>
-          )}
-          <div className="relative isolate z-10 max-h-[92vh] max-w-[92vw]">
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              className="absolute right-2 top-2"
-              onClick={closeExpandedImage}
-              aria-label="Close image preview"
-            >
-              <XIcon />
-            </Button>
-            <img
-              src={expandedImageItem.src}
-              alt={expandedImageItem.name}
-              className="max-h-[86vh] max-w-[92vw] select-none rounded-lg border border-border/70 bg-background object-contain shadow-2xl"
-              draggable={false}
-            />
-            <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
-              {expandedImageItem.name}
-              {expandedImage.images.length > 1
-                ? ` (${expandedImage.index + 1}/${expandedImage.images.length})`
-                : ""}
-            </p>
-          </div>
-          {expandedImage.images.length > 1 && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:right-6"
-              aria-label="Next image"
-              onClick={() => {
-                navigateExpandedImage(1);
-              }}
-            >
-              <ChevronRightIcon className="size-5" />
-            </Button>
-          )}
-        </div>
-      )}
+      {imagePreviewOverlay}
     </div>
   );
 }

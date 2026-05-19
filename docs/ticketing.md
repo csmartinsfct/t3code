@@ -351,9 +351,12 @@ Relationship reads use a dedicated RPC:
 | `TicketHistory`             | `TicketHistory.tsx`             | Lazy-loaded collapsible audit timeline                     |
 | `KanbanTicketDetail`        | `KanbanTicketDetail.tsx`        | Ticket detail panel with origin-thread section             |
 | `TicketMermaidArtifactView` | `TicketMermaidArtifactView.tsx` | Full-pane Mermaid attachment viewer/editor with pan/zoom   |
+| `ImagePreviewOverlay`       | `ImagePreviewOverlay.tsx`       | Shared image preview overlay used by chat and tickets      |
 | `ticketUtils`               | `ticketUtils.ts`                | Status/priority color maps, date formatters                |
 
-Mermaid attachment cards in ticket detail are clickable. Opening one replaces the ticket detail body with a full-pane diagram workspace instead of a modal, so large diagrams have room for pan/zoom and source editing. The workspace has close, edit/save/cancel, zoom in/out, fit, reset, mouse-wheel zoom, and drag-to-pan controls.
+Mermaid attachment cards in ticket detail are clickable. Opening one replaces the ticket detail body with a full-pane diagram workspace instead of a modal, so large diagrams have room for pan/zoom and source editing. The workspace uses the ticket header Back button to return to the ticket detail and has edit/save/cancel, zoom in/out, reset-to-fit, mouse-wheel zoom, and drag-to-pan controls.
+
+Image attachment thumbnails in ticket detail open through the same shared image preview overlay used by chat and composer image attachments, including native overlay routing when the embedded browser is visible and previous/next navigation across previewable ticket images.
 
 ### Ticket Detail Thread Sections
 
