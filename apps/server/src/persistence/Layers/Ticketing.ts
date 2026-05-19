@@ -1090,10 +1090,10 @@ const makeTicketingRepository = Effect.gen(function* () {
         return rows;
       }),
 
-    updateArtifactTitle: ({ id, title, updatedAt }) =>
-      sql`UPDATE artifacts SET title = ${title}, updated_at = ${updatedAt} WHERE id = ${id}`.pipe(
+    updateArtifact: ({ id, title, payload, updatedAt }) =>
+      sql`UPDATE artifacts SET title = ${title}, payload_json = ${JSON.stringify(payload)}, updated_at = ${updatedAt} WHERE id = ${id}`.pipe(
         Effect.asVoid,
-        Effect.mapError(toPersistenceSqlError("TicketingRepository.updateArtifactTitle:query")),
+        Effect.mapError(toPersistenceSqlError("TicketingRepository.updateArtifact:query")),
       ),
     deleteArtifact: ({ id }) =>
       sql`DELETE FROM artifacts WHERE id = ${id}`.pipe(

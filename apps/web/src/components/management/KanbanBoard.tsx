@@ -868,10 +868,17 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
     [clearSelection, pushManagementBoardTicket, typedProjectId],
   );
 
+  const [nestedBackHandler, setNestedBackHandler] = useState<(() => boolean) | null>(null);
+
+  const handleNestedBackChange = useCallback((handler: (() => boolean) | null) => {
+    setNestedBackHandler(() => handler);
+  }, []);
+
   const handleBack = useCallback(() => {
+    if (nestedBackHandler?.()) return;
     clearSelection();
     popManagementBoardTicket(typedProjectId);
-  }, [clearSelection, popManagementBoardTicket, typedProjectId]);
+  }, [clearSelection, nestedBackHandler, popManagementBoardTicket, typedProjectId]);
 
   const handleBackToBoard = useCallback(() => {
     clearSelection();
@@ -968,6 +975,7 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, KanbanBoardProps>(funct
           ticketId={selectedTicketId}
           projectId={projectId}
           onBack={handleBack}
+          onNestedBackChange={handleNestedBackChange}
           onNavigateToTicket={handleNavigateToTicket}
           onOrchestrate={handleOrchestrateFromDetail}
           findTicketSummary={findTicketSummary}

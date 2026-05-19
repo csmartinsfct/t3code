@@ -674,6 +674,7 @@ export type ArtifactCreateInput = typeof ArtifactCreateInput.Type;
 export const ArtifactUpdateInput = Schema.Struct({
   id: ArtifactId,
   title: Schema.optional(Schema.NullOr(Schema.String)),
+  payload: Schema.optional(Schema.Unknown),
 });
 export type ArtifactUpdateInput = typeof ArtifactUpdateInput.Type;
 

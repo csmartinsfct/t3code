@@ -1968,15 +1968,25 @@ const makeTicketingService = Effect.gen(function* () {
         onSome: Effect.succeed,
       });
 
+      const owner: AttachmentOwner | null = current.ticketId
+        ? { kind: "ticket", id: current.ticketId }
+        : current.commentId
+          ? { kind: "comment", id: current.commentId }
+          : null;
+      const nextPayload =
+        input.payload === undefined || owner === null
+          ? current.payload
+          : (yield* ingestIfImagePayload(current.type, input.payload, owner)).payload;
       const now = nowIso();
       const nextTitle = input.title === undefined ? current.title : input.title;
       yield* repo
-        .updateArtifactTitle({ id: input.id, title: nextTitle, updatedAt: now })
+        .updateArtifact({ id: input.id, title: nextTitle, payload: nextPayload, updatedAt: now })
         .pipe(Effect.mapError(toOperationError("updateArtifact")));
 
       const updated: Artifact = {
         ...(current as Artifact),
         title: nextTitle,
+        payload: nextPayload,
         updatedAt: now,
       };
 
@@ -1984,7 +1994,7 @@ const makeTicketingService = Effect.gen(function* () {
         yield* recordHistory(
           current.ticketId,
           "artifact_updated",
-          { artifactId: input.id, title: nextTitle },
+          { artifactId: input.id, title: nextTitle, payloadUpdated: input.payload !== undefined },
           "user",
         ).pipe(Effect.mapError(toOperationError("updateArtifact")));
       }

@@ -787,7 +787,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "update_artifact",
     title: "Update Artifact",
     description:
-      "Update an artifact's title (human-readable label shown on the card). Pass null to clear the title and fall back to the original filename.",
+      "Update an artifact's title and/or type-specific payload. Pass title null to clear the human-readable label.",
     inputSchema: {
       id: { type: "string", description: "The artifact ID." },
       title: {
@@ -795,6 +795,12 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         optional: true,
         nullable: true,
         description: "New title (null clears).",
+      },
+      payload: {
+        type: "object",
+        optional: true,
+        description:
+          "Replacement type-specific payload. For mermaid artifacts use {source}. For image artifacts the same shapes as create_artifact are accepted.",
       },
     },
   },
@@ -1470,6 +1476,7 @@ function toolHandlers(ctx: ToolContext) {
         const artifact = yield* ticketing.updateArtifact({
           id: ArtifactId.makeUnsafe(id),
           ...(title === undefined ? {} : { title }),
+          ...(Object.hasOwn(input, "payload") ? { payload: input.payload } : {}),
         });
         return respondOk(yield* resolveJson(artifact));
       }),

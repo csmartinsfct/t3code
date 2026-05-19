@@ -1,5 +1,7 @@
 import type {
   AcceptanceCriterion,
+  Artifact,
+  ArtifactId,
   Ticket,
   TicketDependency,
   TicketId,
@@ -34,6 +36,7 @@ import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters
 import { useRoutedPopoverSurface } from "~/routedPopover";
 import { TicketAttachments } from "./TicketAttachments";
 import { TicketDescriptionEditor } from "./TicketDescriptionEditor";
+import { TicketMermaidArtifactView } from "./TicketMermaidArtifactView";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -376,6 +379,7 @@ interface KanbanTicketDetailProps {
   ticketId: TicketId;
   projectId: string;
   onBack: () => void;
+  onNestedBackChange?: ((handler: (() => boolean) | null) => void) | undefined;
   onNavigateToTicket: (ticketId: TicketId) => void;
   onOrchestrate?: (ticket: Ticket) => void;
   findTicketSummary?: (id: TicketId) => TicketSummary | undefined;
@@ -578,6 +582,7 @@ export function KanbanTicketDetail({
   ticketId,
   projectId,
   onBack,
+  onNestedBackChange,
   onNavigateToTicket,
   onOrchestrate,
   findTicketSummary,
@@ -594,6 +599,7 @@ export function KanbanTicketDetail({
   const [moveToBoardTickets, setMoveToBoardTickets] = useState<readonly TicketSummary[]>([]);
   const [movingToBoard, setMovingToBoard] = useState(false);
   const [threadLinks, setThreadLinks] = useState<TicketThreadLinks | null>(null);
+  const [openArtifactId, setOpenArtifactId] = useState<ArtifactId | null>(null);
   const ticketRef = useRef<Ticket | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Saved scroll positions keyed by ticketId — used to restore on back navigation. */
@@ -611,6 +617,11 @@ export function KanbanTicketDetail({
     if (!ticket?.parentId || !findTicketSummary) return null;
     return findTicketSummary(ticket.parentId) ?? null;
   }, [ticket?.parentId, findTicketSummary]);
+
+  const openArtifact = useMemo(() => {
+    if (!ticket || !openArtifactId) return null;
+    return ticket.artifacts.find((artifact) => artifact.id === openArtifactId) ?? null;
+  }, [openArtifactId, ticket]);
 
   const toTicketSummary = useCallback((value: Ticket): TicketSummary => {
     return {
@@ -951,6 +962,41 @@ export function KanbanTicketDetail({
     handleMoveToBoardRequest([toTicketSummary(ticket)]);
   }, [handleMoveToBoardRequest, ticket, toTicketSummary]);
 
+  const handleOpenArtifact = useCallback((artifact: Artifact) => {
+    if (artifact.type === "mermaid") {
+      setOpenArtifactId(artifact.id);
+    }
+  }, []);
+
+  const handleCloseOpenArtifact = useCallback(() => {
+    setOpenArtifactId(null);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!onNestedBackChange) return;
+    if (!openArtifactId) {
+      onNestedBackChange(null);
+      return;
+    }
+
+    onNestedBackChange(handleCloseOpenArtifact);
+    return () => onNestedBackChange(null);
+  }, [handleCloseOpenArtifact, onNestedBackChange, openArtifactId]);
+
+  const handleArtifactUpdated = useCallback((updatedArtifact: Artifact) => {
+    const previous = ticketRef.current;
+    if (!previous) return;
+    const next = {
+      ...previous,
+      artifacts: previous.artifacts.map((artifact) =>
+        artifact.id === updatedArtifact.id ? updatedArtifact : artifact,
+      ),
+    };
+    ticketRef.current = next;
+    setTicket(next);
+  }, []);
+
   const handleConfirmMoveToBoard = useCallback(async () => {
     if (moveToBoardTickets.length === 0) return;
     setMovingToBoard(true);
@@ -1001,6 +1047,10 @@ export function KanbanTicketDetail({
         <p className="text-xs text-muted-foreground">Ticket not found.</p>
       </div>
     );
+  }
+
+  if (openArtifact?.type === "mermaid") {
+    return <TicketMermaidArtifactView artifact={openArtifact} onUpdated={handleArtifactUpdated} />;
   }
 
   return (
@@ -1166,6 +1216,7 @@ export function KanbanTicketDetail({
           ticketId={ticketId}
           artifacts={ticket.artifacts}
           onUpdated={() => void fetchTicket()}
+          onOpenArtifact={handleOpenArtifact}
         />
 
         {/* Acceptance Criteria */}

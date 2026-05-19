@@ -10,6 +10,7 @@ interface TicketAttachmentsProps {
   readonly ticketId: TicketId;
   readonly artifacts: ReadonlyArray<Artifact>;
   readonly onUpdated: () => void;
+  readonly onOpenArtifact?: (artifact: Artifact) => void;
 }
 
 const MAX_INFLIGHT_UPLOADS = 4;
@@ -27,7 +28,12 @@ async function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export function TicketAttachments({ ticketId, artifacts, onUpdated }: TicketAttachmentsProps) {
+export function TicketAttachments({
+  ticketId,
+  artifacts,
+  onUpdated,
+  onOpenArtifact,
+}: TicketAttachmentsProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [pending, setPending] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +160,7 @@ export function TicketAttachments({ ticketId, artifacts, onUpdated }: TicketAtta
                 key={artifact.id}
                 artifact={artifact}
                 onDelete={() => void handleDelete(artifact.id)}
+                {...(onOpenArtifact ? { onOpen: onOpenArtifact } : {})}
               />
             );
           })}

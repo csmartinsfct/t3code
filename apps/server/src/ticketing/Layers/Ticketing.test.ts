@@ -907,7 +907,7 @@ TicketingTestLayer("TicketingService", (it) => {
     }),
   );
 
-  it.effect("updateArtifact changes the title and leaves payload untouched", () =>
+  it.effect("updateArtifact changes the title and payload independently", () =>
     Effect.gen(function* () {
       const projectId = ProjectId.makeUnsafe("project-attach-rename");
       const ticketing = yield* TicketingService;
@@ -928,9 +928,23 @@ TicketingTestLayer("TicketingService", (it) => {
       assert.strictEqual(renamed.title, "Renamed");
       assert.deepStrictEqual(renamed.payload, { url: "https://figma.com/design/xyz" });
 
+      const edited = yield* ticketing.updateArtifact({
+        id: figma.id,
+        payload: { url: "https://figma.com/design/abc", nodeId: "4:2" },
+      });
+      assert.strictEqual(edited.title, "Renamed");
+      assert.deepStrictEqual(edited.payload, {
+        url: "https://figma.com/design/abc",
+        nodeId: "4:2",
+      });
+
       // null clears the title
       const cleared = yield* ticketing.updateArtifact({ id: figma.id, title: null });
       assert.strictEqual(cleared.title, null);
+      assert.deepStrictEqual(cleared.payload, {
+        url: "https://figma.com/design/abc",
+        nodeId: "4:2",
+      });
     }),
   );
 

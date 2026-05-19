@@ -286,7 +286,9 @@ When `rootTicketId` is provided, the server uses a recursive CTE bounded to that
 
 **Comments**: `list_ticket_comments`, `create_comment`, `update_comment`, `delete_comment`
 
-**Artifacts**: `list_ticket_artifacts`, `create_artifact`, `delete_artifact`
+**Artifacts**: `list_ticket_artifacts`, `create_artifact`, `update_artifact`, `delete_artifact`
+
+`update_artifact` can update either the display title or the type-specific payload. Mermaid artifacts use payload `{ source }`, which lets the web UI save edits back to the existing attachment without creating a duplicate artifact.
 
 Both `create_ticket` and `update_ticket` accept optional `implementerModel` and `reviewerModel` parameters to set per-ticket orchestration model overrides. Each is an object with `{ provider, model, profileId? }`. Pass `null` on `update_ticket` to clear an override.
 
@@ -338,17 +340,20 @@ Relationship reads use a dedicated RPC:
 
 ### Key Components
 
-| Component                  | File                           | Purpose                                                    |
-| -------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `TicketsPanel`             | `TicketsPanel.tsx`             | List view with project filter, real-time subscription      |
-| `TicketCard`               | `TicketCard.tsx`               | Compact card with status/priority dots, labels, identifier |
-| `TicketDetailPanel`        | `TicketDetailPanel.tsx`        | Full detail with inline status/priority dropdowns          |
-| `CreateTicketDialog`       | `CreateTicketDialog.tsx`       | New ticket form with dynamic acceptance criteria           |
-| `TicketAcceptanceCriteria` | `TicketAcceptanceCriteria.tsx` | Checkbox checklist with verification metadata              |
-| `TicketComments`           | `TicketComments.tsx`           | Threaded comments with human/AI distinction                |
-| `TicketHistory`            | `TicketHistory.tsx`            | Lazy-loaded collapsible audit timeline                     |
-| `KanbanTicketDetail`       | `KanbanTicketDetail.tsx`       | Ticket detail panel with origin-thread section             |
-| `ticketUtils`              | `ticketUtils.ts`               | Status/priority color maps, date formatters                |
+| Component                   | File                            | Purpose                                                    |
+| --------------------------- | ------------------------------- | ---------------------------------------------------------- |
+| `TicketsPanel`              | `TicketsPanel.tsx`              | List view with project filter, real-time subscription      |
+| `TicketCard`                | `TicketCard.tsx`                | Compact card with status/priority dots, labels, identifier |
+| `TicketDetailPanel`         | `TicketDetailPanel.tsx`         | Full detail with inline status/priority dropdowns          |
+| `CreateTicketDialog`        | `CreateTicketDialog.tsx`        | New ticket form with dynamic acceptance criteria           |
+| `TicketAcceptanceCriteria`  | `TicketAcceptanceCriteria.tsx`  | Checkbox checklist with verification metadata              |
+| `TicketComments`            | `TicketComments.tsx`            | Threaded comments with human/AI distinction                |
+| `TicketHistory`             | `TicketHistory.tsx`             | Lazy-loaded collapsible audit timeline                     |
+| `KanbanTicketDetail`        | `KanbanTicketDetail.tsx`        | Ticket detail panel with origin-thread section             |
+| `TicketMermaidArtifactView` | `TicketMermaidArtifactView.tsx` | Full-pane Mermaid attachment viewer/editor with pan/zoom   |
+| `ticketUtils`               | `ticketUtils.ts`                | Status/priority color maps, date formatters                |
+
+Mermaid attachment cards in ticket detail are clickable. Opening one replaces the ticket detail body with a full-pane diagram workspace instead of a modal, so large diagrams have room for pan/zoom and source editing. The workspace has close, edit/save/cancel, zoom in/out, fit, reset, mouse-wheel zoom, and drag-to-pan controls.
 
 ### Ticket Detail Thread Sections
 

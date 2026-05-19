@@ -541,9 +541,10 @@ export interface TicketingRepositoryShape {
   readonly listArtifactsByComment: (
     input: ArtifactsByCommentInput,
   ) => Effect.Effect<ReadonlyArray<PersistedArtifact>, ProjectionRepositoryError>;
-  readonly updateArtifactTitle: (input: {
+  readonly updateArtifact: (input: {
     readonly id: ArtifactId;
     readonly title: string | null;
+    readonly payload: unknown;
     readonly updatedAt: string;
   }) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly deleteArtifact: (

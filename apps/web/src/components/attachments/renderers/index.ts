@@ -9,6 +9,7 @@ import { UnknownArtifact } from "./UnknownArtifact";
 export interface AttachmentRendererProps {
   readonly artifact: Artifact;
   readonly onDelete?: () => void;
+  readonly onOpen?: (artifact: Artifact) => void;
 }
 
 export type AttachmentRenderer = ComponentType<AttachmentRendererProps>;
