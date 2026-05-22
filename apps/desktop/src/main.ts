@@ -51,6 +51,7 @@ import type {
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
   DesktopUpdateState,
+  DesktopWindowChromeState,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
@@ -108,6 +109,8 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const WINDOW_CHROME_STATE_CHANNEL = "desktop:window-chrome-state";
+const WINDOW_CHROME_STATE_CHANGED_CHANNEL = "desktop:window-chrome-state-changed";
 const BROWSER_MOUNT_CHANNEL = "browser:mount";
 const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
 const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
@@ -4116,6 +4119,11 @@ function registerIpcHandlers(): void {
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
+  ipcMain.removeHandler(WINDOW_CHROME_STATE_CHANNEL);
+  ipcMain.handle(WINDOW_CHROME_STATE_CHANNEL, async (event) =>
+    getDesktopWindowChromeState(BrowserWindow.fromWebContents(event.sender) ?? mainWindow),
+  );
+
   ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
   ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
     const result = await downloadAvailableUpdate();
@@ -4167,6 +4175,19 @@ function getIconOption(): { icon: string } | Record<string, never> {
   const ext = process.platform === "win32" ? "ico" : "png";
   const iconPath = resolveIconPath(ext);
   return iconPath ? { icon: iconPath } : {};
+}
+
+function getDesktopWindowChromeState(window: BrowserWindow | null): DesktopWindowChromeState {
+  return {
+    isFullScreen: Boolean(
+      window && !window.isDestroyed() && (window.isFullScreen() || window.isSimpleFullScreen()),
+    ),
+  };
+}
+
+function emitWindowChromeState(window: BrowserWindow): void {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+  window.webContents.send(WINDOW_CHROME_STATE_CHANGED_CHANNEL, getDesktopWindowChromeState(window));
 }
 
 function createWindow(): BrowserWindow {
@@ -4235,6 +4256,7 @@ function createWindow(): BrowserWindow {
       url: window.webContents.getURL(),
     });
     emitUpdateState();
+    emitWindowChromeState(window);
   });
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
     writeDesktopTimeline("renderer.did-fail-load", {
@@ -4269,6 +4291,10 @@ function createWindow(): BrowserWindow {
       url: window.webContents.getURL(),
     });
   });
+  window.on("enter-full-screen", () => emitWindowChromeState(window));
+  window.on("leave-full-screen", () => emitWindowChromeState(window));
+  window.webContents.on("enter-html-full-screen", () => emitWindowChromeState(window));
+  window.webContents.on("leave-html-full-screen", () => emitWindowChromeState(window));
   window.once("ready-to-show", () => {
     if (isDevelopment && process.env.T3_DEV_RESTARTING) {
       // After a dev-mode restart (file-watch triggered), show the window

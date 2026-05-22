@@ -181,9 +181,14 @@ input {
 }
 
 @media (min-width: 768px) {
-  [data-slot="sidebar"][data-side="left"][data-state="collapsed"]
+  html:not([data-window-fullscreen="true"])
+    [data-slot="sidebar"][data-side="left"][data-state="collapsed"]
     ~ [data-slot="sidebar-inset"]
     .electron-titlebar-inset {
+    padding-left: var(--electron-titlebar-left-inset, 90px);
+  }
+
+  html:not([data-window-fullscreen="true"]) .electron-titlebar-sidebar-inset {
     padding-left: var(--electron-titlebar-left-inset, 90px);
   }
 }

@@ -14,6 +14,8 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const WINDOW_CHROME_STATE_CHANNEL = "desktop:window-chrome-state";
+const WINDOW_CHROME_STATE_CHANGED_CHANNEL = "desktop:window-chrome-state-changed";
 const BROWSER_MOUNT_CHANNEL = "browser:mount";
 const BROWSER_SET_BOUNDS_CHANNEL = "browser:setBounds";
 const BROWSER_UNMOUNT_CHANNEL = "browser:unmount";
@@ -75,6 +77,18 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   checkForUpdate: () => ipcRenderer.invoke(UPDATE_CHECK_CHANNEL),
   downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
   installUpdate: () => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL),
+  getWindowChromeState: () => ipcRenderer.invoke(WINDOW_CHROME_STATE_CHANNEL),
+  onWindowChromeStateChanged: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(WINDOW_CHROME_STATE_CHANGED_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(WINDOW_CHROME_STATE_CHANGED_CHANNEL, wrappedListener);
+    };
+  },
   onUpdateState: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
       if (typeof state !== "object" || state === null) return;

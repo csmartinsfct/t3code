@@ -463,6 +463,10 @@ export interface DesktopClipboardBridge {
   writeText(text: string): Promise<void>;
 }
 
+export interface DesktopWindowChromeState {
+  isFullScreen: boolean;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -479,6 +483,8 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  getWindowChromeState: () => Promise<DesktopWindowChromeState>;
+  onWindowChromeStateChanged: (listener: (state: DesktopWindowChromeState) => void) => () => void;
   clipboard: DesktopClipboardBridge;
   browser: DesktopBrowserBridge;
   overlay: DesktopOverlayBridge;

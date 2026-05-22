@@ -15,6 +15,23 @@ import { EmbeddedBrowserPopoutApp } from "./components/browser/EmbeddedBrowserPo
 
 document.title = APP_DISPLAY_NAME;
 
+function applyDesktopWindowChromeState(state: { isFullScreen: boolean }): void {
+  document.documentElement.dataset.windowFullscreen = state.isFullScreen ? "true" : "false";
+}
+
+if (isElectron) {
+  const bridge = window.desktopBridge;
+  if (bridge) {
+    void bridge
+      .getWindowChromeState()
+      .then(applyDesktopWindowChromeState)
+      .catch(() => {
+        // Missing window state should not block app startup.
+      });
+    bridge.onWindowChromeStateChanged(applyDesktopWindowChromeState);
+  }
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
 // Popout mode (T3CO-424). When the desktop main process opens a free-floating

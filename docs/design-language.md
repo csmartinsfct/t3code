@@ -719,7 +719,7 @@ sm:[&_svg:not([class*='size-'])]:size-4
 
 Sidebar: resizable, `border-r`, `bg-card`, `collapsible="offcanvas"` on mobile. Width stored in localStorage.
 
-Electron drag headers that can become the leftmost app chrome when the sidebar is collapsed must include `electron-titlebar-inset` together with `drag-region`. The shared CSS only applies the macOS traffic-light inset when the left sidebar is collapsed, keeping expanded-sidebar layouts unchanged.
+Electron drag headers that can become the leftmost app chrome when the sidebar is collapsed must include `electron-titlebar-inset` together with `drag-region`. The shared CSS only applies the macOS traffic-light inset when the left sidebar is collapsed and the native window is not fullscreen, keeping expanded-sidebar layouts unchanged. Expanded Electron sidebar headers that sit under macOS traffic lights use `electron-titlebar-sidebar-inset`, which follows the same non-fullscreen rule.
 
 ### Page Structure
 
