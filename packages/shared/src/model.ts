@@ -33,6 +33,7 @@ export const KNOWN_PROVIDER_MODEL_OPTIONS: Record<
     { slug: "gpt-5.2", name: "GPT-5.2" },
   ],
   claudeAgent: [
+    { slug: "claude-opus-4-8", name: "Claude Opus 4.8" },
     { slug: "claude-opus-4-7", name: "Claude Opus 4.7" },
     { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
     { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
@@ -64,6 +65,7 @@ export const KNOWN_PROVIDER_MODEL_OPTIONS: Record<
     { slug: "gpt-5.1-codex-max", name: "Codex 5.1 Max" },
     { slug: "gpt-5.1-codex-mini", name: "Codex 5.1 Mini" },
     { slug: "gpt-5-mini", name: "GPT-5 Mini" },
+    { slug: "claude-opus-4-8", name: "Opus 4.8" },
     { slug: "claude-opus-4-7", name: "Opus 4.7" },
     { slug: "claude-opus-4-6", name: "Opus 4.6" },
     { slug: "claude-opus-4-5", name: "Opus 4.5" },
@@ -414,7 +416,8 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
  * Resolve the actual API model identifier from a model selection.
  *
  * Provider-aware: each provider can map `contextWindow` (or other options)
- * to whatever the API requires — a model-id suffix, a separate parameter, etc.
+ * to whatever the API requires — a model-id suffix, a separate parameter, or
+ * no model-id change when the selected model already has that context window.
  * The canonical slug stored in the selection stays unchanged so the
  * capabilities system keeps working.
  *
@@ -426,6 +429,9 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
     case "claudeAgent": {
       switch (modelSelection.options?.contextWindow) {
         case "1m":
+          if (modelSelection.model === "claude-opus-4-8") {
+            return modelSelection.model;
+          }
           return `${modelSelection.model}[1m]`;
         default:
           return modelSelection.model;

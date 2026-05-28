@@ -94,7 +94,9 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<str
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   claudeAgent: {
-    opus: "claude-opus-4-7",
+    opus: "claude-opus-4-8",
+    "opus-4.8": "claude-opus-4-8",
+    "claude-opus-4.8": "claude-opus-4-8",
     "opus-4.7": "claude-opus-4-7",
     "claude-opus-4.7": "claude-opus-4-7",
     "opus-4.6": "claude-opus-4-6",

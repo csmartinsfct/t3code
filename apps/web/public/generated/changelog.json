@@ -1,8 +1,51 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-10T00:03:49.350Z",
-  "lastProcessedCommit": "e9a07975bc350e4b81a6359a70b5eb72f203fa62",
+  "generatedAt": "2026-05-22T14:46:43.741Z",
+  "lastProcessedCommit": "9295a99e950460555a6bbd284cc1321575090d09",
   "groups": [
+    {
+      "date": "2026-05-22",
+      "entries": [
+        {
+          "id": "c3489fb9f4de6618",
+          "title": "Improved fullscreen titlebar spacing",
+          "summary": "Fixed titlebar inset padding in fullscreen mode for a cleaner, more consistent window layout.",
+          "category": "fix",
+          "commitShas": ["9295a99e950460555a6bbd284cc1321575090d09"]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-20",
+      "entries": [
+        {
+          "id": "4428b74e07f50717",
+          "title": "Image attachments now open in a shared preview overlay",
+          "summary": "Image previews are now presented in a consistent overlay experience across ticket attachments, improving clarity and making attachment review smoother.",
+          "category": "improvement",
+          "commitShas": ["7d21c23aa2c2341abf59445517ad7afc18777c38"]
+        },
+        {
+          "id": "bffc8a3791850c3b",
+          "title": "Mermaid diagrams can now be viewed directly in ticket attachments",
+          "summary": "Ticket attachments now support Mermaid diagrams with an in-app viewer, making architecture notes, flows, and technical visuals easier to read without leaving T3 Code.",
+          "category": "feature",
+          "commitShas": ["720c52c42aac10254ca269530a070109b673b23b"]
+        }
+      ]
+    },
+    {
+      "date": "2026-05-16",
+      "entries": [
+        {
+          "id": "ac02f67e0ea10eed",
+          "title": "More reliable browser extension support",
+          "summary": "Improved browser extension compatibility and stability, including more dependable extension popups and stronger browser-tooling behavior when extensions are in use.",
+          "category": "improvement",
+          "commitShas": ["cae06222d4c075bcca5ed8abd7ba88f474428d5f"]
+        }
+      ]
+    },
     {
       "date": "2026-05-10",
       "entries": [
@@ -3702,6 +3745,39 @@
           "e9a07975bc350e4b81a6359a70b5eb72f203fa62"
         ],
         "commitCount": 5,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-17T18:09:02.346Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e9a07975bc350e4b81a6359a70b5eb72f203fa62",
+        "toInclusiveCommit": "cae06222d4c075bcca5ed8abd7ba88f474428d5f",
+        "commitShas": ["cae06222d4c075bcca5ed8abd7ba88f474428d5f"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-19T23:30:40.731Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "cae06222d4c075bcca5ed8abd7ba88f474428d5f",
+        "toInclusiveCommit": "7d21c23aa2c2341abf59445517ad7afc18777c38",
+        "commitShas": [
+          "720c52c42aac10254ca269530a070109b673b23b",
+          "7d21c23aa2c2341abf59445517ad7afc18777c38"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-05-22T14:46:43.736Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "7d21c23aa2c2341abf59445517ad7afc18777c38",
+        "toInclusiveCommit": "9295a99e950460555a6bbd284cc1321575090d09",
+        "commitShas": ["9295a99e950460555a6bbd284cc1321575090d09"],
+        "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true
       }

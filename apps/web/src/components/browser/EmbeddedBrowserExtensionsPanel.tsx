@@ -130,13 +130,11 @@ function ExtensionIcon({
   ext,
   onClick,
   onTogglePin,
-  onRemove,
   onContextMenu,
 }: {
   ext: BrowserExtensionInfo;
   onClick: () => void;
   onTogglePin: (id: string) => void;
-  onRemove: (id: string) => void;
   onContextMenu: (ext: BrowserExtensionInfo, x: number, y: number) => void;
 }) {
   const [imgError, setImgError] = useState(false);
@@ -212,6 +210,7 @@ function AddExtensionButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
+      aria-label="Browse Chrome Web Store"
       tabIndex={-1}
       onClick={onClick}
       className={cn(
@@ -257,9 +256,12 @@ function ExtensionsPanelContent({
       </p>
 
       {extensions.length === 0 ? (
-        <p className="px-0.5 text-[11px] text-muted-foreground/50">
-          No extensions installed. Click + to browse the Web Store.
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 px-0.5 pt-0.5 text-[11px] text-muted-foreground/50">
+            No extensions installed. Click + to browse the Web Store.
+          </p>
+          <AddExtensionButton onClick={onOpenWebStore} />
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {extensions.map((ext) => (
@@ -268,7 +270,6 @@ function ExtensionsPanelContent({
               ext={ext}
               onClick={() => onOpenExtension(ext.id)}
               onTogglePin={onTogglePin}
-              onRemove={onRemove}
               onContextMenu={(e, x, y) => setCtxMenu({ ext: e, x, y })}
             />
           ))}
@@ -280,7 +281,12 @@ function ExtensionsPanelContent({
         <button
           type="button"
           onClick={onLoadUnpacked}
-          className="mt-0.5 w-full rounded px-1.5 py-1 text-left text-[11px] text-muted-foreground/50 transition-colors hover:text-muted-foreground/80"
+          className={cn(
+            "mt-0.5 inline-flex w-fit items-center rounded-full border px-2 py-0.5",
+            "border-border/50 bg-muted/20 text-[10px] font-medium text-muted-foreground/70",
+            "transition-colors hover:border-border hover:bg-accent hover:text-foreground",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          )}
         >
           Load unpacked...
         </button>

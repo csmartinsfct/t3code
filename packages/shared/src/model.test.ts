@@ -82,6 +82,7 @@ describe("makeProviderModelSelection", () => {
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
+    expect(normalizeModelSlug("opus", "claudeAgent")).toBe("claude-opus-4-8");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
     expect(normalizeModelSlug("composer", "cursor")).toBe("composer-2");
@@ -102,6 +103,7 @@ describe("model provider inference", () => {
   it("recognizes built-in provider slugs and aliases", () => {
     expect(inferBaseProviderKindFromModelSlug("gemini-2.5-pro")).toBe("gemini");
     expect(inferBaseProviderKindFromModelSlug("2.5-pro")).toBe("gemini");
+    expect(inferBaseProviderKindFromModelSlug("claude-opus-4-8")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("claude-opus-4-6")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("gpt-5.4")).toBe("codex");
     expect(inferBaseProviderKindFromModelSlug("cursor-special-model")).toBe("cursor");
@@ -154,6 +156,7 @@ describe("resolveModelSlug", () => {
 describe("resolveKnownProviderModelName", () => {
   it("resolves built-in labels before live provider snapshots are available", () => {
     expect(resolveKnownProviderModelName("codex", "gpt-5.5")).toBe("GPT-5.5");
+    expect(resolveKnownProviderModelName("claudeAgent", "claude-opus-4-8")).toBe("Claude Opus 4.8");
     expect(resolveKnownProviderModelName("claudeAgent", "claude-sonnet-4-6")).toBe(
       "Claude Sonnet 4.6",
     );
@@ -354,6 +357,16 @@ describe("resolveApiModelId", () => {
 
   it("returns the model as-is for Codex selections", () => {
     expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
+  });
+
+  it("keeps Opus 4.8 at its canonical API id for the native 1m window", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-8",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-opus-4-8");
   });
 });
 

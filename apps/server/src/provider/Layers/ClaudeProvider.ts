@@ -65,6 +65,26 @@ function hasClaudeProfileConfig(configDir: string | undefined): boolean {
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
+    slug: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
+        { value: "max", label: "Max" },
+        { value: "ultrathink", label: "Ultrathink" },
+      ],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      supportsPlan: true,
+      contextWindowOptions: [{ value: "1m", label: "1M", isDefault: true }],
+      promptInjectedEffortLevels: ["ultrathink"],
+    } satisfies ModelCapabilities,
+  },
+  {
     slug: "claude-opus-4-7",
     name: "Claude Opus 4.7",
     isCustom: false,
@@ -410,9 +430,9 @@ function claudeAuthMetadata(input: {
 /**
  * Adjust the built-in model list based on the user's detected subscription.
  *
- * - Premium tiers (Max, Enterprise, Team): 1M context becomes the default.
- * - Other tiers (Pro, free, unknown): 200k context stays the default;
- *   1M remains available as a manual option so users can still enable it.
+ * - Premium tiers (Max, Enterprise, Team): 1M context becomes the default when
+ *   the model offers both 200k and 1M modes.
+ * - Other tiers (Pro, free, unknown): the model's base default stays in place.
  */
 export function adjustModelsForSubscription(
   baseModels: ReadonlyArray<ServerProviderModel>,
