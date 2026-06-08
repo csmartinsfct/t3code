@@ -7,6 +7,7 @@ import {
   respondError,
   respondErrorFromCause,
   respondOk,
+  validateToolInput,
 } from "../restResponse";
 import { ServerConfig } from "../config";
 import { buildCommandHandlers, playwrightCommandDescriptors, toolDefinitions } from "./handlers";
@@ -91,6 +92,8 @@ const handlePost = Effect.gen(function* () {
 
   const handler = handlers[body.tool];
   if (!handler) return respondError(`Unknown tool: ${body.tool}`);
+  const validationError = validateToolInput(toolDefinitions, body.tool, body.input);
+  if (validationError) return respondError(validationError);
 
   return yield* handler(body.input).pipe(
     Effect.catchCause((cause) => Effect.succeed(respondErrorFromCause(cause))),

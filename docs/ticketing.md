@@ -311,6 +311,8 @@ The `mcpDeliveryMode` server setting (Settings > General > MCP delivery) control
 
 All ticket operations are exposed as WebSocket RPC methods under the `ticketing.*` namespace, plus `subscribeTicketingEvents` for real-time streaming. The stream is global (no project filter) — clients filter by `projectId` on each event.
 
+The REST endpoint validates tool `input` objects strictly against the discovered `inputSchema` before dispatch. Unknown fields fail with the standard error envelope and a close-name suggestion when possible, so a typo such as `parent` on `create_ticket` is rejected before the ticket is created and points callers to `parentId`.
+
 Relationship reads use a dedicated RPC:
 
 - `ticketing.getThreadLinks({ ticketId })`

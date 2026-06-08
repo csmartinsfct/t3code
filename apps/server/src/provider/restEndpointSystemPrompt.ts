@@ -100,6 +100,7 @@ curl -s -X POST <ENDPOINT_URL> \\
 All responses use this envelope:
 - **Success:** \`{"data": {"message": "OK", "data": <result>}, "error": null}\`
 - **Error:** \`{"data": null, "error": "<error message>"}\`
+- Tool \`input\` objects are strict. Unknown fields are rejected with a descriptive error and, when possible, a suggested field name from the discovered \`inputSchema\`.
 
 ### Usage Guidelines
 

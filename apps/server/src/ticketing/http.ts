@@ -20,6 +20,7 @@ import {
   respondErrorFromCause,
   respondOk,
   type ToolDefinition,
+  validateToolInput,
 } from "../restResponse";
 import { TicketingService, type TicketingServiceShape } from "./Services/Ticketing";
 
@@ -1570,6 +1571,8 @@ const handlePost = Effect.gen(function* () {
 
   const handler = handlers[body.tool];
   if (!handler) return respondError(`Unknown tool: ${body.tool}`);
+  const validationError = validateToolInput(TOOL_DEFINITIONS, body.tool, body.input);
+  if (validationError) return respondError(validationError);
 
   return yield* handler(body.input).pipe(
     Effect.catchCause((cause) => Effect.succeed(respondErrorFromCause(cause))),

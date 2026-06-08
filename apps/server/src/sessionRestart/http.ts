@@ -1,7 +1,14 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 
-import { resolveAuth, respondError, respondOk, type ToolDefinition } from "../restResponse";
+import {
+  parseToolCallBody,
+  resolveAuth,
+  respondError,
+  respondOk,
+  type ToolDefinition,
+  validateToolInput,
+} from "../restResponse";
 import { SessionRestartService } from "./Services/SessionRestart";
 
 const API_ROUTE = "/api/session-restart";
@@ -35,14 +42,14 @@ const handlePost = Effect.gen(function* () {
   const auth = yield* resolveAuth(webRequest);
   if (!auth) return respondError("Unauthorized", 401);
 
-  const body = (yield* Effect.promise(() => webRequest.json().catch(() => null))) as {
-    tool?: unknown;
-  } | null;
+  const body = yield* Effect.promise(() => parseToolCallBody(webRequest));
   if (!body || body.tool !== "restart_session") {
     return respondError(
       'Invalid request body. Expected: { "tool": "restart_session", "input": {} }',
     );
   }
+  const validationError = validateToolInput(TOOL_DEFINITIONS, body.tool, body.input);
+  if (validationError) return respondError(validationError);
 
   const sessionRestart = yield* SessionRestartService;
   yield* sessionRestart.scheduleRestart({ threadId: auth.threadId });

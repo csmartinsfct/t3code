@@ -36,6 +36,7 @@ import {
   respondErrorFromCause,
   respondOk,
   type ServiceAuthContext,
+  validateToolInput,
 } from "../restResponse";
 import { ServerConfig } from "../config";
 import { ServerSettingsService } from "../serverSettings";
@@ -696,6 +697,8 @@ const handlePost = Effect.gen(function* () {
   if (!body) return respondError("Invalid request body. Expected: { tool: string, input: object }");
 
   if (body.tool === "create_dynamic_chat_ui_from_prompt") {
+    const validationError = validateToolInput(TOOL_DEFINITIONS, body.tool, body.input);
+    if (validationError) return respondError(validationError);
     const result = yield* buildDynamicChatUiFromPrompt(body.input, auth);
     if ("error" in result) {
       return respondError(result.error);
