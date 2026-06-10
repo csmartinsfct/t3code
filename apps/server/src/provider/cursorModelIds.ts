@@ -19,6 +19,7 @@ export const CURSOR_ACP_BUILT_IN_MODELS: ReadonlyArray<CursorAcpModelOption> = [
   { slug: "gpt-5.1-codex-max", name: "Codex 5.1 Max" },
   { slug: "gpt-5.1-codex-mini", name: "Codex 5.1 Mini" },
   { slug: "gpt-5-mini", name: "GPT-5 Mini" },
+  { slug: "claude-fable-5", name: "Fable 5" },
   { slug: "claude-opus-4-8", name: "Opus 4.8" },
   { slug: "claude-opus-4-7", name: "Opus 4.7" },
   { slug: "claude-opus-4-6", name: "Opus 4.6" },
@@ -63,6 +64,7 @@ export function normalizeCursorModelForAcp(model: string): string {
   if (lower.startsWith("gpt-5.1")) return "gpt-5.1";
   if (lower === "gpt-5-mini") return "gpt-5-mini";
 
+  if (lower.startsWith("claude-fable-5")) return "claude-fable-5";
   if (lower.startsWith("claude-4.8-opus")) return "claude-opus-4-8";
   if (lower.startsWith("claude-opus-4-8")) return "claude-opus-4-8";
   if (lower.startsWith("claude-4.7-opus")) return "claude-opus-4-7";

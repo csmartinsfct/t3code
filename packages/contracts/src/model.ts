@@ -94,6 +94,9 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<str
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   claudeAgent: {
+    fable: "claude-fable-5",
+    "fable-5": "claude-fable-5",
+    "claude-fable-5": "claude-fable-5",
     opus: "claude-opus-4-8",
     "opus-4.8": "claude-opus-4-8",
     "claude-opus-4.8": "claude-opus-4-8",
@@ -139,6 +142,8 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<str
     "cursor-composer-fast": "composer-2",
     gpt5: "gpt-5.5",
     "cursor-gpt5": "gpt-5.5",
+    fable: "claude-fable-5",
+    "cursor-fable": "claude-fable-5",
     sonnet: "claude-sonnet-4-6",
     "cursor-sonnet": "claude-sonnet-4-6",
     thinking: "claude-sonnet-4-6",

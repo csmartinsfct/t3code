@@ -65,6 +65,26 @@ function hasClaudeProfileConfig(configDir: string | undefined): boolean {
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
+        { value: "max", label: "Max" },
+        { value: "ultrathink", label: "Ultrathink" },
+      ],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      supportsPlan: true,
+      contextWindowOptions: [{ value: "1m", label: "1M", isDefault: true }],
+      promptInjectedEffortLevels: ["ultrathink"],
+    } satisfies ModelCapabilities,
+  },
+  {
     slug: "claude-opus-4-8",
     name: "Claude Opus 4.8",
     isCustom: false,
