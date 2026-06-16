@@ -1539,6 +1539,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModelOptionsForDispatch,
     );
   }, [selectedModel, selectedModelOptionsForDispatch, selectedProvider]);
+  const dispatchSettingsRef = useRef({
+    interactionMode,
+    runtimeMode,
+    selectedModelSelection,
+  });
+  dispatchSettingsRef.current = {
+    interactionMode,
+    runtimeMode,
+    selectedModelSelection,
+  };
   const selectedModelForPicker = selectedModel;
   const rawPhase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
@@ -2596,6 +2606,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }) => {
       const api = readNativeApi();
       if (!api || !activeProject || !activeThreadId) return;
+      const dispatchSettings = dispatchSettingsRef.current;
 
       if (event.action === "accept") {
         const nextId = nextProjectScriptId(
@@ -2650,9 +2661,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: messageText,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode,
+          modelSelection: dispatchSettings.selectedModelSelection,
+          runtimeMode: dispatchSettings.runtimeMode,
+          interactionMode: dispatchSettings.interactionMode,
           createdAt,
         });
       } else {
@@ -2675,14 +2686,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: messageText,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode,
+          modelSelection: dispatchSettings.selectedModelSelection,
+          runtimeMode: dispatchSettings.runtimeMode,
+          interactionMode: dispatchSettings.interactionMode,
           createdAt,
         });
       }
     },
-    [activeProject, activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
+    [activeProject, activeThreadId],
   );
 
   const handleProposeScheduledTask = useCallback(
@@ -2698,6 +2709,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }) => {
       const api = readNativeApi();
       if (!api || !activeThreadId) return;
+      const dispatchSettings = dispatchSettingsRef.current;
 
       if (event.action === "accept") {
         let created = false;
@@ -2741,9 +2753,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: messageText,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode,
+          modelSelection: dispatchSettings.selectedModelSelection,
+          runtimeMode: dispatchSettings.runtimeMode,
+          interactionMode: dispatchSettings.interactionMode,
           createdAt,
         });
       } else {
@@ -2766,14 +2778,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: messageText,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode,
+          modelSelection: dispatchSettings.selectedModelSelection,
+          runtimeMode: dispatchSettings.runtimeMode,
+          interactionMode: dispatchSettings.interactionMode,
           createdAt,
         });
       }
     },
-    [activeThreadId, selectedModelSelection, runtimeMode, interactionMode],
+    [activeThreadId],
   );
 
   const resolveProjectName = useCallback(
@@ -5304,13 +5316,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [navigate, threadId],
   );
-  const onRevertUserMessage = (messageId: MessageId) => {
-    const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
-    if (typeof targetTurnCount !== "number") {
-      return;
-    }
-    void onRevertToTurnCount(targetTurnCount);
-  };
+  const onRevertUserMessage = useCallback(
+    (messageId: MessageId) => {
+      const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
+      if (typeof targetTurnCount !== "number") {
+        return;
+      }
+      void onRevertToTurnCount(targetTurnCount);
+    },
+    [onRevertToTurnCount, revertTurnCountByUserMessageId],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
