@@ -1102,6 +1102,7 @@ function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent)
         parentThreadId: event.payload.parentThreadId ?? null,
         isOrchestrationThread: event.payload.isOrchestrationThread ?? false,
         ticketId: event.payload.ticketId ?? null,
+        ...(event.payload.initialDraft ? { initialDraft: event.payload.initialDraft } : {}),
         latestTurn: null,
         createdAt: event.payload.createdAt,
         updatedAt: event.payload.updatedAt,

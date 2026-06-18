@@ -951,6 +951,61 @@ describe("incremental orchestration updates", () => {
     expect(next.threadIdsByProjectId[recreatedProjectId]).toEqual([threadId]);
   });
 
+  it("preserves initial drafts from live thread.created events", () => {
+    const state: AppState = {
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          systemPrompt: null,
+          promptOverrides: { orchestration: {} },
+          scripts: [],
+        },
+      ],
+      threads: [],
+      threadsById: {},
+      sidebarThreadsById: {},
+      threadIdsByProjectId: {},
+      bootstrapComplete: true,
+      orchestrationRunStatusByThreadId: {},
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.created", {
+        threadId: ThreadId.makeUnsafe("thread-scheduled"),
+        projectId: ProjectId.makeUnsafe("project-1"),
+        title: "Scheduled task",
+        modelSelection: {
+          provider: "codex",
+          model: DEFAULT_MODEL_BY_PROVIDER.codex,
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        initialDraft: {
+          prompt: "Run the morning status check",
+          skillIds: ["debug"],
+          autoSend: true,
+        },
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threadsById["thread-scheduled"]?.initialDraft).toEqual({
+      prompt: "Run the morning status check",
+      skillIds: ["debug"],
+      autoSend: true,
+    });
+  });
+
   it("updates only the affected thread for message events", () => {
     const thread1 = makeThread({
       id: ThreadId.makeUnsafe("thread-1"),
