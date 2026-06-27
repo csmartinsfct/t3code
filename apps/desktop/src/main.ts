@@ -84,6 +84,13 @@ import {
 } from "./updateMachine";
 import { shouldSuspendForIdle } from "./embeddedBrowserIdleReaper";
 import { DesktopExtensionManager } from "./desktopExtensionManager";
+import {
+  readEmbeddedBrowserTabState,
+  upsertEmbeddedBrowserProjectTabState,
+  writeEmbeddedBrowserTabState,
+  type PersistedEmbeddedBrowserProject,
+  type PersistedEmbeddedBrowserTabState,
+} from "./embeddedBrowserTabState";
 import { ExtensionPopupRegistry } from "./extensionPopupRegistry";
 import type { ExtensionPopupKind, ExtensionPopupSelector } from "./extensionPopupRegistry";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
@@ -162,6 +169,7 @@ const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
+const EMBEDDED_BROWSER_TAB_STATE_PATH = Path.join(STATE_DIR, "browser", "tab-state.json");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
@@ -169,6 +177,7 @@ const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 const EMBEDDED_BROWSER_PUBLIC_BLANK_URL = "about:blank";
 const EMBEDDED_BROWSER_BLANK_DOCUMENT_MARKER = "t3-embedded-browser-blank";
 const EMBEDDED_BROWSER_BLANK_URLS = new Set(["", "about:blank", "about:newtab"]);
+const EMBEDDED_BROWSER_TAB_STATE_WRITE_DELAY_MS = 250;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type BrowserViewBounds = {
@@ -277,6 +286,10 @@ let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
 const embeddedBrowserStateByWindow = new WeakMap<BrowserWindow, EmbeddedBrowserWindowState>();
 const embeddedBrowserProjectsByProjectId = new Map<string, EmbeddedBrowserProjectState>();
+let embeddedBrowserTabState: PersistedEmbeddedBrowserTabState = readEmbeddedBrowserTabState(
+  EMBEDDED_BROWSER_TAB_STATE_PATH,
+);
+let embeddedBrowserTabStateWriteTimer: ReturnType<typeof setTimeout> | null = null;
 // Popout windows that have detached a project's embedded browser into a free-
 // floating BrowserWindow. One popout per project at most. The same
 // WebContentsView instance is moved between the main window and the popout
@@ -1916,6 +1929,71 @@ function normalizeBrowserUrl(value: unknown): string | null {
   }
 }
 
+function serializeEmbeddedBrowserProjectTabs(
+  project: EmbeddedBrowserProjectState,
+): PersistedEmbeddedBrowserProject | null {
+  const tabs = Array.from(project.tabs.entries())
+    .filter(([, tab]) => !isEmbeddedBrowserDestroyed(tab))
+    .slice(0, MAX_TABS_PER_PROJECT)
+    .map(([tabId, tab]) => {
+      const url = publicEmbeddedBrowserUrl(tab.view.webContents.getURL());
+      const isBlank = isEmbeddedBrowserBlankUrl(url);
+      return {
+        id: tabId,
+        url,
+        title: isBlank ? "" : tab.title || tab.view.webContents.getTitle(),
+        favicon: isBlank ? null : tab.favicon,
+      };
+    });
+
+  if (tabs.length === 0) return null;
+  const activeTabId = tabs.some((tab) => tab.id === project.activeTabId)
+    ? project.activeTabId
+    : tabs[0]!.id;
+  return { activeTabId, tabs };
+}
+
+function updatePersistedEmbeddedBrowserProjectTabs(project: EmbeddedBrowserProjectState): void {
+  const persistedProject = serializeEmbeddedBrowserProjectTabs(project);
+  if (!persistedProject) return;
+  embeddedBrowserTabState = upsertEmbeddedBrowserProjectTabState(
+    embeddedBrowserTabState,
+    project.projectId,
+    persistedProject,
+  );
+}
+
+function scheduleEmbeddedBrowserTabStateWrite(project: EmbeddedBrowserProjectState): void {
+  if (isQuitting) return;
+  updatePersistedEmbeddedBrowserProjectTabs(project);
+  if (embeddedBrowserTabStateWriteTimer) return;
+  embeddedBrowserTabStateWriteTimer = setTimeout(() => {
+    embeddedBrowserTabStateWriteTimer = null;
+    flushEmbeddedBrowserTabState();
+  }, EMBEDDED_BROWSER_TAB_STATE_WRITE_DELAY_MS);
+  embeddedBrowserTabStateWriteTimer.unref?.();
+}
+
+function flushEmbeddedBrowserTabState(): void {
+  if (embeddedBrowserTabStateWriteTimer) {
+    clearTimeout(embeddedBrowserTabStateWriteTimer);
+    embeddedBrowserTabStateWriteTimer = null;
+  }
+  try {
+    writeEmbeddedBrowserTabState(EMBEDDED_BROWSER_TAB_STATE_PATH, embeddedBrowserTabState);
+  } catch (error) {
+    console.warn("[desktop/browser] failed to persist tab state", { error });
+  }
+}
+
+function flushAllEmbeddedBrowserTabState(): void {
+  for (const project of embeddedBrowserProjectsByProjectId.values()) {
+    if (isEmbeddedBrowserProjectDestroyed(project)) continue;
+    updatePersistedEmbeddedBrowserProjectTabs(project);
+  }
+  flushEmbeddedBrowserTabState();
+}
+
 function isEmbeddedBrowserDestroyed(embedded: EmbeddedBrowserTabState): boolean {
   return embedded.view.webContents.isDestroyed();
 }
@@ -2790,8 +2868,31 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
   // Boot the Chrome API bridge before creating the first tab so the session
   // preload (chrome.tabs, chrome.offscreen, etc.) is ready when content loads.
   getOrCreateChromeExtensions(projectId);
-  const rootTab = createEmbeddedBrowserTab(project, 0, EMBEDDED_BROWSER_PUBLIC_BLANK_URL);
-  project.tabs.set(0, rootTab);
+  const persistedProject = embeddedBrowserTabState.projects[projectId];
+  const persistedTabs =
+    persistedProject && persistedProject.tabs.length > 0
+      ? persistedProject.tabs
+      : [
+          {
+            id: 0,
+            url: EMBEDDED_BROWSER_PUBLIC_BLANK_URL,
+            title: "",
+            favicon: null,
+          },
+        ];
+  for (const persistedTab of persistedTabs.slice(0, MAX_TABS_PER_PROJECT)) {
+    const tab = createEmbeddedBrowserTab(project, persistedTab.id, persistedTab.url, {
+      title: persistedTab.title,
+      favicon: persistedTab.favicon,
+    });
+    project.tabs.set(persistedTab.id, tab);
+  }
+  const tabIds = Array.from(project.tabs.keys());
+  project.activeTabId =
+    persistedProject && project.tabs.has(persistedProject.activeTabId)
+      ? persistedProject.activeTabId
+      : (tabIds[0] ?? 0);
+  project.nextTabId = Math.max(0, ...tabIds) + 1;
   embeddedBrowserProjectsByProjectId.set(projectId, project);
   // Rewrite User-Agent to Chrome for Chrome Web Store requests so the
   // "Add to Chrome" button renders. Scoped to this project's session partition.
@@ -2816,6 +2917,7 @@ function createEmbeddedBrowserTab(
   project: EmbeddedBrowserProjectState,
   tabId: number,
   initialUrl: string,
+  initialState?: { readonly title?: string; readonly favicon?: string | null },
 ): EmbeddedBrowserTabState {
   const { projectId } = project;
   const partition = `persist:${projectId}`;
@@ -2859,8 +2961,8 @@ function createEmbeddedBrowserTab(
     isBlank,
     viewportEmulationActive: false,
     readyForMount: null,
-    title: "",
-    favicon: null,
+    title: initialState?.title ?? "",
+    favicon: initialState?.favicon ?? null,
   };
 
   view.webContents.debugger.on("detach", (_event, reason) => {
@@ -3099,6 +3201,17 @@ function createEmbeddedBrowserTab(
       if (project.activeTabId === tab.tabId) chromeExt.selectTab(view.webContents);
     }
   });
+  const handleNavigationStateChanged = () => {
+    tab.isBlank = isEmbeddedBrowserBlankUrl(view.webContents.getURL());
+    if (tab.isBlank) {
+      tab.title = "";
+      tab.favicon = null;
+    }
+    markEmbeddedBrowserActive(project);
+    notifyEmbeddedBrowserTabsChanged(project);
+  };
+  view.webContents.on("did-navigate", handleNavigationStateChanged);
+  view.webContents.on("did-navigate-in-page", handleNavigationStateChanged);
 
   view.webContents.on("destroyed", () => {
     // Resolve the owning window at destroy-time rather than at tab creation:
@@ -3143,6 +3256,7 @@ function createEmbeddedBrowserTab(
 // Push "tabs changed" updates to any interested BrowserWindow that hosts this
 // project so the tab strip in the chat shell can re-render without polling.
 function notifyEmbeddedBrowserTabsChanged(project: EmbeddedBrowserProjectState): void {
+  scheduleEmbeddedBrowserTabStateWrite(project);
   const payload = summarizeEmbeddedBrowserTabs(project);
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -4364,6 +4478,7 @@ async function bootstrap(): Promise<void> {
 }
 
 app.on("before-quit", () => {
+  flushAllEmbeddedBrowserTabState();
   isQuitting = true;
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
@@ -4406,6 +4521,7 @@ app.on("window-all-closed", () => {
 if (process.platform !== "win32") {
   process.on("SIGINT", () => {
     if (isQuitting) return;
+    flushAllEmbeddedBrowserTabState();
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
     clearUpdatePollTimer();
@@ -4416,6 +4532,7 @@ if (process.platform !== "win32") {
 
   process.on("SIGTERM", () => {
     if (isQuitting) return;
+    flushAllEmbeddedBrowserTabState();
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
     clearUpdatePollTimer();
