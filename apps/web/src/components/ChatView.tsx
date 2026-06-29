@@ -2706,6 +2706,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       skillIds?: string[];
       prompt?: string;
       autoSend: boolean;
+      modelSelection?: ModelSelection;
     }) => {
       const api = readNativeApi();
       if (!api || !activeThreadId) return;
@@ -2725,6 +2726,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               ...(event.skillIds && event.skillIds.length > 0 ? { skillIds: event.skillIds } : {}),
               ...(event.prompt ? { prompt: event.prompt } : {}),
               autoSend: event.autoSend,
+              ...(event.modelSelection ? { modelSelection: event.modelSelection } : {}),
             },
           });
           created = true;

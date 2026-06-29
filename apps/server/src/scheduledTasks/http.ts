@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import type { ProjectId } from "@t3tools/contracts";
+import type { ModelSelection, ProjectId, ScheduledTaskNewThreadConfig } from "@t3tools/contracts";
 import { ScheduledTaskId } from "@t3tools/contracts";
 import {
   parseToolCallBody,
@@ -15,6 +15,10 @@ import {
 import { ScheduledTaskService, type ScheduledTaskServiceShape } from "./Services/ScheduledTasks";
 
 const API_ROUTE = "/api/scheduled-tasks";
+
+type MutableScheduledTaskNewThreadConfig = {
+  -readonly [K in keyof ScheduledTaskNewThreadConfig]: ScheduledTaskNewThreadConfig[K];
+};
 
 // ---------------------------------------------------------------------------
 // Tool definitions (for GET discovery)
@@ -58,6 +62,17 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         optional: true,
         description: "Auto-send the prompt. Default: false.",
       },
+      modelSelection: {
+        type: "object",
+        optional: true,
+        description:
+          "Optional model selection for this task. When omitted, the orchestration implementer model is used.",
+        properties: {
+          provider: { type: "string", description: "Provider kind, e.g. codex." },
+          model: { type: "string", description: "Model slug." },
+          options: { type: "object", optional: true, description: "Provider-specific options." },
+        },
+      },
     },
   },
   {
@@ -84,6 +99,18 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       prompt: { type: "string", optional: true, description: "New prompt." },
       autoSend: { type: "boolean", optional: true, description: "New auto-send setting." },
+      modelSelection: {
+        type: "object",
+        optional: true,
+        nullable: true,
+        description:
+          "New task model selection, or null to fall back to the orchestration implementer model.",
+        properties: {
+          provider: { type: "string", description: "Provider kind, e.g. codex." },
+          model: { type: "string", description: "Model slug." },
+          options: { type: "object", optional: true, description: "Provider-specific options." },
+        },
+      },
     },
   },
   {
@@ -152,6 +179,17 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         optional: true,
         description: "Auto-send the prompt. Default: false.",
       },
+      modelSelection: {
+        type: "object",
+        optional: true,
+        description:
+          "Optional model selection for this task. When omitted, the orchestration implementer model is used.",
+        properties: {
+          provider: { type: "string", description: "Provider kind, e.g. codex." },
+          model: { type: "string", description: "Model slug." },
+          options: { type: "object", optional: true, description: "Provider-specific options." },
+        },
+      },
     },
   },
 ];
@@ -186,6 +224,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const skillIds = input.skillIds as string[] | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
+        const modelSelection = input.modelSelection as ModelSelection | undefined;
 
         const job = yield* scheduledTasks.create({
           name,
@@ -198,6 +237,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
             ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
             ...(prompt ? { prompt } : {}),
             autoSend: autoSend ?? false,
+            ...(modelSelection ? { modelSelection } : {}),
           },
         });
         return respondOk(job);
@@ -214,19 +254,41 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const skillIds = input.skillIds as string[] | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
+        const modelSelection = input.modelSelection as ModelSelection | null | undefined;
 
-        const newThreadConfig =
+        let newThreadConfig: ScheduledTaskNewThreadConfig | undefined;
+        if (
           projectId !== undefined ||
           skillIds !== undefined ||
           prompt !== undefined ||
-          autoSend !== undefined
-            ? {
-                ...(projectId ? { projectId: projectId as ProjectId } : {}),
-                ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
-                ...(prompt ? { prompt } : {}),
-                ...(autoSend !== undefined ? { autoSend } : {}),
-              }
-            : undefined;
+          autoSend !== undefined ||
+          modelSelection !== undefined
+        ) {
+          const existing = yield* scheduledTasks.get({ jobId: ScheduledTaskId.makeUnsafe(jobId) });
+          const baseConfig =
+            existing.newThreadConfig ??
+            (projectId ? { projectId: projectId as ProjectId, autoSend: false } : null);
+          if (baseConfig === null) {
+            return respondError("projectId is required when adding new thread configuration.");
+          }
+          const nextConfig: MutableScheduledTaskNewThreadConfig = { ...baseConfig };
+          if (projectId !== undefined) nextConfig.projectId = projectId as ProjectId;
+          if (skillIds !== undefined) {
+            if (skillIds.length > 0) nextConfig.skillIds = skillIds;
+            else delete nextConfig.skillIds;
+          }
+          if (prompt !== undefined) {
+            const trimmedPrompt = prompt.trim();
+            if (trimmedPrompt.length > 0) nextConfig.prompt = trimmedPrompt;
+            else delete nextConfig.prompt;
+          }
+          if (autoSend !== undefined) nextConfig.autoSend = autoSend;
+          if (modelSelection !== undefined) {
+            if (modelSelection === null) delete nextConfig.modelSelection;
+            else nextConfig.modelSelection = modelSelection;
+          }
+          newThreadConfig = nextConfig as ScheduledTaskNewThreadConfig;
+        }
 
         const job = yield* scheduledTasks.update({
           jobId: ScheduledTaskId.makeUnsafe(jobId),
@@ -234,7 +296,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
           ...(description !== undefined ? { description } : {}),
           ...(cronExpression ? { cronExpression } : {}),
           ...(enabled !== undefined ? { enabled } : {}),
-          ...(newThreadConfig ? { newThreadConfig: newThreadConfig as never } : {}),
+          ...(newThreadConfig ? { newThreadConfig } : {}),
         });
         return respondOk(job);
       }),
@@ -287,6 +349,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const skillIds = input.skillIds as string[] | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
+        const modelSelection = input.modelSelection as ModelSelection | undefined;
 
         const payload = JSON.stringify({
           name,
@@ -296,6 +359,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
           ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
           ...(prompt ? { prompt } : {}),
           autoSend: autoSend ?? false,
+          ...(modelSelection ? { modelSelection } : {}),
         });
         return respondOk({
           instruction:

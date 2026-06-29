@@ -13,11 +13,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, ThreadInitialDraft } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    initialDraft: Schema.NullOr(Schema.fromJsonString(ThreadInitialDraft)),
     isOrchestrationThread: Schema.Number.pipe(
       Schema.decodeTo(
         Schema.Boolean,
@@ -50,6 +51,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id,
           is_orchestration_thread,
           ticket_id,
+          initial_draft_json,
           latest_turn_id,
           created_at,
           updated_at,
@@ -68,6 +70,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.parentThreadId},
           ${row.isOrchestrationThread ? 1 : 0},
           ${row.ticketId},
+          ${row.initialDraft !== null ? JSON.stringify(row.initialDraft) : null},
           ${row.latestTurnId},
           ${row.createdAt},
           ${row.updatedAt},
@@ -86,6 +89,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id = excluded.parent_thread_id,
           is_orchestration_thread = excluded.is_orchestration_thread,
           ticket_id = excluded.ticket_id,
+          initial_draft_json = excluded.initial_draft_json,
           latest_turn_id = excluded.latest_turn_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
@@ -106,6 +110,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
     parent_thread_id AS "parentThreadId",
     is_orchestration_thread AS "isOrchestrationThread",
     ticket_id AS "ticketId",
+    initial_draft_json AS "initialDraft",
     latest_turn_id AS "latestTurnId",
     created_at AS "createdAt",
     updated_at AS "updatedAt",

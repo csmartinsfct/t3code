@@ -13,6 +13,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   TicketId,
+  ThreadInitialDraft,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -33,6 +34,7 @@ export const ProjectionThread = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
   isOrchestrationThread: Schema.Boolean,
   ticketId: Schema.NullOr(TicketId),
+  initialDraft: Schema.NullOr(ThreadInitialDraft),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

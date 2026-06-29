@@ -2,6 +2,8 @@ import {
   type ScheduledTask,
   type ScheduledTaskCreateInput,
   type ScheduledTaskUpdateInput,
+  modelSelectionProviderKind,
+  type ModelSelection,
   type ProjectId,
   type SkillEntry,
 } from "@t3tools/contracts";
@@ -9,6 +11,11 @@ import { BookOpenIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ensureNativeApi } from "../../nativeApi";
+import { useSettings } from "../../hooks/useSettings";
+import { useServerProviders } from "../../rpc/serverState";
+import { getCustomModelOptionsByProvider, makeAppModelSelection } from "../../modelSelection";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { OverlayRouteDialog, useRoutedOverlaySurface } from "~/routedOverlayAdapters";
 import { Button } from "../ui/button";
@@ -145,9 +152,12 @@ function ScheduledTaskDialogContent({
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [autoSend, setAutoSend] = useState(false);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [skills, setSkills] = useState<ReadonlyArray<SkillEntry>>([]);
+  const settings = useSettings();
+  const serverProviders = useServerProviders();
 
   const isEditing = editingJob !== null;
 
@@ -179,6 +189,7 @@ function ScheduledTaskDialogContent({
         setSkillIds([...(editingJob.newThreadConfig?.skillIds ?? [])]);
         setPrompt(editingJob.newThreadConfig?.prompt ?? "");
         setAutoSend(editingJob.newThreadConfig?.autoSend ?? false);
+        setModelSelection(editingJob.newThreadConfig?.modelSelection ?? null);
       } else {
         setName(isDev ? "Test Scheduled Tasks" : "");
         setDescription(
@@ -192,10 +203,26 @@ function ScheduledTaskDialogContent({
         setSkillIds([]);
         setPrompt(isDev ? "Hello from a scheduled task!" : "");
         setAutoSend(false);
+        setModelSelection(null);
       }
       setValidationError(null);
     }
   }, [open, editingJob, projects]);
+
+  const effectiveModelSelection = modelSelection ?? settings.orchestrationImplementerModelSelection;
+  const effectiveProvider = modelSelectionProviderKind(effectiveModelSelection);
+  const modelOptionsByProvider = useMemo(
+    () =>
+      getCustomModelOptionsByProvider(
+        settings,
+        serverProviders,
+        effectiveProvider,
+        effectiveModelSelection.model,
+      ),
+    [effectiveModelSelection.model, effectiveProvider, serverProviders, settings],
+  );
+  const effectiveProviderModels =
+    serverProviders.find((provider) => provider.provider === effectiveProvider)?.models ?? [];
 
   const handleSubmit = useCallback(
     async (event: FormEvent) => {
@@ -226,6 +253,7 @@ function ScheduledTaskDialogContent({
                 ...(skillIds.length > 0 ? { skillIds } : {}),
                 ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
                 autoSend,
+                ...(modelSelection ? { modelSelection } : {}),
               }
             : undefined;
 
@@ -266,6 +294,7 @@ function ScheduledTaskDialogContent({
       skillIds,
       prompt,
       autoSend,
+      modelSelection,
       isEditing,
       editingJob,
       onCreateJob,
@@ -376,6 +405,57 @@ function ScheduledTaskDialogContent({
               {skills.length > 0 && (
                 <SkillsMultiSelect skills={skills} selectedIds={skillIds} onChange={setSkillIds} />
               )}
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="task-model-override" className="text-xs font-medium">
+                    Task model override
+                  </Label>
+                  <Switch
+                    id="task-model-override"
+                    checked={modelSelection !== null}
+                    onCheckedChange={(checked) => {
+                      setModelSelection(checked ? effectiveModelSelection : null);
+                    }}
+                  />
+                </div>
+                {modelSelection !== null && (
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <ProviderModelPicker
+                      provider={effectiveProvider}
+                      model={effectiveModelSelection.model}
+                      lockedProvider={null}
+                      providers={serverProviders}
+                      modelOptionsByProvider={modelOptionsByProvider}
+                      triggerVariant="outline"
+                      triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                      onProviderModelChange={(provider, model) => {
+                        setModelSelection(makeAppModelSelection(provider, model));
+                      }}
+                    />
+                    <TraitsPicker
+                      provider={effectiveProvider}
+                      models={effectiveProviderModels}
+                      model={effectiveModelSelection.model}
+                      prompt=""
+                      onPromptChange={() => {}}
+                      modelOptions={effectiveModelSelection.options}
+                      allowPromptInjectedEffort={false}
+                      triggerVariant="outline"
+                      triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                      onModelOptionsChange={(nextOptions) => {
+                        setModelSelection(
+                          makeAppModelSelection(
+                            effectiveProvider,
+                            effectiveModelSelection.model,
+                            nextOptions,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="task-prompt" className="text-xs font-medium">
@@ -628,5 +708,14 @@ function readNewThreadConfigParam(value: unknown): ScheduledTask["newThreadConfi
       : {}),
     ...(typeof candidate.prompt === "string" ? { prompt: candidate.prompt } : {}),
     autoSend: candidate.autoSend === true,
+    ...(isModelSelectionParam(candidate.modelSelection)
+      ? { modelSelection: candidate.modelSelection }
+      : {}),
   } as NonNullable<ScheduledTask["newThreadConfig"]>;
+}
+
+function isModelSelectionParam(value: unknown): value is ModelSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ModelSelection>;
+  return typeof candidate.provider === "string" && typeof candidate.model === "string";
 }

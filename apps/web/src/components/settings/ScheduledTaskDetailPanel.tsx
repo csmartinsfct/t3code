@@ -168,6 +168,15 @@ export function ScheduledTaskDetailPanel() {
             </div>
           )}
 
+          {task.newThreadConfig?.modelSelection && (
+            <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+              <p className="text-[11px] font-medium text-muted-foreground">Task model</p>
+              <p className="mt-0.5 text-xs text-foreground">
+                {task.newThreadConfig.modelSelection.model}
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <Button size="xs" variant="outline" onClick={() => setEditDialogOpen(true)}>
               <PencilIcon className="size-3" />

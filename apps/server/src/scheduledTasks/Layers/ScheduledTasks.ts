@@ -7,13 +7,14 @@ import {
   type ScheduledTaskStreamEvent,
   type ScheduledTaskRun,
   CommandId,
+  MessageId,
   ThreadId,
   ScheduledTaskId as ScheduledTaskIdSchema,
   ScheduledTaskRunId,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_PROVIDER_INTERACTION_MODE,
 } from "@t3tools/contracts";
-import { Effect, Exit, Layer, Option, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, FileSystem, Layer, Option, PubSub, Scope, Stream } from "effect";
 import { CronExpressionParser } from "cron-parser";
 
 import { ScheduledTaskRepository } from "../../persistence/Services/ScheduledTasks.ts";
@@ -23,6 +24,8 @@ import {
   ScheduledTaskService,
   type ScheduledTaskServiceShape,
 } from "../Services/ScheduledTasks.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveSkills, type DiscoveredSkill } from "../../skillsReader.ts";
 
 const nowIso = () => new Date().toISOString();
 
@@ -44,6 +47,25 @@ function validateCronExpression(expression: string): boolean {
   }
 }
 
+function formatSkillsForModel(skills: ReadonlyArray<DiscoveredSkill>): string {
+  if (skills.length === 0) return "";
+  return skills
+    .map(
+      (skill) =>
+        `<skill name="${skill.name}" source="${skill.source}">\n${skill.content}\n</skill>`,
+    )
+    .join("\n\n");
+}
+
+function buildScheduledTaskMessage(input: {
+  readonly prompt?: string;
+  readonly skills: ReadonlyArray<DiscoveredSkill>;
+}): string {
+  const skillsBlock = formatSkillsForModel(input.skills);
+  const prompt = input.prompt?.trim() ?? "";
+  return [skillsBlock, prompt].filter(Boolean).join("\n\n");
+}
+
 const toScheduledTaskOperationError = (operation: string) => (cause: unknown) =>
   new ScheduledTaskOperationError({
     operation,
@@ -55,6 +77,8 @@ const makeScheduledTaskService = Effect.gen(function* () {
   const repo = yield* ScheduledTaskRepository;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
+  const serverSettings = yield* ServerSettingsService;
+  const fileSystem = yield* FileSystem.FileSystem;
   const eventsPubSub = yield* PubSub.unbounded<ScheduledTaskStreamEvent>();
 
   const requireJob = (
@@ -222,15 +246,22 @@ const makeScheduledTaskService = Effect.gen(function* () {
         const commandId = CommandId.makeUnsafe(crypto.randomUUID());
         const config = job.newThreadConfig;
 
-        // Look up project for defaults
+        // Look up project for skill resolution and validate the task target.
         const projectOption = yield* snapshotQuery
           .getProjectById(config.projectId)
           .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.getProjectById")));
-        const project = Option.getOrNull(projectOption);
-        const modelSelection = project?.defaultModelSelection ?? {
-          provider: "codex" as const,
-          model: "codex-mini-latest",
-        };
+        if (Option.isNone(projectOption)) {
+          return yield* new ScheduledTaskOperationError({
+            operation: "executeJob.getProjectById",
+            message: `Unknown project: ${config.projectId}`,
+          });
+        }
+        const project = projectOption.value;
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.mapError(toScheduledTaskOperationError("executeJob.getSettings")),
+        );
+        const modelSelection =
+          config.modelSelection ?? settings.orchestrationImplementerModelSelection;
 
         // Build initial draft from config (prompt, skills, autoSend)
         const initialDraft = {
@@ -257,6 +288,47 @@ const makeScheduledTaskService = Effect.gen(function* () {
             createdAt: now,
           })
           .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.dispatch")));
+
+        if (config.autoSend) {
+          const resolvedSkills =
+            config.skillIds && config.skillIds.length > 0
+              ? yield* resolveSkills(project.workspaceRoot).pipe(
+                  Effect.map((result) =>
+                    config.skillIds
+                      ? config.skillIds
+                          .map((skillId) => result.find((skill) => skill.id === skillId))
+                          .filter((skill): skill is DiscoveredSkill => skill !== undefined)
+                      : [],
+                  ),
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.mapError(toScheduledTaskOperationError("executeJob.resolveSkills")),
+                )
+              : [];
+          const messageText = buildScheduledTaskMessage({
+            ...(config.prompt ? { prompt: config.prompt } : {}),
+            skills: resolvedSkills,
+          });
+          if (messageText.trim().length > 0) {
+            yield* orchestrationEngine
+              .dispatch({
+                type: "thread.turn.start",
+                commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+                threadId,
+                message: {
+                  messageId: MessageId.makeUnsafe(crypto.randomUUID()),
+                  role: "user",
+                  text: messageText,
+                  attachments: [],
+                },
+                modelSelection,
+                runtimeMode: DEFAULT_RUNTIME_MODE,
+                interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+                ...(config.prompt ? { titleSeed: config.prompt } : {}),
+                createdAt: now,
+              })
+              .pipe(Effect.mapError(toScheduledTaskOperationError("executeJob.dispatchAutoSend")));
+          }
+        }
 
         const run: ScheduledTaskRun = {
           runId: ScheduledTaskRunId.makeUnsafe(crypto.randomUUID()),

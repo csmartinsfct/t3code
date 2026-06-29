@@ -57,6 +57,7 @@ ScheduledTask {
     skillIds?: string[]      // optional skill IDs to attach (multi-select)
     prompt?: string          // optional prompt to preload
     autoSend: boolean        // if true, sends the prompt automatically
+    modelSelection?: ModelSelection // optional per-task model override
   } | null
   createdAt: string          // ISO 8601
   updatedAt: string
@@ -138,8 +139,9 @@ Layer implementation: `apps/server/src/scheduledTasks/Layers/ScheduledTasks.ts`
 ### Dependencies
 
 - `ScheduledTaskRepository` — persistence
-- `OrchestrationEngineService` — dispatches `thread.create` commands
-- `ProjectionSnapshotQuery` — resolves project defaults with targeted project lookups and checks thread existence/user-message counts for duplicate prevention
+- `OrchestrationEngineService` — dispatches `thread.create` and auto-send `thread.turn.start` commands
+- `ProjectionSnapshotQuery` — resolves targeted project lookups and checks thread existence/user-message counts for duplicate prevention
+- `ServerSettingsService` — provides the orchestration implementer model used when a task has no model override
 
 ### Scheduler
 
@@ -154,9 +156,10 @@ Embedded in the service layer (not a separate reactor). On layer initialization:
 2. **Duplicate prevention**: Get latest run. If `status === "created"` and `threadId` is set, check if the thread still exists in the read model and has zero user messages. If so → create a `skipped` run and return.
 3. **Execute**: For `new_thread` type:
    - Generate new `ThreadId` and `CommandId`.
-   - Resolve project defaults (model selection) from a targeted projection query.
+   - Resolve the model selection from `newThreadConfig.modelSelection`, or fall back to the global orchestration implementer model.
    - Build `initialDraft` from config (prompt, skillIds, autoSend).
    - Dispatch `thread.create` orchestration command with `initialDraft`.
+   - If `autoSend` is true, resolve configured skills from the project workspace, prepend their content to the prompt, and dispatch `thread.turn.start` server-side.
    - Create run record with `status: "created"`.
    - The web client auto-populates the composer (prompt + skills) when the thread is opened.
 4. Update `job.lastRunAt` and recompute `job.nextRunAt` via `cron-parser`.

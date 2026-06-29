@@ -18,6 +18,7 @@ export interface ProposeScheduledTaskCardProps {
   skillIds?: string[];
   prompt?: string;
   autoSend: boolean;
+  modelSelection?: ProposeScheduledTaskPayload["modelSelection"];
   projectName: string;
   isStreaming: boolean;
   onAccept: (data: ProposeScheduledTaskPayload) => void;
@@ -32,6 +33,7 @@ function ProposeScheduledTaskCard({
   skillIds,
   prompt: initialPrompt,
   autoSend,
+  modelSelection,
   projectName: initialProjectName,
   isStreaming,
   onAccept,
@@ -64,6 +66,7 @@ function ProposeScheduledTaskCard({
       ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
       ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
       autoSend,
+      ...(modelSelection ? { modelSelection } : {}),
     });
   }, [
     isStreaming,
@@ -75,6 +78,7 @@ function ProposeScheduledTaskCard({
     skillIds,
     prompt,
     autoSend,
+    modelSelection,
     onAccept,
   ]);
 
@@ -156,11 +160,15 @@ function ProposeScheduledTaskCard({
         </div>
 
         {/* Metadata row */}
-        {((skillIds && skillIds.length > 0) || autoSend) && (
+        {((skillIds && skillIds.length > 0) || autoSend || modelSelection) && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             {skillIds && skillIds.length > 0 && <span>Skills: {skillIds.join(", ")}</span>}
-            {skillIds && skillIds.length > 0 && autoSend && <span className="text-border">|</span>}
+            {skillIds && skillIds.length > 0 && (autoSend || modelSelection) && (
+              <span className="text-border">|</span>
+            )}
             {autoSend && <span>Auto send enabled</span>}
+            {autoSend && modelSelection && <span className="text-border">|</span>}
+            {modelSelection && <span>Model: {modelSelection.model}</span>}
           </div>
         )}
 

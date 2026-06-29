@@ -22,6 +22,7 @@ import {
   type OrchestrationThreadActivity,
   ModelSelection,
   ProjectId,
+  ThreadInitialDraft,
   ThreadId,
 } from "@t3tools/contracts";
 import { normalizeModelSelectionProvider } from "@t3tools/shared/model";
@@ -93,6 +94,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    initialDraft: Schema.NullOr(Schema.fromJsonString(ThreadInitialDraft)),
     isOrchestrationThread: Schema.Number.pipe(
       Schema.decodeTo(
         Schema.Boolean,
@@ -421,6 +423,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           is_orchestration_thread AS "isOrchestrationThread",
           ticket_id AS "ticketId",
+          initial_draft_json AS "initialDraft",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -449,6 +452,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           is_orchestration_thread AS "isOrchestrationThread",
           ticket_id AS "ticketId",
+          initial_draft_json AS "initialDraft",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1196,6 +1200,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             isOrchestrationThread: row.isOrchestrationThread,
             ticketId: row.ticketId,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+            ...(row.initialDraft !== null ? { initialDraft: row.initialDraft } : {}),
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             archivedAt: row.archivedAt,
@@ -1438,6 +1443,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               isOrchestrationThread: row.isOrchestrationThread,
               ticketId: row.ticketId,
               latestTurn,
+              ...(row.initialDraft !== null ? { initialDraft: row.initialDraft } : {}),
               latestTurnStatus: latestTurn?.state ?? null,
               latestSessionStatus: session?.status ?? null,
               session,

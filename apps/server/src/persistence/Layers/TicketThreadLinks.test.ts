@@ -60,6 +60,7 @@ const seedThread = (input: {
       parentThreadId: null,
       isOrchestrationThread: false,
       ticketId: null,
+      initialDraft: null,
       latestTurnId: null,
       createdAt: "2026-04-09T10:00:00.000Z",
       updatedAt: "2026-04-09T10:00:00.000Z",

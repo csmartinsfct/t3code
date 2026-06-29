@@ -1,3 +1,5 @@
+import type { ModelSelection } from "@t3tools/contracts";
+
 const PROPOSE_SCHEDULED_TASK_LANGUAGE = "language-t3:propose-scheduled-task";
 
 export interface ProposeScheduledTaskPayload {
@@ -8,6 +10,7 @@ export interface ProposeScheduledTaskPayload {
   skillIds?: string[];
   prompt?: string;
   autoSend: boolean;
+  modelSelection?: ModelSelection;
 }
 
 /**
@@ -58,6 +61,9 @@ export function parseProposeScheduledTaskPayload(code: string): ProposeScheduled
     const prompt =
       typeof record.prompt === "string" && record.prompt.trim() ? record.prompt.trim() : undefined;
     const autoSend = typeof record.autoSend === "boolean" ? record.autoSend : false;
+    const modelSelection = isModelSelectionRecord(record.modelSelection)
+      ? record.modelSelection
+      : undefined;
 
     return {
       name,
@@ -67,8 +73,15 @@ export function parseProposeScheduledTaskPayload(code: string): ProposeScheduled
       ...(skillIds !== undefined ? { skillIds } : {}),
       ...(prompt !== undefined ? { prompt } : {}),
       autoSend,
+      ...(modelSelection !== undefined ? { modelSelection } : {}),
     };
   } catch {
     return null;
   }
+}
+
+function isModelSelectionRecord(value: unknown): value is ModelSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<ModelSelection>;
+  return typeof candidate.provider === "string" && typeof candidate.model === "string";
 }
