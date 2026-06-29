@@ -420,7 +420,7 @@ function ScheduledTaskDialogContent({
                   />
                 </div>
                 {modelSelection !== null && (
-                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  <div className="flex flex-wrap items-center justify-start gap-1.5">
                     <ProviderModelPicker
                       provider={effectiveProvider}
                       model={effectiveModelSelection.model}
