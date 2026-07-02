@@ -432,7 +432,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             effort: "max",
           },
@@ -448,7 +448,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("forwards Opus 4.7 xhigh effort into query options", () => {
+  it.effect("forwards Opus 4.8 xhigh effort into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -457,7 +457,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
           options: {
             effort: "xhigh",
           },
@@ -500,7 +500,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("falls back to default effort when unsupported xhigh is requested for Opus 4.6", () => {
+  it.effect("forwards Sonnet 5 xhigh effort into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -509,7 +509,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-sonnet-5",
           options: {
             effort: "xhigh",
           },
@@ -518,14 +518,14 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "high");
+      assert.equal(createInput?.options.effort, "xhigh");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
   });
 
-  it.effect("falls back to default effort when unsupported max is requested for Sonnet 4.6", () => {
+  it.effect("forwards Sonnet 5 max effort into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -534,7 +534,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           options: {
             effort: "max",
           },
@@ -543,7 +543,7 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.effort, "high");
+      assert.equal(createInput?.options.effort, "max");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -611,7 +611,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           options: {
             thinking: false,
           },
@@ -636,7 +636,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             fastMode: true,
           },
@@ -663,7 +663,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           options: {
             fastMode: true,
           },
@@ -688,7 +688,7 @@ describe("ClaudeAdapterLive", () => {
         provider: "claudeAgent",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           options: {
             effort: "ultrathink",
           },
@@ -702,7 +702,7 @@ describe("ClaudeAdapterLive", () => {
         attachments: [],
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
           options: {
             effort: "ultrathink",
           },
@@ -1557,7 +1557,7 @@ describe("ClaudeAdapterLive", () => {
           output_tokens: 679,
         },
         modelUsage: {
-          "claude-opus-4-6": {
+          "claude-opus-4-8": {
             contextWindow: 200000,
             maxOutputTokens: 64000,
           },
@@ -1603,7 +1603,7 @@ describe("ClaudeAdapterLive", () => {
         rawMaxTokens: 200_000,
         percentage: 32.5,
         gridRows: [],
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
         memoryFiles: [],
         mcpTools: [{ name: "ticketing", serverName: "t3", tokens: 1200, isLoaded: true }],
         deferredBuiltinTools: [],
@@ -1672,7 +1672,7 @@ describe("ClaudeAdapterLive", () => {
       if (usageEvent?.type === "thread.token-usage.updated") {
         assert.equal(usageEvent.payload.usage.usedTokens, 65_000);
         assert.equal(usageEvent.payload.usage.maxTokens, 200_000);
-        assert.equal(usageEvent.payload.usage.breakdown?.model, "claude-opus-4-6");
+        assert.equal(usageEvent.payload.usage.breakdown?.model, "claude-opus-4-8");
         assert.deepEqual(usageEvent.payload.usage.breakdown?.categories, [
           { name: "System prompt", tokens: 12_000, color: "#64748b" },
           { name: "Messages", tokens: 45_000, color: "#22c55e" },
@@ -2663,12 +2663,12 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6"]);
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-8"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -2683,7 +2683,7 @@ describe("ClaudeAdapterLive", () => {
         const adapter = yield* ClaudeAdapter;
         const modelSelection = {
           provider: "claudeAgent" as const,
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-5",
         };
 
         const session = yield* adapter.startSession({
@@ -2730,7 +2730,7 @@ describe("ClaudeAdapterLive", () => {
         input: "hello",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-5",
           options: {
             contextWindow: "1m",
           },
@@ -2742,12 +2742,12 @@ describe("ClaudeAdapterLive", () => {
         input: "hello again",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-5",
         },
         attachments: [],
       });
 
-      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-6[1m]", "claude-opus-4-6"]);
+      assert.deepEqual(harness.query.setModelCalls, ["claude-opus-4-5[1m]", "claude-opus-4-5"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -2951,7 +2951,7 @@ describe("ClaudeAdapterLive", () => {
         uuid: "assistant-exit-plan",
         parent_tool_use_id: null,
         message: {
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           id: "msg-exit-plan",
           type: "message",
           role: "assistant",

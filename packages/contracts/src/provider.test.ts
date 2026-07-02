@@ -50,7 +50,7 @@ describe("ProviderSessionStartInput", () => {
       cwd: "/tmp/workspace",
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         options: {
           thinking: true,
           effort: "max",
@@ -61,7 +61,7 @@ describe("ProviderSessionStartInput", () => {
     });
     expect(parsed.provider).toBe("claudeAgent");
     expect(parsed.modelSelection?.provider).toBe("claudeAgent");
-    expect(parsed.modelSelection?.model).toBe("claude-sonnet-4-6");
+    expect(parsed.modelSelection?.model).toBe("claude-sonnet-5");
     if (parsed.modelSelection?.provider !== "claudeAgent") {
       throw new Error("Expected claude modelSelection");
     }
@@ -118,7 +118,7 @@ describe("ProviderSendTurnInput", () => {
       threadId: "thread-1",
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         options: {
           effort: "xhigh",
           fastMode: true,
@@ -139,7 +139,7 @@ describe("ProviderSendTurnInput", () => {
       threadId: "thread-1",
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         options: {
           effort: "ultrathink",
           fastMode: true,

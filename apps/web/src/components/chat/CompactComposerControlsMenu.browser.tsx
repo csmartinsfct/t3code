@@ -63,14 +63,15 @@ async function mountMenu(props?: {
     provider === "claudeAgent"
       ? [
           {
-            slug: "claude-opus-4-6",
-            name: "Claude Opus 4.6",
+            slug: "claude-opus-4-8",
+            name: "Claude Opus 4.8",
             isCustom: false,
             capabilities: {
               reasoningEffortLevels: [
                 { value: "low", label: "Low" },
                 { value: "medium", label: "Medium" },
                 { value: "high", label: "High", isDefault: true },
+                { value: "xhigh", label: "Extra High" },
                 { value: "max", label: "Max" },
                 { value: "ultrathink", label: "Ultrathink" },
               ],
@@ -95,14 +96,16 @@ async function mountMenu(props?: {
             },
           },
           {
-            slug: "claude-sonnet-4-6",
-            name: "Claude Sonnet 4.6",
+            slug: "claude-sonnet-5",
+            name: "Claude Sonnet 5",
             isCustom: false,
             capabilities: {
               reasoningEffortLevels: [
                 { value: "low", label: "Low" },
                 { value: "medium", label: "Medium" },
                 { value: "high", label: "High", isDefault: true },
+                { value: "xhigh", label: "Extra High" },
+                { value: "max", label: "Max" },
                 { value: "ultrathink", label: "Ultrathink" },
               ],
               supportsFastMode: false,
@@ -194,7 +197,7 @@ describe("CompactComposerControlsMenu", () => {
 
   it("shows fast mode controls for Opus", async () => {
     await using _ = await mountMenu({
-      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
     });
 
     await page.getByLabelText("More composer controls").click();
@@ -209,7 +212,7 @@ describe("CompactComposerControlsMenu", () => {
 
   it("hides fast mode controls for non-Opus Claude models", async () => {
     await using _ = await mountMenu({
-      modelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-sonnet-5" },
     });
 
     await page.getByLabelText("More composer controls").click();
@@ -221,7 +224,7 @@ describe("CompactComposerControlsMenu", () => {
 
   it("shows only the provided effort options", async () => {
     await using _ = await mountMenu({
-      modelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-sonnet-5" },
     });
 
     await page.getByLabelText("More composer controls").click();
@@ -231,7 +234,8 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).toContain("Low");
       expect(text).toContain("Medium");
       expect(text).toContain("High");
-      expect(text).not.toContain("Max");
+      expect(text).toContain("Extra High");
+      expect(text).toContain("Max");
       expect(text).toContain("Ultrathink");
     });
   });
@@ -259,7 +263,7 @@ describe("CompactComposerControlsMenu", () => {
     await using _ = await mountMenu({
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
         options: { effort: "high" },
       },
       prompt: "Ultrathink:\nInvestigate this",
@@ -278,7 +282,7 @@ describe("CompactComposerControlsMenu", () => {
     await using _ = await mountMenu({
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
         options: { effort: "high" },
       },
       prompt: "Ultrathink:\nplease ultrathink about this problem",
@@ -298,7 +302,7 @@ describe("CompactComposerControlsMenu", () => {
     // Audit traceability: 623a434, 3dd6391, 03999e7.
     const defaultMounted = await mountMenu({
       interactionMode: "default",
-      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
     });
 
     try {
@@ -317,7 +321,7 @@ describe("CompactComposerControlsMenu", () => {
 
     const acceptMounted = await mountMenu({
       interactionMode: "plan-accept",
-      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
     });
 
     try {
@@ -333,7 +337,7 @@ describe("CompactComposerControlsMenu", () => {
   it("changes runtime access from the menu", async () => {
     const supervisedMounted = await mountMenu({
       runtimeMode: "approval-required",
-      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
     });
 
     try {
@@ -347,7 +351,7 @@ describe("CompactComposerControlsMenu", () => {
 
     const fullAccessMounted = await mountMenu({
       runtimeMode: "full-access",
-      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+      modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
     });
 
     try {

@@ -169,7 +169,7 @@ it.effect("decodes project.meta-updated payloads with explicit default provider"
       projectId: "project-1",
       defaultModelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
       },
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
@@ -266,7 +266,7 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
       threadId: "thread-1",
       modelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
       },
       updatedAt: "2026-01-01T00:00:00.000Z",
     });

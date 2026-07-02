@@ -73,7 +73,7 @@ describe("contextWindow", () => {
         breakdown: {
           totalTokens: 65_000,
           maxTokens: 200_000,
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           categories: [
             { name: "Messages", tokens: 45_000, color: "#22c55e" },
             { name: "Tools", tokens: 8_000, color: "#f59e0b" },
@@ -93,7 +93,7 @@ describe("contextWindow", () => {
       }),
     ]);
 
-    expect(snapshot?.breakdown?.model).toBe("claude-opus-4-6");
+    expect(snapshot?.breakdown?.model).toBe("claude-opus-4-8");
     expect(snapshot?.breakdown?.categories).toEqual([
       { name: "Messages", tokens: 45_000, color: "#22c55e" },
       { name: "Tools", tokens: 8_000, color: "#f59e0b" },

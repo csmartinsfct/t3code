@@ -27,8 +27,8 @@ export function createReadyServerProvider(input: {
             name: input.defaultGeminiModelName ?? "Gemini 3.1 Pro Preview",
           }
         : {
-            slug: input.defaultClaudeModelSlug ?? "claude-opus-4-6",
-            name: input.defaultClaudeModelName ?? "Claude Opus 4.6",
+            slug: input.defaultClaudeModelSlug ?? "claude-sonnet-5",
+            name: input.defaultClaudeModelName ?? "Claude Sonnet 5",
           };
   return {
     provider: input.provider as never,

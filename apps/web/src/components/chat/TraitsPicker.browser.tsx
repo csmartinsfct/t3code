@@ -66,8 +66,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-01-01T00:00:00.000Z",
     models: [
       {
-        slug: "claude-opus-4-7",
-        name: "Claude Opus 4.7",
+        slug: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
@@ -86,33 +86,16 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
       {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
             { value: "low", label: "Low" },
             { value: "medium", label: "Medium" },
             { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High" },
             { value: "max", label: "Max" },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          supportsPlan: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: ["ultrathink"],
-        },
-      },
-      {
-        slug: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
             { value: "ultrathink", label: "Ultrathink" },
           ],
           supportsFastMode: false,
@@ -190,7 +173,7 @@ async function mountClaudePicker(props?: {
   skipDraftModelOptions?: boolean;
   triggerVariant?: "ghost" | "outline";
 }) {
-  const model = props?.model ?? "claude-opus-4-6";
+  const model = props?.model ?? "claude-opus-4-8";
   const claudeOptions = !props?.skipDraftModelOptions ? props?.options : undefined;
   const draftsByThreadId: Record<ThreadId, ComposerThreadDraftState> = {
     [CLAUDE_THREAD_ID]: {
@@ -278,7 +261,7 @@ describe("TraitsPicker (Claude)", () => {
   });
 
   it("hides fast mode controls for non-Opus models", async () => {
-    await using _ = await mountClaudePicker({ model: "claude-sonnet-4-6" });
+    await using _ = await mountClaudePicker({ model: "claude-sonnet-5" });
 
     await page.getByRole("button").click();
 
@@ -289,7 +272,7 @@ describe("TraitsPicker (Claude)", () => {
 
   it("shows only the provided effort options", async () => {
     await using _ = await mountClaudePicker({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     });
 
     await page.getByRole("button").click();
@@ -299,15 +282,15 @@ describe("TraitsPicker (Claude)", () => {
       expect(text).toContain("Low");
       expect(text).toContain("Medium");
       expect(text).toContain("High");
-      expect(text).not.toContain("Extra High");
-      expect(text).not.toContain("Max");
+      expect(text).toContain("Extra High");
+      expect(text).toContain("Max");
       expect(text).toContain("Ultrathink");
     });
   });
 
-  it("shows and selects Opus 4.7 xhigh only when the model advertises it", async () => {
+  it("shows and selects Opus 4.8 xhigh only when the model advertises it", async () => {
     await using _ = await mountClaudePicker({
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
     });
 
     await page.getByRole("button").click();
@@ -323,7 +306,7 @@ describe("TraitsPicker (Claude)", () => {
       useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent,
     ).toMatchObject({
       provider: "claudeAgent",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       options: {
         effort: "xhigh",
       },
@@ -351,7 +334,7 @@ describe("TraitsPicker (Claude)", () => {
 
   it("shows prompt-controlled Ultrathink state with selectable effort controls", async () => {
     await using _ = await mountClaudePicker({
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       options: { effort: "high" },
       prompt: "Ultrathink:\nInvestigate this",
     });
@@ -371,7 +354,7 @@ describe("TraitsPicker (Claude)", () => {
 
   it("warns when ultrathink appears in prompt body text", async () => {
     await using _ = await mountClaudePicker({
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       options: { effort: "high" },
       prompt: "Ultrathink:\nplease ultrathink about this problem",
     });
@@ -388,7 +371,7 @@ describe("TraitsPicker (Claude)", () => {
 
   it("persists sticky claude model options when traits change", async () => {
     await using _ = await mountClaudePicker({
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       options: { effort: "medium", fastMode: false },
     });
 

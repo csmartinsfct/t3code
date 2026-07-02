@@ -178,7 +178,7 @@ describe("ProviderRuntimeEvent", () => {
           breakdown: {
             totalTokens: 31251,
             maxTokens: 200000,
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-8",
             categories: [
               { name: "System prompt", tokens: 12_000, color: "#64748b" },
               { name: "Messages", tokens: 19_251, color: "#22c55e" },

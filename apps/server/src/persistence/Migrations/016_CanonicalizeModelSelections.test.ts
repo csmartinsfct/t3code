@@ -31,12 +31,12 @@ layer("016_CanonicalizeModelSelections", (it) => {
         )
         VALUES
           ('project-codex', 'Codex project', '/tmp/project-codex', 'gpt-5.4', '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL),
-          ('project-claude', 'Claude project', '/tmp/project-claude', 'claude-sonnet-4-6', '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL),
+          ('project-claude', 'Claude project', '/tmp/project-claude', 'claude-sonnet-5', '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL),
           ('project-null', 'Null project', '/tmp/project-null', NULL, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL)
       `;
           yield* sql`
         UPDATE projection_projects
-        SET default_model = 'claude-opus-4-6'
+        SET default_model = 'claude-opus-4-8'
         WHERE project_id = 'project-claude'
       `;
           yield* sql`
@@ -56,9 +56,9 @@ layer("016_CanonicalizeModelSelections", (it) => {
         )
         VALUES
           ('thread-session', 'project-codex', 'Session thread', 'gpt-5.4', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default'),
-          ('thread-claude', 'project-claude', 'Claude thread', 'claude-opus-4-6', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default'),
+          ('thread-claude', 'project-claude', 'Claude thread', 'claude-opus-4-8', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default'),
           ('thread-codex', 'project-codex', 'Codex thread', 'gpt-5.4', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default'),
-          ('thread-legacy-options', 'project-claude', 'Legacy options thread', 'claude-opus-4-6', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default')
+          ('thread-legacy-options', 'project-claude', 'Legacy options thread', 'claude-opus-4-8', NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 'full-access', 'default')
       `;
           yield* sql`
         INSERT INTO projection_thread_sessions (
@@ -111,7 +111,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
           NULL,
           'correlation-project-created',
           'user',
-          '{"projectId":"project-1","title":"Project","workspaceRoot":"/tmp/project","defaultModel":"claude-opus-4-6","defaultModelOptions":{"codex":{"reasoningEffort":"high"},"claudeAgent":{"effort":"max"}},"scripts":[],"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
+          '{"projectId":"project-1","title":"Project","workspaceRoot":"/tmp/project","defaultModel":"claude-opus-4-8","defaultModelOptions":{"codex":{"reasoningEffort":"high"},"claudeAgent":{"effort":"max"}},"scripts":[],"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
           '{}'
         ),
         (
@@ -125,7 +125,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
           NULL,
           'correlation-project-created-fallback',
           'user',
-          '{"projectId":"project-2","title":"Fallback Project","workspaceRoot":"/tmp/project-2","defaultModel":"claude-opus-4-6","defaultModelOptions":{"codex":{"reasoningEffort":"low"}},"scripts":[],"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
+          '{"projectId":"project-2","title":"Fallback Project","workspaceRoot":"/tmp/project-2","defaultModel":"claude-opus-4-8","defaultModelOptions":{"codex":{"reasoningEffort":"low"}},"scripts":[],"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
           '{}'
         ),
         (
@@ -153,7 +153,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
           NULL,
           'correlation-thread-created',
           'user',
-          '{"threadId":"thread-1","projectId":"project-1","title":"Thread","model":"claude-opus-4-6","modelOptions":{"codex":{"reasoningEffort":"high"},"claudeAgent":{"effort":"max","thinking":false}},"runtimeMode":"full-access","interactionMode":"default","branch":null,"worktreePath":null,"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
+          '{"threadId":"thread-1","projectId":"project-1","title":"Thread","model":"claude-opus-4-8","modelOptions":{"codex":{"reasoningEffort":"high"},"claudeAgent":{"effort":"max","thinking":false}},"runtimeMode":"full-access","interactionMode":"default","branch":null,"worktreePath":null,"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
           '{}'
         ),
         (
@@ -219,7 +219,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
           assert.deepStrictEqual(projectRows, [
             {
               projectId: "project-claude",
-              defaultModelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-6"}',
+              defaultModelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-8"}',
             },
             {
               projectId: "project-codex",
@@ -241,7 +241,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
           assert.deepStrictEqual(threadRows, [
             {
               threadId: "thread-claude",
-              modelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-6"}',
+              modelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-8"}',
             },
             {
               threadId: "thread-codex",
@@ -249,7 +249,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             },
             {
               threadId: "thread-legacy-options",
-              modelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-6"}',
+              modelSelection: '{"provider":"claudeAgent","model":"claude-opus-4-8"}',
             },
             {
               threadId: "thread-session",
@@ -271,7 +271,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             workspaceRoot: "/tmp/project",
             defaultModelSelection: {
               provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4-8",
               options: {
                 effort: "max",
               },
@@ -287,7 +287,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             workspaceRoot: "/tmp/project-2",
             defaultModelSelection: {
               provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4-8",
               options: {
                 reasoningEffort: "low",
               },
@@ -313,7 +313,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             title: "Thread",
             modelSelection: {
               provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4-8",
               options: {
                 effort: "max",
                 thinking: false,

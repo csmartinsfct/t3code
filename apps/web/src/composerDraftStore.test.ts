@@ -597,7 +597,7 @@ describe("composerDraftStore terminal contexts", () => {
               "claudeAgent:metric": {
                 provider: "claudeAgent",
                 profileId: "metric",
-                model: "claude-opus-4-6",
+                model: "claude-opus-4-8",
                 options: {
                   effort: "max",
                 },
@@ -617,7 +617,7 @@ describe("composerDraftStore terminal contexts", () => {
           "claudeAgent:metric": {
             provider: "claudeAgent",
             profileId: "metric",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-8",
           },
         },
         stickyActiveProvider: "claudeAgent:metric",
@@ -630,7 +630,7 @@ describe("composerDraftStore terminal contexts", () => {
         "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
           reasoningEffort: "high",
         }),
-        "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+        "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-8", "metric", {
           effort: "max",
         }),
       },
@@ -638,7 +638,7 @@ describe("composerDraftStore terminal contexts", () => {
     });
     expect(mergedState.stickyModelSelectionByProvider).toMatchObject({
       "codex:metric": modelSelection("codex", "gpt-5.4", "metric"),
-      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric"),
+      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-8", "metric"),
     });
     expect(mergedState.stickyActiveProvider).toBe("claudeAgent:metric");
   });
@@ -903,7 +903,7 @@ describe("composerDraftStore modelSelection", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(
       threadId,
-      modelSelection("claudeAgent", "claude-opus-4-7", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         effort: "xhigh",
       }),
     );
@@ -912,7 +912,7 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
         .claudeAgent,
     ).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-7", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         effort: "xhigh",
       }),
     );
@@ -946,13 +946,13 @@ describe("composerDraftStore modelSelection", () => {
 
     store.setModelSelection(
       threadId,
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         effort: "max",
         fastMode: true,
       }),
     );
     store.setStickyModelSelection(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         effort: "max",
         fastMode: true,
       }),
@@ -971,12 +971,12 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
         .claudeAgent,
     ).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         thinking: false,
       }),
     );
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         thinking: false,
       }),
     );
@@ -987,7 +987,7 @@ describe("composerDraftStore modelSelection", () => {
 
     store.setModelSelection(
       threadId,
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         effort: "max",
       }),
     );
@@ -1000,7 +1000,7 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
         .claudeAgent,
     ).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         thinking: true,
       }),
     );
@@ -1065,11 +1065,11 @@ describe("composerDraftStore modelSelection", () => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
     store.setModelSelection(
       threadId,
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
 
     store.setProviderModelOptions(threadId, "claudeAgent", {
@@ -1080,12 +1080,12 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
         .claudeAgent,
     ).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         thinking: false,
       }),
     );
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
   });
 
@@ -1120,11 +1120,11 @@ describe("composerDraftStore modelSelection", () => {
       }),
     );
 
-    store.setModelSelection(threadId, modelSelection("claudeAgent", "claude-opus-4-6"));
+    store.setModelSelection(threadId, modelSelection("claudeAgent", "claude-opus-4-8"));
 
     const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
     expect(draft?.modelSelectionByProvider.claudeAgent).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
     expect(draft?.modelSelectionByProvider.codex?.options).toEqual({ fastMode: true });
     expect(draft?.activeProvider).toBe("claudeAgent");
@@ -1155,11 +1155,11 @@ describe("composerDraftStore modelSelection", () => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
     store.setModelSelection(
       threadId,
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
 
     store.setProviderModelOptions(
@@ -1175,12 +1175,12 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider
         .claudeAgent,
     ).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", {
+      modelSelection("claudeAgent", "claude-opus-4-8", {
         thinking: false,
       }),
     );
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent).toEqual(
-      modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
+      modelSelection("claudeAgent", "claude-opus-4-8", { effort: "max" }),
     );
   });
 });
@@ -1214,11 +1214,11 @@ describe("composerDraftStore setModelSelection", () => {
       activeProvider: "cursor",
     });
 
-    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-6"));
+    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-8"));
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
       modelSelectionByProvider: {
-        cursor: modelSelection("cursor", "claude-opus-4-6"),
+        cursor: modelSelection("cursor", "claude-opus-4-8"),
       },
       activeProvider: "cursor",
     });
@@ -1234,11 +1234,11 @@ describe("composerDraftStore setModelSelection", () => {
   it("keeps profiled Cursor selected when choosing model slugs shared with other providers", () => {
     const store = useComposerDraftStore.getState();
 
-    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-6", "metric"));
+    store.setModelSelection(threadId, modelSelection("cursor", "claude-opus-4-8", "metric"));
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
       modelSelectionByProvider: {
-        "cursor:metric": modelSelection("cursor", "claude-opus-4-6", "metric"),
+        "cursor:metric": modelSelection("cursor", "claude-opus-4-8", "metric"),
       },
       activeProvider: "cursor:metric",
     });
@@ -1286,7 +1286,7 @@ describe("composerDraftStore sticky composer settings", () => {
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex:metric");
 
     store.setStickyModelSelection(
-      modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+      modelSelection("claudeAgent", "claude-opus-4-8", "metric", {
         effort: "max",
       }),
     );
@@ -1295,7 +1295,7 @@ describe("composerDraftStore sticky composer settings", () => {
       "codex:metric": modelSelection("codex", "gpt-5.4", "metric", {
         reasoningEffort: "high",
       }),
-      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-6", "metric", {
+      "claudeAgent:metric": modelSelection("claudeAgent", "claude-opus-4-8", "metric", {
         effort: "max",
       }),
     });
@@ -1317,12 +1317,12 @@ describe("composerDraftStore sticky composer settings", () => {
     const store = useComposerDraftStore.getState();
     const threadId = ThreadId.makeUnsafe("thread-sticky-active-provider");
 
-    store.setStickyModelSelection(modelSelection("claudeAgent", "claude-opus-4-6"));
+    store.setStickyModelSelection(modelSelection("claudeAgent", "claude-opus-4-8"));
     store.applyStickyState(threadId);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
       modelSelectionByProvider: {
-        claudeAgent: modelSelection("claudeAgent", "claude-opus-4-6"),
+        claudeAgent: modelSelection("claudeAgent", "claude-opus-4-8"),
       },
       activeProvider: "claudeAgent",
     });
@@ -1401,8 +1401,8 @@ describe("deriveEffectiveComposerModelState", () => {
       checkedAt: "2026-05-03T00:00:00.000Z",
       models: [
         {
-          slug: "claude-sonnet-4-6",
-          name: "Sonnet 4.6",
+          slug: "claude-sonnet-5",
+          name: "Sonnet 5",
           isCustom: false,
           capabilities: null,
         },
@@ -1434,7 +1434,7 @@ describe("deriveEffectiveComposerModelState", () => {
       settings: DEFAULT_UNIFIED_SETTINGS,
     });
 
-    expect(state.selectedModel).toBe("claude-sonnet-4-6");
+    expect(state.selectedModel).toBe("claude-sonnet-5");
   });
 });
 

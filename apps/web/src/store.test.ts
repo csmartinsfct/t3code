@@ -250,14 +250,14 @@ describe("store read model sync", () => {
       makeReadModelThread({
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
       }),
     );
 
     const next = syncServerReadModel(initialState, readModel);
 
-    expect(next.threads[0]?.modelSelection.model).toBe("claude-opus-4-6");
+    expect(next.threads[0]?.modelSelection.model).toBe("claude-opus-4-8");
   });
 
   it("repairs provider/model mismatches from older Gemini fork commands", () => {
@@ -303,7 +303,7 @@ describe("store read model sync", () => {
 
     const next = syncServerReadModel(initialState, readModel);
 
-    expect(next.threads[0]?.modelSelection.model).toBe("claude-sonnet-4-6");
+    expect(next.threads[0]?.modelSelection.model).toBe("claude-sonnet-5");
   });
 
   it("preserves project and thread updatedAt timestamps from the read model", () => {

@@ -88,8 +88,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: new Date().toISOString(),
     models: [
       {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
+        slug: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
@@ -106,8 +106,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
       {
-        slug: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
@@ -149,8 +149,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: new Date().toISOString(),
     models: [
       {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
+        slug: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
@@ -204,8 +204,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: new Date().toISOString(),
     models: [
       {
-        slug: "claude-sonnet-4-6",
-        name: "Sonnet 4.6",
+        slug: "claude-sonnet-5",
+        name: "Sonnet 5",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [],
@@ -325,7 +325,7 @@ describe("ProviderModelPicker", () => {
   it("shows provider submenus when provider switching is allowed", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
     });
 
@@ -340,7 +340,7 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Claude (metric)");
         expect(text).toContain("Cursor");
         expect(text).not.toContain("Cursor (metric)");
-        expect(text).not.toContain("Claude Sonnet 4.6");
+        expect(text).not.toContain("Claude Sonnet 5");
       });
     } finally {
       await mounted.cleanup();
@@ -373,7 +373,7 @@ describe("ProviderModelPicker", () => {
   it("opens provider submenus with a visible gap from the parent menu", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
     });
 
@@ -418,7 +418,7 @@ describe("ProviderModelPicker", () => {
   it("keeps a provider submenu open while moving onto a model item", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
     });
 
@@ -442,7 +442,7 @@ describe("ProviderModelPicker", () => {
   it("shows models directly when the provider is locked mid-thread", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: "claudeAgent",
     });
 
@@ -451,7 +451,7 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
-        expect(text).toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Claude Sonnet 5");
         expect(text).toContain("Claude Haiku 4.5");
         expect(text).not.toContain("Codex");
       });
@@ -517,7 +517,7 @@ describe("ProviderModelPicker", () => {
 
     const hidden = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
       providers: providersWithoutSpark,
     });
@@ -537,7 +537,7 @@ describe("ProviderModelPicker", () => {
 
     const visible = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
       providers: providersWithSpark,
     });
@@ -557,18 +557,15 @@ describe("ProviderModelPicker", () => {
   it("dispatches the canonical slug when a model is selected", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: "claudeAgent",
     });
 
     try {
       await page.getByRole("button").click();
-      await page.getByRole("menuitemradio", { name: "Claude Sonnet 4.6" }).click();
+      await page.getByRole("menuitemradio", { name: "Claude Sonnet 5" }).click();
 
-      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
-        "claudeAgent",
-        "claude-sonnet-4-6",
-      );
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith("claudeAgent", "claude-sonnet-5");
     } finally {
       await mounted.cleanup();
     }
@@ -578,23 +575,23 @@ describe("ProviderModelPicker", () => {
     // Audit traceability: e1077b5, 7d6be28.
     const mounted = await mountPicker({
       provider: "claudeAgent:metric",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       lockedProvider: null,
     });
 
     try {
       await vi.waitFor(() => {
-        expect(page.getByRole("button").element().textContent).toContain("Claude Opus 4.6");
+        expect(page.getByRole("button").element().textContent).toContain("Claude Opus 4.8");
         expect(page.getByRole("button").element().textContent).toContain("metric");
       });
 
       await page.getByRole("button").click();
       await page.getByRole("menuitem", { name: "Claude (metric)" }).hover();
-      await page.getByRole("menuitemradio", { name: "Claude Opus 4.6" }).click();
+      await page.getByRole("menuitemradio", { name: "Claude Opus 4.8" }).click();
 
       expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
         "claudeAgent:metric",
-        "claude-opus-4-6",
+        "claude-opus-4-8",
       );
     } finally {
       await mounted.cleanup();
@@ -752,9 +749,9 @@ describe("ProviderModelPicker", () => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude");
         expect(text).toContain("Disabled");
-        expect(text).toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Claude Sonnet 5");
       });
-      const disabledModel = expectMenuRadioItemDisabled("Claude Sonnet 4.6");
+      const disabledModel = expectMenuRadioItemDisabled("Claude Sonnet 5");
       disabledModel.click();
       expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {
@@ -852,9 +849,9 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Not configured");
-        expect(text).toContain("Claude Opus 4.6");
+        expect(text).toContain("Claude Opus 4.8");
       });
-      const disabledModel = expectMenuRadioItemDisabled("Claude Opus 4.6");
+      const disabledModel = expectMenuRadioItemDisabled("Claude Opus 4.8");
       disabledModel.click();
       expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
     } finally {

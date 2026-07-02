@@ -39,8 +39,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-04-10T00:00:00.000Z",
     models: [
       {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
+        slug: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
         isCustom: false,
         capabilities: null,
       },
@@ -57,8 +57,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-04-10T00:00:00.000Z",
     models: [
       {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
+        slug: "claude-opus-4-8",
+        name: "Claude Opus 4.8",
         isCustom: false,
         capabilities: null,
       },
@@ -93,8 +93,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-04-10T00:00:00.000Z",
     models: [
       {
-        slug: "claude-sonnet-4-6",
-        name: "Sonnet 4.6",
+        slug: "claude-sonnet-5",
+        name: "Sonnet 5",
         isCustom: false,
         capabilities: null,
       },
@@ -110,7 +110,7 @@ describe("resolveAppModelSelectionState", () => {
         textGenerationModelSelection: {
           provider: "claudeAgent",
           profileId: "metric",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
       },
       TEST_PROVIDERS,
@@ -119,7 +119,7 @@ describe("resolveAppModelSelectionState", () => {
     expect(selection).toMatchObject({
       provider: "claudeAgent",
       profileId: "metric",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
     });
   });
 
@@ -130,7 +130,7 @@ describe("resolveAppModelSelectionState", () => {
         textGenerationModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
         },
       },
       TEST_PROVIDERS,
@@ -139,7 +139,7 @@ describe("resolveAppModelSelectionState", () => {
     expect(selection).toMatchObject({
       provider: "cursor",
       profileId: "metric",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     });
   });
 });
@@ -176,7 +176,7 @@ describe("secondary inference model selection", () => {
         textGenerationModelSelection: {
           provider: "claudeAgent",
           profileId: "metric",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
       },
       TEST_PROVIDERS,
@@ -185,7 +185,7 @@ describe("secondary inference model selection", () => {
     expect(selection).toMatchObject({
       provider: "claudeAgent",
       profileId: "metric",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
     });
   });
 });

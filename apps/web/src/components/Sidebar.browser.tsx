@@ -191,8 +191,8 @@ describe("Sidebar thread context menu helpers", () => {
           displayName: "Claude (metric)",
           models: [
             {
-              slug: "claude-opus-4-6",
-              name: "Claude Opus 4.6",
+              slug: "claude-opus-4-8",
+              name: "Claude Opus 4.8",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [],
@@ -248,8 +248,8 @@ describe("Sidebar thread context menu helpers", () => {
           displayName: "Cursor (profile)",
           models: [
             {
-              slug: "claude-sonnet-4-6",
-              name: "Sonnet 4.6",
+              slug: "claude-sonnet-5",
+              name: "Sonnet 5",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [],
@@ -277,8 +277,8 @@ describe("Sidebar thread context menu helpers", () => {
     expect(forkItem?.disabled).toBe(false);
     expect(forkItem?.children).toEqual([
       {
-        id: "fork::claudeAgent:metric::claude-opus-4-6",
-        label: "Claude (metric) — Claude Opus 4.6",
+        id: "fork::claudeAgent:metric::claude-opus-4-8",
+        label: "Claude (metric) — Claude Opus 4.8",
       },
       {
         id: "fork::gemini::gemini-2.5-pro",
@@ -298,10 +298,10 @@ describe("Sidebar thread context menu helpers", () => {
       provider: "codex",
       model: "gpt-5.4",
     });
-    expect(buildForkModelSelection("claudeAgent:metric", "claude-opus-4-6")).toEqual({
+    expect(buildForkModelSelection("claudeAgent:metric", "claude-opus-4-8")).toEqual({
       provider: "claudeAgent",
       profileId: "metric",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
     });
     expect(buildForkModelSelection("gemini", "gemini-2.5-pro")).toEqual({
       provider: "gemini",

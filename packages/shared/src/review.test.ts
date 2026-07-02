@@ -212,8 +212,8 @@ describe("selectReviewModel", () => {
           provider: "claudeAgent:alpha" as ProviderKind,
           models: [
             {
-              slug: "claude-sonnet-4-6",
-              name: "Claude Sonnet 4.6",
+              slug: "claude-sonnet-5",
+              name: "Claude Sonnet 5",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [{ value: "high", label: "High", isDefault: true }],
@@ -230,8 +230,8 @@ describe("selectReviewModel", () => {
           provider: "claudeAgent:beta" as ProviderKind,
           models: [
             {
-              slug: "claude-opus-4-6",
-              name: "Claude Opus 4.6",
+              slug: "claude-opus-4-8",
+              name: "Claude Opus 4.8",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [{ value: "high", label: "High", isDefault: true }],
@@ -258,7 +258,7 @@ describe("selectReviewModel", () => {
     expect(result).toEqual({
       provider: "claudeAgent",
       profileId: "beta",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
     });
   });
 
@@ -287,8 +287,8 @@ describe("selectReviewModel", () => {
           provider: "claudeAgent",
           models: [
             {
-              slug: "claude-sonnet-4-6",
-              name: "Claude Sonnet 4.6",
+              slug: "claude-sonnet-5",
+              name: "Claude Sonnet 5",
               isCustom: false,
               capabilities: {
                 reasoningEffortLevels: [{ value: "high", label: "High", isDefault: true }],
@@ -311,7 +311,7 @@ describe("selectReviewModel", () => {
 
     expect(result).toEqual({
       provider: "claudeAgent",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     });
   });
 
@@ -340,7 +340,7 @@ describe("selectReviewModel", () => {
       rateLimits: [],
       implementationModelSelection: {
         provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
       },
     });
 

@@ -24,9 +24,9 @@ describe("OrchestrateConfirmDialog model labels", () => {
     expect(
       resolveReviewerConfigurationSummary(2, {
         provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
       }),
-    ).toBe("Claude / claude-sonnet-4-6");
+    ).toBe("Claude / claude-sonnet-5");
   });
 
   it("shows the settings hint when automated review is disabled", () => {

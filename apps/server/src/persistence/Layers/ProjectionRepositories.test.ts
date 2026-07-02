@@ -87,7 +87,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         title: "Null options thread",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
         runtimeMode: "full-access",
         interactionMode: "default",
@@ -120,7 +120,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         row.modelSelection,
         JSON.stringify({
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         }),
       );
 
@@ -129,7 +129,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       });
       assert.deepStrictEqual(Option.getOrNull(persisted)?.modelSelection, {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
       });
     }),
   );

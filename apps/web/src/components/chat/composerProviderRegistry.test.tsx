@@ -45,8 +45,8 @@ const CURSOR_MODELS: ReadonlyArray<ServerProviderModel> = [
 
 const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "claude-opus-4-7",
-    name: "Claude Opus 4.7",
+    slug: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
@@ -64,32 +64,16 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
     },
   },
   {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    isCustom: false,
-    capabilities: {
-      reasoningEffortLevels: [
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High", isDefault: true },
-        { value: "max", label: "Max" },
-        { value: "ultrathink", label: "Ultrathink" },
-      ],
-      supportsFastMode: true,
-      supportsThinkingToggle: false,
-      supportsPlan: true,
-      contextWindowOptions: [],
-      promptInjectedEffortLevels: ["ultrathink"],
-    },
-  },
-  {
-    slug: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
+    slug: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
         { value: "high", label: "High", isDefault: true },
+        { value: "xhigh", label: "Extra High" },
+        { value: "max", label: "Max" },
         { value: "ultrathink", label: "Ultrathink" },
       ],
       supportsFastMode: false,
@@ -116,8 +100,8 @@ const CLAUDE_MODELS: ReadonlyArray<ServerProviderModel> = [
 
 const CLAUDE_MODELS_WITH_CONTEXT_WINDOW: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    slug: "claude-opus-4-5",
+    name: "Claude Opus 4.5",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
@@ -244,7 +228,7 @@ describe("getComposerProviderState", () => {
   it("returns Claude defaults for effort-capable models", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: undefined,
@@ -262,7 +246,7 @@ describe("getComposerProviderState", () => {
   it("tracks Claude ultrathink from the prompt without changing dispatch effort", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       models: CLAUDE_MODELS,
       prompt: "Ultrathink:\nInvestigate this failure",
       modelOptions: {
@@ -310,7 +294,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude fast mode when it is the only active option", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -333,7 +317,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude default effort explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -354,10 +338,10 @@ describe("getComposerProviderState", () => {
     });
   });
 
-  it("preserves Claude Opus 4.7 xhigh effort for dispatch", () => {
+  it("preserves Claude Opus 4.8 xhigh effort for dispatch", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -376,10 +360,10 @@ describe("getComposerProviderState", () => {
     });
   });
 
-  it("falls unsupported Claude xhigh back to high for older effort-capable models", () => {
+  it("preserves Sonnet 5 xhigh effort for dispatch", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-sonnet-5",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -391,9 +375,9 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "claudeAgent",
-      promptEffort: "high",
+      promptEffort: "xhigh",
       modelOptionsForDispatch: {
-        effort: "high",
+        effort: "xhigh",
       },
     });
   });
@@ -403,7 +387,7 @@ describe("getComposerProviderState", () => {
     // fastMode: false, which meant deepMerge could never clear a previous true.
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -438,7 +422,7 @@ describe("getComposerProviderState", () => {
   it("preserves Claude default context window explicitly in dispatch options", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-5",
       models: CLAUDE_MODELS_WITH_CONTEXT_WINDOW,
       prompt: "",
       modelOptions: {
@@ -460,7 +444,7 @@ describe("getComposerProviderState", () => {
     // deepMerge can clear an older non-default 1m selection.
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-5",
       models: CLAUDE_MODELS_WITH_CONTEXT_WINDOW,
       prompt: "",
       modelOptions: {
@@ -492,7 +476,7 @@ describe("getComposerProviderState", () => {
   it("omits fastMode when the model does not support it", () => {
     const state = getComposerProviderState({
       provider: "claudeAgent",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       models: CLAUDE_MODELS,
       prompt: "",
       modelOptions: {
@@ -544,7 +528,7 @@ describe("renderProviderTraitsMenuContent", () => {
     const element = renderProviderTraitsMenuContent({
       provider: "claudeAgent:metric",
       threadId: ThreadId.makeUnsafe("thread-profiled-provider"),
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       models: CLAUDE_MODELS,
       modelOptions: undefined,
       prompt: "",

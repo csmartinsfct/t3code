@@ -105,8 +105,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     } satisfies ModelCapabilities,
   },
   {
-    slug: "claude-opus-4-7",
-    name: "Claude Opus 4.7",
+    slug: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
     isCustom: false,
     capabilities: {
       reasoningEffortLevels: [
@@ -117,56 +117,10 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         { value: "max", label: "Max" },
         { value: "ultrathink", label: "Ultrathink" },
       ],
-      supportsFastMode: true,
-      supportsThinkingToggle: false,
-      supportsPlan: true,
-      contextWindowOptions: [
-        { value: "200k", label: "200k", isDefault: true },
-        { value: "1m", label: "1M" },
-      ],
-      promptInjectedEffortLevels: ["ultrathink"],
-    } satisfies ModelCapabilities,
-  },
-  {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    isCustom: false,
-    capabilities: {
-      reasoningEffortLevels: [
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High", isDefault: true },
-        { value: "max", label: "Max" },
-        { value: "ultrathink", label: "Ultrathink" },
-      ],
-      supportsFastMode: true,
-      supportsThinkingToggle: false,
-      supportsPlan: true,
-      contextWindowOptions: [
-        { value: "200k", label: "200k", isDefault: true },
-        { value: "1m", label: "1M" },
-      ],
-      promptInjectedEffortLevels: ["ultrathink"],
-    } satisfies ModelCapabilities,
-  },
-  {
-    slug: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
-    isCustom: false,
-    capabilities: {
-      reasoningEffortLevels: [
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High", isDefault: true },
-        { value: "ultrathink", label: "Ultrathink" },
-      ],
       supportsFastMode: false,
       supportsThinkingToggle: false,
       supportsPlan: true,
-      contextWindowOptions: [
-        { value: "200k", label: "200k", isDefault: true },
-        { value: "1m", label: "1M" },
-      ],
+      contextWindowOptions: [{ value: "1m", label: "1M", isDefault: true }],
       promptInjectedEffortLevels: ["ultrathink"],
     } satisfies ModelCapabilities,
   },

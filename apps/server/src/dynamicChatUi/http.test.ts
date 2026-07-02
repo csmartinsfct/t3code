@@ -90,7 +90,7 @@ T3_DYNAMIC_CHAT_UI_END`),
     const threadModelSelection = {
       provider: "claudeAgent" as const,
       profileId: "metric",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       options: { effort: "xhigh" as const, contextWindow: "1m" },
     };
 

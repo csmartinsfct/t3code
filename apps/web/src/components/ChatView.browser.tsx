@@ -4606,7 +4606,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               modelSelection: {
                 provider: "claudeAgent" as const,
                 profileId: "metric",
-                model: "claude-opus-4-6",
+                model: "claude-opus-4-8",
               },
             }
           : thread,
@@ -4626,8 +4626,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
               displayName: "Claude",
               models: [
                 {
-                  slug: "claude-opus-4-6",
-                  name: "Claude Opus 4.6",
+                  slug: "claude-opus-4-8",
+                  name: "Claude Opus 4.8",
                   isCustom: false,
                   capabilities: {
                     reasoningEffortLevels: [],
@@ -4645,8 +4645,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
               displayName: "Claude (metric)",
               models: [
                 {
-                  slug: "claude-opus-4-6",
-                  name: "Claude Opus 4.6",
+                  slug: "claude-opus-4-8",
+                  name: "Claude Opus 4.8",
                   isCustom: false,
                   capabilities: {
                     reasoningEffortLevels: [],
@@ -4977,7 +4977,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     installTestNativeApi({
       showContextMenu: async (items) => {
         contextMenus.push(items);
-        return "fork::claudeAgent:metric::claude-opus-4-6";
+        return "fork::claudeAgent:metric::claude-opus-4-8";
       },
       dispatchCommand: async (payload) => {
         dispatchedCommands.push(payload);
@@ -5017,8 +5017,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
               displayName: "Claude (metric)",
               models: [
                 {
-                  slug: "claude-opus-4-6",
-                  name: "Claude Opus 4.6",
+                  slug: "claude-opus-4-8",
+                  name: "Claude Opus 4.8",
                   isCustom: false,
                   capabilities: {
                     reasoningEffortLevels: [],
@@ -5053,8 +5053,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(
           forkItem?.children?.some(
             (child) =>
-              child.id === "fork::claudeAgent:metric::claude-opus-4-6" &&
-              child.label === "Claude (metric) — Claude Opus 4.6",
+              child.id === "fork::claudeAgent:metric::claude-opus-4-8" &&
+              child.label === "Claude (metric) — Claude Opus 4.8",
           ),
         ).toBe(true);
       });
@@ -5305,7 +5305,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       stickyModelSelectionByProvider: {
         claudeAgent: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             effort: "max",
             fastMode: true,
@@ -5340,7 +5340,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         modelSelectionByProvider: {
           claudeAgent: {
             provider: "claudeAgent",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-8",
             options: {
               effort: "max",
               fastMode: true,
@@ -5361,7 +5361,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "claudeAgent:metric": {
           provider: "claudeAgent",
           profileId: "metric",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             effort: "max",
           },
@@ -5406,7 +5406,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           "claudeAgent:metric": {
             provider: "claudeAgent",
             profileId: "metric",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-8",
             options: {
               effort: "max",
             },
@@ -5507,7 +5507,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
             "claudeAgent:metric": {
               provider: "claudeAgent",
               profileId: "metric",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4-8",
             },
           },
           activeProvider: "claudeAgent:metric",

@@ -35,9 +35,7 @@ export const KNOWN_PROVIDER_MODEL_OPTIONS: Record<
   claudeAgent: [
     { slug: "claude-fable-5", name: "Claude Fable 5" },
     { slug: "claude-opus-4-8", name: "Claude Opus 4.8" },
-    { slug: "claude-opus-4-7", name: "Claude Opus 4.7" },
-    { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
-    { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
     { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
   ],
   gemini: [
@@ -68,10 +66,8 @@ export const KNOWN_PROVIDER_MODEL_OPTIONS: Record<
     { slug: "gpt-5-mini", name: "GPT-5 Mini" },
     { slug: "claude-fable-5", name: "Fable 5" },
     { slug: "claude-opus-4-8", name: "Opus 4.8" },
-    { slug: "claude-opus-4-7", name: "Opus 4.7" },
-    { slug: "claude-opus-4-6", name: "Opus 4.6" },
     { slug: "claude-opus-4-5", name: "Opus 4.5" },
-    { slug: "claude-sonnet-4-6", name: "Sonnet 4.6" },
+    { slug: "claude-sonnet-5", name: "Sonnet 5" },
     { slug: "claude-sonnet-4-5", name: "Sonnet 4.5" },
     { slug: "claude-sonnet-4", name: "Sonnet 4" },
     { slug: "claude-haiku-4-5", name: "Haiku 4.5" },
@@ -433,7 +429,8 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
         case "1m":
           if (
             modelSelection.model === "claude-fable-5" ||
-            modelSelection.model === "claude-opus-4-8"
+            modelSelection.model === "claude-opus-4-8" ||
+            modelSelection.model === "claude-sonnet-5"
           ) {
             return modelSelection.model;
           }

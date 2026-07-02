@@ -58,7 +58,7 @@ vi.mock("../chat/ProviderModelPicker", () => ({
       data-provider-model-picker="true"
       data-provider={provider}
       data-model={model}
-      onClick={() => onProviderModelChange?.("claudeAgent", "claude-sonnet-4-6")}
+      onClick={() => onProviderModelChange?.("claudeAgent", "claude-sonnet-5")}
     >
       {model}
     </button>

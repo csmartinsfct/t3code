@@ -1973,7 +1973,7 @@ export function GeneralSettingsPanel() {
                               : providerCard.provider === "gemini"
                                 ? "gemini-3.1-pro-preview"
                                 : providerCard.provider === "cursor"
-                                  ? "claude-sonnet-4-6"
+                                  ? "claude-sonnet-5"
                                   : "claude-sonnet-5-0"
                           }
                           spellCheck={false}

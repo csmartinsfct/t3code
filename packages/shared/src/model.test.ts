@@ -61,20 +61,20 @@ describe("makeProviderModelSelection", () => {
       profileId: "metric",
       model: "gpt-5.4",
     });
-    expect(makeProviderModelSelection("claudeAgent:metric", "claude-opus-4-6")).toEqual({
+    expect(makeProviderModelSelection("claudeAgent:metric", "claude-opus-4-8")).toEqual({
       provider: "claudeAgent",
       profileId: "metric",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-8",
     });
     expect(makeProviderModelSelection("gemini:preview", "gemini-2.5-pro")).toEqual({
       provider: "gemini",
       profileId: "preview",
       model: "gemini-2.5-pro",
     });
-    expect(makeProviderModelSelection("cursor:metric", "claude-sonnet-4-6")).toEqual({
+    expect(makeProviderModelSelection("cursor:metric", "claude-sonnet-5")).toEqual({
       provider: "cursor",
       profileId: "metric",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
     });
   });
 });
@@ -84,12 +84,12 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("fable", "claudeAgent")).toBe("claude-fable-5");
     expect(normalizeModelSlug("opus", "claudeAgent")).toBe("claude-opus-4-8");
-    expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-5");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
     expect(normalizeModelSlug("composer", "cursor")).toBe("composer-2");
     expect(normalizeModelSlug("composer-fast", "cursor")).toBe("composer-2");
     expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5.5");
-    expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("claude-sonnet-5");
   });
 
   it("returns null for empty or missing values", () => {
@@ -106,7 +106,7 @@ describe("model provider inference", () => {
     expect(inferBaseProviderKindFromModelSlug("2.5-pro")).toBe("gemini");
     expect(inferBaseProviderKindFromModelSlug("claude-fable-5")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("claude-opus-4-8")).toBe("claudeAgent");
-    expect(inferBaseProviderKindFromModelSlug("claude-opus-4-6")).toBe("claudeAgent");
+    expect(inferBaseProviderKindFromModelSlug("claude-sonnet-5")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("gpt-5.4")).toBe("codex");
     expect(inferBaseProviderKindFromModelSlug("cursor-special-model")).toBe("cursor");
   });
@@ -160,9 +160,7 @@ describe("resolveKnownProviderModelName", () => {
     expect(resolveKnownProviderModelName("codex", "gpt-5.5")).toBe("GPT-5.5");
     expect(resolveKnownProviderModelName("claudeAgent", "claude-fable-5")).toBe("Claude Fable 5");
     expect(resolveKnownProviderModelName("claudeAgent", "claude-opus-4-8")).toBe("Claude Opus 4.8");
-    expect(resolveKnownProviderModelName("claudeAgent", "claude-sonnet-4-6")).toBe(
-      "Claude Sonnet 4.6",
-    );
+    expect(resolveKnownProviderModelName("claudeAgent", "claude-sonnet-5")).toBe("Claude Sonnet 5");
     expect(resolveKnownProviderModelName("gemini", "auto")).toBe("Auto (Gemini 3)");
     expect(resolveKnownProviderModelName("cursor", "composer-2")).toBe("Composer 2");
   });
@@ -170,7 +168,7 @@ describe("resolveKnownProviderModelName", () => {
   it("uses provider-specific labels for ambiguous slugs", () => {
     expect(resolveKnownProviderModelName("codex", "gpt-5.3-codex")).toBe("GPT-5.3 Codex");
     expect(resolveKnownProviderModelName("cursor", "gpt-5.3-codex")).toBe("Codex 5.3");
-    expect(resolveKnownProviderModelName("cursor:metric", "claude-sonnet-4-6")).toBe("Sonnet 4.6");
+    expect(resolveKnownProviderModelName("cursor:metric", "claude-sonnet-5")).toBe("Sonnet 5");
   });
 
   it("returns null for unknown models", () => {
@@ -182,11 +180,11 @@ describe("resolveSelectableModel", () => {
   it("resolves exact slugs, labels, and aliases", () => {
     const options = [
       { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-      { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+      { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
     ];
     expect(resolveSelectableModel("codex", "gpt-5.3-codex", options)).toBe("gpt-5.3-codex");
     expect(resolveSelectableModel("codex", "gpt-5.3 codex", options)).toBe("gpt-5.3-codex");
-    expect(resolveSelectableModel("claudeAgent", "sonnet", options)).toBe("claude-sonnet-4-6");
+    expect(resolveSelectableModel("claudeAgent", "sonnet", options)).toBe("claude-sonnet-5");
   });
 });
 
@@ -333,29 +331,29 @@ describe("resolveApiModelId", () => {
     expect(
       resolveApiModelId({
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-5",
         options: { contextWindow: "1m" },
       }),
-    ).toBe("claude-opus-4-6[1m]");
+    ).toBe("claude-opus-4-5[1m]");
   });
 
   it("returns the model as-is for 200k context window", () => {
     expect(
       resolveApiModelId({
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-5",
         options: { contextWindow: "200k" },
       }),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-5");
   });
 
   it("returns the model as-is when no context window is set", () => {
-    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
-      "claude-opus-4-6",
+    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-5" })).toBe(
+      "claude-opus-4-5",
     );
     expect(
-      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
-    ).toBe("claude-opus-4-6");
+      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-5", options: {} }),
+    ).toBe("claude-opus-4-5");
   });
 
   it("returns the model as-is for Codex selections", () => {
@@ -380,6 +378,16 @@ describe("resolveApiModelId", () => {
         options: { contextWindow: "1m" },
       }),
     ).toBe("claude-fable-5");
+  });
+
+  it("keeps Sonnet 5 at its canonical API id for the native 1m window", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-sonnet-5",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-sonnet-5");
   });
 });
 

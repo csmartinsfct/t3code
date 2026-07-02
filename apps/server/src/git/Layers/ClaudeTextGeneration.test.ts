@@ -236,7 +236,7 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           diffPatch: "diff --git a/README.md b/README.md",
           modelSelection: {
             provider: "claudeAgent",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-8",
             options: {
               effort: "max",
               fastMode: true,
@@ -268,7 +268,7 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           message: "Please investigate reconnect failures after restarting the session.",
           modelSelection: {
             provider: "claudeAgent",
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5",
           },
         });
 
@@ -298,7 +298,7 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           message: "Name this thread.",
           modelSelection: {
             provider: "claudeAgent",
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5",
           },
         });
 

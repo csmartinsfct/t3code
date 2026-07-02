@@ -804,7 +804,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         cwd: "/tmp/project-claude-send-turn",
         modelSelection: {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             effort: "max",
           },
@@ -837,7 +837,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.cwd, "/tmp/project-claude-send-turn");
         assert.deepEqual(startPayload.modelSelection, {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
           options: {
             effort: "max",
           },

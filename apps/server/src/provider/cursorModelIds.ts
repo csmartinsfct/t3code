@@ -21,10 +21,8 @@ export const CURSOR_ACP_BUILT_IN_MODELS: ReadonlyArray<CursorAcpModelOption> = [
   { slug: "gpt-5-mini", name: "GPT-5 Mini" },
   { slug: "claude-fable-5", name: "Fable 5" },
   { slug: "claude-opus-4-8", name: "Opus 4.8" },
-  { slug: "claude-opus-4-7", name: "Opus 4.7" },
-  { slug: "claude-opus-4-6", name: "Opus 4.6" },
   { slug: "claude-opus-4-5", name: "Opus 4.5" },
-  { slug: "claude-sonnet-4-6", name: "Sonnet 4.6" },
+  { slug: "claude-sonnet-5", name: "Sonnet 5" },
   { slug: "claude-sonnet-4-5", name: "Sonnet 4.5" },
   { slug: "claude-sonnet-4", name: "Sonnet 4" },
   { slug: "claude-haiku-4-5", name: "Haiku 4.5" },
@@ -67,14 +65,10 @@ export function normalizeCursorModelForAcp(model: string): string {
   if (lower.startsWith("claude-fable-5")) return "claude-fable-5";
   if (lower.startsWith("claude-4.8-opus")) return "claude-opus-4-8";
   if (lower.startsWith("claude-opus-4-8")) return "claude-opus-4-8";
-  if (lower.startsWith("claude-4.7-opus")) return "claude-opus-4-7";
-  if (lower.startsWith("claude-opus-4-7")) return "claude-opus-4-7";
-  if (lower.startsWith("claude-4.6-opus")) return "claude-opus-4-6";
-  if (lower.startsWith("claude-opus-4-6")) return "claude-opus-4-6";
   if (lower.startsWith("claude-4.5-opus")) return "claude-opus-4-5";
   if (lower.startsWith("claude-opus-4-5")) return "claude-opus-4-5";
-  if (lower.startsWith("claude-4.6-sonnet")) return "claude-sonnet-4-6";
-  if (lower.startsWith("claude-sonnet-4-6")) return "claude-sonnet-4-6";
+  if (lower.startsWith("claude-5-sonnet")) return "claude-sonnet-5";
+  if (lower.startsWith("claude-sonnet-5")) return "claude-sonnet-5";
   if (lower.startsWith("claude-4.5-sonnet")) return "claude-sonnet-4-5";
   if (lower.startsWith("claude-sonnet-4-5")) return "claude-sonnet-4-5";
   if (lower.startsWith("claude-4-sonnet")) return "claude-sonnet-4";

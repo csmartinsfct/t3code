@@ -96,14 +96,14 @@ describe("settings defaults", () => {
         orchestrationReviewerModelSelection: {
           provider: "claudeAgent",
           profileId: "metric",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-8",
         },
       }),
     ).toEqual({
       orchestrationReviewerModelSelection: {
         provider: "claudeAgent",
         profileId: "metric",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
       },
     });
 
@@ -112,14 +112,14 @@ describe("settings defaults", () => {
         textGenerationModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
         },
       }),
     ).toEqual({
       textGenerationModelSelection: {
         provider: "cursor",
         profileId: "metric",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
       },
     });
   });
@@ -185,14 +185,14 @@ describe("settings defaults", () => {
               configDir: "/tmp/cursor-metric/.cursor",
               dataDir: "/tmp/cursor-metric/.cursor",
               env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
-              customModels: ["claude-sonnet-4-6"],
+              customModels: ["claude-sonnet-5"],
             },
           ],
         },
         orchestrationImplementerModelSelection: {
           provider: "cursor",
           profileId: "metric",
-          model: "claude-sonnet-4-6",
+          model: "claude-sonnet-5",
         },
       }),
     ).toEqual({
@@ -218,14 +218,14 @@ describe("settings defaults", () => {
             configDir: "/tmp/cursor-metric/.cursor",
             dataDir: "/tmp/cursor-metric/.cursor",
             env: { CURSOR_DATA_DIR: "/tmp/cursor-metric/.cursor" },
-            customModels: ["claude-sonnet-4-6"],
+            customModels: ["claude-sonnet-5"],
           },
         ],
       },
       orchestrationImplementerModelSelection: {
         provider: "cursor",
         profileId: "metric",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
       },
     });
   });
