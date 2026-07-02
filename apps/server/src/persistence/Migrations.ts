@@ -56,6 +56,7 @@ import Migration0039 from "./Migrations/039_TicketingPatchableBodies.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadProposedPlanStatus.ts";
 import Migration0041 from "./Migrations/041_ProjectionThreadMessageSequence.ts";
 import Migration0042 from "./Migrations/042_ProjectionThreadsInitialDraft.ts";
+import Migration0043 from "./Migrations/043_ProjectionThreadActivitiesKindIndex.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -110,6 +111,7 @@ export const migrationEntries = [
   [40, "ProjectionThreadProposedPlanStatus", Migration0040],
   [41, "ProjectionThreadMessageSequence", Migration0041],
   [42, "ProjectionThreadsInitialDraft", Migration0042],
+  [43, "ProjectionThreadActivitiesKindIndex", Migration0043],
 ] as const;
 
 const migrationEntryById = new Map<number, string>(
