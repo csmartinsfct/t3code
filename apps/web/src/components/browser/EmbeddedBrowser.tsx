@@ -6,6 +6,11 @@ import type {
 } from "@t3tools/contracts";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
 import {
+  chooseNextBrowserTabIdAfterClose,
+  pruneBrowserTabActivationHistory,
+  recordActiveBrowserTabId,
+} from "@t3tools/shared/browserTabs";
+import {
   ArrowDownLeftFromSquareIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -255,6 +260,13 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const [emulationByTab, setEmulationByTab] = useState<Map<number, TabEmulation>>(
     () => readProjectCache(projectId).emulationByTab,
   );
+  const activeTabHistoryRef = useRef<readonly number[]>(
+    recordActiveBrowserTabId(
+      [],
+      readProjectCache(projectId).activeTabId,
+      readProjectCache(projectId).tabs.map((tab) => tab.id),
+    ),
+  );
   const [isOpeningNewTab, setIsOpeningNewTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -343,6 +355,11 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       setUrl(cached.url);
       setTabs(cached.tabs);
       setActiveTabId(cached.activeTabId);
+      activeTabHistoryRef.current = recordActiveBrowserTabId(
+        [],
+        cached.activeTabId,
+        cached.tabs.map((tab) => tab.id),
+      );
       setEmulationByTab(cached.emulationByTab);
       return;
     }
@@ -461,6 +478,11 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   }, []);
 
   const applyTabListing = useCallback((listing: BrowserTabListing) => {
+    activeTabHistoryRef.current = recordActiveBrowserTabId(
+      activeTabHistoryRef.current,
+      listing.activeTabId,
+      listing.tabs.map((tab) => tab.id),
+    );
     setTabs(listing.tabs);
     setActiveTabId(listing.activeTabId);
     const activeTab = listing.tabs.find((tab) => tab.id === listing.activeTabId);
@@ -711,6 +733,11 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       const targetTab = tabs.find((tab) => tab.id === tabId);
       const bounds = readBoundsForEmulation(emulationByTab.get(tabId) ?? OFF_EMULATION);
       flushSync(() => {
+        activeTabHistoryRef.current = recordActiveBrowserTabId(
+          activeTabHistoryRef.current,
+          tabId,
+          tabs.map((tab) => tab.id),
+        );
         setActiveTabId(tabId);
         if (targetTab) setUrl(displayUrl(targetTab.url));
       });
@@ -742,11 +769,33 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
       const lifecycleId = lifecycleIdRef.current;
       const wasActive = tabId === activeTabId;
       const remainingTabs = tabs.filter((tab) => tab.id !== tabId);
-      const nextActiveTab = wasActive ? remainingTabs[0] : null;
+      const nextActiveTabId = chooseNextBrowserTabIdAfterClose({
+        activeTabId,
+        closingTabId: tabId,
+        tabIds: tabs.map((tab) => tab.id),
+        activationHistory: activeTabHistoryRef.current,
+      });
+      const nextActiveTab =
+        wasActive && nextActiveTabId !== null
+          ? (remainingTabs.find((tab) => tab.id === nextActiveTabId) ?? null)
+          : null;
       const bounds = nextActiveTab
         ? readBoundsForEmulation(emulationByTab.get(nextActiveTab.id) ?? OFF_EMULATION)
         : null;
       flushSync(() => {
+        activeTabHistoryRef.current = nextActiveTab
+          ? recordActiveBrowserTabId(
+              pruneBrowserTabActivationHistory(
+                activeTabHistoryRef.current,
+                remainingTabs.map((tab) => tab.id),
+              ),
+              nextActiveTab.id,
+              remainingTabs.map((tab) => tab.id),
+            )
+          : pruneBrowserTabActivationHistory(
+              activeTabHistoryRef.current,
+              remainingTabs.map((tab) => tab.id),
+            );
         setTabs(remainingTabs);
         if (nextActiveTab) {
           setActiveTabId(nextActiveTab.id);

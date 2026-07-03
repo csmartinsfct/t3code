@@ -58,6 +58,11 @@ import { autoUpdater } from "electron-updater";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import { isBrowserNavigationAbortError } from "@t3tools/shared/browserNavigationErrors";
+import {
+  chooseNextBrowserTabIdAfterClose,
+  pruneBrowserTabActivationHistory,
+  recordActiveBrowserTabId,
+} from "@t3tools/shared/browserTabs";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { resolveT3StateDir } from "@t3tools/shared/paths";
 import {
@@ -213,6 +218,7 @@ type EmbeddedBrowserProjectState = {
   readonly handle: string;
   readonly tabs: Map<number, EmbeddedBrowserTabState>;
   activeTabId: number;
+  activeTabHistory: readonly number[];
   nextTabId: number;
   mounted: boolean;
   suspendedForModal: boolean;
@@ -2239,11 +2245,18 @@ function cleanupEmbeddedBrowserView(
     return;
   }
   if (project.activeTabId === tab.tabId) {
-    // Fall back to any remaining tab. Tab order is insertion order — pick the
-    // earliest (most likely the root tab 0, or the lowest-numbered sibling).
-    const next = project.tabs.keys().next();
-    if (!next.done) project.activeTabId = next.value;
+    const nextTabId = chooseNextBrowserTabIdAfterClose({
+      activeTabId: project.activeTabId,
+      closingTabId: tab.tabId,
+      tabIds: [tab.tabId, ...project.tabs.keys()],
+      activationHistory: project.activeTabHistory,
+    });
+    if (nextTabId !== null) project.activeTabId = nextTabId;
   }
+  project.activeTabHistory = pruneBrowserTabActivationHistory(
+    project.activeTabHistory,
+    project.tabs.keys(),
+  );
 }
 
 function cleanupEmbeddedBrowserProject(
@@ -2857,6 +2870,7 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     handle: `electron-wc:${projectId}`,
     tabs: new Map(),
     activeTabId: 0,
+    activeTabHistory: [],
     nextTabId: 1,
     mounted: false,
     suspendedForModal: false,
@@ -2892,6 +2906,7 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
     persistedProject && project.tabs.has(persistedProject.activeTabId)
       ? persistedProject.activeTabId
       : (tabIds[0] ?? 0);
+  project.activeTabHistory = recordActiveBrowserTabId([], project.activeTabId, tabIds);
   project.nextTabId = Math.max(0, ...tabIds) + 1;
   embeddedBrowserProjectsByProjectId.set(projectId, project);
   // Rewrite User-Agent to Chrome for Chrome Web Store requests so the
@@ -3363,6 +3378,11 @@ async function switchBrowserTab(
   }
   project.mounted = false;
   project.activeTabId = tabId;
+  project.activeTabHistory = recordActiveBrowserTabId(
+    project.activeTabHistory,
+    tabId,
+    project.tabs.keys(),
+  );
   const targetBounds = boundsOverride ?? project.bounds;
   if (targetBounds) {
     project.bounds = targetBounds;
@@ -3419,7 +3439,20 @@ async function closeBrowserTab(
     return;
   }
   const wasActive = project.activeTabId === tabId;
+  const tabIdsBeforeClose = Array.from(project.tabs.keys());
+  const nextActiveTabId = wasActive
+    ? chooseNextBrowserTabIdAfterClose({
+        activeTabId: project.activeTabId,
+        closingTabId: tabId,
+        tabIds: tabIdsBeforeClose,
+        activationHistory: project.activeTabHistory,
+      })
+    : null;
   project.tabs.delete(tabId);
+  project.activeTabHistory = pruneBrowserTabActivationHistory(
+    project.activeTabHistory,
+    project.tabs.keys(),
+  );
   tab.view.webContents.close();
   console.log("[desktop/browser] tab closed", {
     projectId: project.projectId,
@@ -3428,9 +3461,8 @@ async function closeBrowserTab(
     tabCount: project.tabs.size,
   });
   if (wasActive) {
-    const next = project.tabs.keys().next();
-    if (!next.done) {
-      await switchBrowserTab(project, next.value, window, nextBounds);
+    if (nextActiveTabId !== null) {
+      await switchBrowserTab(project, nextActiveTabId, window, nextBounds);
       return;
     }
   }

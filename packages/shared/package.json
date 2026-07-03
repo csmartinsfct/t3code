@@ -80,6 +80,10 @@
       "types": "./src/browserNavigationErrors.ts",
       "import": "./src/browserNavigationErrors.ts"
     },
+    "./browserTabs": {
+      "types": "./src/browserTabs.ts",
+      "import": "./src/browserTabs.ts"
+    },
     "./dynamicChatUi": {
       "types": "./src/dynamicChatUi.ts",
       "import": "./src/dynamicChatUi.ts"

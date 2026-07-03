@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ProjectId } from "@t3tools/contracts";
+import {
+  chooseNextBrowserTabIdAfterClose,
+  pruneBrowserTabActivationHistory,
+  recordActiveBrowserTabId,
+} from "@t3tools/shared/browserTabs";
 import { assert, describe, it } from "@effect/vitest";
 
 import { BROWSER_HOST_TOOL_NAMES, type BrowserHostToolName } from "./BrowserHost.ts";
@@ -101,6 +106,7 @@ class HarnessTransport implements CdpBrokerTransport {
     { targetId: string; sessionId: string; url: string; title: string }
   >();
   private activeTabId = 0;
+  private activeTabHistory: readonly number[] = [];
   private nextTabId = 1;
   private rootInitialized = false;
 
@@ -159,6 +165,7 @@ class HarnessTransport implements CdpBrokerTransport {
       title: "",
     });
     this.activeTabId = id;
+    this.activeTabHistory = recordActiveBrowserTabId(this.activeTabHistory, id, this.tabs.keys());
     return id;
   }
 
@@ -166,6 +173,11 @@ class HarnessTransport implements CdpBrokerTransport {
     this.ensureRoot();
     if (!this.tabs.has(request.tabId)) throw new Error(`unknown tab id ${request.tabId}`);
     this.activeTabId = request.tabId;
+    this.activeTabHistory = recordActiveBrowserTabId(
+      this.activeTabHistory,
+      request.tabId,
+      this.tabs.keys(),
+    );
     return this.activeTabId;
   }
 
@@ -181,11 +193,29 @@ class HarnessTransport implements CdpBrokerTransport {
       tab.title = "";
       return this.activeTabId;
     }
+    const tabIdsBeforeClose = Array.from(this.tabs.keys());
+    const nextActiveTabId =
+      this.activeTabId === request.tabId
+        ? chooseNextBrowserTabIdAfterClose({
+            activeTabId: this.activeTabId,
+            closingTabId: request.tabId,
+            tabIds: tabIdsBeforeClose,
+            activationHistory: this.activeTabHistory,
+          })
+        : null;
     await this.harness.sendCdp("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
     this.tabs.delete(request.tabId);
+    this.activeTabHistory = pruneBrowserTabActivationHistory(
+      this.activeTabHistory,
+      this.tabs.keys(),
+    );
     if (this.activeTabId === request.tabId) {
-      const next = this.tabs.keys().next();
-      this.activeTabId = next.done ? 0 : next.value;
+      this.activeTabId = nextActiveTabId ?? 0;
+      this.activeTabHistory = recordActiveBrowserTabId(
+        this.activeTabHistory,
+        this.activeTabId,
+        this.tabs.keys(),
+      );
     }
     return this.activeTabId;
   }
@@ -236,6 +266,7 @@ class HarnessTransport implements CdpBrokerTransport {
   private ensureRoot(): void {
     if (this.rootInitialized) return;
     this.tabs.set(0, { targetId: "root", sessionId: "root", url: "about:blank", title: "" });
+    this.activeTabHistory = recordActiveBrowserTabId([], this.activeTabId, this.tabs.keys());
     this.rootInitialized = true;
   }
 }
