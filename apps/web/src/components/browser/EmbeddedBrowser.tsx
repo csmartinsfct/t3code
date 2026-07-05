@@ -56,7 +56,6 @@ interface BrowserRect {
   height: number;
 }
 
-const MAX_TABS = 5;
 const BLANK_URLS = new Set(["about:blank", "about:newtab"]);
 const EMULATION_STORAGE_PREFIX = "embeddedBrowser.emulation.";
 const OFF_EMULATION: TabEmulation = { kind: "off" };
@@ -270,6 +269,7 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
   const [isOpeningNewTab, setIsOpeningNewTab] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const showContextMenu = useContextMenuStore((s) => s.show);
 
   const browserBridge = typeof window === "undefined" ? undefined : window.desktopBridge?.browser;
 
@@ -833,6 +833,88 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     ],
   );
 
+  const closeTabs = useCallback(
+    async (idsToClose: readonly number[]) => {
+      if (!browserBridge) return;
+      const closeSet = new Set(idsToClose);
+      const ids = tabs.map((tab) => tab.id).filter((id) => closeSet.has(id));
+      if (ids.length === 0) return;
+      const lifecycleId = lifecycleIdRef.current;
+      const remainingTabs = tabs.filter((tab) => !closeSet.has(tab.id));
+      const wasActiveClosed = closeSet.has(activeTabId);
+      const nextActiveTabId = !wasActiveClosed
+        ? activeTabId
+        : (chooseNextBrowserTabIdAfterClose({
+            activeTabId,
+            closingTabId: activeTabId,
+            tabIds: tabs.map((tab) => tab.id),
+            activationHistory: activeTabHistoryRef.current,
+          }) ??
+          remainingTabs[0]?.id ??
+          null);
+      const nextActiveTab =
+        nextActiveTabId !== null
+          ? (remainingTabs.find((tab) => tab.id === nextActiveTabId) ?? null)
+          : null;
+      const bounds = nextActiveTab
+        ? readBoundsForEmulation(emulationByTab.get(nextActiveTab.id) ?? OFF_EMULATION)
+        : null;
+      flushSync(() => {
+        activeTabHistoryRef.current = nextActiveTab
+          ? recordActiveBrowserTabId(
+              pruneBrowserTabActivationHistory(
+                activeTabHistoryRef.current,
+                remainingTabs.map((tab) => tab.id),
+              ),
+              nextActiveTab.id,
+              remainingTabs.map((tab) => tab.id),
+            )
+          : pruneBrowserTabActivationHistory(
+              activeTabHistoryRef.current,
+              remainingTabs.map((tab) => tab.id),
+            );
+        setTabs(remainingTabs);
+        if (nextActiveTab) {
+          setActiveTabId(nextActiveTab.id);
+          setUrl(displayUrl(nextActiveTab.url));
+        }
+      });
+      try {
+        for (const [i, id] of ids.entries()) {
+          const isLast = i === ids.length - 1;
+          await browserBridge.closeTab(projectId, id, isLast ? (bounds ?? undefined) : undefined);
+          if (!isCurrentLifecycle(lifecycleId)) return;
+        }
+        await refreshTabs();
+        setEmulationByTab((prev) => {
+          let map: Map<number, TabEmulation> | null = null;
+          for (const id of ids) {
+            if (prev.has(id)) {
+              map ??= new Map(prev);
+              map.delete(id);
+            }
+          }
+          return map ?? prev;
+        });
+        for (const id of ids) lastEmulationByTabRef.current.delete(id);
+      } catch (cause) {
+        if (!isCurrentLifecycle(lifecycleId)) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+        await refreshTabs();
+      }
+    },
+    [
+      activeTabId,
+      browserBridge,
+      emulationByTab,
+      isCurrentLifecycle,
+      projectId,
+      readBoundsForEmulation,
+      refreshTabs,
+      tabs,
+    ],
+  );
+
   // Browser-focused keyboard shortcuts are handled
   // in the Electron main process via `before-input-event` on each tab's
   // webContents — when focus is inside the webview, keydown events never
@@ -858,8 +940,6 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
     if (!browserBridge) return;
     void browserBridge.reload(projectId);
   }, [browserBridge, projectId]);
-
-  const atTabCap = tabs.length >= MAX_TABS;
 
   if (isPoppedOut && !isInsidePopout) {
     return (
@@ -987,22 +1067,46 @@ export function EmbeddedBrowser({ projectId }: EmbeddedBrowserProps) {
           role="tablist"
           aria-label="Browser tabs"
         >
-          {tabs.map((tab) => (
+          {tabs.map((tab, index) => (
             <BrowserTab
               key={tab.id}
               tab={tab}
               active={tab.id === activeTabId}
               onActivate={() => void activateTab(tab.id)}
               onClose={tabs.length > 1 ? () => void closeTab(tab.id) : undefined}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                const tabsToRight = tabs.length - index - 1;
+                void showContextMenu(
+                  [
+                    { id: "close", label: "Close Tab", disabled: tabs.length <= 1 },
+                    { id: "close-others", label: "Close Other Tabs", disabled: tabs.length <= 1 },
+                    {
+                      id: "close-right",
+                      label: "Close Tabs to the Right",
+                      disabled: tabsToRight === 0,
+                    },
+                    { id: "close-all", label: "Close All Tabs", destructive: true },
+                  ],
+                  { x: event.clientX, y: event.clientY },
+                ).then((choice) => {
+                  if (choice === "close") void closeTab(tab.id);
+                  else if (choice === "close-others")
+                    void closeTabs(tabs.filter((t) => t.id !== tab.id).map((t) => t.id));
+                  else if (choice === "close-right")
+                    void closeTabs(tabs.slice(index + 1).map((t) => t.id));
+                  else if (choice === "close-all") void closeTabs(tabs.map((t) => t.id));
+                });
+              }}
             />
           ))}
           <button
             type="button"
             onClick={() => void openNewTab()}
-            disabled={atTabCap || isOpeningNewTab}
+            disabled={isOpeningNewTab}
             className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-            aria-label={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab"}
-            title={atTabCap ? `Tab limit reached (${MAX_TABS})` : "New tab (⌘T)"}
+            aria-label="New tab"
+            title="New tab (⌘T)"
           >
             <PlusIcon className="size-3.5" strokeWidth={2.5} />
           </button>
@@ -1088,9 +1192,10 @@ interface BrowserTabProps {
   active: boolean;
   onActivate: () => void;
   onClose: (() => void) | undefined;
+  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
 }
 
-function BrowserTab({ tab, active, onActivate, onClose }: BrowserTabProps) {
+function BrowserTab({ tab, active, onActivate, onClose, onContextMenu }: BrowserTabProps) {
   const handleClose = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     onClose?.();
@@ -1117,6 +1222,7 @@ function BrowserTab({ tab, active, onActivate, onClose }: BrowserTabProps) {
       aria-selected={active}
       onClick={onActivate}
       onAuxClick={handleAuxClick}
+      onContextMenu={onContextMenu}
       onKeyDown={handleKey}
       title={tab.url}
       className={`group relative flex h-[30px] max-w-[180px] min-w-0 flex-1 basis-[140px] cursor-pointer items-center gap-2 rounded-t-md px-2.5 text-xs transition-colors select-none ${

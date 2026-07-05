@@ -240,7 +240,6 @@ type EmbeddedBrowserWindowState = {
   activeProjectId: string | null;
   mountRequestId: number;
 };
-const MAX_TABS_PER_PROJECT = 5;
 type BrowserCdpSendRequest = {
   readonly id: string;
   readonly viewId: string;
@@ -1940,7 +1939,6 @@ function serializeEmbeddedBrowserProjectTabs(
 ): PersistedEmbeddedBrowserProject | null {
   const tabs = Array.from(project.tabs.entries())
     .filter(([, tab]) => !isEmbeddedBrowserDestroyed(tab))
-    .slice(0, MAX_TABS_PER_PROJECT)
     .map(([tabId, tab]) => {
       const url = publicEmbeddedBrowserUrl(tab.view.webContents.getURL());
       const isBlank = isEmbeddedBrowserBlankUrl(url);
@@ -2894,7 +2892,7 @@ function ensureEmbeddedBrowserProject(projectId: string): EmbeddedBrowserProject
             favicon: null,
           },
         ];
-  for (const persistedTab of persistedTabs.slice(0, MAX_TABS_PER_PROJECT)) {
+  for (const persistedTab of persistedTabs) {
     const tab = createEmbeddedBrowserTab(project, persistedTab.id, persistedTab.url, {
       title: persistedTab.title,
       favicon: persistedTab.favicon,
@@ -3333,14 +3331,6 @@ function openNewBrowserTab(
   url: string,
   options?: { notify?: boolean },
 ): number {
-  const liveTabs = Array.from(project.tabs.values()).filter(
-    (tab) => !isEmbeddedBrowserDestroyed(tab),
-  );
-  if (liveTabs.length >= MAX_TABS_PER_PROJECT) {
-    throw new Error(
-      `browser tab limit reached (${MAX_TABS_PER_PROJECT}); close an existing tab first`,
-    );
-  }
   const tabId = project.nextTabId++;
   const tab = createEmbeddedBrowserTab(project, tabId, url);
   project.tabs.set(tabId, tab);
