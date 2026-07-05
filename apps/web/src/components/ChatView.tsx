@@ -702,6 +702,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerCodeSnippets = composerDraft.codeSnippets;
   const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
+  const composerPersistedAttachments = composerDraft.persistedAttachments;
   const composerSendState = useMemo(
     () =>
       deriveComposerSendState({
@@ -1459,6 +1460,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const hasAppliedInitialDraft =
       hydrationState.promptApplied || hydrationState.attachedSkillIds.size > 0;
 
+    if (draft.autoSend) {
+      const draftSkillIds = new Set(draft.skillIds ?? []);
+      const composerHasOnlyAutoSentDraftContent =
+        (prompt === "" || prompt === (draft.prompt ?? "")) &&
+        composerImages.length === 0 &&
+        nonPersistedComposerImageIds.length === 0 &&
+        composerPersistedAttachments.length === 0 &&
+        composerTerminalContexts.length === 0 &&
+        composerCodeSnippets.length === 0 &&
+        composerTicketAttachments.length === 0 &&
+        composerSkills.every((skill) => draftSkillIds.has(skill.id));
+      if (composerHasOnlyAutoSentDraftContent) {
+        clearComposerDraftContent(tid);
+      }
+      hydrationState.promptApplied = true;
+      for (const skillId of draft.skillIds ?? []) {
+        hydrationState.attachedSkillIds.add(skillId);
+      }
+      return;
+    }
+
     // Only seed untouched composers. If initial hydration has already started for this thread,
     // continue attaching any remaining referenced skills as they resolve.
     if (!hasAppliedInitialDraft && (prompt || composerSkills.length > 0)) return;
@@ -1498,10 +1520,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeThread?.id,
     activeThread?.initialDraft,
     prompt,
+    composerImages.length,
+    nonPersistedComposerImageIds.length,
+    composerPersistedAttachments.length,
+    composerTerminalContexts.length,
+    composerCodeSnippets.length,
+    composerTicketAttachments.length,
     composerSkills,
     availableSkills,
     setComposerDraftPrompt,
     addComposerDraftSkill,
+    clearComposerDraftContent,
   ]);
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({

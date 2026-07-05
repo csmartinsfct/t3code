@@ -4006,6 +4006,62 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps auto-send initial drafts out of the composer", async () => {
+    const resolveSkills = vi.fn(async () => ({
+      skills: [
+        {
+          id: "skill-auto-send",
+          name: "Auto Send",
+          source: "project",
+          absolutePath: "/repo/project/.claude/skills/auto-send/SKILL.md",
+          relativePath: ".claude/skills/auto-send/SKILL.md",
+          content: "# Auto-send skill",
+          group: null,
+        },
+      ] satisfies readonly SkillEntry[],
+    }));
+    installTestNativeApi({ resolveSkills });
+
+    const baseSnapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-auto-sent-initial-draft" as MessageId,
+      targetText: "Start with an automated release checklist.",
+    });
+    const snapshot: OrchestrationReadModel = {
+      ...baseSnapshot,
+      threads: baseSnapshot.threads.map((thread) =>
+        thread.id === THREAD_ID
+          ? {
+              ...thread,
+              initialDraft: {
+                prompt: "Start with an automated release checklist.",
+                skillIds: ["skill-auto-send"],
+                autoSend: true,
+              },
+            }
+          : thread,
+      ),
+    };
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(resolveSkills).toHaveBeenCalled();
+          const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+          expect(draft?.prompt ?? "").toBe("");
+          expect(draft?.skills ?? []).toEqual([]);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps removed terminal context pills removed when a new one is added", async () => {
     const removedLabel = "Terminal 1 lines 1-2";
     const addedLabel = "Terminal 2 lines 9-10";
