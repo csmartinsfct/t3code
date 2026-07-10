@@ -89,6 +89,12 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - Runs `codex app-server` as a child process communicating via JSON-RPC over stdio.
 - Authentication via `codex login` CLI.
 - Configuration: global `~/.codex/config.toml` + project-scoped `.codex/config.toml`.
+- Model selection: built-in OpenAI GPT models include GPT-5.6 Sol
+  (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna
+  (`gpt-5.6-luna`). The `gpt-5.6`/`5.6` aliases resolve to Sol.
+- GPT-5.6 Codex selections expose `low`, `medium` (default), `high`, `xhigh`,
+  `max`, and `ultra` reasoning effort options; older built-in Codex models
+  continue to expose `xhigh`, `high`, `medium`, and `low`.
 - **Profiles:** Multiple named profiles supported. T3 auto-discovers `~/.codex-*`
   homes such as `~/.codex-metric`; profiles appear as separate provider entries
   and run Codex with profile-scoped `CODEX_HOME`.

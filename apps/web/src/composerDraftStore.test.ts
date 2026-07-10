@@ -1109,6 +1109,24 @@ describe("composerDraftStore modelSelection", () => {
     expect(draft?.modelSelectionByProvider.claudeAgent?.options).toEqual({ effort: "max" });
   });
 
+  it("preserves GPT-5.6 Codex reasoning efforts", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(
+      threadId,
+      modelSelection("codex", "gpt-5.6-sol", { reasoningEffort: "ultra" }),
+    );
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.codex,
+    ).toEqual(modelSelection("codex", "gpt-5.6-sol", { reasoningEffort: "ultra" }));
+
+    store.setModelOptions(threadId, providerModelOptions({ codex: { reasoningEffort: "none" } }));
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.modelSelectionByProvider.codex
+        ?.options,
+    ).toEqual({ reasoningEffort: "none" });
+  });
+
   it("preserves other provider options when switching the active model selection", () => {
     const store = useComposerDraftStore.getState();
 

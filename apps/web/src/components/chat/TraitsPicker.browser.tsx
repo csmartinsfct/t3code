@@ -4,7 +4,6 @@ import {
   type ModelSelection,
   ClaudeModelOptions,
   CodexModelOptions,
-  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   type ServerProvider,
@@ -39,8 +38,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-01-01T00:00:00.000Z",
     models: [
       {
-        slug: "gpt-5.4",
-        name: "GPT-5.4",
+        slug: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
@@ -406,7 +405,7 @@ describe("TraitsPicker (Claude)", () => {
 
 async function mountCodexPicker(props: { model?: string; options?: CodexModelOptions }) {
   const threadId = ThreadId.makeUnsafe("thread-codex-traits");
-  const model = props.model ?? DEFAULT_MODEL_BY_PROVIDER.codex;
+  const model = props.model ?? "gpt-5.6-sol";
   const draftsByThreadId: Record<ThreadId, ComposerThreadDraftState> = {
     [threadId]: {
       prompt: "",
@@ -444,7 +443,7 @@ async function mountCodexPicker(props: { model?: string; options?: CodexModelOpt
       provider="codex"
       models={TEST_PROVIDERS[0]!.models}
       threadId={threadId}
-      model={props.model ?? DEFAULT_MODEL_BY_PROVIDER.codex}
+      model={model}
       prompt=""
       modelOptions={props.options}
       onPromptChange={() => {}}

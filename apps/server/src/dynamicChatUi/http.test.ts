@@ -104,4 +104,23 @@ T3_DYNAMIC_CHAT_UI_END`),
       options: { effort: "high", contextWindow: "1m" },
     });
   });
+
+  it("clamps Codex ultra effort for the hidden builder session", () => {
+    const threadModelSelection = {
+      provider: "codex" as const,
+      profileId: "metric",
+      model: "gpt-5.6-sol",
+      options: { reasoningEffort: "ultra" as const, fastMode: true },
+    };
+
+    expect(
+      resolveDynamicChatUiBuilderModelSelection({
+        serverSettings: DEFAULT_SERVER_SETTINGS,
+        threadModelSelection,
+      }),
+    ).toEqual({
+      ...threadModelSelection,
+      options: { reasoningEffort: "high", fastMode: true },
+    });
+  });
 });

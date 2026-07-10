@@ -80,14 +80,16 @@ describe("settings defaults", () => {
         orchestrationImplementerModelSelection: {
           provider: "codex",
           profileId: "metric",
-          model: "gpt-5.4",
+          model: "gpt-5.6-sol",
+          options: { reasoningEffort: "ultra" },
         },
       }),
     ).toEqual({
       orchestrationImplementerModelSelection: {
         provider: "codex",
         profileId: "metric",
-        model: "gpt-5.4",
+        model: "gpt-5.6-sol",
+        options: { reasoningEffort: "ultra" },
       },
     });
 

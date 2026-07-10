@@ -126,6 +126,13 @@ const LegacyCodexFields = Schema.Struct({
 });
 type LegacyCodexFields = typeof LegacyCodexFields.Type;
 
+function isCodexReasoningEffort(value: unknown): value is CodexReasoningEffort {
+  return (
+    typeof value === "string" &&
+    (CODEX_REASONING_EFFORT_OPTIONS as readonly string[]).includes(value)
+  );
+}
+
 const LegacyThreadModelFields = Schema.Struct({
   provider: Schema.optionalKey(ProviderKind),
   model: Schema.optionalKey(Schema.String),
@@ -614,19 +621,15 @@ function normalizeProviderModelOptions(
         ? providerSpecificCandidate
         : null;
 
-  const codexReasoningEffort: CodexReasoningEffort | undefined =
-    codexCandidate?.reasoningEffort === "low" ||
-    codexCandidate?.reasoningEffort === "medium" ||
-    codexCandidate?.reasoningEffort === "high" ||
-    codexCandidate?.reasoningEffort === "xhigh"
-      ? codexCandidate.reasoningEffort
-      : provider === "codex" &&
-          (legacy?.effort === "low" ||
-            legacy?.effort === "medium" ||
-            legacy?.effort === "high" ||
-            legacy?.effort === "xhigh")
-        ? legacy.effort
-        : undefined;
+  const rawCodexReasoningEffort = codexCandidate?.reasoningEffort;
+  const rawLegacyEffort = legacy?.effort;
+  const codexReasoningEffort: CodexReasoningEffort | undefined = isCodexReasoningEffort(
+    rawCodexReasoningEffort,
+  )
+    ? rawCodexReasoningEffort
+    : provider === "codex" && isCodexReasoningEffort(rawLegacyEffort)
+      ? rawLegacyEffort
+      : undefined;
   const codexFastMode =
     codexCandidate?.fastMode === true
       ? true

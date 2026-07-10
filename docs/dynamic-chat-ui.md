@@ -50,7 +50,7 @@ Requests missing `title` or `description` are rejected before T3 inserts a pendi
 
 1. Validate the REST tool call and authenticate it against the source thread.
 2. Resolve the source thread and selected model.
-3. Clamp impractical reasoning settings, for example Claude `xhigh` to `high`.
+3. Clamp impractical reasoning settings, for example Claude or Codex `xhigh`/`max`/`ultra` to `high`.
 4. Load the Dynamic UI builder prompt and design guide from Settings overrides or shipped defaults.
 5. Find the previous artifact when this is a revision.
 6. Insert a pending timeline message.

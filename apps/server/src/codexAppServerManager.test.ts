@@ -283,18 +283,17 @@ describe("profiled Codex rate-limit events", () => {
 });
 
 describe("normalizeCodexModelSlug", () => {
-  it("maps 5.3 aliases to gpt-5.3-codex", () => {
-    expect(normalizeCodexModelSlug("5.3")).toBe("gpt-5.3-codex");
-    expect(normalizeCodexModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
+  it("maps 5.6 aliases to gpt-5.6-sol", () => {
+    expect(normalizeCodexModelSlug("5.6")).toBe("gpt-5.6-sol");
+    expect(normalizeCodexModelSlug("gpt-5.6")).toBe("gpt-5.6-sol");
   });
 
   it("prefers codex id when model differs", () => {
-    expect(normalizeCodexModelSlug("gpt-5.3", "gpt-5.3-codex")).toBe("gpt-5.3-codex");
+    expect(normalizeCodexModelSlug("gpt-5.5", "gpt-5.5-codex")).toBe("gpt-5.5-codex");
   });
 
   it("keeps non-aliased models as-is", () => {
-    expect(normalizeCodexModelSlug("gpt-5.2-codex")).toBe("gpt-5.2-codex");
-    expect(normalizeCodexModelSlug("gpt-5.2")).toBe("gpt-5.2");
+    expect(normalizeCodexModelSlug("custom-codex-model")).toBe("custom-codex-model");
   });
 });
 
@@ -376,34 +375,34 @@ describe("readCodexAccountSnapshot", () => {
 });
 
 describe("resolveCodexModelForAccount", () => {
-  it("falls back from spark to default for unsupported chatgpt plans", () => {
+  it("preserves the selected model for unsupported chatgpt plans", () => {
     expect(
-      resolveCodexModelForAccount("gpt-5.3-codex-spark", {
+      resolveCodexModelForAccount("gpt-5.6-sol", {
         type: "chatgpt",
         planType: "plus",
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe("gpt-5.6-sol");
   });
 
-  it("keeps spark for supported plans", () => {
+  it("preserves the selected model for supported plans", () => {
     expect(
-      resolveCodexModelForAccount("gpt-5.3-codex-spark", {
+      resolveCodexModelForAccount("gpt-5.6-terra", {
         type: "chatgpt",
         planType: "pro",
         sparkEnabled: true,
       }),
-    ).toBe("gpt-5.3-codex-spark");
+    ).toBe("gpt-5.6-terra");
   });
 
-  it("falls back from spark to default for api key auth", () => {
+  it("preserves the selected model for api key auth", () => {
     expect(
-      resolveCodexModelForAccount("gpt-5.3-codex-spark", {
+      resolveCodexModelForAccount("gpt-5.6-luna", {
         type: "apiKey",
         planType: null,
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe("gpt-5.6-luna");
   });
 });
 
@@ -549,7 +548,7 @@ describe("sendTurn", () => {
           url: "data:image/png;base64,AAAA",
         },
       ],
-      model: "gpt-5.3-codex",
+      model: "gpt-5.3",
       serviceTier: "fast",
       effort: "high",
     });

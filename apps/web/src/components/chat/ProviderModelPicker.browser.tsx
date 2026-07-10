@@ -39,8 +39,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
       {
-        slug: "gpt-5.3-codex",
-        name: "GPT-5.3 Codex",
+        slug: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
@@ -64,8 +64,8 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: new Date().toISOString(),
     models: [
       {
-        slug: "gpt-5.4",
-        name: "GPT-5.4",
+        slug: "gpt-5.6-sol",
+        name: "GPT-5.6 Sol",
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
@@ -219,19 +219,6 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     ],
   },
 ];
-
-function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
-  return {
-    provider: "codex",
-    enabled: true,
-    installed: true,
-    version: "0.116.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: new Date().toISOString(),
-    models,
-  };
-}
 
 function getMenuRadioItemByText(label: string): HTMLElement {
   const element = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')).find(
@@ -460,100 +447,6 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("only shows codex spark when the server reports it for the account", async () => {
-    const claudeProvider = TEST_PROVIDERS.find((provider) => provider.provider === "claudeAgent");
-    if (!claudeProvider) {
-      throw new Error("Expected Claude test provider to exist.");
-    }
-    const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
-      buildCodexProvider([
-        {
-          slug: "gpt-5.3-codex",
-          name: "GPT-5.3 Codex",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            supportsPlan: true,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-      ]),
-      claudeProvider,
-    ];
-    const providersWithSpark: ReadonlyArray<ServerProvider> = [
-      buildCodexProvider([
-        {
-          slug: "gpt-5.3-codex",
-          name: "GPT-5.3 Codex",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            supportsPlan: true,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-        {
-          slug: "gpt-5.3-codex-spark",
-          name: "GPT-5.3 Codex Spark",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            supportsPlan: true,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-      ]),
-      claudeProvider,
-    ];
-
-    const hidden = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-8",
-      lockedProvider: null,
-      providers: providersWithoutSpark,
-    });
-
-    try {
-      await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex", exact: true }).hover();
-
-      await vi.waitFor(() => {
-        const text = document.body.textContent ?? "";
-        expect(text).toContain("GPT-5.3 Codex");
-        expect(text).not.toContain("GPT-5.3 Codex Spark");
-      });
-    } finally {
-      await hidden.cleanup();
-    }
-
-    const visible = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-8",
-      lockedProvider: null,
-      providers: providersWithSpark,
-    });
-
-    try {
-      await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex", exact: true }).hover();
-
-      await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("GPT-5.3 Codex Spark");
-      });
-    } finally {
-      await visible.cleanup();
-    }
-  });
-
   it("dispatches the canonical slug when a model is selected", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
@@ -601,21 +494,21 @@ describe("ProviderModelPicker", () => {
   it("keeps discovered Codex profiles as distinct provider selections", async () => {
     const mounted = await mountPicker({
       provider: "codex:metric",
-      model: "gpt-5.4",
+      model: "gpt-5.6-sol",
       lockedProvider: null,
     });
 
     try {
       await vi.waitFor(() => {
-        expect(page.getByRole("button").element().textContent).toContain("GPT-5.4");
+        expect(page.getByRole("button").element().textContent).toContain("GPT-5.6 Sol");
         expect(page.getByRole("button").element().textContent).toContain("metric");
       });
 
       await page.getByRole("button").click();
       await page.getByRole("menuitem", { name: "Codex (metric)" }).hover();
-      await page.getByRole("menuitemradio", { name: "GPT-5.4" }).click();
+      await page.getByRole("menuitemradio", { name: "GPT-5.6 Sol" }).click();
 
-      expect(mounted.onProviderModelChange).toHaveBeenCalledWith("codex:metric", "gpt-5.4");
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith("codex:metric", "gpt-5.6-sol");
     } finally {
       await mounted.cleanup();
     }

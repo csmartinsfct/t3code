@@ -2,7 +2,15 @@ import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
 import type { BaseProviderKind, ProviderKind } from "./orchestration";
 
-export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
+export const CODEX_REASONING_EFFORT_OPTIONS = [
+  "ultra",
+  "max",
+  "xhigh",
+  "high",
+  "medium",
+  "low",
+  "none",
+] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
 export const CLAUDE_CODE_EFFORT_OPTIONS = [
   "low",
@@ -68,7 +76,7 @@ export const ModelCapabilities = Schema.Struct({
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Record<BaseProviderKind, string> = {
-  codex: "gpt-5.5",
+  codex: "gpt-5.6-sol",
   claudeAgent: "claude-sonnet-5",
   gemini: "auto-gemini-3",
   cursor: "composer-2",
@@ -86,12 +94,18 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<BaseProviderK
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<string, string>> = {
   codex: {
+    "5.6": "gpt-5.6-sol",
+    "gpt-5.6": "gpt-5.6-sol",
+    sol: "gpt-5.6-sol",
+    "5.6-sol": "gpt-5.6-sol",
+    "gpt-5.6-sol": "gpt-5.6-sol",
+    terra: "gpt-5.6-terra",
+    "5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    luna: "gpt-5.6-luna",
+    "5.6-luna": "gpt-5.6-luna",
+    "gpt-5.6-luna": "gpt-5.6-luna",
     "5.5": "gpt-5.5",
-    "5.4": "gpt-5.4",
-    "5.3": "gpt-5.3-codex",
-    "gpt-5.3": "gpt-5.3-codex",
-    "5.3-spark": "gpt-5.3-codex-spark",
-    "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   claudeAgent: {
     fable: "claude-fable-5",
@@ -134,8 +148,18 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<BaseProviderKind, Record<str
     "cursor-composer": "composer-2",
     "composer-fast": "composer-2",
     "cursor-composer-fast": "composer-2",
-    gpt5: "gpt-5.5",
-    "cursor-gpt5": "gpt-5.5",
+    sol: "gpt-5.6-sol",
+    "5.6-sol": "gpt-5.6-sol",
+    "gpt-5.6": "gpt-5.6-sol",
+    "gpt-5.6-sol": "gpt-5.6-sol",
+    terra: "gpt-5.6-terra",
+    "5.6-terra": "gpt-5.6-terra",
+    "gpt-5.6-terra": "gpt-5.6-terra",
+    luna: "gpt-5.6-luna",
+    "5.6-luna": "gpt-5.6-luna",
+    "gpt-5.6-luna": "gpt-5.6-luna",
+    gpt5: "gpt-5.6-sol",
+    "cursor-gpt5": "gpt-5.6-sol",
     fable: "claude-fable-5",
     "cursor-fable": "claude-fable-5",
     sonnet: "claude-sonnet-5",

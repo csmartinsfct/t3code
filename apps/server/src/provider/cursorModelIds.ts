@@ -7,14 +7,12 @@ export const CURSOR_ACP_BUILT_IN_MODELS: ReadonlyArray<CursorAcpModelOption> = [
   { slug: "composer-2", name: "Composer 2" },
   { slug: "composer-1.5", name: "Composer 1.5" },
   { slug: "auto", name: "Auto" },
+  { slug: "gpt-5.6-sol", name: "GPT-5.6 Sol" },
+  { slug: "gpt-5.6-terra", name: "GPT-5.6 Terra" },
+  { slug: "gpt-5.6-luna", name: "GPT-5.6 Luna" },
   { slug: "gpt-5.5", name: "GPT-5.5" },
-  { slug: "gpt-5.4", name: "GPT-5.4" },
   { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
   { slug: "gpt-5.4-nano", name: "GPT-5.4 Nano" },
-  { slug: "gpt-5.3-codex", name: "Codex 5.3" },
-  { slug: "gpt-5.3-codex-spark", name: "Codex 5.3 Spark" },
-  { slug: "gpt-5.2", name: "GPT-5.2" },
-  { slug: "gpt-5.2-codex", name: "Codex 5.2" },
   { slug: "gpt-5.1", name: "GPT-5.1" },
   { slug: "gpt-5.1-codex-max", name: "Codex 5.1 Max" },
   { slug: "gpt-5.1-codex-mini", name: "Codex 5.1 Mini" },
@@ -49,16 +47,14 @@ export function normalizeCursorModelForAcp(model: string): string {
   if (lower.startsWith("composer-2")) return "composer-2";
   if (lower.startsWith("composer-1.5")) return "composer-1.5";
 
-  if (lower.startsWith("gpt-5.3-codex-spark")) return "gpt-5.3-codex-spark";
-  if (lower.startsWith("gpt-5.3-codex")) return "gpt-5.3-codex";
-  if (lower.startsWith("gpt-5.2-codex")) return "gpt-5.2-codex";
+  if (lower.startsWith("gpt-5.6-terra")) return "gpt-5.6-terra";
+  if (lower.startsWith("gpt-5.6-luna")) return "gpt-5.6-luna";
+  if (lower.startsWith("gpt-5.6") || lower.startsWith("gpt-5.6-sol")) return "gpt-5.6-sol";
   if (lower.startsWith("gpt-5.1-codex-max")) return "gpt-5.1-codex-max";
   if (lower.startsWith("gpt-5.1-codex-mini")) return "gpt-5.1-codex-mini";
   if (lower.startsWith("gpt-5.5")) return "gpt-5.5";
   if (lower.startsWith("gpt-5.4-mini")) return "gpt-5.4-mini";
   if (lower.startsWith("gpt-5.4-nano")) return "gpt-5.4-nano";
-  if (lower.startsWith("gpt-5.4")) return "gpt-5.4";
-  if (lower.startsWith("gpt-5.2")) return "gpt-5.2";
   if (lower.startsWith("gpt-5.1")) return "gpt-5.1";
   if (lower === "gpt-5-mini") return "gpt-5-mini";
 

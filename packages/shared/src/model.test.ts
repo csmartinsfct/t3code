@@ -81,14 +81,13 @@ describe("makeProviderModelSelection", () => {
 
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
-    expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("fable", "claudeAgent")).toBe("claude-fable-5");
     expect(normalizeModelSlug("opus", "claudeAgent")).toBe("claude-opus-4-8");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-5");
     expect(normalizeModelSlug("2.5-pro", "gemini")).toBe("gemini-2.5-pro");
     expect(normalizeModelSlug("composer", "cursor")).toBe("composer-2");
     expect(normalizeModelSlug("composer-fast", "cursor")).toBe("composer-2");
-    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5.5");
+    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5.6-sol");
     expect(normalizeModelSlug("cursor-thinking", "cursor")).toBe("claude-sonnet-5");
   });
 
@@ -97,6 +96,14 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("   ")).toBeNull();
     expect(normalizeModelSlug(null)).toBeNull();
     expect(normalizeModelSlug(undefined)).toBeNull();
+  });
+
+  it("maps GPT-5.6 aliases to canonical model IDs", () => {
+    expect(normalizeModelSlug("5.6")).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("sol")).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("terra")).toBe("gpt-5.6-terra");
+    expect(normalizeModelSlug("luna")).toBe("gpt-5.6-luna");
+    expect(normalizeModelSlug("cursor-gpt5", "cursor")).toBe("gpt-5.6-sol");
   });
 });
 
@@ -107,7 +114,8 @@ describe("model provider inference", () => {
     expect(inferBaseProviderKindFromModelSlug("claude-fable-5")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("claude-opus-4-8")).toBe("claudeAgent");
     expect(inferBaseProviderKindFromModelSlug("claude-sonnet-5")).toBe("claudeAgent");
-    expect(inferBaseProviderKindFromModelSlug("gpt-5.4")).toBe("codex");
+    expect(inferBaseProviderKindFromModelSlug("gpt-5.6-sol")).toBe("codex");
+    expect(inferBaseProviderKindFromModelSlug("gpt-5.4-mini")).toBe("codex");
     expect(inferBaseProviderKindFromModelSlug("cursor-special-model")).toBe("cursor");
   });
 
@@ -157,6 +165,7 @@ describe("resolveModelSlug", () => {
 
 describe("resolveKnownProviderModelName", () => {
   it("resolves built-in labels before live provider snapshots are available", () => {
+    expect(resolveKnownProviderModelName("codex", "gpt-5.6-sol")).toBe("GPT-5.6 Sol");
     expect(resolveKnownProviderModelName("codex", "gpt-5.5")).toBe("GPT-5.5");
     expect(resolveKnownProviderModelName("claudeAgent", "claude-fable-5")).toBe("Claude Fable 5");
     expect(resolveKnownProviderModelName("claudeAgent", "claude-opus-4-8")).toBe("Claude Opus 4.8");
@@ -166,8 +175,6 @@ describe("resolveKnownProviderModelName", () => {
   });
 
   it("uses provider-specific labels for ambiguous slugs", () => {
-    expect(resolveKnownProviderModelName("codex", "gpt-5.3-codex")).toBe("GPT-5.3 Codex");
-    expect(resolveKnownProviderModelName("cursor", "gpt-5.3-codex")).toBe("Codex 5.3");
     expect(resolveKnownProviderModelName("cursor:metric", "claude-sonnet-5")).toBe("Sonnet 5");
   });
 
@@ -179,11 +186,11 @@ describe("resolveKnownProviderModelName", () => {
 describe("resolveSelectableModel", () => {
   it("resolves exact slugs, labels, and aliases", () => {
     const options = [
-      { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+      { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
     ];
-    expect(resolveSelectableModel("codex", "gpt-5.3-codex", options)).toBe("gpt-5.3-codex");
-    expect(resolveSelectableModel("codex", "gpt-5.3 codex", options)).toBe("gpt-5.3-codex");
+    expect(resolveSelectableModel("codex", "gpt-5.4-mini", options)).toBe("gpt-5.4-mini");
+    expect(resolveSelectableModel("codex", "GPT-5.4 Mini", options)).toBe("gpt-5.4-mini");
     expect(resolveSelectableModel("claudeAgent", "sonnet", options)).toBe("claude-sonnet-5");
   });
 });

@@ -209,7 +209,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ),
       );
 
-      it.effect("returns the codex plan type in auth and keeps spark for supported plans", () =>
+      it.effect("returns the codex plan type in auth and GPT-5.6 models", () =>
         Effect.gen(function* () {
           yield* withTempCodexHome();
           const status = yield* checkCodexProviderStatus(() =>
@@ -225,71 +225,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "pro");
           assert.strictEqual(status.auth.label, "ChatGPT Pro Subscription");
+          const sol = status.models.find((model) => model.slug === "gpt-5.6-sol");
+          assert.strictEqual(sol?.name, "GPT-5.6 Sol");
+          assert.ok(sol?.capabilities);
           assert.deepStrictEqual(
-            status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
-            true,
-          );
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) => {
-              const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
-              if (joined === "login status") return { stdout: "Logged in\n", stderr: "", code: 0 };
-              throw new Error(`Unexpected args: ${joined}`);
-            }),
-          ),
-        ),
-      );
-
-      it.effect("hides spark from codex models for unsupported chatgpt plans", () =>
-        Effect.gen(function* () {
-          yield* withTempCodexHome();
-          const status = yield* checkCodexProviderStatus(() =>
-            Effect.succeed({
-              type: "chatgpt" as const,
-              planType: "plus" as const,
-              sparkEnabled: false,
-            }),
-          );
-
-          assert.strictEqual(status.provider, "codex");
-          assert.strictEqual(status.status, "ready");
-          assert.strictEqual(status.auth.status, "authenticated");
-          assert.strictEqual(status.auth.type, "plus");
-          assert.strictEqual(status.auth.label, "ChatGPT Plus Subscription");
-          assert.deepStrictEqual(
-            status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
-            false,
-          );
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) => {
-              const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
-              if (joined === "login status") return { stdout: "Logged in\n", stderr: "", code: 0 };
-              throw new Error(`Unexpected args: ${joined}`);
-            }),
-          ),
-        ),
-      );
-
-      it.effect("hides spark from codex models for non-pro chatgpt subscriptions", () =>
-        Effect.gen(function* () {
-          yield* withTempCodexHome();
-          const status = yield* checkCodexProviderStatus(() =>
-            Effect.succeed({
-              type: "chatgpt" as const,
-              planType: "team" as const,
-              sparkEnabled: false,
-            }),
-          );
-
-          assert.strictEqual(status.provider, "codex");
-          assert.strictEqual(status.auth.type, "team");
-          assert.strictEqual(status.auth.label, "ChatGPT Team Subscription");
-          assert.deepStrictEqual(
-            status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
-            false,
+            sol.capabilities.reasoningEffortLevels.map((level) => level.value),
+            ["low", "medium", "high", "xhigh", "max", "ultra"],
           );
         }).pipe(
           Effect.provide(
@@ -319,9 +260,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "apiKey");
           assert.strictEqual(status.auth.label, "OpenAI API Key");
-          assert.deepStrictEqual(
-            status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
-            false,
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "gpt-5.6-sol"),
+            true,
           );
         }).pipe(
           Effect.provide(

@@ -365,7 +365,7 @@ function buildCodexCollaborationMode(input: {
   // "plan-accept" is a client-side auto-accept variant of plan mode;
   // map it to "plan" before passing to the Codex app server.
   const effectiveMode = input.interactionMode === "plan-accept" ? "plan" : input.interactionMode;
-  const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
+  const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.6-sol";
   return {
     mode: effectiveMode,
     settings: {

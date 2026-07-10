@@ -106,7 +106,9 @@ export function resolveDynamicChatUiBuilderModelSelection(input: {
         ? {
             options: {
               ...modelSelection.options,
-              ...(modelSelection.options.reasoningEffort === "xhigh"
+              ...(modelSelection.options.reasoningEffort === "xhigh" ||
+              modelSelection.options.reasoningEffort === "max" ||
+              modelSelection.options.reasoningEffort === "ultra"
                 ? { reasoningEffort: "high" as const }
                 : {}),
             },

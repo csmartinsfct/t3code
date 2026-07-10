@@ -17,8 +17,6 @@ export interface CodexAccountSnapshot {
   readonly sparkEnabled: boolean;
 }
 
-export const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
-export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const CODEX_SPARK_ENABLED_PLAN_TYPES = new Set<CodexPlanType>(["pro"]);
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -102,22 +100,14 @@ export function codexAuthSubLabel(account: CodexAccountSnapshot | undefined): st
 
 export function adjustCodexModelsForAccount(
   baseModels: ReadonlyArray<ServerProviderModel>,
-  account: CodexAccountSnapshot | undefined,
+  _account: CodexAccountSnapshot | undefined,
 ): ReadonlyArray<ServerProviderModel> {
-  if (account?.sparkEnabled !== false) {
-    return baseModels;
-  }
-
-  return baseModels.filter((model) => model.isCustom || model.slug !== CODEX_SPARK_MODEL);
+  return baseModels;
 }
 
 export function resolveCodexModelForAccount(
   model: string | undefined,
-  account: CodexAccountSnapshot,
+  _account: CodexAccountSnapshot,
 ): string | undefined {
-  if (model !== CODEX_SPARK_MODEL || account.sparkEnabled) {
-    return model;
-  }
-
-  return CODEX_DEFAULT_MODEL;
+  return model;
 }
