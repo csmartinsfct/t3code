@@ -3,7 +3,7 @@ import * as Path from "node:path";
 
 import { BaseWindow, BrowserWindow, ipcMain, nativeTheme, WebContentsView } from "electron";
 
-import type { OverlayRenderMessage } from "@t3tools/contracts";
+import type { OverlayAcquireOptions, OverlayRenderMessage } from "@t3tools/contracts";
 import { formatTimelineLog, isTimelineLogMessage } from "@t3tools/shared/timeline";
 
 function shortOverlayId(id: string): string {
@@ -71,15 +71,19 @@ export class OverlayPool {
     void targetWindow; // retained for future per-window expansion
   }
 
-  acquire(targetWindow: BrowserWindow, hostWebContents: Electron.WebContents): OverlayPoolEntry {
+  acquire(
+    targetWindow: BrowserWindow,
+    hostWebContents: Electron.WebContents,
+    options: OverlayAcquireOptions = {},
+  ): OverlayPoolEntry {
     const entry = this.entries.find((e) => e.status === "idle");
     if (!entry) {
       logOverlayTimeline("pool.acquire.create-extra");
       // Pool exhausted — create an extra entry on demand (should be rare).
       const extra = this.createEntry();
-      return this.acquireEntry(extra, targetWindow, hostWebContents);
+      return this.acquireEntry(extra, targetWindow, hostWebContents, options);
     }
-    return this.acquireEntry(entry, targetWindow, hostWebContents);
+    return this.acquireEntry(entry, targetWindow, hostWebContents, options);
   }
 
   release(id: string): void {
@@ -219,6 +223,7 @@ export class OverlayPool {
     entry: OverlayPoolEntry,
     targetWindow: BrowserWindow,
     hostWebContents: Electron.WebContents,
+    options: OverlayAcquireOptions,
   ): OverlayPoolEntry {
     // Remove from park window before adding to target (a view can only have one parent).
     try {
@@ -233,7 +238,9 @@ export class OverlayPool {
     // addChildView puts it last → topmost; it captures all pointer events
     // for the window since it fills the full bounds.
     targetWindow.contentView.addChildView(entry.view);
-    entry.view.webContents.focus();
+    if (options.focus !== false) {
+      entry.view.webContents.focus();
+    }
 
     entry.status = "active";
     entry.hostWebContents = hostWebContents;
@@ -322,14 +329,23 @@ export function registerOverlayIpcHandlers(
   getServerUrl: () => string | null,
 ): void {
   ipcMain.removeHandler(OVERLAY_ACQUIRE_CHANNEL);
-  ipcMain.handle(OVERLAY_ACQUIRE_CHANNEL, (event: Electron.IpcMainInvokeEvent) => {
-    const window = getWindow(event);
-    if (!window) throw new Error("no browser window for overlay:acquire");
-    const pool = getOrCreateOverlayPool(window);
-    const entry = pool.acquire(window, event.sender);
-    logOverlayTimeline("ipc.acquire", { overlayId: shortOverlayId(entry.id) });
-    return entry.id;
-  });
+  ipcMain.handle(
+    OVERLAY_ACQUIRE_CHANNEL,
+    (event: Electron.IpcMainInvokeEvent, rawOptions: unknown) => {
+      const options: OverlayAcquireOptions =
+        typeof rawOptions === "object" &&
+        rawOptions !== null &&
+        (rawOptions as { focus?: unknown }).focus === false
+          ? { focus: false }
+          : {};
+      const window = getWindow(event);
+      if (!window) throw new Error("no browser window for overlay:acquire");
+      const pool = getOrCreateOverlayPool(window);
+      const entry = pool.acquire(window, event.sender, options);
+      logOverlayTimeline("ipc.acquire", { overlayId: shortOverlayId(entry.id) });
+      return entry.id;
+    },
+  );
 
   ipcMain.removeHandler(OVERLAY_RELEASE_CHANNEL);
   ipcMain.handle(OVERLAY_RELEASE_CHANNEL, (event: Electron.IpcMainInvokeEvent, rawId: unknown) => {
