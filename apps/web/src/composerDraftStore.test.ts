@@ -363,6 +363,43 @@ describe("composerDraftStore provider capabilities", () => {
     ).toHaveLength(0);
   });
 
+  it("ignores ambiguous raw-id provider capability removal", () => {
+    const store = useComposerDraftStore.getState();
+    const profiledCapability = {
+      ...capability,
+      provider: "codex:zbd" as const,
+    };
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, profiledCapability);
+
+    store.removeProviderCapability(threadId, capability.id);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability, profiledCapability]);
+  });
+
+  it("removes provider capabilities by provider-scoped selection key", () => {
+    const store = useComposerDraftStore.getState();
+    const profiledCapability = {
+      ...capability,
+      provider: "codex:zbd" as const,
+    };
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, profiledCapability);
+
+    store.removeProviderCapability(
+      threadId,
+      "codex:zbd\u0000plugin\u0000superpowers@openai-curated-remote",
+    );
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability]);
+  });
+
   it("deduplicates capabilities by provider, kind, and id", () => {
     const store = useComposerDraftStore.getState();
 

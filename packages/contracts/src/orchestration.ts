@@ -53,6 +53,13 @@ export const BASE_PROVIDER_KINDS = ["codex", "claudeAgent", "gemini", "cursor"] 
 export type BaseProviderKind = (typeof BASE_PROVIDER_KINDS)[number];
 export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
 
+export type ProviderKind =
+  | BaseProviderKind
+  | `codex:${string}`
+  | `claudeAgent:${string}`
+  | `gemini:${string}`
+  | `cursor:${string}`;
+
 /**
  * Runtime Schema that validates profiled provider kinds like "claudeAgent:zbd".
  *
@@ -64,12 +71,6 @@ export const BaseProviderKind = Schema.Literals(BASE_PROVIDER_KINDS);
 export const ProviderKind = Schema.String.check(
   Schema.isPattern(/^(codex|claudeAgent|gemini|cursor)(:[a-zA-Z0-9_-]+)?$/),
 ) as unknown as typeof BaseProviderKind;
-export type ProviderKind =
-  | BaseProviderKind
-  | `codex:${string}`
-  | `claudeAgent:${string}`
-  | `gemini:${string}`
-  | `cursor:${string}`;
 
 /**
  * Safely narrow a full ProviderKind (possibly profiled) for use as a

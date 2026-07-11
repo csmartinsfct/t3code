@@ -167,9 +167,11 @@ export const resolveCodexProviderCapabilities = Effect.fn("resolveCodexProviderC
 
 async function queryCodexAppServer(input: {
   binaryPath: string;
+  cwd: string;
   homePath?: string;
 }): Promise<{ plugins: CodexPluginListResponse; skills: CodexSkillsListResponse }> {
   const child = spawn(input.binaryPath, ["app-server"], {
+    cwd: input.cwd,
     env: { ...process.env, ...(input.homePath ? { CODEX_HOME: input.homePath } : {}) },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",

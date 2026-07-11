@@ -8,6 +8,7 @@ import {
   EventId,
   ProviderItemId,
   ProviderRequestKind,
+  baseProviderKind,
   type ProviderUserInputAnswers,
   ThreadId,
   TurnId,
@@ -393,7 +394,9 @@ function buildCodexCapabilityActivationInputItems(
   const items: CodexSkillInputItem[] = [];
   const seen = new Set<string>();
   for (const capability of capabilities ?? []) {
-    if (capability.provider !== "codex" || capability.kind !== "skill") continue;
+    if (baseProviderKind(capability.provider) !== "codex" || capability.kind !== "skill") {
+      continue;
+    }
     if (!capability.name || !capability.path) continue;
     const key = `${capability.name}\u0000${capability.path}`;
     if (seen.has(key)) continue;

@@ -9,6 +9,7 @@ import { BotIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandItem, CommandList } from "../ui/command";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
 export type ComposerCommandItem =
@@ -150,9 +151,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         </Badge>
       ) : null}
       {props.item.type === "provider-capability" ? (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          {props.item.capability.kind === "plugin" ? "Plugin" : "Skill"}
-        </Badge>
+        <ProviderCapabilityIcon capability={props.item.capability} />
       ) : null}
       {props.item.type === "local-skill" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">

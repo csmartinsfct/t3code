@@ -45,6 +45,23 @@ describe("provider capability contracts", () => {
     );
   });
 
+  it("decodes profiled provider capabilities", () => {
+    const decoded = Schema.decodeUnknownSync(ProviderCapabilityEntry)({
+      id: "superpowers:brainstorming",
+      provider: "codex:zbd",
+      kind: "skill",
+      name: "superpowers:brainstorming",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/brainstorming/SKILL.md",
+      displayName: "Brainstorming",
+      parentId: "superpowers@openai-curated-remote",
+      parentDisplayName: "Superpowers",
+      enabled: true,
+      installed: true,
+    });
+
+    expect(decoded.provider).toBe("codex:zbd");
+  });
+
   it("decodes next-turn selected provider capabilities", () => {
     const decoded = Schema.decodeUnknownSync(SelectedProviderCapability)({
       provider: "codex",
@@ -55,6 +72,7 @@ describe("provider capability contracts", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      iconUrl: "https://example.com/superpowers.png",
     });
 
     expect(decoded.id).toBe("superpowers:using-superpowers");
@@ -62,6 +80,7 @@ describe("provider capability contracts", () => {
     expect(decoded.path).toBe(
       "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
     );
+    expect(decoded.iconUrl).toBe("https://example.com/superpowers.png");
   });
 
   it("keeps next-turn selected provider capability name and path optional", () => {

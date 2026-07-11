@@ -184,6 +184,28 @@ describe("normalizeCodexCapabilities", () => {
 });
 
 describe("resolveCodexProviderCapabilities", () => {
+  it("launches Codex capability discovery from the target project cwd", async () => {
+    spawnMock.mockReset();
+    const child = makeChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    const result = Effect.runPromise(
+      resolveCodexProviderCapabilities({
+        provider: "codex",
+        cwd: "/repo",
+        binaryPath: "codex",
+      }),
+    );
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ cwd: "/repo" });
+
+    const error = new Error("stop after assertion");
+    child.emit("error", error);
+    await expect(result).rejects.toMatchObject({ cause: error });
+  });
+
   it.each(["error", "stdin", "stdout"] as const)(
     "rejects and cleans up when Codex %s emits an error",
     async (source) => {

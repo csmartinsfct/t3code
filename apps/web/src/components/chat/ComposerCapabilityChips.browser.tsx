@@ -11,6 +11,7 @@ const superpowersCapability = {
   id: "superpowers@openai-curated-remote",
   displayName: "Superpowers",
   parentDisplayName: "OpenAI curated",
+  iconUrl: "https://example.com/superpowers.png",
 } satisfies SelectedProviderCapability;
 
 describe("ComposerCapabilityChips", () => {
@@ -30,6 +31,9 @@ describe("ComposerCapabilityChips", () => {
     try {
       const chip = page.getByTitle("plugin · OpenAI curated");
       await expect.element(chip).toHaveTextContent("Superpowers");
+      expect(
+        chip.element().querySelector('img[src="https://example.com/superpowers.png"]'),
+      ).toBeTruthy();
 
       await page.getByRole("button", { name: "Remove Superpowers" }).click();
 

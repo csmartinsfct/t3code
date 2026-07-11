@@ -2458,8 +2458,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           const current = state.draftsByThreadId[threadId];
           if (!current) return state;
           const currentProviderCapabilities = providerCapabilitiesOf(current);
+          const rawIdMatches = currentProviderCapabilities.filter(
+            (capability) => capability.id === capabilityId,
+          );
           const nextProviderCapabilities = currentProviderCapabilities.filter(
-            (capability) => capability.id !== capabilityId,
+            (capability) =>
+              providerCapabilityDedupKey(capability) !== capabilityId &&
+              !(rawIdMatches.length === 1 && capability.id === capabilityId),
           );
           if (nextProviderCapabilities.length === currentProviderCapabilities.length) {
             return state;

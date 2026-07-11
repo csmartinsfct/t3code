@@ -7,6 +7,8 @@ import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters
 import { useRoutedPopoverSurface } from "~/routedPopover";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { providerCapabilitySelectionKey } from "./composerCapabilitySelection";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 
 const SKILLS_PICKER_OVERLAY_ROUTE_KEY = "skills-picker-menu";
 
@@ -290,9 +292,9 @@ const ProviderCapabilitySection = memo(function ProviderCapabilitySection({
       <div className="px-2 pb-0.5 pt-1.5 font-medium text-muted-foreground text-xs">{label}</div>
       {capabilities.map((capability) => (
         <ProviderCapabilityMenuItem
-          key={capability.id}
+          key={providerCapabilitySelectionKey(capability)}
           capability={capability}
-          isAttached={attachedProviderCapabilityIds.has(capability.id)}
+          isAttached={attachedProviderCapabilityIds.has(providerCapabilitySelectionKey(capability))}
           onAttach={onAttachProviderCapability}
           onCloseMenu={onCloseMenu}
         />
@@ -320,6 +322,7 @@ const ProviderCapabilityMenuItem = memo(function ProviderCapabilityMenuItem({
 
   return (
     <MenuItem disabled={isAttached} onClick={handleClick}>
+      <ProviderCapabilityIcon capability={capability} />
       <span className="min-w-0 truncate text-sm">{capability.displayName}</span>
     </MenuItem>
   );

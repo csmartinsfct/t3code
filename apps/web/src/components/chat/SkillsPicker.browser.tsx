@@ -59,6 +59,7 @@ const TEST_PROVIDER_CAPABILITIES: readonly ProviderCapabilityEntry[] = [
     description: "Planning workflows",
     enabled: true,
     installed: true,
+    iconUrl: "https://example.com/superpowers.png",
   },
   {
     id: "superpowers:brainstorming",
@@ -70,6 +71,7 @@ const TEST_PROVIDER_CAPABILITIES: readonly ProviderCapabilityEntry[] = [
     parentDisplayName: "Superpowers",
     enabled: true,
     installed: true,
+    iconUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E",
   },
 ];
 
@@ -199,6 +201,7 @@ describe("SkillsPicker", () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain("Codex plugins");
       expect(document.body.textContent).toContain("Codex plugin skills");
+      expect(document.querySelector('img[src="https://example.com/superpowers.png"]')).toBeTruthy();
     });
 
     await page.getByRole("menuitem", { name: "Superpowers" }).click();

@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 import { TrimmedNonEmptyString } from "./baseSchemas";
-import { ProviderKind } from "./orchestration";
+import { ProviderKind as ProviderKindSchema, type ProviderKind } from "./orchestration";
 
 export const ProviderCapabilityKind = Schema.Literals([
   "plugin",
@@ -13,9 +13,13 @@ export const ProviderCapabilityKind = Schema.Literals([
 ]);
 export type ProviderCapabilityKind = typeof ProviderCapabilityKind.Type;
 
+function providerCapabilityProviderKind(): Schema.Codec<ProviderKind, string, never, never> {
+  return ProviderKindSchema as unknown as Schema.Codec<ProviderKind, string, never, never>;
+}
+
 export const ProviderCapabilityEntry = Schema.Struct({
   id: TrimmedNonEmptyString,
-  provider: Schema.suspend(() => ProviderKind),
+  provider: Schema.suspend(() => providerCapabilityProviderKind()),
   kind: ProviderCapabilityKind,
   name: TrimmedNonEmptyString,
   path: Schema.optional(TrimmedNonEmptyString),
@@ -33,7 +37,7 @@ export const ProviderCapabilityEntry = Schema.Struct({
 export type ProviderCapabilityEntry = typeof ProviderCapabilityEntry.Type;
 
 export const SelectedProviderCapability = Schema.Struct({
-  provider: Schema.suspend(() => ProviderKind),
+  provider: Schema.suspend(() => providerCapabilityProviderKind()),
   kind: ProviderCapabilityKind,
   id: TrimmedNonEmptyString,
   name: Schema.optional(TrimmedNonEmptyString),
@@ -41,11 +45,13 @@ export const SelectedProviderCapability = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   parentId: Schema.optional(TrimmedNonEmptyString),
   parentDisplayName: Schema.optional(TrimmedNonEmptyString),
+  iconPath: Schema.optional(Schema.String),
+  iconUrl: Schema.optional(Schema.String),
 });
 export type SelectedProviderCapability = typeof SelectedProviderCapability.Type;
 
 export const ResolveProviderCapabilitiesInput = Schema.Struct({
-  provider: Schema.suspend(() => ProviderKind),
+  provider: Schema.suspend(() => providerCapabilityProviderKind()),
   cwd: TrimmedNonEmptyString,
 });
 export type ResolveProviderCapabilitiesInput = typeof ResolveProviderCapabilitiesInput.Type;

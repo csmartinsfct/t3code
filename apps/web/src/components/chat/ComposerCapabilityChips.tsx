@@ -3,6 +3,8 @@ import { XIcon } from "lucide-react";
 import { memo } from "react";
 
 import { Button } from "../ui/button";
+import { providerCapabilitySelectionKey } from "./composerCapabilitySelection";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 
 interface ComposerCapabilityChipsProps {
   capabilities: readonly SelectedProviderCapability[];
@@ -27,6 +29,7 @@ export const ComposerCapabilityChips = memo(function ComposerCapabilityChips({
               : `${capability.kind} · ${capability.provider}`
           }
         >
+          <ProviderCapabilityIcon capability={capability} className="size-3.5" />
           <span className="truncate text-foreground">{capability.displayName}</span>
           <Button
             type="button"
@@ -34,7 +37,7 @@ export const ComposerCapabilityChips = memo(function ComposerCapabilityChips({
             size="icon-xs"
             className="ml-0.5 size-4 rounded-sm text-muted-foreground/72 hover:text-foreground [&_svg]:size-2.5"
             aria-label={`Remove ${capability.displayName}`}
-            onClick={() => onRemove(capability.id)}
+            onClick={() => onRemove(providerCapabilitySelectionKey(capability))}
           >
             <XIcon />
           </Button>

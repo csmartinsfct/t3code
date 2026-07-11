@@ -212,6 +212,8 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerCapabilityChips } from "./chat/ComposerCapabilityChips";
 import {
+  isActivatableProviderCapabilityForProvider,
+  providerCapabilitySelectionKey,
   selectComposerAttachment,
   toSelectedProviderCapability,
 } from "./chat/composerCapabilitySelection";
@@ -716,23 +718,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerProviderCapabilities =
     composerDraft.providerCapabilities ?? EMPTY_SELECTED_PROVIDER_CAPABILITIES;
   const composerPersistedAttachments = composerDraft.persistedAttachments;
-  const composerSendState = useMemo(
-    () =>
-      deriveComposerSendState({
-        prompt,
-        imageCount: composerImages.length,
-        terminalContexts: composerTerminalContexts,
-        skillCount: composerSkills.length,
-        providerCapabilityCount: composerProviderCapabilities.length,
-      }),
-    [
-      composerImages.length,
-      composerProviderCapabilities.length,
-      composerTerminalContexts,
-      composerSkills.length,
-      prompt,
-    ],
-  );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
@@ -1443,6 +1428,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const sendableComposerProviderCapabilities = useMemo(
+    () =>
+      composerProviderCapabilities.filter((capability) =>
+        isActivatableProviderCapabilityForProvider(capability, selectedProvider),
+      ),
+    [composerProviderCapabilities, selectedProvider],
+  );
+  const composerSendState = useMemo(
+    () =>
+      deriveComposerSendState({
+        prompt,
+        imageCount: composerImages.length,
+        terminalContexts: composerTerminalContexts,
+        skillCount: composerSkills.length,
+        activatableProviderCapabilityCount: sendableComposerProviderCapabilities.length,
+      }),
+    [
+      composerImages.length,
+      composerTerminalContexts,
+      composerSkills.length,
+      prompt,
+      sendableComposerProviderCapabilities.length,
+    ],
+  );
 
   // Rate limits: always derive from the currently-selected provider so that
   // switching profiles in the dropdown immediately reflects the selected
@@ -1480,7 +1489,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [composerSkills],
   );
   const attachedProviderCapabilityIds = useMemo(
-    () => new Set((composerProviderCapabilities ?? []).map((capability) => capability.id)),
+    () => new Set(composerProviderCapabilities.map(providerCapabilitySelectionKey)),
     [composerProviderCapabilities],
   );
 
@@ -4177,7 +4186,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
       skillCount: composerSkills.length,
-      providerCapabilityCount: composerProviderCapabilities.length,
+      activatableProviderCapabilityCount: sendableComposerProviderCapabilities.length,
     });
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -4266,7 +4275,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
     const composerTicketAttachmentsSnapshot = [...composerTicketAttachments];
     const composerSkillsSnapshot = [...composerSkills];
-    const composerProviderCapabilitiesSnapshot = [...composerProviderCapabilities];
+    const composerProviderCapabilitiesSnapshot = [...sendableComposerProviderCapabilities];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);

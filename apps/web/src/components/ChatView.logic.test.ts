@@ -64,12 +64,12 @@ describe("deriveComposerSendState", () => {
     expect(state.hasSendableContent).toBe(true);
   });
 
-  it("treats selected provider capability chips as sendable content", () => {
+  it("treats activatable provider capability chips as sendable content", () => {
     const state = deriveComposerSendState({
       prompt: "",
       imageCount: 0,
       terminalContexts: [],
-      providerCapabilityCount: 1,
+      activatableProviderCapabilityCount: 1,
     });
 
     expect(state.hasSendableContent).toBe(true);

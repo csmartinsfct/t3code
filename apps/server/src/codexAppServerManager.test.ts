@@ -711,6 +711,42 @@ describe("sendTurn", () => {
     });
   });
 
+  it("adds Codex skill activation input for selected profiled-provider skills", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected profile skill",
+      providerCapabilities: [
+        {
+          provider: "codex:zbd",
+          kind: "skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "$superpowers:using-superpowers\n\nUse the selected profile skill",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
   it("does not duplicate a selected Codex skill marker already present in user text", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
 

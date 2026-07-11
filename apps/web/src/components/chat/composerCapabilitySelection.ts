@@ -3,6 +3,7 @@ import type {
   SelectedProviderCapability,
   SkillEntry,
 } from "@t3tools/contracts";
+import { baseProviderKind } from "@t3tools/contracts";
 
 import type { ComposerTrigger } from "../../composer-logic";
 
@@ -31,6 +32,27 @@ type ApplyPromptReplacement = (
   options: { expectedText: string },
 ) => boolean;
 
+export function providerCapabilitySelectionKey(
+  capability: Pick<SelectedProviderCapability, "provider" | "kind" | "id">,
+): string {
+  return `${capability.provider}\u0000${capability.kind}\u0000${capability.id}`;
+}
+
+export function isActivatableProviderCapability(capability: SelectedProviderCapability): boolean {
+  return (
+    baseProviderKind(capability.provider) === "codex" &&
+    capability.kind === "skill" &&
+    Boolean(capability.name && capability.path)
+  );
+}
+
+export function isActivatableProviderCapabilityForProvider(
+  capability: SelectedProviderCapability,
+  provider: SelectedProviderCapability["provider"],
+): boolean {
+  return capability.provider === provider && isActivatableProviderCapability(capability);
+}
+
 function extendReplacementRangeForTrailingSpace(
   text: string,
   rangeEnd: number,
@@ -51,6 +73,8 @@ export function toSelectedProviderCapability(
     displayName: capability.displayName,
     ...(capability.parentId ? { parentId: capability.parentId } : {}),
     ...(capability.parentDisplayName ? { parentDisplayName: capability.parentDisplayName } : {}),
+    ...(capability.iconPath ? { iconPath: capability.iconPath } : {}),
+    ...(capability.iconUrl ? { iconUrl: capability.iconUrl } : {}),
   };
 }
 

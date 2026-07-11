@@ -1,7 +1,14 @@
-import type { ProviderCapabilityEntry, SkillEntry } from "@t3tools/contracts";
+import type {
+  ProviderCapabilityEntry,
+  SelectedProviderCapability,
+  SkillEntry,
+} from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  isActivatableProviderCapabilityForProvider,
+  isActivatableProviderCapability,
+  providerCapabilitySelectionKey,
   selectComposerAttachment,
   toSelectedProviderCapability,
 } from "./composerCapabilitySelection";
@@ -34,6 +41,56 @@ const trigger = {
 };
 
 describe("selectComposerAttachment", () => {
+  it("builds a provider-scoped selection key", () => {
+    expect(
+      providerCapabilitySelectionKey({
+        provider: "codex:zbd",
+        kind: "skill",
+        id: "superpowers:using-superpowers",
+      }),
+    ).toBe("codex:zbd\u0000skill\u0000superpowers:using-superpowers");
+  });
+
+  it("treats Codex skills with activation fields as activatable provider capabilities", () => {
+    expect(
+      isActivatableProviderCapability({
+        provider: "codex:zbd",
+        kind: "skill",
+        id: "superpowers:using-superpowers",
+        name: "superpowers:using-superpowers",
+        path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        displayName: "Using Superpowers",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat plugin chips as activatable provider capabilities", () => {
+    expect(
+      isActivatableProviderCapability({
+        provider: "codex",
+        kind: "plugin",
+        id: "superpowers@openai-curated-remote",
+        name: "superpowers",
+        displayName: "Superpowers",
+      }),
+    ).toBe(false);
+  });
+
+  it("activates provider capabilities only for the matching active provider profile", () => {
+    const capability = {
+      provider: "codex:zbd",
+      kind: "skill",
+      id: "superpowers:using-superpowers",
+      name: "superpowers:using-superpowers",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+      displayName: "Using Superpowers",
+    } satisfies SelectedProviderCapability;
+
+    expect(isActivatableProviderCapabilityForProvider(capability, "codex:zbd")).toBe(true);
+    expect(isActivatableProviderCapabilityForProvider(capability, "codex:metric")).toBe(false);
+    expect(isActivatableProviderCapabilityForProvider(capability, "cursor")).toBe(false);
+  });
+
   it("preserves provider capability activation fields for draft selection", () => {
     const selected = toSelectedProviderCapability({
       id: "superpowers:using-superpowers",
@@ -44,6 +101,7 @@ describe("selectComposerAttachment", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      iconUrl: "https://example.com/superpowers.png",
       enabled: true,
       installed: true,
     });
@@ -57,6 +115,7 @@ describe("selectComposerAttachment", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      iconUrl: "https://example.com/superpowers.png",
     });
   });
 
