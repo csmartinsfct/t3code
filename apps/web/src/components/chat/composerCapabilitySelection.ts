@@ -39,10 +39,23 @@ export function providerCapabilitySelectionKey(
 }
 
 export function isActivatableProviderCapability(capability: SelectedProviderCapability): boolean {
+  if (baseProviderKind(capability.provider) !== "codex") return false;
+  if (capability.kind === "skill" && capability.name && capability.path) return true;
+  return Boolean(
+    capability.capabilityRootPath &&
+    capability.appIds !== undefined &&
+    capability.appIds.length > 0,
+  );
+}
+
+export function isDefaultEnabledProviderCapability(
+  capability: SelectedProviderCapability,
+): boolean {
   return (
     baseProviderKind(capability.provider) === "codex" &&
-    capability.kind === "skill" &&
-    Boolean(capability.name && capability.path)
+    capability.capabilityRootPath !== undefined &&
+    capability.appIds !== undefined &&
+    capability.appIds.length > 0
   );
 }
 
@@ -51,6 +64,46 @@ export function isActivatableProviderCapabilityForProvider(
   provider: SelectedProviderCapability["provider"],
 ): boolean {
   return capability.provider === provider && isActivatableProviderCapability(capability);
+}
+
+export function defaultProviderCapabilitiesForProvider(
+  capabilities: ReadonlyArray<ProviderCapabilityEntry>,
+  provider: SelectedProviderCapability["provider"],
+): SelectedProviderCapability[] {
+  const seenRoots = new Set<string>();
+  const selected: SelectedProviderCapability[] = [];
+  for (const capability of capabilities) {
+    const selection = toSelectedProviderCapability(capability);
+    if (selection.provider !== provider || !isDefaultEnabledProviderCapability(selection)) {
+      continue;
+    }
+    const root = selection.capabilityRootPath;
+    if (!root || seenRoots.has(root)) continue;
+    seenRoots.add(root);
+    selected.push(selection);
+  }
+  return selected;
+}
+
+export function mergeProviderCapabilitiesForSend(
+  selectedCapabilities: ReadonlyArray<SelectedProviderCapability>,
+  defaultCapabilities: ReadonlyArray<SelectedProviderCapability>,
+): SelectedProviderCapability[] {
+  const merged: SelectedProviderCapability[] = [];
+  const seenPlugins = new Set<string>();
+  const seenSelections = new Set<string>();
+  for (const capability of [...defaultCapabilities, ...selectedCapabilities]) {
+    const selectionKey = providerCapabilitySelectionKey(capability);
+    if (seenSelections.has(selectionKey)) continue;
+    if (capability.kind === "plugin" && capability.capabilityRootPath) {
+      const pluginKey = `${capability.provider}\u0000${capability.capabilityRootPath}`;
+      if (seenPlugins.has(pluginKey)) continue;
+      seenPlugins.add(pluginKey);
+    }
+    seenSelections.add(selectionKey);
+    merged.push(capability);
+  }
+  return merged;
 }
 
 function extendReplacementRangeForTrailingSpace(
@@ -73,6 +126,8 @@ export function toSelectedProviderCapability(
     displayName: capability.displayName,
     ...(capability.parentId ? { parentId: capability.parentId } : {}),
     ...(capability.parentDisplayName ? { parentDisplayName: capability.parentDisplayName } : {}),
+    ...(capability.capabilityRootPath ? { capabilityRootPath: capability.capabilityRootPath } : {}),
+    ...(capability.appIds ? { appIds: [...capability.appIds] } : {}),
     ...(capability.iconPath ? { iconPath: capability.iconPath } : {}),
     ...(capability.iconUrl ? { iconUrl: capability.iconUrl } : {}),
   };

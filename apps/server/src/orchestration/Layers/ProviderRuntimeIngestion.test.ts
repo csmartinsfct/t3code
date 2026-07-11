@@ -15,7 +15,19 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { type DeepPartial } from "@t3tools/shared/Struct";
+import {
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  PubSub,
+  Scope,
+  Stream,
+} from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
@@ -33,7 +45,10 @@ import {
   ProviderLifecycleLogger,
   noopProviderLifecycleLogger,
 } from "../../provider/Services/ProviderLifecycleLogger.ts";
-import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
+import {
+  materializeAssistantTextWithTimeout,
+  ProviderRuntimeIngestionLive,
+} from "./ProviderRuntimeIngestion.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -41,7 +56,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
-function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
+function makeTestServerSettingsLayer(overrides: DeepPartial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
 }
 
@@ -169,6 +184,22 @@ type ProviderRuntimeTestProposedPlan = ProviderRuntimeTestThread["proposedPlans"
 type ProviderRuntimeTestActivity = ProviderRuntimeTestThread["activities"][number];
 type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][number];
 
+it("falls back when inline visualization materialization times out", async () => {
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const fiber = yield* materializeAssistantTextWithTimeout({
+        text: "original assistant text",
+        materialization: Effect.never,
+      }).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.seconds(2));
+      return yield* Fiber.join(fiber);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  expect(result).toEqual({ text: "original assistant text", artifacts: [] });
+});
+
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
     OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
@@ -197,7 +228,7 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: { serverSettings?: DeepPartial<ServerSettings> }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -1686,6 +1717,177 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("materializes buffered Codex visualization directives at assistant completion", async () => {
+    const codexHomePath = makeTempDir("t3-codex-home-");
+    const nativeThreadId = "01980a2e-8ca3-7000-8000-7e6dd4afae22";
+    const visualizationDirectory = path.join(
+      codexHomePath,
+      "visualizations",
+      "2026",
+      "07",
+      "11",
+      nativeThreadId,
+    );
+    fs.mkdirSync(visualizationDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(visualizationDirectory, "chart.html"),
+      "<main>Buffered chart</main>",
+    );
+    const harness = await createHarness({
+      serverSettings: { providers: { codex: { homePath: codexHomePath } } },
+    });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-visualization-buffered-delta"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-buffered"),
+      itemId: asItemId("item-visualization-buffered"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: 'Before ::codex-inline-vis{file="chart.html"} after',
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-visualization-buffered-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-buffered"),
+      itemId: asItemId("item-visualization-buffered"),
+      raw: {
+        source: "codex.app-server.notification",
+        payload: { threadId: nativeThreadId },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-visualization-buffered" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-visualization-buffered",
+    );
+    expect(message?.text).toContain("```t3:dynamic-chat-ui");
+    expect(message?.text).not.toContain("::codex-inline-vis");
+    expect(message?.metadata?.dynamicChatUiArtifacts).toEqual([
+      expect.objectContaining({ html: "<main>Buffered chart</main>" }),
+    ]);
+  });
+
+  it("merges imported artifacts with existing assistant message metadata", async () => {
+    const codexHomePath = makeTempDir("t3-codex-home-");
+    const nativeThreadId = "01980a2e-8ca3-7000-8000-7e6dd4afae22";
+    const visualizationDirectory = path.join(
+      codexHomePath,
+      "visualizations",
+      "2026",
+      "07",
+      "11",
+      nativeThreadId,
+    );
+    fs.mkdirSync(visualizationDirectory, { recursive: true });
+    fs.writeFileSync(path.join(visualizationDirectory, "chart.html"), "<main>New chart</main>");
+    const harness = await createHarness({
+      serverSettings: { providers: { codex: { homePath: codexHomePath } } },
+    });
+    const now = new Date().toISOString();
+    const messageId = asMessageId("assistant:item-visualization-metadata");
+    const priorArtifact = {
+      version: 1 as const,
+      id: "prior-artifact",
+      title: "Prior",
+      description: null,
+      initialHeight: 320,
+      maxHeight: 900,
+      html: "<main>Prior chart</main>",
+    };
+    const origin = {
+      kind: "orchestration-prompt" as const,
+      promptId: "implement" as const,
+      phase: "working" as const,
+      dispatchMode: "start" as const,
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: CommandId.makeUnsafe("cmd-seed-visualization-metadata"),
+        threadId: asThreadId("thread-1"),
+        messageId,
+        text: "Before ",
+        metadata: {
+          origin,
+          internal: true,
+          dynamicChatUiArtifacts: [priorArtifact],
+        },
+        turnId: asTurnId("turn-visualization-metadata"),
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-visualization-metadata-delta"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-metadata"),
+      itemId: asItemId("item-visualization-metadata"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: '::codex-inline-vis{file="chart.html"}',
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-visualization-metadata-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-metadata"),
+      itemId: asItemId("item-visualization-metadata"),
+      raw: {
+        source: "codex.app-server.notification",
+        payload: { threadId: nativeThreadId },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === messageId &&
+          !message.streaming &&
+          message.text.includes("```t3:dynamic-chat-ui"),
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === messageId,
+    );
+    expect(message?.metadata).toEqual({
+      origin,
+      internal: true,
+      dynamicChatUiArtifacts: [
+        priorArtifact,
+        expect.objectContaining({ html: "<main>New chart</main>" }),
+      ],
+    });
+  });
+
   it("streams assistant deltas when thread.turn.start requests streaming mode", async () => {
     const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
     const now = new Date().toISOString();
@@ -1776,6 +1978,85 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(finalMessage?.text).toBe("hello live");
     expect(finalMessage?.streaming).toBe(false);
+  });
+
+  it("atomically replaces streamed Codex visualization directives at assistant completion", async () => {
+    const codexHomePath = makeTempDir("t3-codex-home-");
+    const nativeThreadId = "01980a2e-8ca3-7000-8000-7e6dd4afae22";
+    const visualizationDirectory = path.join(
+      codexHomePath,
+      "visualizations",
+      "2026",
+      "07",
+      "11",
+      nativeThreadId,
+    );
+    fs.mkdirSync(visualizationDirectory, { recursive: true });
+    fs.writeFileSync(path.join(visualizationDirectory, "chart.html"), "<main>Live chart</main>");
+    const harness = await createHarness({
+      serverSettings: {
+        enableAssistantStreaming: true,
+        providers: { codex: { homePath: codexHomePath } },
+      },
+    });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-visualization-streamed-delta"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-streamed"),
+      itemId: asItemId("item-visualization-streamed"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: '::codex-inline-vis{file="chart.html"}',
+      },
+    });
+
+    await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-visualization-streamed" &&
+          message.streaming &&
+          message.text.includes("::codex-inline-vis"),
+      ),
+    );
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-visualization-streamed-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-visualization-streamed"),
+      itemId: asItemId("item-visualization-streamed"),
+      raw: {
+        source: "codex.app-server.notification",
+        payload: { threadId: nativeThreadId },
+      },
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-visualization-streamed" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-visualization-streamed",
+    );
+    expect(message?.text).toContain("```t3:dynamic-chat-ui");
+    expect(message?.text).not.toContain("::codex-inline-vis");
+    expect(message?.text.match(/```t3:dynamic-chat-ui/g)).toHaveLength(1);
+    expect(message?.metadata?.dynamicChatUiArtifacts).toEqual([
+      expect.objectContaining({ html: "<main>Live chart</main>" }),
+    ]);
   });
 
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {

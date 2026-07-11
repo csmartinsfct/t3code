@@ -124,6 +124,13 @@ type CodexTextInputItem = { type: "text"; text: string; text_elements: [] };
 type CodexImageInputItem = { type: "image"; url: string };
 type CodexSkillInputItem = { type: "skill"; name: string; path: string };
 type CodexTurnInputItem = CodexTextInputItem | CodexImageInputItem | CodexSkillInputItem;
+type CodexSelectedCapabilityRoots = {
+  environments: Array<{ environmentId: string; cwd: string }>;
+  selectedCapabilityRoots: Array<{
+    id: string;
+    location: { type: "environment"; environmentId: string; path: string };
+  }>;
+};
 
 export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
@@ -136,6 +143,7 @@ export interface CodexAppServerStartSessionInput {
   readonly homePath?: string;
   readonly configOverrides?: ReadonlyArray<string>;
   readonly appendDeveloperInstructions?: string;
+  readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -452,6 +460,42 @@ function appendCodexSkillInvocations(
   return next;
 }
 
+export function buildCodexSelectedCapabilityRoots(input: {
+  cwd: string;
+  capabilities: ReadonlyArray<SelectedProviderCapability> | undefined;
+}): CodexSelectedCapabilityRoots | undefined {
+  const selectedCapabilityRoots: CodexSelectedCapabilityRoots["selectedCapabilityRoots"] = [];
+  const seen = new Set<string>();
+
+  for (const capability of input.capabilities ?? []) {
+    if (
+      baseProviderKind(capability.provider) !== "codex" ||
+      !capability.capabilityRootPath ||
+      !capability.appIds ||
+      capability.appIds.length === 0
+    ) {
+      continue;
+    }
+    const key = capability.capabilityRootPath;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selectedCapabilityRoots.push({
+      id: capability.id,
+      location: {
+        type: "environment",
+        environmentId: "local",
+        path: capability.capabilityRootPath,
+      },
+    });
+  }
+
+  if (selectedCapabilityRoots.length === 0) return undefined;
+  return {
+    environments: [{ environmentId: "local", cwd: input.cwd }],
+    selectedCapabilityRoots,
+  };
+}
+
 function toCodexUserInputAnswer(value: unknown): CodexUserInputAnswer {
   if (typeof value === "string") {
     return { answers: [value] };
@@ -626,11 +670,18 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         cwd: input.cwd ?? null,
         ...mapCodexRuntimeMode(input.runtimeMode ?? "full-access"),
       };
+      const capabilityRoots = buildCodexSelectedCapabilityRoots({
+        cwd: resolvedCwd,
+        capabilities: input.providerCapabilities,
+      });
 
       const threadStartParams = {
         ...sessionOverrides,
         experimentalRawEvents: false,
       };
+      if (capabilityRoots) {
+        Object.assign(threadStartParams, capabilityRoots);
+      }
       const resumeThreadId = readResumeThreadId(input);
       this.emitLifecycleEvent(
         context,

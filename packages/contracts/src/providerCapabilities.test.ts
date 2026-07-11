@@ -25,6 +25,26 @@ describe("provider capability contracts", () => {
     expect(decoded.displayName).toBe("Superpowers");
   });
 
+  it("decodes an app-backed provider plugin root", () => {
+    const decoded = Schema.decodeUnknownSync(ProviderCapabilityEntry)({
+      id: "gmail@openai-curated-remote",
+      provider: "codex",
+      kind: "plugin",
+      name: "gmail",
+      displayName: "Gmail",
+      enabled: true,
+      installed: true,
+      source: "openai-curated-remote",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+    });
+
+    expect(decoded.capabilityRootPath).toBe(
+      "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+    );
+    expect(decoded.appIds).toEqual(["connector_2128aebfecb84f64a069897515042a44"]);
+  });
+
   it("decodes a provider skill with parent plugin metadata", () => {
     const decoded = Schema.decodeUnknownSync(ProviderCapabilityEntry)({
       id: "superpowers:brainstorming",
@@ -72,6 +92,8 @@ describe("provider capability contracts", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1",
+      appIds: ["asdk_app_superpowers"],
       iconUrl: "https://example.com/superpowers.png",
     });
 
@@ -80,6 +102,10 @@ describe("provider capability contracts", () => {
     expect(decoded.path).toBe(
       "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
     );
+    expect(decoded.capabilityRootPath).toBe(
+      "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1",
+    );
+    expect(decoded.appIds).toEqual(["asdk_app_superpowers"]);
     expect(decoded.iconUrl).toBe("https://example.com/superpowers.png");
   });
 

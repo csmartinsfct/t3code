@@ -14,6 +14,7 @@
 import type {
   ProviderInterruptTurnInput,
   ProviderKind,
+  SelectedProviderCapability,
   ProviderRateLimitInfo,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -36,6 +37,22 @@ import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
 export interface ProviderServiceShape {
+  /** Resolve selected capability ids to canonical installed provider metadata. */
+  readonly resolveSessionCapabilities?: (input: {
+    readonly provider: ProviderKind;
+    readonly cwd: string;
+    readonly requested?: ReadonlyArray<SelectedProviderCapability>;
+  }) => Effect.Effect<ReadonlyArray<SelectedProviderCapability>, ProviderServiceError>;
+
+  /** Read the persisted provider identity and resume cursor without starting a session. */
+  readonly getPersistedSession?: (threadId: ThreadId) => Effect.Effect<
+    | {
+        readonly provider: ProviderKind;
+        readonly resumeCursor: unknown | null | undefined;
+      }
+    | undefined
+  >;
+
   /**
    * Start a provider session.
    */

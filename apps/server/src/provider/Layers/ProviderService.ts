@@ -17,6 +17,7 @@ import {
   NonNegativeInt,
   ThreadId,
   type ProviderKind,
+  type SelectedProviderCapability,
   ProviderInterruptTurnInput,
   type ProviderRateLimitInfo,
   ProviderRespondToRequestInput,
@@ -56,6 +57,9 @@ import type {
 } from "../Services/ProviderLifecycleLogger.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
+import { resolveProviderCapabilities } from "../capabilities/index.ts";
+import { canonicalizeCodexSelectedCapabilities } from "../capabilities/codexCapabilities.ts";
+import { resolveCodexHomePathForProvider } from "../codexProfileDiscovery.ts";
 
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
@@ -402,6 +406,54 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+
+  const resolveSessionCapabilities: NonNullable<
+    ProviderServiceShape["resolveSessionCapabilities"]
+  > = Effect.fn("resolveSessionCapabilities")(function* (input) {
+    if (baseProviderKind(input.provider) !== "codex") {
+      return [...(input.requested ?? [])];
+    }
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError((cause) =>
+        toValidationError("resolveSessionCapabilities", "Failed to load provider settings", cause),
+      ),
+    );
+    const profileId = providerProfileId(input.provider);
+    const profile = profileId
+      ? settings.providers.codexProfiles.find((candidate) => candidate.profileId === profileId)
+      : undefined;
+    const binaryPath = profile?.binaryPath || settings.providers.codex.binaryPath;
+    const discovery = resolveProviderCapabilities({
+      provider: input.provider,
+      cwd: input.cwd,
+      binaryPathByProvider: {
+        codex: settings.providers.codex.binaryPath,
+        [input.provider]: binaryPath,
+      },
+      homePathByProvider: {
+        [input.provider]: resolveCodexHomePathForProvider(settings, input.provider),
+      },
+    });
+    const validatedDiscovery = discovery.pipe(
+      Effect.mapError((cause) =>
+        toValidationError("resolveSessionCapabilities", "Capability discovery failed", cause),
+      ),
+    );
+    const discovered =
+      input.requested === undefined
+        ? yield* validatedDiscovery.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `Codex capability discovery failed during default session startup: ${error.message}`,
+              ).pipe(Effect.as({ capabilities: [] })),
+            ),
+          )
+        : yield* validatedDiscovery;
+    return canonicalizeCodexSelectedCapabilities({
+      discovered: discovered.capabilities,
+      requested: input.requested,
+    }) satisfies SelectedProviderCapability[];
+  });
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
@@ -1068,6 +1120,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
     registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
+  const getPersistedSession: NonNullable<ProviderServiceShape["getPersistedSession"]> = (
+    threadId,
+  ) =>
+    directory.getBinding(threadId).pipe(
+      Effect.map((bindingOption) => {
+        const binding = Option.getOrUndefined(bindingOption);
+        return binding
+          ? { provider: binding.provider, resumeCursor: binding.resumeCursor }
+          : undefined;
+      }),
+      Effect.orElseSucceed(() => undefined),
+    );
+
   const probeMcpServers: ProviderServiceShape["probeMcpServers"] = Effect.fn("probeMcpServers")(
     function* (input) {
       const adapter = yield* registry.getByProvider(input.provider);
@@ -1204,6 +1269,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   });
 
   return {
+    resolveSessionCapabilities,
+    getPersistedSession,
     startSession,
     sendTurn,
     interruptTurn,

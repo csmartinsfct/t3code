@@ -235,12 +235,16 @@ When the user sends a message, T3 should build:
 - file mentions and local skill attachments as it does today;
 - provider capability selections as structured turn/session metadata.
 
-For Codex, T3 should not rely on literal `@superpowers` text. The confirmed
-app-server activation path is provider skill activation: a `turn/start` input
-whose text contains `$<skill-name>` plus a `{ type: "skill", name, path }` input
-item from `skills/list`. Direct plugin activation is not yet documented or
-implemented, so plugin rows are visible parent/grouping selections and bundled
-skill rows are the explicit activation path.
+For Codex, T3 should not rely on literal `@superpowers` text. App-backed plugin
+activation is a `thread/start` concern: installed app-backed plugin roots with
+connector ids are sent as `selectedCapabilityRoots` for fresh Codex threads by
+default, while visible plugin chips remain an explicit intent cue. Explicit
+plugin selection restarts the active app-server process and resumes the same
+native thread from its persisted cursor before sending the turn. The selected
+capability is also persisted on the user message for durable icon/name
+rendering. Provider skill activation remains a `turn/start` concern: text
+contains `$<skill-name>` plus a
+`{ type: "skill", name, path }` input item from `skills/list`.
 
 For Claude, activation should go through the Claude adapter's plugin/skill
 mechanism rather than copying Codex's payload shape.
@@ -267,9 +271,8 @@ disabled rows with a short label. Management actions can follow later.
 - Add provider plugin/skill rows to the `@` picker.
 - Add provider plugin/skill rows to the Skills menu.
 - Add composer capability chips and draft persistence.
-- Wire Codex send behavior for selected skill capabilities; keep direct plugin
-  activation unsupported until Codex exposes or documents a plugin activation
-  payload.
+- Wire Codex session start behavior for app-backed plugin roots and turn send
+  behavior for selected skill capabilities.
 - Add tests for discovery normalization, picker ranking, chip persistence, and
   turn payload construction.
 

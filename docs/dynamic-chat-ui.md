@@ -2,7 +2,9 @@
 
 Dynamic Chat UI lets a chat agent ask T3 to generate an interactive interface and insert it directly into the chat timeline as a durable message. The parent agent does not write HTML itself. It calls a single REST tool, and T3 starts a hidden builder session using the same model selection as the visible chat thread.
 
-The feature is intentionally highly dynamic. Generated UIs are self-contained HTML/CSS/JS documents rendered in sandboxed iframes inside chat messages.
+The feature is intentionally highly dynamic. Builder-generated UIs are normally
+self-contained HTML/CSS/JS documents, while imported native fragments may use
+external modules. Both render in sandboxed iframes inside chat messages.
 
 ## Goals
 
@@ -19,6 +21,11 @@ When the agent calls the tool, T3 inserts a compact generating card into the cur
 The iframe is part of the timeline, not a transient overlay. It scrolls with the conversation, survives chat rerenders, and is reconstructed from message content if the thread is reopened later.
 
 Follow-up requests such as "make the chart stacked" or "remove the extra panel" should generate a revised artifact by calling the same tool with `sourceArtifactId` and, when known, `sourceMessageId`.
+
+Codex Visualize fragments can also appear as the native inline directive
+`::codex-inline-vis{file="<basename>.html"}`. This directive is resolved by the
+server at assistant-message completion, then enters the same artifact pipeline;
+the web renderer does not read from the Codex filesystem.
 
 ## Agent Tool Surface
 
@@ -97,6 +104,38 @@ sequenceDiagram
 
 For a revision, the parent agent calls the same tool with `sourceArtifactId`. The server locates the prior artifact, includes its metadata and HTML in the builder prompt, and uses the same artifact id unless the parent explicitly requests a new one.
 
+### Native Codex Visualize Import
+
+When a Codex assistant message contains a valid `codex-inline-vis` directive,
+server-side completion handling reads the native thread id from the completed
+provider event and resolves the requested safe HTML basename beneath the
+configured Codex home:
+
+```text
+<CODEX_HOME>/visualizations/YYYY/MM/DD/<native-thread-id>/<basename>.html
+```
+
+Only a single basename ending in `.html` is accepted. Directory traversal,
+absolute paths, malformed attributes, unrelated directives, and files that do
+not pass real-path containment checks are never imported. Unrelated or malformed
+directives remain ordinary assistant text. A valid visualization reference that
+cannot be resolved, read, or fit the existing artifact size limit is replaced
+inline with `_Preview unavailable: visualization file was removed._` so an
+optional preview cannot block or fail message completion.
+
+This is best effort and deliberately bounded: resolution inspects at most 32
+date directories, materializes at most 8 valid visualization directives in one
+assistant message, and has a 2-second completion-time budget. On timeout or any
+unexpected resolver failure, the original assistant text is retained and the
+message still completes.
+
+Threads created before native import support are handled when their content is
+loaded. If an existing assistant message still contains a raw directive, T3
+reads the persisted Codex resume cursor to recover the native thread id,
+materializes the same bounded artifact, and persists the replacement through
+the normal orchestration command path. This does not start or resume a provider
+session.
+
 ## Artifact Format
 
 Generated messages contain a small fenced marker block, while the full iframe HTML is stored in message metadata:
@@ -116,6 +155,12 @@ Generated messages contain a small fenced marker block, while the full iframe HT
 
 `metadata.dynamicChatUiArtifacts` stores the renderable artifact document, including `html`. Older messages that still contain full HTML in the fenced block are parsed as a legacy fallback.
 
+Imported Codex fragments are converted into the same small marker block and
+stored in `metadata.dynamicChatUiArtifacts`, including their complete HTML.
+That projection is durable: reopening a thread renders the persisted artifact
+even if the original file has since been removed from the Codex visualization
+directory.
+
 ## Rendering Model
 
 `apps/web/src/components/chat/DynamicChatUiArtifact.tsx` renders artifacts.
@@ -126,6 +171,16 @@ Generated HTML runs in an iframe with scripts enabled and without same-origin ac
 - A resize observer measures content and posts height updates.
 - Heights are not capped by artifact metadata. The parent ignores tiny resize jitter, but otherwise lets the iframe grow or shrink to the measured content height.
 - The chat column can resize up to roughly 800px; generated UIs must work at 320px, 520px, and 800px widths.
+
+The injected base style preserves the existing `--t3-*` tokens and aliases the
+native Codex Visualize contract: `--background`, `--foreground`, `--card`,
+`--card-foreground`, `--popover`, `--popover-foreground`, `--primary`,
+`--primary-foreground`, `--secondary`, `--secondary-foreground`, `--muted`,
+`--muted-foreground`, `--accent`, `--accent-foreground`, `--destructive`,
+`--border`, `--input`, `--ring`, and `--font-size-base`. It also supplies
+theme-derived `--viz-series-1` through `--viz-series-6` values for both light
+and dark themes, so native fragments can render without a second renderer or a
+palette translation step.
 
 To prevent expensive iframe resets during chat rerenders, the web app keeps live iframe nodes in a small parking-lot cache and reattaches them by artifact id/content hash. This preserves UI state while the timeline rerenders.
 
@@ -152,9 +207,20 @@ Dynamic UI artifacts are deliberately expressive, but they remain isolated:
 
 - Generated documents are sandboxed iframes.
 - They cannot access the parent origin.
-- They cannot load external network resources.
-- They must inline all CSS and JavaScript.
+- The sandbox does not block network access. Artifacts may load external
+  resources when the remote server permits the request through CORS and the
+  browser's normal security policy.
+- The Dynamic UI builder is instructed to inline its CSS and JavaScript. Native
+  Codex Visualize fragments instead follow the Visualize skill's documented CDN
+  allowlist: `cdnjs.cloudflare.com`, `esm.sh`, `cdn.jsdelivr.net`, `unpkg.com`,
+  `fonts.googleapis.com`, `fonts.gstatic.com`, and `fonts.bunny.net`.
+- T3 does not currently enforce that CDN allowlist in the iframe. There is no
+  renderer CSP or URL filter, so other CORS-enabled origins can load as well.
 - They communicate layout changes only through the injected height bridge.
+- The native `window.openai.sendFollowUpMessage` interaction is intentionally
+  deferred. Imported fragments can render their visual content, but follow-up
+  actions are not forwarded to the parent until a future bridge contract maps
+  them through `window.t3ChatUi`.
 
 The current feature is not a safe plugin marketplace. Treat it as an experimental local dynamic UI capability.
 
@@ -164,6 +230,9 @@ The current feature is not a safe plugin marketplace. Treat it as an experimenta
 - Builder timeout is intentionally long because full UI generation can take minutes on high-capability models.
 - Failures replace the pending card with a failure message so the chat timeline does not stay stuck.
 - Existing artifacts are durable because the final HTML is stored in message metadata and legacy full-HTML marker blocks are still supported.
+- Native Codex visualization resolution is best effort and bounded to 32 date
+  directories, 8 directives, and 2 seconds per assistant completion; failures
+  use the inline unavailable fallback and do not hold the completion open.
 - New design-guide edits apply only to future generations or future revisions.
 
 ## Tests

@@ -212,7 +212,9 @@ import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/Provide
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerCapabilityChips } from "./chat/ComposerCapabilityChips";
 import {
+  defaultProviderCapabilitiesForProvider,
   isActivatableProviderCapabilityForProvider,
+  mergeProviderCapabilitiesForSend,
   providerCapabilitySelectionKey,
   selectComposerAttachment,
   toSelectedProviderCapability,
@@ -271,6 +273,8 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const CAPABILITY_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached a provider capability without additional text. Use that capability and explain what information or action is available.]";
 
 function formatCodeSnippetsForModel(snippets: ComposerCodeSnippetAttachment[]): string {
   if (snippets.length === 0) return "";
@@ -1483,6 +1487,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     provider: selectedProvider,
     cwd: activeProject?.cwd,
   });
+  const defaultProviderCapabilities = useMemo(
+    () => defaultProviderCapabilitiesForProvider(providerCapabilities, selectedProvider),
+    [providerCapabilities, selectedProvider],
+  );
+  const providerCapabilitiesForSend = useMemo(
+    () =>
+      mergeProviderCapabilitiesForSend(
+        sendableComposerProviderCapabilities,
+        defaultProviderCapabilities,
+      ),
+    [defaultProviderCapabilities, sendableComposerProviderCapabilities],
+  );
   useRehydrateSkillContent(threadId, activeProject?.cwd);
   const attachedSkillIds = useMemo(
     () => new Set(composerSkills.map((s) => s.id)),
@@ -4276,6 +4292,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const composerTicketAttachmentsSnapshot = [...composerTicketAttachments];
     const composerSkillsSnapshot = [...composerSkills];
     const composerProviderCapabilitiesSnapshot = [...sendableComposerProviderCapabilities];
+    const providerCapabilitiesForSendSnapshot = [...providerCapabilitiesForSend];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
@@ -4293,8 +4310,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       model: selectedModel,
       models: selectedProviderModels,
       effort: selectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text:
+        messageTextForSend ||
+        (composerProviderCapabilitiesSnapshot.length > 0
+          ? CAPABILITY_ONLY_BOOTSTRAP_PROMPT
+          : IMAGE_ONLY_BOOTSTRAP_PROMPT),
     });
+    const messageCapabilityMetadata =
+      composerProviderCapabilitiesSnapshot.length > 0
+        ? { providerCapabilities: composerProviderCapabilitiesSnapshot }
+        : undefined;
     logWebTimeline("composer.submit.prepared", {
       threadId: threadIdForSend,
       messageId: messageIdForSend,
@@ -4329,6 +4354,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         role: "user",
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        ...(messageCapabilityMetadata ? { metadata: messageCapabilityMetadata } : {}),
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -4519,13 +4545,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
               role: "user",
               text: outgoingMessageText,
               attachments: turnAttachments,
+              ...(messageCapabilityMetadata ? { metadata: messageCapabilityMetadata } : {}),
             },
             modelSelection: selectedModelSelection,
             titleSeed: title,
             runtimeMode,
             interactionMode,
-            ...(composerProviderCapabilitiesSnapshot.length > 0
-              ? { providerCapabilities: composerProviderCapabilitiesSnapshot }
+            ...((isFirstMessage || composerProviderCapabilitiesSnapshot.length > 0) &&
+            providerCapabilitiesForSendSnapshot.length > 0
+              ? { providerCapabilities: providerCapabilitiesForSendSnapshot }
               : {}),
             createdAt: messageCreatedAt,
           });

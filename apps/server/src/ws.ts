@@ -103,6 +103,7 @@ import {
   resolveCodexHomePath,
   resolveCodexHomePathForProvider,
 } from "./provider/codexProfileDiscovery";
+import { backfillCodexInlineVisualizations } from "./provider/codexInlineVisualizationBackfill";
 import { resolveCursorSettingsForProvider } from "./provider/cursorProfileDiscovery";
 import { probeCursorMcpServers, runCursorMcpAction } from "./provider/cursorMcpProbe";
 import { resolveProviderCapabilities } from "./provider/capabilities";
@@ -251,6 +252,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       serverSettings.getSettings.pipe(
         Effect.map((settings) => resolveCodexHomePathForProvider(settings, provider)),
       );
+
     yield* ensureWatchDirForFile(codexHome, "config.toml");
 
     // Watch each ~/.codex-{profile}/ and ~/.claude-{profile}/ directory
@@ -329,7 +331,17 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.getThreadContent]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.getThreadContent,
-          projectionSnapshotQuery.getThreadContent(input.threadId).pipe(
+          backfillCodexInlineVisualizations({
+            threadId: input.threadId,
+            getThreadContent: () => projectionSnapshotQuery.getThreadContent(input.threadId),
+            ...(providerService.getPersistedSession
+              ? {
+                  getPersistedSession: () => providerService.getPersistedSession!(input.threadId),
+                }
+              : {}),
+            resolveCodexHomeForProvider,
+            dispatch: (command) => orchestrationEngine.dispatch(command),
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new OrchestrationGetThreadContentError({

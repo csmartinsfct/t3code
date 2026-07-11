@@ -1,5 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => ({
 }));
 
 import {
+  canonicalizeCodexSelectedCapabilities,
   normalizeCodexCapabilities,
   resolveCodexProviderCapabilities,
   type CodexPluginListResponse,
@@ -91,6 +95,47 @@ describe("normalizeCodexCapabilities", () => {
       parentDisplayName: "Superpowers",
       displayName: "Brainstorming",
       path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/brainstorming/SKILL.md",
+    });
+  });
+
+  it("normalizes app-backed plugin roots for Codex thread capability selection", () => {
+    const plugins: CodexPluginListResponse = {
+      marketplaces: [
+        {
+          name: "openai-curated-remote",
+          plugins: [
+            {
+              id: "gmail@openai-curated-remote",
+              name: "gmail",
+              installed: true,
+              enabled: true,
+              source: {
+                source: "local",
+                path: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+              },
+              appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+              interface: {
+                displayName: "Gmail",
+                shortDescription: "Read and manage Gmail",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = normalizeCodexCapabilities({
+      provider: "codex",
+      plugins,
+      skills: { data: [] },
+    });
+
+    expect(result[0]).toMatchObject({
+      id: "gmail@openai-curated-remote",
+      kind: "plugin",
+      displayName: "Gmail",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
     });
   });
 
@@ -184,6 +229,115 @@ describe("normalizeCodexCapabilities", () => {
 });
 
 describe("resolveCodexProviderCapabilities", () => {
+  it("enriches installed app plugins from the local Codex cache when plugin/list omits source paths", async () => {
+    spawnMock.mockReset();
+    const codexHome = await mkdtemp(join(tmpdir(), "t3-code-codex-home-"));
+    const pluginRoot = join(
+      codexHome,
+      "plugins",
+      "cache",
+      "openai-curated-remote",
+      "gmail",
+      "0.1.5",
+    );
+    await mkdir(join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await writeFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "{}", "utf8");
+    await writeFile(
+      join(pluginRoot, ".app.json"),
+      JSON.stringify({
+        apps: {
+          gmail: {
+            id: "connector_2128aebfecb84f64a069897515042a44",
+            required: true,
+          },
+        },
+      }),
+      "utf8",
+    );
+    const catalogRoot = join(codexHome, "cache", "remote_plugin_catalog");
+    await mkdir(catalogRoot, { recursive: true });
+    await writeFile(
+      join(catalogRoot, "catalog.json"),
+      JSON.stringify({
+        plugins: [
+          {
+            name: "gmail",
+            release: {
+              interface: {
+                composer_icon_url: null,
+                logo_url: "https://files.openai.com/gmail-logo.png",
+              },
+            },
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const child = makeChild();
+    const stdinWrites: string[] = [];
+    child.stdin.on("data", (chunk) => {
+      stdinWrites.push(String(chunk));
+    });
+    spawnMock.mockReturnValueOnce(child);
+
+    const result = Effect.runPromise(
+      resolveCodexProviderCapabilities({
+        provider: "codex",
+        cwd: "/repo",
+        binaryPath: "codex",
+        homePath: codexHome,
+      }),
+    );
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+    (child.stdout as PassThrough).write(`${JSON.stringify({ id: 1, result: {} })}\n`);
+    await vi.waitFor(() => expect(stdinWrites.join("")).toContain('"plugin/list"'));
+    (child.stdout as PassThrough).write(
+      `${JSON.stringify({
+        id: 2,
+        result: {
+          marketplaces: [
+            {
+              name: "openai-curated-remote",
+              plugins: [
+                {
+                  id: "gmail@openai-curated-remote",
+                  name: "gmail",
+                  installed: true,
+                  enabled: true,
+                  interface: {
+                    displayName: "Gmail",
+                    shortDescription: "Read and manage Gmail",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      })}\n`,
+    );
+    (child.stdout as PassThrough).write(`${JSON.stringify({ id: 3, result: { data: [] } })}\n`);
+
+    await expect(result).resolves.toEqual({
+      capabilities: [
+        {
+          id: "gmail@openai-curated-remote",
+          provider: "codex",
+          kind: "plugin",
+          name: "gmail",
+          displayName: "Gmail",
+          description: "Read and manage Gmail",
+          source: "openai-curated-remote",
+          enabled: true,
+          installed: true,
+          capabilityRootPath: pluginRoot,
+          appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+          iconUrl: "https://files.openai.com/gmail-logo.png",
+        },
+      ],
+    });
+  });
+
   it("launches Codex capability discovery from the target project cwd", async () => {
     spawnMock.mockReset();
     const child = makeChild();
@@ -204,6 +358,48 @@ describe("resolveCodexProviderCapabilities", () => {
     const error = new Error("stop after assertion");
     child.emit("error", error);
     await expect(result).rejects.toMatchObject({ cause: error });
+  });
+
+  it("replaces client capability metadata with canonical discovered values", () => {
+    expect(
+      canonicalizeCodexSelectedCapabilities({
+        discovered: [
+          {
+            id: "spotify@openai-curated-remote",
+            provider: "codex",
+            kind: "plugin",
+            name: "spotify",
+            displayName: "Spotify",
+            enabled: true,
+            installed: true,
+            capabilityRootPath: "/canonical/spotify/1.0.0",
+            appIds: ["spotify-app"],
+            iconUrl: "https://example.com/spotify.png",
+          },
+        ],
+        requested: [
+          {
+            id: "spotify@openai-curated-remote",
+            provider: "codex",
+            kind: "plugin",
+            displayName: "Forged Spotify",
+            capabilityRootPath: "/tmp/attacker-controlled",
+            appIds: ["forged-app"],
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "spotify@openai-curated-remote",
+        provider: "codex",
+        kind: "plugin",
+        name: "spotify",
+        displayName: "Spotify",
+        capabilityRootPath: "/canonical/spotify/1.0.0",
+        appIds: ["spotify-app"],
+        iconUrl: "https://example.com/spotify.png",
+      },
+    ]);
   });
 
   it.each(["error", "stdin", "stdout"] as const)(

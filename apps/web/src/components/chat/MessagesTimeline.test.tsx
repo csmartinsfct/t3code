@@ -97,6 +97,63 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("yoo what&#x27;s ");
   });
 
+  it("renders attached plugin metadata in the sent user message", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-spotify",
+            kind: "message",
+            createdAt: "2026-07-12T01:04:59.000Z",
+            message: {
+              id: MessageId.makeUnsafe("message-spotify"),
+              role: "user",
+              text: "Show my recently played songs.",
+              createdAt: "2026-07-12T01:04:59.000Z",
+              streaming: false,
+              metadata: {
+                providerCapabilities: [
+                  {
+                    provider: "codex",
+                    kind: "plugin",
+                    id: "spotify@openai-curated-remote",
+                    displayName: "Spotify",
+                    iconUrl: "https://files.openai.com/spotify-logo.png",
+                  },
+                ],
+              },
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-07-12T01:05:00.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Spotify");
+    expect(markup).toContain("https://files.openai.com/spotify-logo.png");
+    expect(markup).toContain("Show my recently played songs.");
+  });
+
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

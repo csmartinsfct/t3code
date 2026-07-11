@@ -6,8 +6,10 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  defaultProviderCapabilitiesForProvider,
   isActivatableProviderCapabilityForProvider,
   isActivatableProviderCapability,
+  mergeProviderCapabilitiesForSend,
   providerCapabilitySelectionKey,
   selectComposerAttachment,
   toSelectedProviderCapability,
@@ -76,6 +78,100 @@ describe("selectComposerAttachment", () => {
     ).toBe(false);
   });
 
+  it("treats app-backed Codex plugins as activatable provider capabilities", () => {
+    expect(
+      isActivatableProviderCapability({
+        provider: "codex",
+        kind: "plugin",
+        id: "gmail@openai-curated-remote",
+        name: "gmail",
+        displayName: "Gmail",
+        capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+        appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+      }),
+    ).toBe(true);
+  });
+
+  it("defaults installed app-backed Codex plugins into outbound capabilities", () => {
+    const gmailPlugin = {
+      id: "gmail@openai-curated-remote",
+      provider: "codex",
+      kind: "plugin",
+      name: "gmail",
+      displayName: "Gmail",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+      enabled: true,
+      installed: true,
+    } satisfies ProviderCapabilityEntry;
+
+    const gmailSkill = {
+      id: "gmail:gmail",
+      provider: "codex",
+      kind: "skill",
+      name: "gmail:gmail",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5/skills/gmail/SKILL.md",
+      displayName: "Gmail",
+      parentId: "gmail@openai-curated-remote",
+      parentDisplayName: "Gmail",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+      enabled: true,
+      installed: true,
+    } satisfies ProviderCapabilityEntry;
+
+    expect(
+      defaultProviderCapabilitiesForProvider(
+        [gmailPlugin, gmailSkill, providerCapability],
+        "codex",
+      ),
+    ).toEqual([
+      {
+        provider: "codex",
+        kind: "plugin",
+        id: "gmail@openai-curated-remote",
+        name: "gmail",
+        displayName: "Gmail",
+        capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+        appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+      },
+    ]);
+  });
+
+  it("merges default plugin roots with explicit selected capabilities without duplicates", () => {
+    const gmailRoot = {
+      provider: "codex",
+      kind: "plugin",
+      id: "gmail@openai-curated-remote",
+      name: "gmail",
+      displayName: "Gmail",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+    } satisfies SelectedProviderCapability;
+    const explicitGmailSkill = {
+      provider: "codex",
+      kind: "skill",
+      id: "gmail:gmail",
+      name: "gmail:gmail",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5/skills/gmail/SKILL.md",
+      displayName: "Gmail",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+      appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+    } satisfies SelectedProviderCapability;
+    const superpowersSkill = {
+      provider: "codex",
+      kind: "skill",
+      id: "superpowers:using-superpowers",
+      name: "superpowers:using-superpowers",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+      displayName: "Using Superpowers",
+    } satisfies SelectedProviderCapability;
+
+    expect(
+      mergeProviderCapabilitiesForSend([explicitGmailSkill, superpowersSkill], [gmailRoot]),
+    ).toEqual([gmailRoot, explicitGmailSkill, superpowersSkill]);
+  });
+
   it("activates provider capabilities only for the matching active provider profile", () => {
     const capability = {
       provider: "codex:zbd",
@@ -101,6 +197,8 @@ describe("selectComposerAttachment", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1",
+      appIds: ["asdk_app_superpowers"],
       iconUrl: "https://example.com/superpowers.png",
       enabled: true,
       installed: true,
@@ -115,6 +213,8 @@ describe("selectComposerAttachment", () => {
       displayName: "Using Superpowers",
       parentId: "superpowers@openai-curated-remote",
       parentDisplayName: "Superpowers",
+      capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1",
+      appIds: ["asdk_app_superpowers"],
       iconUrl: "https://example.com/superpowers.png",
     });
   });

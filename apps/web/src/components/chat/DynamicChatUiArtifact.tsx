@@ -127,6 +127,31 @@ function injectBridge(html: string, artifactId: string): string {
 	  --t3-success: #10b981;
 	  --t3-warning: #f59e0b;
 	  --t3-destructive: #ef4444;
+	  --background: var(--t3-background);
+	  --foreground: var(--t3-foreground);
+	  --card: var(--t3-card);
+	  --card-foreground: var(--t3-foreground);
+	  --popover: var(--t3-card);
+	  --popover-foreground: var(--t3-foreground);
+	  --primary: var(--t3-primary);
+	  --primary-foreground: var(--t3-primary-foreground);
+	  --secondary: var(--t3-muted);
+	  --secondary-foreground: var(--t3-foreground);
+	  --muted: var(--t3-muted);
+	  --muted-foreground: var(--t3-muted-foreground);
+	  --accent: color-mix(in srgb, var(--t3-primary) 16%, var(--t3-background));
+	  --accent-foreground: var(--t3-primary);
+	  --destructive: var(--t3-destructive);
+	  --border: var(--t3-border);
+	  --input: var(--t3-border);
+	  --ring: var(--t3-primary);
+	  --font-size-base: 14px;
+	  --viz-series-1: var(--primary);
+	  --viz-series-2: rgb(243 136 59);
+	  --viz-series-3: rgb(93 201 119);
+	  --viz-series-4: rgb(235 119 177);
+	  --viz-series-5: rgb(155 121 236);
+	  --viz-series-6: rgb(58 185 177);
 	}
 	:root.dark {
 	  --t3-background: color-mix(in srgb, #0a0a0a 95%, #ffffff);
@@ -140,6 +165,11 @@ function injectBridge(html: string, artifactId: string): string {
 	  --t3-success: #34d399;
 	  --t3-warning: #fbbf24;
 	  --t3-destructive: #f87171;
+	  --viz-series-2: rgb(245 154 86);
+	  --viz-series-3: rgb(116 213 139);
+	  --viz-series-4: rgb(240 143 192);
+	  --viz-series-5: rgb(170 145 239);
+	  --viz-series-6: rgb(90 203 194);
 	}
 	html, body { margin: 0; min-width: 0; min-height: 0 !important; height: auto !important; background: transparent; color-scheme: light dark; }
 	*, *::before, *::after { box-sizing: border-box; }

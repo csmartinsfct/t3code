@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 import { TrimmedNonEmptyString } from "./baseSchemas";
-import { ProviderKind as ProviderKindSchema, type ProviderKind } from "./orchestration";
+import { ProviderKind as ProviderKindSchema, type ProviderKind } from "./providerKind";
 
 export const ProviderCapabilityKind = Schema.Literals([
   "plugin",
@@ -31,6 +31,8 @@ export const ProviderCapabilityEntry = Schema.Struct({
   enabled: Schema.Boolean,
   installed: Schema.optional(Schema.Boolean),
   needsAuth: Schema.optional(Schema.Boolean),
+  capabilityRootPath: Schema.optional(TrimmedNonEmptyString),
+  appIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   iconPath: Schema.optional(Schema.String),
   iconUrl: Schema.optional(Schema.String),
 });
@@ -45,6 +47,8 @@ export const SelectedProviderCapability = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   parentId: Schema.optional(TrimmedNonEmptyString),
   parentDisplayName: Schema.optional(TrimmedNonEmptyString),
+  capabilityRootPath: Schema.optional(TrimmedNonEmptyString),
+  appIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   iconPath: Schema.optional(Schema.String),
   iconUrl: Schema.optional(Schema.String),
 });

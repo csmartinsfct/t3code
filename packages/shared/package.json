@@ -91,6 +91,10 @@
     "./dynamicChatUiBuilderPrompt": {
       "types": "./src/dynamicChatUiBuilderPrompt.ts",
       "import": "./src/dynamicChatUiBuilderPrompt.ts"
+    },
+    "./inlineDirective": {
+      "types": "./src/inlineDirective.ts",
+      "import": "./src/inlineDirective.ts"
     }
   },
   "scripts": {

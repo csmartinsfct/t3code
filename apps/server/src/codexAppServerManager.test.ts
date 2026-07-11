@@ -11,6 +11,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CodexAppServerManager,
+  buildCodexSelectedCapabilityRoots,
   classifyCodexStderrLine,
   isRecoverableThreadResumeError,
   normalizeCodexModelSlug,
@@ -407,6 +408,44 @@ describe("resolveCodexModelForAccount", () => {
 });
 
 describe("startSession", () => {
+  it("builds selected capability roots for app-backed Codex plugins", () => {
+    expect(
+      buildCodexSelectedCapabilityRoots({
+        cwd: "/repo",
+        capabilities: [
+          {
+            provider: "codex",
+            kind: "plugin",
+            id: "gmail@openai-curated-remote",
+            name: "gmail",
+            displayName: "Gmail",
+            capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+            appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+          },
+          {
+            provider: "codex",
+            kind: "plugin",
+            id: "superpowers@openai-curated-remote",
+            name: "superpowers",
+            displayName: "Superpowers",
+          },
+        ],
+      }),
+    ).toEqual({
+      environments: [{ environmentId: "local", cwd: "/repo" }],
+      selectedCapabilityRoots: [
+        {
+          id: "gmail@openai-curated-remote",
+          location: {
+            type: "environment",
+            environmentId: "local",
+            path: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+          },
+        },
+      ],
+    });
+  });
+
   it("enables Codex experimental api capabilities during initialize", () => {
     expect(buildCodexInitializeParams()).toEqual({
       clientInfo: {
@@ -783,7 +822,7 @@ describe("sendTurn", () => {
     });
   });
 
-  it("does not add unsupported Codex plugin activation input for selected provider plugins", async () => {
+  it("does not add session-scoped Codex plugin roots to turn input", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
 
     await manager.sendTurn({

@@ -51,6 +51,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 import {
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
@@ -441,6 +442,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "user" &&
         (() => {
           const userImages = row.message.attachments ?? [];
+          const providerCapabilities = row.message.metadata?.providerCapabilities ?? [];
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
@@ -460,6 +462,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                {providerCapabilities.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1.5">
+                    {providerCapabilities.map((capability) => (
+                      <div
+                        key={`${capability.provider}:${capability.kind}:${capability.id}`}
+                        className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground"
+                      >
+                        <ProviderCapabilityIcon capability={capability} className="size-4" />
+                        <span className="truncate">{capability.displayName}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(

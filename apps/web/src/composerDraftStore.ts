@@ -470,6 +470,15 @@ function providerCapabilitiesOf(draft: ComposerThreadDraftState): SelectedProvid
   return draft.providerCapabilities ?? [];
 }
 
+function cloneSelectedProviderCapability(
+  capability: SelectedProviderCapability,
+): DeepMutable<SelectedProviderCapability> {
+  return {
+    ...capability,
+    ...(capability.appIds ? { appIds: [...capability.appIds] } : {}),
+  } as DeepMutable<SelectedProviderCapability>;
+}
+
 function normalizeTerminalContextForThread(
   threadId: ThreadId,
   context: TerminalContextDraft,
@@ -589,7 +598,7 @@ function createPersistedThreadDraft(input: {
     draft.skills = [...input.skills];
   }
   if (input.providerCapabilities.length > 0) {
-    draft.providerCapabilities = [...input.providerCapabilities];
+    draft.providerCapabilities = input.providerCapabilities.map(cloneSelectedProviderCapability);
   }
   if (input.hasModelData) {
     draft.modelSelectionByProvider = toPersistedModelSelectionByProvider(
@@ -996,7 +1005,7 @@ function normalizePersistedProviderCapabilities(value: unknown): SelectedProvide
       if (dedupKeys.has(dedupKey)) {
         continue;
       }
-      capabilities.push(capability);
+      capabilities.push(cloneSelectedProviderCapability(capability));
       dedupKeys.add(dedupKey);
     } catch {
       // Ignore malformed capability entries from older or manually edited storage.
@@ -2446,7 +2455,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
               ...state.draftsByThreadId,
               [threadId]: {
                 ...existing,
-                providerCapabilities: [...existingProviderCapabilities, capability],
+                providerCapabilities: [
+                  ...existingProviderCapabilities,
+                  cloneSelectedProviderCapability(capability),
+                ],
               },
             },
           };
