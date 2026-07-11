@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  baseProviderKind,
+  asProviderInput,
   type ProviderCapabilityEntry,
   type ProviderKind,
 } from "@t3tools/contracts";
@@ -29,7 +29,7 @@ export function useProviderCapabilities(input: {
       if (!api || cancelled) return;
       api.server
         .resolveProviderCapabilities({
-          provider: baseProviderKind(input.provider!),
+          provider: asProviderInput(input.provider!),
           cwd: input.cwd!,
         })
         .then((result) => {

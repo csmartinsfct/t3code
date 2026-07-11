@@ -5,6 +5,18 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+const { resolveProviderCapabilities } = vi.hoisted(() => ({
+  resolveProviderCapabilities: vi.fn().mockResolvedValue({ capabilities: [] }),
+}));
+
+vi.mock("~/nativeApi", () => ({
+  readNativeApi: () => ({
+    server: { resolveProviderCapabilities },
+  }),
+}));
+
+import { useProviderCapabilities } from "~/hooks/useProviderCapabilities";
+
 import { SkillsPicker } from "./SkillsPicker";
 
 const TEST_SKILLS: readonly SkillEntry[] = [
@@ -92,9 +104,15 @@ async function mountPicker(props?: { attachedSkillIds?: ReadonlySet<string> }) {
   };
 }
 
+function ProviderCapabilitiesProbe() {
+  useProviderCapabilities({ provider: "codex:profile", cwd: "/repo" });
+  return null;
+}
+
 describe("SkillsPicker", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    resolveProviderCapabilities.mockClear();
   });
 
   it("shows discovered skills with top-level items first and grouped package sections after", async () => {
@@ -186,6 +204,22 @@ describe("SkillsPicker", () => {
     await page.getByRole("menuitem", { name: "Superpowers" }).click();
 
     expect(onAttachProviderCapability).toHaveBeenCalledWith(TEST_PROVIDER_CAPABILITIES[0]);
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("preserves a profiled provider when resolving capabilities", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(<ProviderCapabilitiesProbe />, { container: host });
+
+    await vi.waitFor(() => {
+      expect(resolveProviderCapabilities).toHaveBeenCalledWith({
+        provider: "codex:profile",
+        cwd: "/repo",
+      });
+    });
 
     await screen.unmount();
     host.remove();
