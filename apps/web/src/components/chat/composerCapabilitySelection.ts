@@ -45,7 +45,7 @@ export function selectComposerAttachment(input: {
   onAttachSkill: (skill: SkillEntry) => void;
 }): boolean {
   if (input.item.type === "provider-capability") {
-    const replacement = `@${input.item.label} `;
+    const replacement = "";
     const applied = replaceActiveTrigger(input, replacement);
     if (applied) {
       input.onAttachProviderCapability(input.item.capability);
@@ -56,7 +56,7 @@ export function selectComposerAttachment(input: {
   const localSkillItem = input.item as LocalSkillAttachmentItem;
   const skill = input.availableSkills.find((candidate) => candidate.id === localSkillItem.skillId);
   if (!skill) return false;
-  const replacement = `@${skill.name} `;
+  const replacement = "";
   const applied = replaceActiveTrigger(input, replacement);
   if (applied) {
     input.onAttachSkill(skill);

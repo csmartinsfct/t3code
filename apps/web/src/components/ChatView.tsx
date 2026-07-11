@@ -209,6 +209,7 @@ import { buildExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { useImagePreviewOverlay } from "./imagePreview/ImagePreviewOverlay";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
+import { ComposerCapabilityChips } from "./chat/ComposerCapabilityChips";
 import { selectComposerAttachment } from "./chat/composerCapabilitySelection";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
@@ -705,7 +706,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerCodeSnippets = composerDraft.codeSnippets;
   const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
-  const composerProviderCapabilities = composerDraft.providerCapabilities;
+  const composerProviderCapabilities = composerDraft.providerCapabilities ?? [];
   const composerPersistedAttachments = composerDraft.persistedAttachments;
   const composerSendState = useMemo(
     () =>
@@ -714,8 +715,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
         imageCount: composerImages.length,
         terminalContexts: composerTerminalContexts,
         skillCount: composerSkills.length,
+        providerCapabilityCount: composerProviderCapabilities.length,
       }),
-    [composerImages.length, composerTerminalContexts, composerSkills.length, prompt],
+    [
+      composerImages.length,
+      composerProviderCapabilities.length,
+      composerTerminalContexts,
+      composerSkills.length,
+      prompt,
+    ],
   );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
@@ -735,6 +743,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const addComposerDraftSkill = useComposerDraftStore((store) => store.addSkill);
   const addComposerDraftProviderCapability = useComposerDraftStore(
     (store) => store.addProviderCapability,
+  );
+  const removeComposerDraftProviderCapability = useComposerDraftStore(
+    (store) => store.removeProviderCapability,
   );
   const removeComposerDraftSkill = useComposerDraftStore((store) => store.removeSkill);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
@@ -905,6 +916,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       addComposerDraftTerminalContexts(threadId, contexts);
     },
     [addComposerDraftTerminalContexts, threadId],
+  );
+  const addComposerProviderCapabilitiesToDraft = useCallback(
+    (capabilities: typeof composerProviderCapabilities) => {
+      for (const capability of capabilities) {
+        addComposerDraftProviderCapability(threadId, capability);
+      }
+    },
+    [addComposerDraftProviderCapability, threadId],
   );
   const removeComposerImageFromDraft = useCallback(
     (imageId: string) => {
@@ -3849,6 +3868,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThreadId, addComposerDraftProviderCapability],
   );
 
+  const removeComposerProviderCapability = useCallback(
+    (capabilityId: string) => {
+      if (!activeThreadId) return;
+      removeComposerDraftProviderCapability(activeThreadId, capabilityId);
+    },
+    [activeThreadId, removeComposerDraftProviderCapability],
+  );
+
   const onRevealSkill = useCallback(
     (skill: SkillEntry) => {
       const cwd = activeProject?.cwd;
@@ -4151,6 +4178,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
       skillCount: composerSkills.length,
+      providerCapabilityCount: composerProviderCapabilities.length,
     });
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -4239,6 +4267,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
     const composerTicketAttachmentsSnapshot = [...composerTicketAttachments];
     const composerSkillsSnapshot = [...composerSkills];
+    const composerProviderCapabilitiesSnapshot = [...composerProviderCapabilities];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
@@ -4525,6 +4554,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setComposerCursor(collapseExpandedComposerCursor(promptForSend, promptForSend.length));
         addComposerImagesToDraft(composerImagesSnapshot.map(cloneComposerImageForRetry));
         addComposerTerminalContextsToDraft(composerTerminalContextsSnapshot);
+        for (const skill of composerSkillsSnapshot) {
+          addComposerDraftSkill(threadIdForSend, skill);
+        }
+        addComposerProviderCapabilitiesToDraft(composerProviderCapabilitiesSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
       }
       logWebTimeline("composer.submit.failed", {
@@ -5793,6 +5826,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               <ComposerSkillChips
                                 skills={composerSkills}
                                 onRemove={removeComposerSkill}
+                              />
+                            </div>
+                          )}
+
+                        {!isComposerApprovalState &&
+                          pendingUserInputs.length === 0 &&
+                          composerProviderCapabilities.length > 0 && (
+                            <div className="-mx-3 mb-2 sm:-mx-4">
+                              <ComposerCapabilityChips
+                                capabilities={composerProviderCapabilities}
+                                onRemove={removeComposerProviderCapability}
                               />
                             </div>
                           )}

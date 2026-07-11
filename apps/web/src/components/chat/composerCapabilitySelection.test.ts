@@ -52,7 +52,7 @@ describe("selectComposerAttachment", () => {
     });
 
     expect(applied).toBe(true);
-    expect(applyPromptReplacement).toHaveBeenCalledWith(0, 4, "@Superpowers ", {
+    expect(applyPromptReplacement).toHaveBeenCalledWith(0, 4, "", {
       expectedText: "@sup",
     });
     expect(attachProviderCapability).toHaveBeenCalledWith(providerCapability);
@@ -105,7 +105,7 @@ describe("selectComposerAttachment", () => {
     });
 
     expect(applied).toBe(true);
-    expect(applyPromptReplacement).toHaveBeenCalledWith(0, 4, "@Local Skill ", {
+    expect(applyPromptReplacement).toHaveBeenCalledWith(0, 4, "", {
       expectedText: "@sup",
     });
     expect(attachSkill).toHaveBeenCalledWith(localSkill);
