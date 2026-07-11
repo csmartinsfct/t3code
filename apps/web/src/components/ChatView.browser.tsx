@@ -6083,4 +6083,65 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await mounted.cleanup();
     }
   });
+
+  it("shows provider capabilities in composer picker", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-provider-capability-picker" as MessageId,
+        targetText: "provider capability picker thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.serverResolveProviderCapabilities) {
+          return {
+            capabilities: [
+              {
+                id: "superpowers@openai-curated-remote",
+                provider: "codex",
+                kind: "plugin",
+                name: "superpowers",
+                displayName: "Superpowers",
+                description: "Planning workflows",
+                enabled: true,
+                installed: true,
+              },
+            ],
+          };
+        }
+        if (body._tag === WS_METHODS.projectsSearchEntries) {
+          return {
+            entries: [
+              {
+                path: "src/unrelated.ts",
+                kind: "file",
+                parentPath: "src",
+              },
+            ],
+            truncated: false,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("@sup");
+
+      const capability = await waitForComposerMenuItem(
+        "provider-capability:codex:plugin:superpowers@openai-curated-remote",
+      );
+      const unrelatedFile = await waitForComposerMenuItem("path:file:src/unrelated.ts");
+
+      await vi.waitFor(() => {
+        expect(capability.textContent ?? "").toContain("Superpowers");
+        expect(capability.textContent ?? "").toContain("Plugin");
+        expect(
+          capability.compareDocumentPosition(unrelatedFile) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });

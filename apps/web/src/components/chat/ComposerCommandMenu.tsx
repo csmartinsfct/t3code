@@ -151,12 +151,12 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       {props.item.type === "provider-capability" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          {props.item.capability.kind === "plugin" ? "plugin" : "skill"}
+          {props.item.capability.kind === "plugin" ? "Plugin" : "Skill"}
         </Badge>
       ) : null}
       {props.item.type === "local-skill" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          skill
+          Skill
         </Badge>
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">

@@ -2074,14 +2074,55 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
-      return workspaceEntries.map((entry) => ({
+      const query = composerTrigger.query.trim().toLowerCase();
+      const capabilityItems = providerCapabilities
+        .filter((capability) => {
+          if (!query) return false;
+          return (
+            capability.displayName.toLowerCase().includes(query) ||
+            capability.name.toLowerCase().includes(query) ||
+            capability.parentDisplayName?.toLowerCase().includes(query)
+          );
+        })
+        .map((capability) => ({
+          id: `provider-capability:${capability.provider}:${capability.kind}:${capability.id}`,
+          type: "provider-capability" as const,
+          capability,
+          label: capability.displayName,
+          description:
+            capability.kind === "skill" && capability.parentDisplayName
+              ? `Skill · ${capability.parentDisplayName}`
+              : "Plugin",
+        }));
+      const rankedCapabilityItems = capabilityItems.toSorted((left, right) => {
+        const matchRank = (capability: ProviderCapabilityEntry) => {
+          const values = [capability.displayName, capability.name, capability.parentDisplayName]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.toLowerCase());
+          if (values.some((value) => value === query)) return 0;
+          if (values.some((value) => value.startsWith(query))) return 1;
+          return 2;
+        };
+        return matchRank(left.capability) - matchRank(right.capability);
+      });
+      const rankedLocalSkillItems = availableSkills
+        .filter((skill) => query.length > 0 && skill.name.toLowerCase().includes(query))
+        .map((skill) => ({
+          id: `local-skill:${skill.id}`,
+          type: "local-skill" as const,
+          skillId: skill.id,
+          label: skill.name,
+          description: skill.group ? `Local skill · ${skill.group}` : "Local skill",
+        }));
+      const pathItems = workspaceEntries.map((entry) => ({
         id: `path:${entry.kind}:${entry.path}`,
-        type: "path",
+        type: "path" as const,
         path: entry.path,
         pathKind: entry.kind,
         label: basenameOfPath(entry.path),
         description: entry.parentPath ?? "",
       }));
+      return [...rankedCapabilityItems, ...rankedLocalSkillItems, ...pathItems];
     }
 
     if (composerTrigger.kind === "slash-command") {
@@ -2133,7 +2174,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [
+    availableSkills,
+    composerTrigger,
+    providerCapabilities,
+    searchableModelOptions,
+    workspaceEntries,
+  ]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -5125,8 +5172,44 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
-      if (item.type === "provider-capability" || item.type === "local-skill") {
-        setComposerHighlightedItemId(null);
+      if (item.type === "provider-capability") {
+        const replacement = `@${item.label} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        onAttachProviderCapability(item.capability);
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+      if (item.type === "local-skill") {
+        const skill = availableSkills.find((candidate) => candidate.id === item.skillId);
+        if (!skill) return;
+        const replacement = `@${skill.name} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        onAttachSkill(skill);
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
         return;
       }
       onProviderModelSelect(item.provider, item.model);
@@ -5139,7 +5222,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
+      availableSkills,
       handleInteractionModeChange,
+      onAttachProviderCapability,
+      onAttachSkill,
       onProviderModelSelect,
       resolveActiveComposerTrigger,
     ],
