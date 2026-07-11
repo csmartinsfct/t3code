@@ -25,6 +25,7 @@
 ### Task 1: Add a typed overlay acquire focus policy
 
 **Files:**
+
 - Modify: `packages/contracts/src/ipc.ts`
 - Modify: `apps/desktop/src/preload.ts`
 - Modify: `apps/web/src/nativeOverlayBridge.ts`
@@ -123,6 +124,7 @@ git commit -m "Add native overlay focus policy"
 ### Task 2: Honor the focus policy in Electron
 
 **Files:**
+
 - Create: `apps/desktop/src/overlayPool.test.ts`
 - Modify: `apps/desktop/src/overlayPool.ts`
 
@@ -179,7 +181,8 @@ Update the IPC handler to accept a raw options argument, validate only the boole
 ```typescript
 ipcMain.handle(OVERLAY_ACQUIRE_CHANNEL, (event, rawOptions: unknown) => {
   const options: OverlayAcquireOptions =
-    typeof rawOptions === "object" && rawOptions !== null &&
+    typeof rawOptions === "object" &&
+    rawOptions !== null &&
     (rawOptions as { focus?: unknown }).focus === false
       ? { focus: false }
       : {};
@@ -205,6 +208,7 @@ git commit -m "Preserve host focus for passive overlays"
 ### Task 3: Opt the composer picker out and document the contract
 
 **Files:**
+
 - Modify: `apps/web/src/components/ChatView.tsx`
 - Modify: `docs/overlays.md`
 - Modify: `docs/browser-tools.md`
@@ -248,6 +252,7 @@ git commit -m "Keep composer focused with file picker open"
 ### Task 4: Repository verification
 
 **Files:**
+
 - Verify only; do not stage the user's unrelated files.
 
 - [ ] **Step 1: Run formatting**

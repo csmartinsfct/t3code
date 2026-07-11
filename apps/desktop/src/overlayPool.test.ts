@@ -49,7 +49,7 @@ vi.mock("electron", () => {
 
   return {
     BaseWindow,
-    BrowserWindow: class BrowserWindow {},
+    BrowserWindow: vi.fn(),
     WebContentsView,
     ipcMain: {
       handle: vi.fn(),
