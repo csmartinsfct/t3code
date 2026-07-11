@@ -10,6 +10,7 @@ import {
   OrchestrationPromptOverrides,
   OrchestrationPromptOverridesPatch,
 } from "./promptTemplates";
+import { SelectedProviderCapability } from "./providerCapabilities";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -788,6 +789,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  providerCapabilities: Schema.optional(
+    Schema.Array(Schema.suspend(() => SelectedProviderCapability)),
+  ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -807,6 +811,9 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  providerCapabilities: Schema.optional(
+    Schema.Array(Schema.suspend(() => SelectedProviderCapability)),
+  ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1153,6 +1160,9 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  providerCapabilities: Schema.optional(
+    Schema.Array(Schema.suspend(() => SelectedProviderCapability)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,

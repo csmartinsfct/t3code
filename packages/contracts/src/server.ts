@@ -11,6 +11,11 @@ import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
 import { ProviderKind, type ProviderKind as ProviderKindType } from "./orchestration";
+import {
+  ProviderCapabilityEntry,
+  ResolveProviderCapabilitiesInput,
+  ResolveProviderCapabilitiesResult,
+} from "./providerCapabilities";
 import { ProviderRateLimitInfo } from "./providerRuntime";
 import { ServerSettings } from "./settings";
 
@@ -448,5 +453,16 @@ export type ResolveSkillsResult = typeof ResolveSkillsResult.Type;
 
 export class ResolveSkillsError extends Schema.TaggedErrorClass<ResolveSkillsError>()(
   "ResolveSkillsError",
+  { message: TrimmedNonEmptyString },
+) {}
+
+export {
+  ProviderCapabilityEntry,
+  ResolveProviderCapabilitiesInput,
+  ResolveProviderCapabilitiesResult,
+};
+
+export class ResolveProviderCapabilitiesError extends Schema.TaggedErrorClass<ResolveProviderCapabilitiesError>()(
+  "ResolveProviderCapabilitiesError",
   { message: TrimmedNonEmptyString },
 ) {}

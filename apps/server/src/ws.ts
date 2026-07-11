@@ -35,6 +35,7 @@ import {
   ResolveCodexProjectTrustError,
   ResolveMcpServersError,
   ResolveMcpServersResult,
+  ResolveProviderCapabilitiesError,
   ResolveSkillsError,
   ServerConfigStreamMcpStatusUpdatedEvent,
   TextGenerationError,
@@ -1018,6 +1019,19 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ResolveSkillsError({
                   message: `Failed to resolve skills: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverResolveProviderCapabilities]: (_input) =>
+        observeRpcEffect(
+          WS_METHODS.serverResolveProviderCapabilities,
+          Effect.succeed({ capabilities: [] }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResolveProviderCapabilitiesError({
+                  message: `Failed to resolve provider capabilities: ${String(cause)}`,
                 }),
             ),
           ),

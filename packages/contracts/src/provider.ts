@@ -22,6 +22,7 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration";
+import { SelectedProviderCapability } from "./providerCapabilities";
 
 const ProviderSessionStatus = Schema.Literals([
   "connecting",
@@ -69,6 +70,7 @@ export const ProviderSendTurnInput = Schema.Struct({
   ),
   modelSelection: Schema.optional(ModelSelection),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  providerCapabilities: Schema.optional(Schema.Array(SelectedProviderCapability)),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 

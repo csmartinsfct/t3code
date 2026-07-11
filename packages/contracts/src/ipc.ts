@@ -42,6 +42,11 @@ import type {
 } from "./promptManagement";
 import type { EnhanceSystemPromptInput, EnhanceSystemPromptResult } from "./rpc";
 import type {
+  ProviderCapabilityEntry,
+  ResolveProviderCapabilitiesInput,
+  ResolveProviderCapabilitiesResult,
+} from "./providerCapabilities";
+import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
@@ -362,6 +367,20 @@ export type OverlayComposerCommandItem =
       model: string;
       label: string;
       description: string;
+    }
+  | {
+      id: string;
+      type: "provider-capability";
+      capability: ProviderCapabilityEntry;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "local-skill";
+      skillId: string;
+      label: string;
+      description: string;
     };
 
 export interface OverlayComposerCommandMessage {
@@ -564,6 +583,9 @@ export interface NativeApi {
     ) => Promise<ResolveCodexProjectTrustResult>;
     trustCodexProject: (input: TrustCodexProjectInput) => Promise<TrustCodexProjectResult>;
     resolveSkills: (input: ResolveSkillsInput) => Promise<ResolveSkillsResult>;
+    resolveProviderCapabilities: (
+      input: ResolveProviderCapabilitiesInput,
+    ) => Promise<ResolveProviderCapabilitiesResult>;
   };
   managedRuns: {
     launchProjectScript: (
