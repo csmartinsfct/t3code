@@ -209,6 +209,7 @@ import { buildExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { useImagePreviewOverlay } from "./imagePreview/ImagePreviewOverlay";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
+import { selectComposerAttachment } from "./chat/composerCapabilitySelection";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import {
@@ -5173,40 +5174,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (item.type === "provider-capability") {
-        const replacement = `@${item.label} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        onAttachProviderCapability(item.capability);
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
+        const applied = selectComposerAttachment({
+          item,
+          availableSkills,
+          snapshot,
+          trigger,
+          applyPromptReplacement,
+          onAttachProviderCapability,
+          onAttachSkill,
+        });
         if (applied) {
           setComposerHighlightedItemId(null);
         }
         return;
       }
       if (item.type === "local-skill") {
-        const skill = availableSkills.find((candidate) => candidate.id === item.skillId);
-        if (!skill) return;
-        const replacement = `@${skill.name} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        onAttachSkill(skill);
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
+        const applied = selectComposerAttachment({
+          item,
+          availableSkills,
+          snapshot,
+          trigger,
+          applyPromptReplacement,
+          onAttachProviderCapability,
+          onAttachSkill,
+        });
         if (applied) {
           setComposerHighlightedItemId(null);
         }
