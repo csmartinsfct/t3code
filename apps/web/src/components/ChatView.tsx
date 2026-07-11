@@ -11,6 +11,7 @@ import {
   type ProjectScriptIcon,
   type ProviderKind,
   type ProviderCapabilityEntry,
+  type SelectedProviderCapability,
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -302,6 +303,9 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_SELECTED_PROVIDER_CAPABILITIES: SelectedProviderCapability[] = Object.freeze(
+  [],
+) as unknown as SelectedProviderCapability[];
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -709,7 +713,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerCodeSnippets = composerDraft.codeSnippets;
   const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
-  const composerProviderCapabilities = composerDraft.providerCapabilities ?? [];
+  const composerProviderCapabilities =
+    composerDraft.providerCapabilities ?? EMPTY_SELECTED_PROVIDER_CAPABILITIES;
   const composerPersistedAttachments = composerDraft.persistedAttachments;
   const composerSendState = useMemo(
     () =>
