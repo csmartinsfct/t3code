@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type {
+  OverlayAcquireOptions,
   OverlayAnchorRect,
   OverlayRouteContext,
   OverlayRouteMessage,
@@ -198,7 +199,9 @@ export function createOverlayRouteMessage(input: NativeOverlayRouteInput): Overl
   };
 }
 
-async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null> {
+async function acquireNativeOverlayHandle(
+  options?: OverlayAcquireOptions,
+): Promise<NativeOverlayHandle | null> {
   if (isFullPageSurfaceOverEmbeddedBrowser()) {
     warnWebTimeline("native-overlay.acquire.suppressed", {
       reason: "full-page-surface",
@@ -220,7 +223,7 @@ async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null>
   let id: string;
   try {
     logWebTimeline("native-overlay.acquire.start");
-    id = await bridge.acquire();
+    id = await bridge.acquire(options);
     logWebTimeline("native-overlay.acquire.success", { overlayId: describeOverlayId(id) });
   } catch {
     warnWebTimeline("native-overlay.acquire.failed");
@@ -285,8 +288,9 @@ async function acquireNativeOverlayHandle(): Promise<NativeOverlayHandle | null>
 
 export async function acquireNativeOverlay(
   initialMessage: OverlayRenderMessage,
+  options?: OverlayAcquireOptions,
 ): Promise<NativeOverlayHandle | null> {
-  const handle = await acquireNativeOverlayHandle();
+  const handle = await acquireNativeOverlayHandle(options);
   if (!handle) return null;
 
   try {

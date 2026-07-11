@@ -5,7 +5,11 @@ import {
   __resetEmbeddedBrowserModalSuspensionForTests,
   setEmbeddedBrowserMountedForModalSuspension,
 } from "./embeddedBrowserModalSuspension";
-import { openNativeOverlay, shouldUseNativeOverlay } from "./nativeOverlayBridge";
+import {
+  acquireNativeOverlay,
+  openNativeOverlay,
+  shouldUseNativeOverlay,
+} from "./nativeOverlayBridge";
 
 function installOverlayBridge(overrides: Partial<DesktopOverlayBridge> = {}) {
   ensureWindowForTest("/");
@@ -85,5 +89,29 @@ describe("native overlay gate", () => {
 
     expect(session).toBeNull();
     expect(overlay.acquire).not.toHaveBeenCalled();
+  });
+});
+
+describe("native overlay acquisition", () => {
+  it("requests a non-focusing native overlay when configured", async () => {
+    const overlay = installOverlayBridge();
+    setEmbeddedBrowserMountedForModalSuspension(true);
+
+    const handle = await acquireNativeOverlay(
+      {
+        type: "composer-command",
+        anchor: { x: 0, y: 0, width: 100, height: 40 },
+        items: [],
+        resolvedTheme: "dark",
+        isLoading: false,
+        triggerKind: "path",
+        activeItemId: null,
+      },
+      { focus: false },
+    );
+
+    expect(handle).not.toBeNull();
+    expect(overlay.acquire).toHaveBeenCalledWith({ focus: false });
+    handle?.release();
   });
 });

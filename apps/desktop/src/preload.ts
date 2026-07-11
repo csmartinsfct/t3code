@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, OverlayAcquireOptions } from "@t3tools/contracts";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -101,7 +101,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     };
   },
   overlay: {
-    acquire: () => ipcRenderer.invoke(OVERLAY_ACQUIRE_CHANNEL),
+    acquire: (options?: OverlayAcquireOptions) =>
+      ipcRenderer.invoke(OVERLAY_ACQUIRE_CHANNEL, options),
     release: (id: string) => ipcRenderer.invoke(OVERLAY_RELEASE_CHANNEL, id),
     render: (id: string, msg: import("@t3tools/contracts").OverlayRenderMessage) =>
       ipcRenderer.invoke(OVERLAY_RENDER_CHANNEL, id, msg),

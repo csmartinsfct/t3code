@@ -451,8 +451,12 @@ export type OverlayRenderMessage =
   | OverlaySheetMessage
   | OverlayCommandMessage;
 
+export interface OverlayAcquireOptions {
+  focus?: boolean;
+}
+
 export interface DesktopOverlayBridge {
-  acquire(): Promise<string>;
+  acquire(options?: OverlayAcquireOptions): Promise<string>;
   release(id: string): Promise<void>;
   render(id: string, message: OverlayRenderMessage): Promise<void>;
   onEvent(id: string, handler: (type: string, payload: unknown) => void): () => void;
