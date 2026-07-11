@@ -1,8 +1,145 @@
 {
   "version": 1,
-  "generatedAt": "2026-05-28T18:14:56.004Z",
-  "lastProcessedCommit": "e23f39353171b2099c2368aa72c7bc901303352c",
+  "generatedAt": "2026-07-10T10:50:22.143Z",
+  "lastProcessedCommit": "cb48153bba32c05dd6231efcdf31052387f9b2c1",
   "groups": [
+    {
+      "date": "2026-07-10",
+      "entries": [
+        {
+          "id": "0dbef68c02a992a3",
+          "title": "Added GPT-5.6 Codex model support",
+          "summary": "T3 Code now includes GPT-5.6 Codex models in model selection and Codex-powered workflows.",
+          "category": "feature",
+          "commitShas": ["cb48153bba32c05dd6231efcdf31052387f9b2c1"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-05",
+      "entries": [
+        {
+          "id": "929bfa1fedc168e8",
+          "title": "Embedded browser tabs are no longer capped",
+          "summary": "You can now open as many embedded browser tabs as you need within a project. Tab management is also improved with a new right-click menu for closing the current tab, other tabs, tabs to the right, or all tabs.",
+          "category": "improvement",
+          "commitShas": ["16174301c0ebdd1a496b53d85be2c26496b6eedc"]
+        },
+        {
+          "id": "162a04b7cb9f9d7d",
+          "title": "Scheduled auto-send drafts clear more reliably",
+          "summary": "Scheduled auto-send drafts are now cleared after use, reducing stale draft state in chat flows.",
+          "category": "fix",
+          "commitShas": ["ce32a93905461eadff879b9498fb11faf946807f"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-03",
+      "entries": [
+        {
+          "id": "d7df230a478fd606",
+          "title": "More reliable embedded browser tab closing",
+          "summary": "Fixed tab selection behavior in the embedded browser so closing a tab now keeps focus on the expected remaining tab.",
+          "category": "fix",
+          "commitShas": ["ed5a50f91dc387e3e21d7a0b78cc950a5d31ec81"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-02",
+      "entries": [
+        {
+          "id": "f74fcca2f25d7da6",
+          "title": "Faster app startup on larger workspaces",
+          "summary": "Improved startup and refresh performance to avoid long launch delays as activity history grows, making the UI feel much more responsive on large datasets.",
+          "category": "performance",
+          "commitShas": ["86f96492cf9d86ea2c4a333e3bf14d36921084be"]
+        },
+        {
+          "id": "95b1ed520077609b",
+          "title": "Claude Sonnet 5 support",
+          "summary": "Added support for the Claude Sonnet 5 model across T3 Code, making it available in model selection and related chat workflows.",
+          "category": "feature",
+          "commitShas": ["527dc7b6cf312973fd9bf23c8c9562802eb9795b"]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-29",
+      "entries": [
+        {
+          "id": "1578a6cb601db812",
+          "title": "Improved scheduled task model selection and auto-send behavior",
+          "summary": "Scheduled tasks now use the intended model more reliably when auto-send is enabled, and the model selection controls have been refined to make configuration clearer and more consistent.",
+          "category": "fix",
+          "commitShas": [
+            "45b8c32cc20599f9ddd9dd25b0dad9355936cdf4",
+            "5fa28a64129a2d32f707d81b6316d011ef3d7f16"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-27",
+      "entries": [
+        {
+          "id": "bdd06d0e1a685664",
+          "title": "Embedded Browser Tabs Persist Per Project",
+          "summary": "Embedded browser tabs now stay associated with each project, making it easier to return to prior browsing context when switching back into work.",
+          "category": "improvement",
+          "commitShas": ["7a555d0eb951bc0653e95e2e4552752b9ef63cd0"]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-18",
+      "entries": [
+        {
+          "id": "72312a51347c5d2d",
+          "title": "Fixed Initial Drafts for Scheduled Tasks",
+          "summary": "Resolved an issue where scheduled tasks could start with incorrect initial draft state, making draft creation behave more reliably.",
+          "category": "fix",
+          "commitShas": ["7acd6f30a6e964ade3618ca50d4d84efd0cfea3b"]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-16",
+      "entries": [
+        {
+          "id": "5e37d378fdaaae06",
+          "title": "Smoother chat typing performance",
+          "summary": "Improved chat responsiveness by preventing unnecessary timeline updates while you type.",
+          "category": "performance",
+          "commitShas": ["6babd6f71425f566f6557796640609c1a14a254a"]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-10",
+      "entries": [
+        {
+          "id": "2bda758f56a68fc5",
+          "title": "Added Claude Fable 5 model support",
+          "summary": "Claude Fable 5 is now available as a supported model option in T3 Code.",
+          "category": "feature",
+          "commitShas": ["637c84031b19775797a8178cb4b74bfb688e6dd4"]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-08",
+      "entries": [
+        {
+          "id": "4c9e39e8f616fd0d",
+          "title": "Stricter validation for agent tool requests",
+          "summary": "Improved request validation across agent-facing REST tools so unexpected inputs are rejected consistently, making tool behavior more predictable and reducing the chance of malformed requests being accepted.",
+          "category": "security",
+          "commitShas": ["5232d4c2a49cfaecadd21ce0c28deb884c133d62"]
+        }
+      ]
+    },
     {
       "date": "2026-05-28",
       "entries": [
@@ -3799,6 +3936,119 @@
         "fromExclusiveCommit": "9295a99e950460555a6bbd284cc1321575090d09",
         "toInclusiveCommit": "e23f39353171b2099c2368aa72c7bc901303352c",
         "commitShas": ["e23f39353171b2099c2368aa72c7bc901303352c"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-08T14:23:09.228Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "e23f39353171b2099c2368aa72c7bc901303352c",
+        "toInclusiveCommit": "5232d4c2a49cfaecadd21ce0c28deb884c133d62",
+        "commitShas": [
+          "c0159b03c5205454ff7fdef20113f3f0a34c4a45",
+          "a3d98c8e41b06026119f7a005369d26272725cbd",
+          "5232d4c2a49cfaecadd21ce0c28deb884c133d62"
+        ],
+        "commitCount": 3,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-10T20:04:43.082Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "5232d4c2a49cfaecadd21ce0c28deb884c133d62",
+        "toInclusiveCommit": "637c84031b19775797a8178cb4b74bfb688e6dd4",
+        "commitShas": ["637c84031b19775797a8178cb4b74bfb688e6dd4"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-16T13:34:33.679Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "637c84031b19775797a8178cb4b74bfb688e6dd4",
+        "toInclusiveCommit": "6babd6f71425f566f6557796640609c1a14a254a",
+        "commitShas": ["6babd6f71425f566f6557796640609c1a14a254a"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-18T14:15:51.216Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "6babd6f71425f566f6557796640609c1a14a254a",
+        "toInclusiveCommit": "7acd6f30a6e964ade3618ca50d4d84efd0cfea3b",
+        "commitShas": ["7acd6f30a6e964ade3618ca50d4d84efd0cfea3b"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-27T11:24:19.048Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "7acd6f30a6e964ade3618ca50d4d84efd0cfea3b",
+        "toInclusiveCommit": "7a555d0eb951bc0653e95e2e4552752b9ef63cd0",
+        "commitShas": ["7a555d0eb951bc0653e95e2e4552752b9ef63cd0"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-06-29T11:06:48.403Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "7a555d0eb951bc0653e95e2e4552752b9ef63cd0",
+        "toInclusiveCommit": "45b8c32cc20599f9ddd9dd25b0dad9355936cdf4",
+        "commitShas": [
+          "5fa28a64129a2d32f707d81b6316d011ef3d7f16",
+          "45b8c32cc20599f9ddd9dd25b0dad9355936cdf4"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-02T10:44:06.079Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "45b8c32cc20599f9ddd9dd25b0dad9355936cdf4",
+        "toInclusiveCommit": "527dc7b6cf312973fd9bf23c8c9562802eb9795b",
+        "commitShas": ["527dc7b6cf312973fd9bf23c8c9562802eb9795b"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-03T14:37:27.665Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "527dc7b6cf312973fd9bf23c8c9562802eb9795b",
+        "toInclusiveCommit": "ed5a50f91dc387e3e21d7a0b78cc950a5d31ec81",
+        "commitShas": [
+          "86f96492cf9d86ea2c4a333e3bf14d36921084be",
+          "ed5a50f91dc387e3e21d7a0b78cc950a5d31ec81"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-05T11:49:58.290Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "ed5a50f91dc387e3e21d7a0b78cc950a5d31ec81",
+        "toInclusiveCommit": "16174301c0ebdd1a496b53d85be2c26496b6eedc",
+        "commitShas": [
+          "ce32a93905461eadff879b9498fb11faf946807f",
+          "16174301c0ebdd1a496b53d85be2c26496b6eedc"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-10T10:50:22.117Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "16174301c0ebdd1a496b53d85be2c26496b6eedc",
+        "toInclusiveCommit": "cb48153bba32c05dd6231efcdf31052387f9b2c1",
+        "commitShas": ["cb48153bba32c05dd6231efcdf31052387f9b2c1"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true

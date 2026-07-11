@@ -45,6 +45,9 @@ gated by Codex project trust. T3 Code now auto-trusts the active project path by
 writing the matching `[projects."<cwd>"] trust_level = "trusted"` entry into the
 active Codex home before resolving Codex MCP servers and before starting Codex
 sessions, so repo-local MCP config works without any manual terminal setup.
+See [Codex Plugin Skills](codex-plugin-skills.md) for notes on debugging
+installed Codex plugins whose skills do not appear in `codex app-server`
+sessions.
 
 ---
 
