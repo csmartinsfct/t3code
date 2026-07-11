@@ -44,6 +44,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
   baseProviderKind,
+  providerProfileId,
   type ProviderKind,
 } from "@t3tools/contracts";
 import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -104,6 +105,7 @@ import {
 } from "./provider/codexProfileDiscovery";
 import { resolveCursorSettingsForProvider } from "./provider/cursorProfileDiscovery";
 import { probeCursorMcpServers, runCursorMcpAction } from "./provider/cursorMcpProbe";
+import { resolveProviderCapabilities } from "./provider/capabilities";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -1024,10 +1026,30 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           ),
           { "rpc.aggregate": "server" },
         ),
-      [WS_METHODS.serverResolveProviderCapabilities]: (_input) =>
+      [WS_METHODS.serverResolveProviderCapabilities]: (input) =>
         observeRpcEffect(
           WS_METHODS.serverResolveProviderCapabilities,
-          Effect.succeed({ capabilities: [] }).pipe(
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings;
+            const profileId = providerProfileId(input.provider);
+            const profile = profileId
+              ? settings.providers.codexProfiles.find(
+                  (candidate) => candidate.profileId === profileId,
+                )
+              : undefined;
+            const binaryPath = profile?.binaryPath || settings.providers.codex.binaryPath;
+            return yield* resolveProviderCapabilities({
+              ...input,
+              binaryPathByProvider: {
+                codex: settings.providers.codex.binaryPath,
+                [input.provider]: binaryPath,
+              },
+              homePathByProvider: {
+                codex: resolveCodexHomePath(settings),
+                [input.provider]: resolveCodexHomePathForProvider(settings, input.provider),
+              },
+            });
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new ResolveProviderCapabilitiesError({

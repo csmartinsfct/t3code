@@ -138,6 +138,7 @@ const rpcClientMock = {
     resolveCodexProjectTrust: vi.fn(),
     trustCodexProject: vi.fn(),
     resolveSkills: vi.fn(),
+    resolveProviderCapabilities: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
   },
@@ -495,6 +496,22 @@ describe("wsNativeApi", () => {
       trusted: true,
     });
     expect(rpcClientMock.server.trustCodexProject).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+    });
+  });
+
+  it("forwards provider capability resolution directly to the RPC client", async () => {
+    const result = { capabilities: [] };
+    rpcClientMock.server.resolveProviderCapabilities.mockResolvedValue(result);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(
+      api.server.resolveProviderCapabilities({ provider: "codex", cwd: "/tmp/project" }),
+    ).resolves.toEqual(result);
+    expect(rpcClientMock.server.resolveProviderCapabilities).toHaveBeenCalledWith({
+      provider: "codex",
       cwd: "/tmp/project",
     });
   });
