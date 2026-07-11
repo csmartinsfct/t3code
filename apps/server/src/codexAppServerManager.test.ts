@@ -675,6 +675,35 @@ describe("sendTurn", () => {
     });
   });
 
+  it("accepts provider capabilities without changing turn/start params", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected skill later",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Use the selected skill later",
+          text_elements: [],
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
   it("rejects empty turn input", async () => {
     const { manager } = createSendTurnHarness();
 

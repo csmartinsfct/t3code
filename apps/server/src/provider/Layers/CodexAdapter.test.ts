@@ -460,6 +460,36 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
     }),
   );
+
+  it.effect("forwards provider capabilities when sending a turn", () =>
+    Effect.gen(function* () {
+      sessionErrorManager.sendTurnImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      const providerCapabilities = [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ] as const;
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-missing"),
+          input: "hello",
+          attachments: [],
+          providerCapabilities,
+        }),
+      );
+
+      assert.deepStrictEqual(sessionErrorManager.sendTurnImpl.mock.calls[0]?.[0], {
+        threadId: asThreadId("sess-missing"),
+        input: "hello",
+        providerCapabilities,
+      });
+    }),
+  );
 });
 
 const lifecycleManager = new FakeCodexManager();

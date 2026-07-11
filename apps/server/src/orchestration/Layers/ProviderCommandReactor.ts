@@ -8,6 +8,7 @@ import {
   type ModelSelection,
   type OrchestrationEvent,
   ProviderKind,
+  type SelectedProviderCapability,
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
@@ -588,6 +589,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan" | "plan-accept";
+    readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -664,6 +666,9 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.providerCapabilities !== undefined
+        ? { providerCapabilities: input.providerCapabilities }
+        : {}),
     });
     yield* Effect.logInfo(
       formatTimelineLog("server.provider-reactor", "turn-send.success", {
@@ -857,6 +862,9 @@ const make = Effect.gen(function* () {
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.providerCapabilities !== undefined
+        ? { providerCapabilities: event.payload.providerCapabilities }
+        : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.catchCause((cause) =>

@@ -18,6 +18,7 @@ import {
   type ProviderTurnStartResult,
   RuntimeMode,
   ProviderInteractionMode,
+  type SelectedProviderCapability,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Effect, ServiceMap } from "effect";
@@ -115,6 +116,7 @@ export interface CodexAppServerSendTurnInput {
   readonly serviceTier?: string | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
 }
 
 export interface CodexAppServerStartSessionInput {

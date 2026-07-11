@@ -4516,6 +4516,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             titleSeed: title,
             runtimeMode,
             interactionMode,
+            ...(composerProviderCapabilitiesSnapshot.length > 0
+              ? { providerCapabilities: composerProviderCapabilitiesSnapshot }
+              : {}),
             createdAt: messageCreatedAt,
           });
           turnStartSucceeded = true;

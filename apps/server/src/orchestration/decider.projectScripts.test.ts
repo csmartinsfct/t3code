@@ -265,6 +265,14 @@ describe("decider project scripts", () => {
               fastMode: true,
             },
           },
+          providerCapabilities: [
+            {
+              provider: "codex",
+              kind: "skill",
+              id: "skill-review",
+              displayName: "Review Skill",
+            },
+          ],
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
           createdAt: now,
@@ -304,6 +312,14 @@ describe("decider project scripts", () => {
           fastMode: true,
         },
       },
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ],
       runtimeMode: "approval-required",
     });
   });

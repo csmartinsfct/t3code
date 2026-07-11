@@ -342,6 +342,14 @@ describe("ProviderCommandReactor", () => {
           text: "hello reactor",
           attachments: [],
         },
+        providerCapabilities: [
+          {
+            provider: "codex",
+            kind: "skill",
+            id: "skill-review",
+            displayName: "Review Skill",
+          },
+        ],
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
@@ -358,6 +366,18 @@ describe("ProviderCommandReactor", () => {
         model: "gpt-5-codex",
       },
       runtimeMode: "approval-required",
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      input: "hello reactor",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ],
     });
 
     const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
