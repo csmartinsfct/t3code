@@ -5195,7 +5195,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (nativeComposerMenuOpeningRef.current) return;
     nativeComposerMenuOpeningRef.current = true;
     let canceled = false;
-    void acquireNativeOverlay(message).then((handle) => {
+    void acquireNativeOverlay(message, { focus: false }).then((handle) => {
       nativeComposerMenuOpeningRef.current = false;
       if (canceled) {
         handle?.release();

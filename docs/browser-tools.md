@@ -616,7 +616,8 @@ The native path uses a full-window transparent overlay view, so anchored popups 
 ```
 Host renderer                    Main process              Overlay view
 ────────────────                 ─────────────             ────────────
-overlay.acquire()   ──invoke──►  pool.acquire()
+overlay.acquire({ focus?: boolean })
+                    ──invoke──►  pool.acquire()
                     ◄─ id ──────
 overlay.render(id, msg) ─────►  send("overlay:render", msg) ──►  OverlayShell.onRender
                                                                   renders popup
@@ -632,7 +633,7 @@ Events from the overlay view carry `null` as the overlay ID (the view doesn't kn
 
 ### Host runtime
 
-Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup. Event and dismiss subscriptions are attached before the initial render message is sent, so fast routed-overlay bootstrap failures cannot be missed and can reliably fall back to the DOM path. Electron main focuses the overlay `WebContents` after acquire/render so `autoFocus` controls can receive input, then focuses the host `WebContents` on release so app shortcuts work immediately after closing the overlay.
+Host code should prefer `openNativeOverlay(message, options)` over wiring overlay IPC directly. It returns a session with a `result` promise and a `release()` method for long-lived overlays. The shared runtime owns focus restore, event subscriptions, dismiss resolution, and release cleanup. Event and dismiss subscriptions are attached before the initial render message is sent, so fast routed-overlay bootstrap failures cannot be missed and can reliably fall back to the DOM path. Electron main focuses the overlay `WebContents` by default so `autoFocus` controls can receive input, then focuses the host `WebContents` on release so app shortcuts work immediately after closing the overlay. Passive overlays whose keyboard interaction remains host-owned can acquire with `{ focus: false }`.
 
 The native-overlay gate is intentionally stricter than "browser WebContents exists." `useNativeOverlayActive()` and `openNativeOverlay()` suppress native acquisition on full-page app surfaces such as `/settings`, because those routes cover the browser even if its `WebContentsView` is still mounted behind the host UI. The old DOM suspension helper uses the same relevance gate, so settings dropdowns render as ordinary DOM popups without native overlay acquisition and without `browser:suspendForModal`.
 
@@ -652,7 +653,7 @@ Native routed overlays must keep their anchor live while open. The overlay view 
 
 `OverlayRouteCombobox` is the path for searchable pickers where exact JSX parity matters. The chat branch selector uses a routed combobox so the browser-hidden DOM path and browser-visible native route share the same search/list/row JSX, including branch badges, create-branch rows, pull-request checkout rows, empty/loading status, and virtualization. Row selection submits a route result; outside click, Escape, and resize dismiss the native route.
 
-The chat composer `@` / `/` / `/model` suggestion menu is handled by a narrow `composer-command` overlay type rather than the generic `Autocomplete` adapter. It sends the already-derived `ComposerCommandItem[]` rows to the overlay and renders the exact `ComposerCommandMenu` component there, while selection/highlight events flow back to `ChatView`. This keeps the file icons, active row styling, loading/empty copy, keyboard navigation, and row spacing identical without treating arbitrary `CommandDialog` content as Phase 1 work.
+The chat composer `@` / `/` / `/model` suggestion menu is handled by a narrow `composer-command` overlay type rather than the generic `Autocomplete` adapter. It sends the already-derived `ComposerCommandItem[]` rows to the overlay and renders the exact `ComposerCommandMenu` component there, while selection/highlight events flow back to `ChatView`. The host acquires this overlay with `{ focus: false }`, so typing remains uninterrupted in the composer, Up/Down changes the active row, and Tab/Enter selects it; pointer hover and click continue to target the overlay view. This keeps the file icons, active row styling, loading/empty copy, keyboard navigation, and row spacing identical without treating arbitrary `CommandDialog` content as Phase 1 work.
 
 ### Routed Overlays
 

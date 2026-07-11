@@ -108,6 +108,7 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 - Routed selects must use `OverlayRouteSelect`, which submits selected values through the route result path and ignores Base UI `item-press` close requests as route cancellations. Outside click, Escape, and resize still dismiss the native route.
 - Routed comboboxes must use `OverlayRouteCombobox`, which follows the routed select dismissal policy. Row selection is a route result; outside click, Escape, and resize dismiss the native route.
 - Header/row action buttons should emit non-dismissing `action` events by default. Use `dismissOnAction` only when the action intentionally opens another surface or ends the interaction.
+- The chat `composer-command` overlay must acquire its native view with `focus: false`. The host composer keeps keyboard ownership so typing filters the menu, Up/Down changes the active row, and Tab/Enter selects it; the native overlay remains pointer-interactive for hover and click.
 - The host `WebContents` must be focused again after release so app shortcuts work immediately.
 - Electron clipboard actions should prefer `desktopBridge.clipboard.writeText()` because focus may still be transitioning back from the overlay `WebContents`.
 - Controlled primitives must not switch between controlled and uncontrolled `open` state when toggling between DOM and native paths.
