@@ -98,6 +98,15 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - **Profiles:** Multiple named profiles supported. T3 auto-discovers `~/.codex-*`
   homes such as `~/.codex-metric`; profiles appear as separate provider entries
   and run Codex with profile-scoped `CODEX_HOME`.
+- **Provider capabilities:** The composer Skills menu and `@` picker include
+  provider-native Codex plugins and plugin skills discovered from
+  `plugin/list` and `skills/list`. Selecting a capability adds a next-turn chip
+  instead of expanding raw plugin text into the prompt. Codex skill rows with a
+  discovered `name` and `path` activate through the documented app-server
+  `$<skill-name>` marker plus `{ type: "skill", name, path }` turn input item.
+  Plugin rows are visible grouping/selection rows but do not inject an
+  unsupported plugin activation payload; select a bundled skill row for explicit
+  activation.
 - Project trust: the server auto-trusts the active project path.
 
 ### Claude Agent (Anthropic)

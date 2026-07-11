@@ -47,7 +47,8 @@ active Codex home before resolving Codex MCP servers and before starting Codex
 sessions, so repo-local MCP config works without any manual terminal setup.
 See [Codex Plugin Skills](codex-plugin-skills.md) for notes on debugging
 installed Codex plugins whose skills do not appear in `codex app-server`
-sessions.
+sessions and for the provider-capability activation path T3 uses when a user
+selects a Codex plugin skill in the composer.
 
 ---
 
