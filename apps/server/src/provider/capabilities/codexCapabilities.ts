@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
+import { PassThrough } from "node:stream";
 import { Data, Effect } from "effect";
 import type { ProviderCapabilityEntry, ProviderKind } from "@t3tools/contracts";
 import { asProviderInput } from "@t3tools/contracts";
@@ -172,7 +173,6 @@ async function queryCodexAppServer(input: {
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
   });
-  const output = readline.createInterface({ input: child.stdout });
   let nextId = 1;
   const pending = new Map<
     number,
@@ -195,6 +195,11 @@ async function queryCodexAppServer(input: {
     }
     pending.clear();
   };
+
+  child.stdout.once("error", fail);
+  const stdout = new PassThrough();
+  child.stdout.pipe(stdout);
+  const output = readline.createInterface({ input: stdout });
 
   const request = (method: string, params: unknown) =>
     new Promise<unknown>((resolve, reject) => {
@@ -231,6 +236,7 @@ async function queryCodexAppServer(input: {
     entry.resolve(parsed.result);
   });
   child.once("error", fail);
+  child.stdin.once("error", fail);
   const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
     fail(
       new Error(
@@ -253,7 +259,11 @@ async function queryCodexAppServer(input: {
     };
   } finally {
     output.close();
+    child.stdout.unpipe(stdout);
+    stdout.destroy();
     child.removeListener("error", fail);
+    child.stdin.removeListener("error", fail);
+    child.stdout.removeListener("error", fail);
     child.removeListener("exit", onExit);
     killCodexChildProcess(child);
   }

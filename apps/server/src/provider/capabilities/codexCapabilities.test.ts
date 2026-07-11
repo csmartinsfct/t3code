@@ -1,11 +1,38 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const spawnMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawn: spawnMock,
+}));
+
 import {
   normalizeCodexCapabilities,
   resolveCodexProviderCapabilities,
   type CodexPluginListResponse,
   type CodexSkillsListResponse,
 } from "./codexCapabilities";
+
+function makeChild(): ChildProcessWithoutNullStreams {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    killed: boolean;
+    kill: ReturnType<typeof vi.fn>;
+  };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = vi.fn(() => true);
+  return child as unknown as ChildProcessWithoutNullStreams;
+}
 
 describe("normalizeCodexCapabilities", () => {
   it("normalizes installed plugins and plugin skills", () => {
@@ -156,15 +183,31 @@ describe("normalizeCodexCapabilities", () => {
 });
 
 describe("resolveCodexProviderCapabilities", () => {
-  it("rejects when the configured Codex binary cannot start", async () => {
-    const result = Effect.runPromise(
-      resolveCodexProviderCapabilities({
-        provider: "codex",
-        cwd: "/repo",
-        binaryPath: `/tmp/t3code-missing-codex-${process.pid}`,
-      }),
-    );
+  it.each(["error", "stdin", "stdout"] as const)(
+    "rejects and cleans up when Codex %s emits an error",
+    async (source) => {
+      spawnMock.mockReset();
+      const child = makeChild();
+      spawnMock.mockReturnValueOnce(child);
 
-    await expect(result).rejects.toThrow();
-  });
+      const result = Effect.runPromise(
+        resolveCodexProviderCapabilities({
+          provider: "codex",
+          cwd: "/repo",
+          binaryPath: "codex",
+        }),
+      );
+
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+      const error = new Error(`${source} failed`);
+      if (source === "error") {
+        child.emit("error", error);
+      } else {
+        child[source].emit("error", error);
+      }
+
+      await expect(result).rejects.toMatchObject({ cause: error });
+      expect(child.kill).toHaveBeenCalledOnce();
+    },
+  );
 });
