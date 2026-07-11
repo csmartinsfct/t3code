@@ -158,6 +158,7 @@ function SkillsMenuContent({
           capabilities={plugins}
           attachedProviderCapabilityIds={attachedProviderCapabilityIds}
           onAttachProviderCapability={onAttachProviderCapability}
+          onCloseMenu={onCloseMenu}
           showSeparator={groups.length > 0}
         />
       )}
@@ -167,6 +168,7 @@ function SkillsMenuContent({
           capabilities={pluginSkills}
           attachedProviderCapabilityIds={attachedProviderCapabilityIds}
           onAttachProviderCapability={onAttachProviderCapability}
+          onCloseMenu={onCloseMenu}
           showSeparator
         />
       )}
@@ -272,12 +274,14 @@ const ProviderCapabilitySection = memo(function ProviderCapabilitySection({
   capabilities,
   attachedProviderCapabilityIds,
   onAttachProviderCapability,
+  onCloseMenu,
   showSeparator,
 }: {
   label: string;
   capabilities: readonly ProviderCapabilityEntry[];
   attachedProviderCapabilityIds: ReadonlySet<string>;
   onAttachProviderCapability: (capability: ProviderCapabilityEntry) => void;
+  onCloseMenu: () => void;
   showSeparator: boolean;
 }) {
   return (
@@ -290,6 +294,7 @@ const ProviderCapabilitySection = memo(function ProviderCapabilitySection({
           capability={capability}
           isAttached={attachedProviderCapabilityIds.has(capability.id)}
           onAttach={onAttachProviderCapability}
+          onCloseMenu={onCloseMenu}
         />
       ))}
     </div>
@@ -300,14 +305,18 @@ const ProviderCapabilityMenuItem = memo(function ProviderCapabilityMenuItem({
   capability,
   isAttached,
   onAttach,
+  onCloseMenu,
 }: {
   capability: ProviderCapabilityEntry;
   isAttached: boolean;
   onAttach: (capability: ProviderCapabilityEntry) => void;
+  onCloseMenu: () => void;
 }) {
   const handleClick = useCallback(() => {
-    if (!isAttached) onAttach(capability);
-  }, [capability, isAttached, onAttach]);
+    if (isAttached) return;
+    onAttach(capability);
+    onCloseMenu();
+  }, [capability, isAttached, onAttach, onCloseMenu]);
 
   return (
     <MenuItem disabled={isAttached} onClick={handleClick}>

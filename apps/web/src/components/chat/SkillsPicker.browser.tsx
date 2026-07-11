@@ -204,6 +204,9 @@ describe("SkillsPicker", () => {
     await page.getByRole("menuitem", { name: "Superpowers" }).click();
 
     expect(onAttachProviderCapability).toHaveBeenCalledWith(TEST_PROVIDER_CAPABILITIES[0]);
+    await expect
+      .element(page.getByRole("menuitem", { name: "Superpowers" }))
+      .not.toBeInTheDocument();
 
     await screen.unmount();
     host.remove();
