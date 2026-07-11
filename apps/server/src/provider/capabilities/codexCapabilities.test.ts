@@ -1,6 +1,8 @@
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   normalizeCodexCapabilities,
+  resolveCodexProviderCapabilities,
   type CodexPluginListResponse,
   type CodexSkillsListResponse,
 } from "./codexCapabilities";
@@ -113,5 +115,56 @@ describe("normalizeCodexCapabilities", () => {
 
     expect(brainstorming).toHaveLength(1);
     expect(brainstorming[0]?.description).toBe("Current");
+  });
+
+  it("includes only explicitly enabled plugin skills", () => {
+    const plugins: CodexPluginListResponse = {
+      marketplaces: [
+        {
+          name: "openai-curated-remote",
+          plugins: [
+            {
+              id: "superpowers@openai-curated-remote",
+              name: "superpowers",
+              installed: true,
+              enabled: true,
+              interface: { displayName: "Superpowers" },
+            },
+          ],
+        },
+      ],
+    };
+    const skills: CodexSkillsListResponse = {
+      data: [
+        {
+          skills: [
+            { name: "superpowers:enabled", enabled: true },
+            { name: "superpowers:disabled", enabled: false },
+            { name: "superpowers:unspecified" },
+          ],
+        },
+      ],
+    };
+
+    const result = normalizeCodexCapabilities({ provider: "codex", plugins, skills });
+
+    expect(result.map((entry) => entry.id)).toEqual([
+      "superpowers@openai-curated-remote",
+      "superpowers:enabled",
+    ]);
+  });
+});
+
+describe("resolveCodexProviderCapabilities", () => {
+  it("rejects when the configured Codex binary cannot start", async () => {
+    const result = Effect.runPromise(
+      resolveCodexProviderCapabilities({
+        provider: "codex",
+        cwd: "/repo",
+        binaryPath: `/tmp/t3code-missing-codex-${process.pid}`,
+      }),
+    );
+
+    await expect(result).rejects.toThrow();
   });
 });

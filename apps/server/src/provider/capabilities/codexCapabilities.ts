@@ -107,7 +107,7 @@ export function normalizeCodexCapabilities(input: {
   const dedupedSkills = new Map<string, ProviderCapabilityEntry>();
   for (const block of input.skills.data ?? []) {
     for (const skill of block.skills ?? []) {
-      if (!skill.name || skill.enabled === false) continue;
+      if (!skill.name || skill.enabled !== true) continue;
       const pluginName = pluginPrefixFromSkillName(skill.name);
       if (!pluginName) continue;
       const parent = installedPluginsByName.get(pluginName);
@@ -184,6 +184,18 @@ async function queryCodexAppServer(input: {
     }
   >();
 
+  let failed = false;
+  const fail = (cause: unknown) => {
+    if (failed) return;
+    failed = true;
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    for (const entry of pending.values()) {
+      clearTimeout(entry.timeout);
+      entry.reject(error);
+    }
+    pending.clear();
+  };
+
   const request = (method: string, params: unknown) =>
     new Promise<unknown>((resolve, reject) => {
       const id = nextId++;
@@ -192,15 +204,21 @@ async function queryCodexAppServer(input: {
         reject(new Error(`Timed out waiting for ${method}.`));
       }, 5_000);
       pending.set(id, { method, resolve, reject, timeout });
-      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      try {
+        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      } catch (cause) {
+        fail(cause);
+      }
     });
 
   output.on("line", (line) => {
-    const parsed = JSON.parse(line) as {
-      id?: number;
-      result?: unknown;
-      error?: { message?: string };
-    };
+    let parsed: { id?: number; result?: unknown; error?: { message?: string } };
+    try {
+      parsed = JSON.parse(line) as typeof parsed;
+    } catch (cause) {
+      fail(new Error(`Received invalid JSON from codex app-server: ${String(cause)}`));
+      return;
+    }
     if (parsed.id === undefined) return;
     const entry = pending.get(parsed.id);
     if (!entry) return;
@@ -212,6 +230,15 @@ async function queryCodexAppServer(input: {
     }
     entry.resolve(parsed.result);
   });
+  child.once("error", fail);
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    fail(
+      new Error(
+        `codex app-server exited before capability discovery completed (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
+      ),
+    );
+  };
+  child.once("exit", onExit);
 
   try {
     await request("initialize", buildCodexInitializeParams());
@@ -226,6 +253,8 @@ async function queryCodexAppServer(input: {
     };
   } finally {
     output.close();
+    child.removeListener("error", fail);
+    child.removeListener("exit", onExit);
     killCodexChildProcess(child);
   }
 }
