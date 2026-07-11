@@ -10,6 +10,7 @@ import {
   modelSelectionProviderKind,
   ProjectId,
   ProviderInteractionMode,
+  SelectedProviderCapability,
   isValidProviderKind,
   ProviderKind,
   ProviderModelOptions,
@@ -104,12 +105,15 @@ const PersistedComposerSkillAttachment = Schema.Struct({
 });
 type PersistedComposerSkillAttachment = typeof PersistedComposerSkillAttachment.Type;
 
+const PersistedSelectedProviderCapability = SelectedProviderCapability;
+
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
   terminalContexts: Schema.optionalKey(Schema.Array(PersistedTerminalContextDraft)),
   codeSnippets: Schema.optionalKey(Schema.Array(PersistedComposerCodeSnippet)),
   skills: Schema.optionalKey(Schema.Array(PersistedComposerSkillAttachment)),
+  providerCapabilities: Schema.optionalKey(Schema.Array(PersistedSelectedProviderCapability)),
   modelSelectionByProvider: Schema.optionalKey(
     Schema.Record(ProviderKind, Schema.optional(ModelSelection)),
   ),
@@ -236,6 +240,7 @@ export interface ComposerThreadDraftState {
   ticketAttachments: ComposerTicketAttachment[];
   /** Skill file attachments. Persisted as path references; content re-read on rehydration. */
   skills: ComposerSkillAttachment[];
+  providerCapabilities?: SelectedProviderCapability[];
   modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
   activeProvider: ProviderKind | null;
   runtimeMode: RuntimeMode | null;
@@ -328,6 +333,9 @@ interface ComposerDraftStoreState {
   addSkill: (threadId: ThreadId, skill: ComposerSkillAttachment) => void;
   removeSkill: (threadId: ThreadId, skillId: string) => void;
   clearSkills: (threadId: ThreadId) => void;
+  addProviderCapability: (threadId: ThreadId, capability: SelectedProviderCapability) => void;
+  removeProviderCapability: (threadId: ThreadId, capabilityId: string) => void;
+  clearProviderCapabilities: (threadId: ThreadId) => void;
   insertTerminalContext: (
     threadId: ThreadId,
     prompt: string,
@@ -406,6 +414,10 @@ const EMPTY_SKILLS: ComposerSkillAttachment[] = Object.freeze(
   [],
 ) as unknown as ComposerSkillAttachment[];
 
+const EMPTY_PROVIDER_CAPABILITIES: SelectedProviderCapability[] = Object.freeze(
+  [],
+) as unknown as SelectedProviderCapability[];
+
 const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   prompt: "",
   images: EMPTY_IMAGES,
@@ -415,6 +427,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   codeSnippets: EMPTY_CODE_SNIPPETS,
   ticketAttachments: EMPTY_TICKET_ATTACHMENTS,
   skills: EMPTY_SKILLS,
+  providerCapabilities: EMPTY_PROVIDER_CAPABILITIES,
   modelSelectionByProvider: EMPTY_MODEL_SELECTION_BY_PROVIDER,
   activeProvider: null,
   runtimeMode: null,
@@ -431,6 +444,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     codeSnippets: [],
     ticketAttachments: [],
     skills: [],
+    providerCapabilities: [],
     modelSelectionByProvider: {},
     activeProvider: null,
     runtimeMode: null,
@@ -446,6 +460,14 @@ function composerImageDedupKey(image: ComposerImageAttachment): string {
 
 function terminalContextDedupKey(context: TerminalContextDraft): string {
   return `${context.terminalId}\u0000${context.lineStart}\u0000${context.lineEnd}`;
+}
+
+function providerCapabilityDedupKey(capability: SelectedProviderCapability): string {
+  return `${capability.provider}\u0000${capability.kind}\u0000${capability.id}`;
+}
+
+function providerCapabilitiesOf(draft: ComposerThreadDraftState): SelectedProviderCapability[] {
+  return draft.providerCapabilities ?? [];
 }
 
 function normalizeTerminalContextForThread(
@@ -504,6 +526,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.codeSnippets.length === 0 &&
     draft.ticketAttachments.length === 0 &&
     draft.skills.length === 0 &&
+    providerCapabilitiesOf(draft).length === 0 &&
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
@@ -545,6 +568,7 @@ function createPersistedThreadDraft(input: {
   terminalContexts: PersistedTerminalContextDraft[];
   codeSnippets: PersistedComposerCodeSnippet[];
   skills: PersistedComposerSkillAttachment[];
+  providerCapabilities: SelectedProviderCapability[];
   modelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
   activeProvider: ProviderKind | null;
   runtimeMode: RuntimeMode | null;
@@ -563,6 +587,9 @@ function createPersistedThreadDraft(input: {
   }
   if (input.skills.length > 0) {
     draft.skills = [...input.skills];
+  }
+  if (input.providerCapabilities.length > 0) {
+    draft.providerCapabilities = [...input.providerCapabilities];
   }
   if (input.hasModelData) {
     draft.modelSelectionByProvider = toPersistedModelSelectionByProvider(
@@ -956,6 +983,28 @@ function normalizePersistedTerminalContextDraft(
   };
 }
 
+function normalizePersistedProviderCapabilities(value: unknown): SelectedProviderCapability[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const capabilities: SelectedProviderCapability[] = [];
+  const dedupKeys = new Set<string>();
+  for (const entry of value) {
+    try {
+      const capability = Schema.decodeUnknownSync(SelectedProviderCapability)(entry);
+      const dedupKey = providerCapabilityDedupKey(capability);
+      if (dedupKeys.has(dedupKey)) {
+        continue;
+      }
+      capabilities.push(capability);
+      dedupKeys.add(dedupKey);
+    } catch {
+      // Ignore malformed capability entries from older or manually edited storage.
+    }
+  }
+  return capabilities;
+}
+
 function normalizeDraftThreadEnvMode(
   value: unknown,
   fallbackWorktreePath: string | null,
@@ -1095,6 +1144,9 @@ function normalizePersistedDraftsByThreadId(
           (s) => s && typeof s.id === "string" && typeof s.name === "string",
         )
       : [];
+    const providerCapabilities = normalizePersistedProviderCapabilities(
+      draftCandidate.providerCapabilities,
+    );
     const runtimeMode =
       draftCandidate.runtimeMode === "approval-required" ||
       draftCandidate.runtimeMode === "full-access"
@@ -1164,6 +1216,7 @@ function normalizePersistedDraftsByThreadId(
       terminalContexts.length === 0 &&
       codeSnippets.length === 0 &&
       skills.length === 0 &&
+      providerCapabilities.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
       !interactionMode
@@ -1176,6 +1229,7 @@ function normalizePersistedDraftsByThreadId(
       terminalContexts,
       codeSnippets,
       skills,
+      providerCapabilities,
       modelSelectionByProvider,
       activeProvider,
       runtimeMode,
@@ -1251,6 +1305,7 @@ function partializeComposerDraftStoreState(
       draft.terminalContexts.length === 0 &&
       draft.codeSnippets.length === 0 &&
       draft.skills.length === 0 &&
+      providerCapabilitiesOf(draft).length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
       draft.interactionMode === null
@@ -1285,6 +1340,7 @@ function partializeComposerDraftStoreState(
         relativePath: s.relativePath,
         group: s.group,
       })),
+      providerCapabilities: providerCapabilitiesOf(draft),
       modelSelectionByProvider: draft.modelSelectionByProvider,
       activeProvider: draft.activeProvider,
       runtimeMode: draft.runtimeMode,
@@ -1514,6 +1570,9 @@ function toHydratedThreadDraft(
         code: s.code,
       })) ?? [],
     ticketAttachments: [],
+    providerCapabilities: normalizePersistedProviderCapabilities(
+      persistedDraft.providerCapabilities,
+    ),
     skills:
       persistedDraft.skills?.map((s) => ({
         id: s.id,
@@ -2369,6 +2428,72 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return { draftsByThreadId: nextDraftsByThreadId };
         });
       },
+      addProviderCapability: (threadId, capability) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          const dedupKey = providerCapabilityDedupKey(capability);
+          const existingProviderCapabilities = providerCapabilitiesOf(existing);
+          if (
+            existingProviderCapabilities.some(
+              (entry) => providerCapabilityDedupKey(entry) === dedupKey,
+            )
+          ) {
+            return state;
+          }
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...existing,
+                providerCapabilities: [...existingProviderCapabilities, capability],
+              },
+            },
+          };
+        });
+      },
+      removeProviderCapability: (threadId, capabilityId) => {
+        if (threadId.length === 0 || capabilityId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current) return state;
+          const currentProviderCapabilities = providerCapabilitiesOf(current);
+          const nextProviderCapabilities = currentProviderCapabilities.filter(
+            (capability) => capability.id !== capabilityId,
+          );
+          if (nextProviderCapabilities.length === currentProviderCapabilities.length) {
+            return state;
+          }
+          const nextDraft: ComposerThreadDraftState = {
+            ...current,
+            providerCapabilities: nextProviderCapabilities,
+          };
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: nextDraft,
+            },
+          };
+        });
+      },
+      clearProviderCapabilities: (threadId) => {
+        if (threadId.length === 0) return;
+        set((state) => {
+          const current = state.draftsByThreadId[threadId];
+          if (!current || providerCapabilitiesOf(current).length === 0) return state;
+          const nextDraft: ComposerThreadDraftState = {
+            ...current,
+            providerCapabilities: [],
+          };
+          const nextDraftsByThreadId = { ...state.draftsByThreadId };
+          if (shouldRemoveDraft(nextDraft)) {
+            delete nextDraftsByThreadId[threadId];
+          } else {
+            nextDraftsByThreadId[threadId] = nextDraft;
+          }
+          return { draftsByThreadId: nextDraftsByThreadId };
+        });
+      },
       insertTerminalContext: (threadId, prompt, context, index) => {
         if (threadId.length === 0) {
           return false;
@@ -2558,6 +2683,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             terminalContexts: [],
             codeSnippets: [],
             ticketAttachments: [],
+            providerCapabilities: [],
             skills: [],
           };
           const nextDraftsByThreadId = { ...state.draftsByThreadId };

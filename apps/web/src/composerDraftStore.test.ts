@@ -334,6 +334,62 @@ describe("composerDraftStore ticket attachments", () => {
   });
 });
 
+describe("composerDraftStore provider capabilities", () => {
+  const threadId = ThreadId.makeUnsafe("thread-provider-capabilities");
+  const capability = {
+    provider: "codex" as const,
+    kind: "plugin" as const,
+    id: "superpowers@openai-curated-remote",
+    displayName: "Superpowers",
+  };
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("adds and removes a selected provider capability", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.addProviderCapability(threadId, capability);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability]);
+
+    store.removeProviderCapability(threadId, capability.id);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toHaveLength(0);
+  });
+
+  it("deduplicates capabilities by provider, kind, and id", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, {
+      ...capability,
+      provider: "claudeAgent",
+    });
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability, { ...capability, provider: "claudeAgent" }]);
+  });
+
+  it("clears selected provider capabilities with composer content", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setPrompt(threadId, "sent draft");
+    store.addProviderCapability(threadId, capability);
+
+    store.clearComposerContent(threadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.makeUnsafe("thread-sync-persisted");
 
