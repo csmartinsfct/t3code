@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from "react";
 import { BookOpenIcon, PencilIcon } from "lucide-react";
 
-import type { SkillEntry } from "@t3tools/contracts";
+import type { ProviderCapabilityEntry, SkillEntry } from "@t3tools/contracts";
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { OverlayRouteMenu, OverlayRouteMenuPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
@@ -12,13 +12,17 @@ const SKILLS_PICKER_OVERLAY_ROUTE_KEY = "skills-picker-menu";
 
 type SkillsPickerResult =
   | { kind: "attach"; skill: SkillEntry }
-  | { kind: "reveal"; skill: SkillEntry };
+  | { kind: "reveal"; skill: SkillEntry }
+  | { kind: "attach-provider-capability"; capability: ProviderCapabilityEntry };
 
 interface SkillsPickerProps {
   skills: readonly SkillEntry[];
   attachedSkillIds: ReadonlySet<string>;
+  providerCapabilities: readonly ProviderCapabilityEntry[];
+  attachedProviderCapabilityIds: ReadonlySet<string>;
   compact?: boolean;
   onAttachSkill: (skill: SkillEntry) => void;
+  onAttachProviderCapability: (capability: ProviderCapabilityEntry) => void;
   onRevealSkill: (skill: SkillEntry) => void;
 }
 
@@ -74,30 +78,60 @@ function readAttachedSkillIdsParam(value: unknown): Set<string> {
   return new Set(value.filter((item): item is string => typeof item === "string"));
 }
 
+function isProviderCapabilityEntry(value: unknown): value is ProviderCapabilityEntry {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProviderCapabilityEntry>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.provider === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.displayName === "string" &&
+    typeof candidate.enabled === "boolean"
+  );
+}
+
+function readProviderCapabilityEntriesParam(value: unknown): ProviderCapabilityEntry[] {
+  return Array.isArray(value) ? value.filter(isProviderCapabilityEntry) : [];
+}
+
 function isSkillsPickerResult(value: unknown): value is SkillsPickerResult {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<SkillsPickerResult>;
   return (
-    (candidate.kind === "attach" || candidate.kind === "reveal") && isSkillEntry(candidate.skill)
+    ((candidate.kind === "attach" || candidate.kind === "reveal") &&
+      isSkillEntry(candidate.skill)) ||
+    (candidate.kind === "attach-provider-capability" &&
+      isProviderCapabilityEntry(candidate.capability))
   );
 }
 
 function SkillsMenuContent({
   attachedSkillIds,
+  attachedProviderCapabilityIds,
   groups,
+  plugins,
+  pluginSkills,
   onAttachSkill,
+  onAttachProviderCapability,
   onCloseMenu,
   onRevealSkill,
 }: {
   attachedSkillIds: ReadonlySet<string>;
+  attachedProviderCapabilityIds: ReadonlySet<string>;
   groups: readonly SkillGroup[];
+  plugins: readonly ProviderCapabilityEntry[];
+  pluginSkills: readonly ProviderCapabilityEntry[];
   onAttachSkill: (skill: SkillEntry) => void;
+  onAttachProviderCapability: (capability: ProviderCapabilityEntry) => void;
   onCloseMenu: () => void;
   onRevealSkill: (skill: SkillEntry) => void;
 }) {
   return (
     <>
-      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Skills</div>
+      {groups.length > 0 && (
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Skills</div>
+      )}
       {groups.map((group, groupIdx) => (
         <div key={group.label ?? "__top__"}>
           {groupIdx > 0 && <div className="mx-2 my-1 border-t border-border/50" role="separator" />}
@@ -118,6 +152,24 @@ function SkillsMenuContent({
           ))}
         </div>
       ))}
+      {plugins.length > 0 && (
+        <ProviderCapabilitySection
+          label="Codex plugins"
+          capabilities={plugins}
+          attachedProviderCapabilityIds={attachedProviderCapabilityIds}
+          onAttachProviderCapability={onAttachProviderCapability}
+          showSeparator={groups.length > 0}
+        />
+      )}
+      {pluginSkills.length > 0 && (
+        <ProviderCapabilitySection
+          label="Codex plugin skills"
+          capabilities={pluginSkills}
+          attachedProviderCapabilityIds={attachedProviderCapabilityIds}
+          onAttachProviderCapability={onAttachProviderCapability}
+          showSeparator
+        />
+      )}
     </>
   );
 }
@@ -132,11 +184,22 @@ function SkillsMenuContent({
 export const SkillsPicker = memo(function SkillsPicker({
   skills,
   attachedSkillIds,
+  providerCapabilities,
+  attachedProviderCapabilityIds,
   compact,
   onAttachSkill,
+  onAttachProviderCapability,
   onRevealSkill,
 }: SkillsPickerProps) {
   const groups = useMemo(() => groupSkills(skills), [skills]);
+  const plugins = useMemo(
+    () => providerCapabilities.filter((capability) => capability.kind === "plugin"),
+    [providerCapabilities],
+  );
+  const pluginSkills = useMemo(
+    () => providerCapabilities.filter((capability) => capability.kind === "skill"),
+    [providerCapabilities],
+  );
 
   const handleRouteResult = useCallback(
     (value: SkillsPickerResult) => {
@@ -145,9 +208,13 @@ export const SkillsPicker = memo(function SkillsPicker({
         onAttachSkill(value.skill);
         return;
       }
+      if (value.kind === "attach-provider-capability") {
+        onAttachProviderCapability(value.capability);
+        return;
+      }
       onRevealSkill(value.skill);
     },
-    [onAttachSkill, onRevealSkill],
+    [onAttachProviderCapability, onAttachSkill, onRevealSkill],
   );
   const route = useRoutedPopoverSurface<HTMLButtonElement, SkillsPickerResult>({
     routeKey: SKILLS_PICKER_OVERLAY_ROUTE_KEY,
@@ -155,13 +222,15 @@ export const SkillsPicker = memo(function SkillsPicker({
     align: "start",
     params: {
       attachedSkillIds: Array.from(attachedSkillIds),
+      attachedProviderCapabilityIds: Array.from(attachedProviderCapabilityIds),
+      providerCapabilities,
       skills,
     },
     onResult: handleRouteResult,
   });
   const closeMenu = useCallback(() => route.onOpenChange(false), [route]);
 
-  if (skills.length === 0) return null;
+  if (skills.length === 0 && plugins.length === 0 && pluginSkills.length === 0) return null;
 
   return (
     <Menu open={route.domOpen} onOpenChange={route.onOpenChange}>
@@ -184,13 +253,66 @@ export const SkillsPicker = memo(function SkillsPicker({
       <MenuPopup align="start" className="max-h-[500px]">
         <SkillsMenuContent
           attachedSkillIds={attachedSkillIds}
+          attachedProviderCapabilityIds={attachedProviderCapabilityIds}
           groups={groups}
+          plugins={plugins}
+          pluginSkills={pluginSkills}
           onAttachSkill={onAttachSkill}
+          onAttachProviderCapability={onAttachProviderCapability}
           onCloseMenu={closeMenu}
           onRevealSkill={onRevealSkill}
         />
       </MenuPopup>
     </Menu>
+  );
+});
+
+const ProviderCapabilitySection = memo(function ProviderCapabilitySection({
+  label,
+  capabilities,
+  attachedProviderCapabilityIds,
+  onAttachProviderCapability,
+  showSeparator,
+}: {
+  label: string;
+  capabilities: readonly ProviderCapabilityEntry[];
+  attachedProviderCapabilityIds: ReadonlySet<string>;
+  onAttachProviderCapability: (capability: ProviderCapabilityEntry) => void;
+  showSeparator: boolean;
+}) {
+  return (
+    <div>
+      {showSeparator && <div className="mx-2 my-1 border-t border-border/50" role="separator" />}
+      <div className="px-2 pb-0.5 pt-1.5 font-medium text-muted-foreground text-xs">{label}</div>
+      {capabilities.map((capability) => (
+        <ProviderCapabilityMenuItem
+          key={capability.id}
+          capability={capability}
+          isAttached={attachedProviderCapabilityIds.has(capability.id)}
+          onAttach={onAttachProviderCapability}
+        />
+      ))}
+    </div>
+  );
+});
+
+const ProviderCapabilityMenuItem = memo(function ProviderCapabilityMenuItem({
+  capability,
+  isAttached,
+  onAttach,
+}: {
+  capability: ProviderCapabilityEntry;
+  isAttached: boolean;
+  onAttach: (capability: ProviderCapabilityEntry) => void;
+}) {
+  const handleClick = useCallback(() => {
+    if (!isAttached) onAttach(capability);
+  }, [capability, isAttached, onAttach]);
+
+  return (
+    <MenuItem disabled={isAttached} onClick={handleClick}>
+      <span className="min-w-0 truncate text-sm">{capability.displayName}</span>
+    </MenuItem>
   );
 });
 
@@ -244,19 +366,35 @@ const SkillMenuItem = memo(function SkillMenuItem({
 
 registerOverlayRoute<{
   attachedSkillIds?: unknown;
+  attachedProviderCapabilityIds?: unknown;
+  providerCapabilities?: unknown;
   skills?: unknown;
 }>(SKILLS_PICKER_OVERLAY_ROUTE_KEY, function SkillsPickerOverlayRoute({ message, controller }) {
   const skills = readSkillEntriesParam(message.params.skills);
   const attachedSkillIds = readAttachedSkillIdsParam(message.params.attachedSkillIds);
+  const providerCapabilities = readProviderCapabilityEntriesParam(
+    message.params.providerCapabilities,
+  );
+  const attachedProviderCapabilityIds = readAttachedSkillIdsParam(
+    message.params.attachedProviderCapabilityIds,
+  );
   const groups = groupSkills(skills);
+  const plugins = providerCapabilities.filter((capability) => capability.kind === "plugin");
+  const pluginSkills = providerCapabilities.filter((capability) => capability.kind === "skill");
 
   return (
     <OverlayRouteMenu>
       <OverlayRouteMenuPopup align="start" className="max-h-[500px]">
         <SkillsMenuContent
           attachedSkillIds={attachedSkillIds}
+          attachedProviderCapabilityIds={attachedProviderCapabilityIds}
           groups={groups}
+          plugins={plugins}
+          pluginSkills={pluginSkills}
           onAttachSkill={(skill) => controller.submit({ kind: "attach", skill })}
+          onAttachProviderCapability={(capability) =>
+            controller.submit({ kind: "attach-provider-capability", capability })
+          }
           onCloseMenu={() => undefined}
           onRevealSkill={(skill) => controller.submit({ kind: "reveal", skill })}
         />

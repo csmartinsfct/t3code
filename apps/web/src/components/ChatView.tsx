@@ -10,6 +10,7 @@ import {
   type ProjectScript,
   type ProjectScriptIcon,
   type ProviderKind,
+  type ProviderCapabilityEntry,
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -164,6 +165,7 @@ import {
 import { useManagedRunCompletionToasts } from "../hooks/useManagedRunCompletionToasts";
 import { useMcpServers } from "../hooks/useMcpServerNames";
 import { useSkills } from "../hooks/useSkills";
+import { useProviderCapabilities } from "../hooks/useProviderCapabilities";
 import { useRehydrateSkillContent } from "../hooks/useRehydrateSkillContent";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
@@ -702,6 +704,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerCodeSnippets = composerDraft.codeSnippets;
   const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
+  const composerProviderCapabilities = composerDraft.providerCapabilities;
   const composerPersistedAttachments = composerDraft.persistedAttachments;
   const composerSendState = useMemo(
     () =>
@@ -729,6 +732,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.removeTicketAttachment,
   );
   const addComposerDraftSkill = useComposerDraftStore((store) => store.addSkill);
+  const addComposerDraftProviderCapability = useComposerDraftStore(
+    (store) => store.addProviderCapability,
+  );
   const removeComposerDraftSkill = useComposerDraftStore((store) => store.removeSkill);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
@@ -1436,10 +1442,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     refreshKey: mcpStatusRefreshKey,
   });
   const availableSkills = useSkills(activeProject?.cwd);
+  const providerCapabilities = useProviderCapabilities({
+    provider: selectedProvider,
+    cwd: activeProject?.cwd,
+  });
   useRehydrateSkillContent(threadId, activeProject?.cwd);
   const attachedSkillIds = useMemo(
     () => new Set(composerSkills.map((s) => s.id)),
     [composerSkills],
+  );
+  const attachedProviderCapabilityIds = useMemo(
+    () => new Set((composerProviderCapabilities ?? []).map((capability) => capability.id)),
+    [composerProviderCapabilities],
   );
 
   // Populate composer from thread initialDraft (e.g. scheduled task created threads)
@@ -3770,6 +3784,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThreadId, addComposerDraftSkill],
   );
 
+  const onAttachProviderCapability = useCallback(
+    (capability: ProviderCapabilityEntry) => {
+      if (!activeThreadId) return;
+      addComposerDraftProviderCapability(activeThreadId, {
+        provider: capability.provider,
+        kind: capability.kind,
+        id: capability.id,
+        displayName: capability.displayName,
+        ...(capability.parentId ? { parentId: capability.parentId } : {}),
+        ...(capability.parentDisplayName
+          ? { parentDisplayName: capability.parentDisplayName }
+          : {}),
+      });
+    },
+    [activeThreadId, addComposerDraftProviderCapability],
+  );
+
   const onRevealSkill = useCallback(
     (skill: SkillEntry) => {
       const cwd = activeProject?.cwd;
@@ -5888,8 +5919,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}
+                                  providerCapabilities={providerCapabilities}
+                                  attachedProviderCapabilityIds={attachedProviderCapabilityIds}
                                   compact
                                   onAttachSkill={onAttachSkill}
+                                  onAttachProviderCapability={onAttachProviderCapability}
                                   onRevealSkill={onRevealSkill}
                                 />
                                 <CompactComposerControlsMenu
@@ -5983,7 +6017,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}
+                                  providerCapabilities={providerCapabilities}
+                                  attachedProviderCapabilityIds={attachedProviderCapabilityIds}
                                   onAttachSkill={onAttachSkill}
+                                  onAttachProviderCapability={onAttachProviderCapability}
                                   onRevealSkill={onRevealSkill}
                                 />
                               </>
