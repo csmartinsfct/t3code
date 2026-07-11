@@ -1,4 +1,8 @@
-import type { ProviderCapabilityEntry, SkillEntry } from "@t3tools/contracts";
+import type {
+  ProviderCapabilityEntry,
+  SelectedProviderCapability,
+  SkillEntry,
+} from "@t3tools/contracts";
 
 import type { ComposerTrigger } from "../../composer-logic";
 
@@ -33,6 +37,21 @@ function extendReplacementRangeForTrailingSpace(
   replacement: string,
 ): number {
   return replacement.endsWith(" ") && text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
+}
+
+export function toSelectedProviderCapability(
+  capability: ProviderCapabilityEntry,
+): SelectedProviderCapability {
+  return {
+    provider: capability.provider,
+    kind: capability.kind,
+    id: capability.id,
+    ...(capability.name ? { name: capability.name } : {}),
+    ...(capability.path ? { path: capability.path } : {}),
+    displayName: capability.displayName,
+    ...(capability.parentId ? { parentId: capability.parentId } : {}),
+    ...(capability.parentDisplayName ? { parentDisplayName: capability.parentDisplayName } : {}),
+  };
 }
 
 export function selectComposerAttachment(input: {

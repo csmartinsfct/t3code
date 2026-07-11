@@ -1,7 +1,10 @@
 import type { ProviderCapabilityEntry, SkillEntry } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
-import { selectComposerAttachment } from "./composerCapabilitySelection";
+import {
+  selectComposerAttachment,
+  toSelectedProviderCapability,
+} from "./composerCapabilitySelection";
 
 const providerCapability = {
   id: "superpowers@openai-curated-remote",
@@ -31,6 +34,32 @@ const trigger = {
 };
 
 describe("selectComposerAttachment", () => {
+  it("preserves provider capability activation fields for draft selection", () => {
+    const selected = toSelectedProviderCapability({
+      id: "superpowers:using-superpowers",
+      provider: "codex",
+      kind: "skill",
+      name: "superpowers:using-superpowers",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+      displayName: "Using Superpowers",
+      parentId: "superpowers@openai-curated-remote",
+      parentDisplayName: "Superpowers",
+      enabled: true,
+      installed: true,
+    });
+
+    expect(selected).toEqual({
+      provider: "codex",
+      kind: "skill",
+      id: "superpowers:using-superpowers",
+      name: "superpowers:using-superpowers",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+      displayName: "Using Superpowers",
+      parentId: "superpowers@openai-curated-remote",
+      parentDisplayName: "Superpowers",
+    });
+  });
+
   it("attaches a provider capability only after replacing its active trigger", () => {
     const attachProviderCapability = vi.fn();
     const applyPromptReplacement = vi.fn(() => true);

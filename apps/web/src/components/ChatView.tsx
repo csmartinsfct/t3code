@@ -210,7 +210,10 @@ import { useImagePreviewOverlay } from "./imagePreview/ImagePreviewOverlay";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerCapabilityChips } from "./chat/ComposerCapabilityChips";
-import { selectComposerAttachment } from "./chat/composerCapabilitySelection";
+import {
+  selectComposerAttachment,
+  toSelectedProviderCapability,
+} from "./chat/composerCapabilitySelection";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import {
@@ -3854,16 +3857,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onAttachProviderCapability = useCallback(
     (capability: ProviderCapabilityEntry) => {
       if (!activeThreadId) return;
-      addComposerDraftProviderCapability(activeThreadId, {
-        provider: capability.provider,
-        kind: capability.kind,
-        id: capability.id,
-        displayName: capability.displayName,
-        ...(capability.parentId ? { parentId: capability.parentId } : {}),
-        ...(capability.parentDisplayName
-          ? { parentDisplayName: capability.parentDisplayName }
-          : {}),
-      });
+      addComposerDraftProviderCapability(activeThreadId, toSelectedProviderCapability(capability));
     },
     [activeThreadId, addComposerDraftProviderCapability],
   );

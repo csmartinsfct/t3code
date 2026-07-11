@@ -90,6 +90,7 @@ describe("normalizeCodexCapabilities", () => {
       kind: "skill",
       parentDisplayName: "Superpowers",
       displayName: "Brainstorming",
+      path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/brainstorming/SKILL.md",
     });
   });
 

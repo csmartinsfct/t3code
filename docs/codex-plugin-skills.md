@@ -22,6 +22,50 @@ path alone did not make those skills model-visible to `codex app-server`.
 The working workaround was to expose the plugin's skill directories through the
 documented user-skill location, `~/.agents/skills`.
 
+## App-Server Discovery And Activation
+
+T3 discovers Codex provider capabilities through the app-server JSON-RPC API:
+
+- `plugin/list` returns installed and enabled plugin rows. These are useful as
+  visible parent/grouping entries in the composer.
+- `skills/list` returns skill entries, including the documented `name` and
+  `path` fields needed for explicit skill activation.
+
+The confirmed activation path for a selected provider skill is the documented
+Codex app-server skill input shape. A `turn/start` request should include both:
+
+- a text input item whose text includes the `$<skill-name>` marker;
+- a skill input item with the discovered skill name and path:
+
+```json
+{
+  "type": "skill",
+  "name": "skill-creator",
+  "path": "/.../SKILL.md"
+}
+```
+
+T3 wires only that explicit skill path. When a selected Codex skill capability
+has both `name` and `path`, T3 prepends `$<skill-name>` to the first user text
+input if the marker is not already present, then appends the `skill` input item.
+
+Direct plugin activation is not confirmed or implemented. Selecting a plugin
+row alone keeps the plugin visible in T3's structured draft state, but it does
+not inject an unsupported app-server payload. To activate a bundled plugin
+skill, select the specific skill row discovered from `skills/list`.
+
+Use the safe probe to inspect the current app-server surface without consuming
+model usage:
+
+```bash
+bun run tsx scripts/probe-codex-capability-activation.ts
+```
+
+The probe initializes `codex app-server`, calls `plugin/list` and `skills/list`,
+prints discovered skill entries with their paths, and prints the exact candidate
+`turn/start` input shape T3 would send for the first skill with `name` and
+`path`.
+
 ## Diagnosis Commands
 
 Check which Codex home T3 app-server processes are using:

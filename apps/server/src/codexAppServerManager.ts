@@ -119,6 +119,11 @@ export interface CodexAppServerSendTurnInput {
   readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
 }
 
+type CodexTextInputItem = { type: "text"; text: string; text_elements: [] };
+type CodexImageInputItem = { type: "image"; url: string };
+type CodexSkillInputItem = { type: "skill"; name: string; path: string };
+type CodexTurnInputItem = CodexTextInputItem | CodexImageInputItem | CodexSkillInputItem;
+
 export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
   readonly provider?: ProviderKind;
@@ -380,6 +385,68 @@ function buildCodexCollaborationMode(input: {
         (input.appendDeveloperInstructions ? `\n\n${input.appendDeveloperInstructions}` : ""),
     },
   };
+}
+
+function buildCodexCapabilityActivationInputItems(
+  capabilities: ReadonlyArray<SelectedProviderCapability> | undefined,
+): CodexSkillInputItem[] {
+  const items: CodexSkillInputItem[] = [];
+  const seen = new Set<string>();
+  for (const capability of capabilities ?? []) {
+    if (capability.provider !== "codex" || capability.kind !== "skill") continue;
+    if (!capability.name || !capability.path) continue;
+    const key = `${capability.name}\u0000${capability.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      type: "skill",
+      name: capability.name,
+      path: capability.path,
+    });
+  }
+  return items;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function textIncludesSkillMarker(text: string, marker: string): boolean {
+  return new RegExp(`(^|\\s)${escapeRegExp(marker)}(?=$|\\s|[.,;!?)}\\]])`).test(text);
+}
+
+function appendCodexSkillInvocations(
+  inputItems: readonly CodexTurnInputItem[],
+  skillItems: readonly CodexSkillInputItem[],
+): CodexTurnInputItem[] {
+  if (skillItems.length === 0) return [...inputItems];
+
+  const next = [...inputItems];
+  const firstTextIndex = next.findIndex((item): item is CodexTextInputItem => item.type === "text");
+  const existingText = firstTextIndex >= 0 ? (next[firstTextIndex] as CodexTextInputItem).text : "";
+  const missingMarkers = skillItems
+    .map((item) => `$${item.name}`)
+    .filter((marker) => !textIncludesSkillMarker(existingText, marker));
+
+  if (missingMarkers.length > 0) {
+    const markerText = missingMarkers.join("\n");
+    if (firstTextIndex >= 0) {
+      const firstText = next[firstTextIndex] as CodexTextInputItem;
+      next[firstTextIndex] = {
+        ...firstText,
+        text: firstText.text ? `${markerText}\n\n${firstText.text}` : markerText,
+      };
+    } else {
+      next.unshift({
+        type: "text",
+        text: markerText,
+        text_elements: [],
+      });
+    }
+  }
+
+  next.push(...skillItems);
+  return next;
 }
 
 function toCodexUserInputAnswer(value: unknown): CodexUserInputAnswer {
@@ -683,9 +750,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const context = this.requireSession(input.threadId);
     context.collabReceiverTurns.clear();
 
-    const turnInput: Array<
-      { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
-    > = [];
+    const turnInput: CodexTurnInputItem[] = [];
     if (input.input) {
       turnInput.push({
         type: "text",
@@ -701,7 +766,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         });
       }
     }
-    if (turnInput.length === 0) {
+    const activatedTurnInput = appendCodexSkillInvocations(
+      turnInput,
+      buildCodexCapabilityActivationInputItems(input.providerCapabilities),
+    );
+    if (activatedTurnInput.length === 0) {
       throw new Error("Turn input must include text or attachments.");
     }
 
@@ -715,9 +784,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
     const turnStartParams: {
       threadId: string;
-      input: Array<
-        { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
-      >;
+      input: CodexTurnInputItem[];
       model?: string;
       serviceTier?: string | null;
       effort?: string;
@@ -731,7 +798,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       };
     } = {
       threadId: providerThreadId,
-      input: turnInput,
+      input: activatedTurnInput,
     };
     const normalizedModel = resolveCodexModelForAccount(
       normalizeCodexModelSlug(input.model ?? context.session.model),

@@ -128,6 +128,7 @@ export function normalizeCodexCapabilities(input: {
         parentDisplayName: parent.displayName,
         enabled: true,
         installed: true,
+        ...(skill.path ? { path: skill.path } : {}),
         ...(marketplaceHint ? { source: marketplaceHint } : {}),
         ...(skill.interface?.iconSmall ? { iconPath: skill.interface.iconSmall } : {}),
       };

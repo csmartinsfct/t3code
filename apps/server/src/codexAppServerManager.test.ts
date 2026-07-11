@@ -675,18 +675,20 @@ describe("sendTurn", () => {
     });
   });
 
-  it("accepts provider capabilities without changing turn/start params", async () => {
+  it("adds documented Codex skill activation input for selected provider skills", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
 
     await manager.sendTurn({
       threadId: asThreadId("thread_1"),
-      input: "Use the selected skill later",
+      input: "Use the selected skill",
       providerCapabilities: [
         {
           provider: "codex",
           kind: "skill",
-          id: "skill-review",
-          displayName: "Review Skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
         },
       ],
     });
@@ -696,7 +698,78 @@ describe("sendTurn", () => {
       input: [
         {
           type: "text",
-          text: "Use the selected skill later",
+          text: "$superpowers:using-superpowers\n\nUse the selected skill",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
+  it("does not duplicate a selected Codex skill marker already present in user text", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Please use $superpowers:using-superpowers here",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Please use $superpowers:using-superpowers here",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
+  it("does not add unsupported Codex plugin activation input for selected provider plugins", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected plugin if supported",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "plugin",
+          id: "superpowers@openai-curated-remote",
+          name: "superpowers",
+          displayName: "Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Use the selected plugin if supported",
           text_elements: [],
         },
       ],
