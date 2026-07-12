@@ -175,12 +175,15 @@ When a user clicks an extension's icon in the panel, or when an extension calls 
 frame: true, titleBarStyle default (visible + draggable)
 alwaysOnTop: true
 NSPanel via panel-window native addon (see below)
+parented to the `BrowserWindow` currently hosting the project's embedded browser
 hide-then-destroy on close (prevents white flash)
 ```
 
 ### NSPanel native addon
 
 `apps/desktop/native/panel-window/panel-window.mm` is a minimal N-API Objective-C++ addon that sets `NSWindowCollectionBehaviorFullScreenAuxiliary` on the popup `BrowserWindow`, allowing it to appear in T3's full-screen Space alongside the main window. It also calls `[win _setPreventsActivation:true]` to prevent the popup from stealing keyboard focus from T3.
+
+The native auxiliary flag makes a popup eligible for a full-screen Space; the Electron parent relationship determines which T3 window and Space owns it. Both renderer-triggered opens and agent `open_extension` broker calls resolve the owner from the project-to-window binding before creating the popup. Project unmount detaches hidden popups from the old parent, and mount reparents them before showing, so main-window/popout transitions do not strand a popup in another Space or let a closing parent destroy it.
 
 This addon replaces the class-swapping approach used by `@egoist/electron-panel-window` (which is incompatible with Electron 40's V8 via NAN). It does **not** use `object_setClass` — the window class is untouched, avoiding the `cleanup` selector crash on close.
 
@@ -202,7 +205,7 @@ Popups are positioned below the URL bar on the right side of the screen. In macO
 
 ### Dapp approval popups
 
-When extensions call `chrome.windows.create()` for dapp approvals (MetaMask connect, sign, send), the `createWindow` callback supplied to `DesktopExtensionManager` handles it identically to action popups — creates a `BrowserWindow`, resolves the URL (now done in the library, not in `main.ts`), registers it with `ExtensionPopupRegistry`, and shows it.
+When extensions call `chrome.windows.create()` for dapp approvals (MetaMask connect, sign, send), the `createWindow` callback supplied to `DesktopExtensionManager` handles it identically to action popups — resolves the project's current owner window, creates a parented `BrowserWindow`, resolves the URL (now done in the library, not in `main.ts`), registers it with `ExtensionPopupRegistry`, and shows it.
 
 `ExtensionPopupRegistry` gives every popup window a stable runtime `popupKey` (`popup-1`, `popup-2`, ...). `open_extension`, `ext_switch <extensionId>`, and `ext_close <extensionId>` remain compatible for the common single-popup case. When multiple windows exist for one extension, `ext_windows` lists each `popupKey`, popup type (`action` or `extension-window`), title, and URL; agents should use `ext_switch <popupKey>` / `ext_close <popupKey>` to target the intended window.
 

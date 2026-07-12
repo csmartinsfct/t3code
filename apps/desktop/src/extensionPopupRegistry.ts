@@ -158,13 +158,15 @@ export class ExtensionPopupRegistry {
     for (const popup of this.popupsByKey.values()) {
       if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
         popup.popupWin.hide();
+        popup.popupWin.setParentWindow(null);
       }
     }
   }
 
-  showProject(projectId: string): void {
+  showProject(projectId: string, parentWindow: BrowserWindow | null): void {
     for (const popup of this.popupsByKey.values()) {
       if (popup.projectId === projectId && !popup.popupWin.isDestroyed()) {
+        popup.popupWin.setParentWindow(parentWindow);
         popup.popupWin.show();
       }
     }

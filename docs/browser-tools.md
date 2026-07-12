@@ -372,10 +372,12 @@ Tab state is split by durability: live `WebContentsView` instances own process-l
 
 Extension popup windows (`BrowserWindow` instances created when the user opens an extension or a dapp triggers `chrome.windows.create`) are **project-scoped** and follow the project's mount lifecycle:
 
-- **`BROWSER_UNMOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(projectId)`: all open popups for the outgoing project are hidden (`BrowserWindow.hide()`). The extension keeps running in the background; no reload occurs.
-- **`BROWSER_MOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(previousProjectId)` for the outgoing project (handles the transition case where unmount was not called explicitly), then `showExtensionPopupsForProject(projectId)` for the incoming project to restore any previously hidden popups.
+- **`BROWSER_UNMOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(projectId)`: all open popups for the outgoing project are hidden (`BrowserWindow.hide()`) and detached from their former parent window. The extension keeps running in the background; no reload occurs.
+- **`BROWSER_MOUNT_CHANNEL`** — calls `hideExtensionPopupsForProject(previousProjectId)` for the outgoing project (handles the transition case where unmount was not called explicitly), then `showExtensionPopupsForProject(projectId, ownerWindow)` for the incoming project to reparent and restore any previously hidden popups.
 
 This means switching threads hides the active wallet/dapp popup and restores it when the user returns — matching the behaviour of the browser panel itself.
+
+Action popups opened by either the renderer or the agent `open_extension` route, plus approval windows created through `chrome.windows.create`, resolve their parent from the project's active `BrowserWindow`. On macOS this parent relationship works with the native `NSWindowCollectionBehaviorFullScreenAuxiliary` flag to keep background agent-triggered popups in the same full-screen Space as T3 Code.
 
 Each extension popup window is tracked by a stable runtime `popupKey`, not just extension ID. `ext_switch <extensionId>` and `ext_close <extensionId>` still work when only one popup is open for that extension; when there are multiple dapp approval/options windows, `ext_windows` exposes each `popupKey`, popup type, title, URL, and active-target state so agents can use `ext_switch <popupKey>` or `ext_close <popupKey>`.
 

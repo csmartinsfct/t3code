@@ -1360,7 +1360,7 @@ async function handleBrowserCdpBrokerRequest(
       const req = parseExtOpenRequest(body);
       const { projectId } = parseViewId(req.viewId);
       if (!projectId) throw new Error("invalid viewId for ext/open");
-      const anchor = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const anchor = getExtensionPopupOwnerWindow(projectId);
       const popupKey = await openExtensionPopupForProject(projectId, req.extensionId, anchor);
       sendBrokerSuccess(response, { popupKey });
       return;
@@ -2179,6 +2179,25 @@ function findEmbeddedBrowserOwnerWindow(tab: EmbeddedBrowserTabState): BrowserWi
   return null;
 }
 
+function findEmbeddedBrowserOwnerWindowForProject(projectId: string): BrowserWindow | null {
+  let boundWindow: BrowserWindow | null = null;
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    const state = embeddedBrowserStateByWindow.get(window);
+    if (state?.projectsByProjectId.get(projectId)?.projectId !== projectId) continue;
+    if (state.activeProjectId === projectId) return window;
+    boundWindow ??= window;
+  }
+  return boundWindow;
+}
+
+function getExtensionPopupOwnerWindow(projectId: string): BrowserWindow | null {
+  return (
+    findEmbeddedBrowserOwnerWindowForProject(projectId) ??
+    (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+  );
+}
+
 function getActiveEmbeddedBrowserProject(
   window: BrowserWindow,
 ): EmbeddedBrowserProjectState | null {
@@ -2797,6 +2816,7 @@ async function createExtensionWindowForProject(
     : (details.url ?? "about:blank");
   const width = details.width ?? 360;
   const height = details.height ?? 600;
+  const ownerWindow = getExtensionPopupOwnerWindow(projectId);
 
   const ses = session.fromPartition(`persist:${projectId}`);
   const notifWin = new BrowserWindow({
@@ -2808,6 +2828,7 @@ async function createExtensionWindowForProject(
     show: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    ...(ownerWindow ? { parent: ownerWindow } : {}),
     webPreferences: {
       session: ses,
       sandbox: true,
@@ -2821,9 +2842,8 @@ async function createExtensionWindowForProject(
   notifWin.setAlwaysOnTop(true);
 
   const ownerBounds =
-    mainWindow && !mainWindow.isDestroyed()
-      ? mainWindow.getBounds()
-      : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    ownerWindow?.getBounds() ??
+    screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   notifWin.setPosition(
     ownerBounds.x + Math.round((ownerBounds.width - width) / 2),
     ownerBounds.y + Math.round((ownerBounds.height - height) / 2),
@@ -3519,8 +3539,8 @@ function hideExtensionPopupsForProject(projectId: string): void {
 }
 
 // Re-show extension popups that were hidden when the user left a project.
-function showExtensionPopupsForProject(projectId: string): void {
-  extensionPopupRegistry.showProject(projectId);
+function showExtensionPopupsForProject(projectId: string, ownerWindow: BrowserWindow): void {
+  extensionPopupRegistry.showProject(projectId, ownerWindow);
 }
 
 function closeExtensionPopupWindow(projectId: string, selector: ExtensionPopupSelector): void {
@@ -3593,6 +3613,7 @@ async function openExtensionPopupForProject(
 
   const existing = extensionPopupRegistry.getActionPopup(projectId, extensionId);
   if (existing && !existing.popupWin.isDestroyed()) {
+    existing.popupWin.setParentWindow(anchorWindow);
     existing.popupWin.focus();
     return existing.popupKey;
   }
@@ -3606,6 +3627,7 @@ async function openExtensionPopupForProject(
     show: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    ...(anchorWindow ? { parent: anchorWindow } : {}),
     webPreferences: {
       session: ses,
       sandbox: true,
@@ -3701,7 +3723,7 @@ function registerIpcHandlers(): void {
       // that belong to the incoming one. This keeps popups alive in the
       // background so the extension isn't reloaded when the user returns.
       if (previousActive) hideExtensionPopupsForProject(previousActive.projectId);
-      showExtensionPopupsForProject(projectId);
+      showExtensionPopupsForProject(projectId, window);
       console.log("[desktop/browser] mount", {
         projectId,
         tabs: project.tabs.size,
