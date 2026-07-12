@@ -506,7 +506,7 @@ ScheduledTask {
   cronExpression   — 5-field standard cron (e.g. "0 9 * * 1" for Mondays at 9am)
   enabled          — on/off toggle
   jobType          — currently only "new_thread"
-  newThreadConfig  — { projectId, skillIds?, prompt?, autoSend }
+  newThreadConfig  — { projectId, skillIds?, providerCapabilities?, prompt?, autoSend }
   lastRunAt        — timestamp of most recent execution
   nextRunAt        — calculated next execution time
 }
@@ -522,7 +522,8 @@ ScheduledTask {
 **User interaction:**
 
 - Create, edit, enable/disable, and delete scheduled tasks in Settings → Scheduled Tasks.
-- View task detail with cron expression, project selector, prompt configuration.
+- Attach local skills, provider plugins, and plugin skills in one compact picker.
+- View task detail with cron expression, project selector, prompt, and capability configuration.
 - Browse execution history with success/failure status.
 - Settings list/detail pages and chat proposal cards hydrate their project dropdowns from the client project store, with `orchestration.listProjects` available for narrow project-only refreshes. Opening scheduled-task UI does not wait for startup snapshot hydration.
 

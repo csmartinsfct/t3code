@@ -39,7 +39,8 @@ REST API tool: propose_project_script (managedRuns/http.ts)
 
 ### Propose Scheduled Task (`t3:propose-scheduled-task`)
 
-Lets the model propose a scheduled task for the user to review.
+Lets the model propose a scheduled task, including optional provider plugin or
+plugin-skill attachments, for the user to review.
 
 **Data flow:**
 

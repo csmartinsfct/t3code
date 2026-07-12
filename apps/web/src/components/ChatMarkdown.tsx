@@ -65,7 +65,12 @@ class CodeHighlightErrorBoundary extends React.Component<
   }
 }
 
-import type { DeclaredService, ModelSelection, ProjectScriptIcon } from "@t3tools/contracts";
+import type {
+  DeclaredService,
+  ModelSelection,
+  ProjectScriptIcon,
+  SelectedProviderCapability,
+} from "@t3tools/contracts";
 
 export interface ProposeActionEvent {
   action: "accept" | "reject";
@@ -82,6 +87,7 @@ export interface ProposeScheduledTaskEvent {
   cronExpression: string;
   projectId: string;
   skillIds?: string[];
+  providerCapabilities?: SelectedProviderCapability[];
   prompt?: string;
   autoSend: boolean;
   modelSelection?: ModelSelection;

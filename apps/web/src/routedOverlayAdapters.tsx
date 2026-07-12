@@ -251,6 +251,22 @@ export function shouldDismissOverlayRouteMenu(reason: string | null): boolean {
   return reason === "outside-press" || reason === "escape-key" || reason === "close-press";
 }
 
+export function shouldDismissOverlayRouteDialog(reason: string | null): boolean {
+  return shouldDismissOverlayRouteMenu(reason);
+}
+
+function useRouteDialogDismiss(cancelReason = "dismissed") {
+  const controller = useOverlayRouteController();
+  return useCallback(
+    (nextOpen: boolean, details?: unknown) => {
+      if (nextOpen) return;
+      if (!shouldDismissOverlayRouteDialog(getOpenChangeReason(details))) return;
+      controller.cancel(cancelReason);
+    },
+    [cancelReason, controller],
+  );
+}
+
 function useRouteMenuDismiss(cancelReason = "dismissed") {
   const controller = useOverlayRouteController();
   return useCallback(
@@ -284,7 +300,7 @@ function useRouteSelectDismiss(cancelReason = "dismissed") {
 }
 
 export function OverlayRouteDialog({ cancelReason, ...props }: RouteRootProps<typeof Dialog>) {
-  const handleOpenChange = useRouteDismiss(cancelReason);
+  const handleOpenChange = useRouteDialogDismiss(cancelReason);
   return <Dialog open onOpenChange={handleOpenChange} {...props} />;
 }
 

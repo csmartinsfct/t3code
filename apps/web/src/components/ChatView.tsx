@@ -1511,7 +1511,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   // Populate composer from thread initialDraft (e.g. scheduled task created threads)
   const initialDraftHydrationRef = useRef<
-    Map<string, { promptApplied: boolean; attachedSkillIds: Set<string> }>
+    Map<
+      string,
+      {
+        promptApplied: boolean;
+        attachedSkillIds: Set<string>;
+        attachedProviderCapabilityIds: Set<string>;
+      }
+    >
   >(new Map());
   useEffect(() => {
     const draft = activeThread?.initialDraft;
@@ -1520,15 +1527,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const hydrationState =
       initialDraftHydrationRef.current.get(tid) ??
       (() => {
-        const initialState = { promptApplied: false, attachedSkillIds: new Set<string>() };
+        const initialState = {
+          promptApplied: false,
+          attachedSkillIds: new Set<string>(),
+          attachedProviderCapabilityIds: new Set<string>(),
+        };
         initialDraftHydrationRef.current.set(tid, initialState);
         return initialState;
       })();
     const hasAppliedInitialDraft =
-      hydrationState.promptApplied || hydrationState.attachedSkillIds.size > 0;
+      hydrationState.promptApplied ||
+      hydrationState.attachedSkillIds.size > 0 ||
+      hydrationState.attachedProviderCapabilityIds.size > 0;
 
     if (draft.autoSend) {
       const draftSkillIds = new Set(draft.skillIds ?? []);
+      const draftProviderCapabilityIds = new Set(
+        (draft.providerCapabilities ?? []).map(providerCapabilitySelectionKey),
+      );
       const composerHasOnlyAutoSentDraftContent =
         (prompt === "" || prompt === (draft.prompt ?? "")) &&
         composerImages.length === 0 &&
@@ -1537,7 +1553,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         composerTerminalContexts.length === 0 &&
         composerCodeSnippets.length === 0 &&
         composerTicketAttachments.length === 0 &&
-        composerSkills.every((skill) => draftSkillIds.has(skill.id));
+        composerSkills.every((skill) => draftSkillIds.has(skill.id)) &&
+        composerProviderCapabilities.every((capability) =>
+          draftProviderCapabilityIds.has(providerCapabilitySelectionKey(capability)),
+        );
       if (composerHasOnlyAutoSentDraftContent) {
         clearComposerDraftContent(tid);
       }
@@ -1545,12 +1564,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       for (const skillId of draft.skillIds ?? []) {
         hydrationState.attachedSkillIds.add(skillId);
       }
+      for (const capabilityId of draftProviderCapabilityIds) {
+        hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+      }
       return;
     }
 
     // Only seed untouched composers. If initial hydration has already started for this thread,
     // continue attaching any remaining referenced skills as they resolve.
-    if (!hasAppliedInitialDraft && (prompt || composerSkills.length > 0)) return;
+    if (
+      !hasAppliedInitialDraft &&
+      (prompt || composerSkills.length > 0 || composerProviderCapabilities.length > 0)
+    ) {
+      return;
+    }
 
     // Pre-fill prompt
     if (!hydrationState.promptApplied && draft.prompt) {
@@ -1583,6 +1610,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
     }
+
+    for (const capability of draft.providerCapabilities ?? []) {
+      const capabilityId = providerCapabilitySelectionKey(capability);
+      if (
+        hydrationState.attachedProviderCapabilityIds.has(capabilityId) ||
+        composerProviderCapabilities.some(
+          (attached) => providerCapabilitySelectionKey(attached) === capabilityId,
+        )
+      ) {
+        hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+        continue;
+      }
+      addComposerDraftProviderCapability(tid, capability);
+      hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+    }
   }, [
     activeThread?.id,
     activeThread?.initialDraft,
@@ -1594,9 +1636,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerCodeSnippets.length,
     composerTicketAttachments.length,
     composerSkills,
+    composerProviderCapabilities,
     availableSkills,
     setComposerDraftPrompt,
     addComposerDraftSkill,
+    addComposerDraftProviderCapability,
     clearComposerDraftContent,
   ]);
 
@@ -2847,6 +2891,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       cronExpression: string;
       projectId: string;
       skillIds?: string[];
+      providerCapabilities?: SelectedProviderCapability[];
       prompt?: string;
       autoSend: boolean;
       modelSelection?: ModelSelection;
@@ -2867,6 +2912,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             newThreadConfig: {
               projectId: event.projectId as never,
               ...(event.skillIds && event.skillIds.length > 0 ? { skillIds: event.skillIds } : {}),
+              ...(event.providerCapabilities && event.providerCapabilities.length > 0
+                ? { providerCapabilities: event.providerCapabilities }
+                : {}),
               ...(event.prompt ? { prompt: event.prompt } : {}),
               autoSend: event.autoSend,
               ...(event.modelSelection ? { modelSelection: event.modelSelection } : {}),

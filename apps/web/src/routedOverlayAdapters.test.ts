@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  shouldDismissOverlayRouteDialog,
   shouldDismissOverlayRouteCombobox,
   shouldDismissOverlayRouteMenu,
   shouldDismissOverlayRouteSelect,
 } from "./routedOverlayAdapters";
+
+describe("shouldDismissOverlayRouteDialog", () => {
+  it("dismisses only for explicit dialog dismissal reasons", () => {
+    expect(shouldDismissOverlayRouteDialog("outside-press")).toBe(true);
+    expect(shouldDismissOverlayRouteDialog("escape-key")).toBe(true);
+    expect(shouldDismissOverlayRouteDialog("close-press")).toBe(true);
+    expect(shouldDismissOverlayRouteDialog("focus-out")).toBe(false);
+    expect(shouldDismissOverlayRouteDialog("item-press")).toBe(false);
+    expect(shouldDismissOverlayRouteDialog(null)).toBe(false);
+  });
+});
 
 describe("routed overlay menu dismissal", () => {
   it("only dismisses routed menus for explicit menu dismissals", () => {

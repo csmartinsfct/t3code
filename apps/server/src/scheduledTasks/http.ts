@@ -1,7 +1,12 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import type { ModelSelection, ProjectId, ScheduledTaskNewThreadConfig } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProjectId,
+  ScheduledTaskNewThreadConfig,
+  SelectedProviderCapability,
+} from "@t3tools/contracts";
 import { ScheduledTaskId } from "@t3tools/contracts";
 import {
   parseToolCallBody,
@@ -19,6 +24,42 @@ const API_ROUTE = "/api/scheduled-tasks";
 type MutableScheduledTaskNewThreadConfig = {
   -readonly [K in keyof ScheduledTaskNewThreadConfig]: ScheduledTaskNewThreadConfig[K];
 };
+
+const PROVIDER_CAPABILITIES_INPUT_SCHEMA = {
+  type: "array",
+  optional: true,
+  description: "Optional provider plugins or plugin skills to attach.",
+  items: {
+    type: "object",
+    properties: {
+      provider: { type: "string", description: "Provider kind, e.g. codex." },
+      kind: { type: "string", description: "Capability kind: plugin or skill." },
+      id: { type: "string", description: "Stable provider capability ID." },
+      displayName: { type: "string", description: "User-facing capability name." },
+      name: { type: "string", optional: true, description: "Provider-native name." },
+      path: { type: "string", optional: true, description: "Provider-native skill path." },
+      parentId: { type: "string", optional: true, description: "Parent plugin ID." },
+      parentDisplayName: {
+        type: "string",
+        optional: true,
+        description: "Parent plugin display name.",
+      },
+      capabilityRootPath: {
+        type: "string",
+        optional: true,
+        description: "Provider capability root path. Revalidated when the task runs.",
+      },
+      appIds: {
+        type: "array",
+        optional: true,
+        items: { type: "string" },
+        description: "Connector app IDs. Revalidated when the task runs.",
+      },
+      iconPath: { type: "string", optional: true, description: "Capability icon path." },
+      iconUrl: { type: "string", optional: true, description: "Capability icon URL." },
+    },
+  },
+} as const;
 
 // ---------------------------------------------------------------------------
 // Tool definitions (for GET discovery)
@@ -56,6 +97,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         items: { type: "string" },
         description: "Optional skill IDs to attach.",
       },
+      providerCapabilities: PROVIDER_CAPABILITIES_INPUT_SCHEMA,
       prompt: { type: "string", optional: true, description: "Optional prompt to preload." },
       autoSend: {
         type: "boolean",
@@ -97,6 +139,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         items: { type: "string" },
         description: "New skill IDs.",
       },
+      providerCapabilities: PROVIDER_CAPABILITIES_INPUT_SCHEMA,
       prompt: { type: "string", optional: true, description: "New prompt." },
       autoSend: { type: "boolean", optional: true, description: "New auto-send setting." },
       modelSelection: {
@@ -173,6 +216,7 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         items: { type: "string" },
         description: "Optional skill IDs to attach.",
       },
+      providerCapabilities: PROVIDER_CAPABILITIES_INPUT_SCHEMA,
       prompt: { type: "string", optional: true, description: "Optional prompt to preload." },
       autoSend: {
         type: "boolean",
@@ -222,6 +266,9 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const cronExpression = input.cronExpression as string;
         const projectId = input.projectId as string;
         const skillIds = input.skillIds as string[] | undefined;
+        const providerCapabilities = input.providerCapabilities as
+          | SelectedProviderCapability[]
+          | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
         const modelSelection = input.modelSelection as ModelSelection | undefined;
@@ -235,6 +282,9 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
           newThreadConfig: {
             projectId: projectId as ProjectId,
             ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
+            ...(providerCapabilities && providerCapabilities.length > 0
+              ? { providerCapabilities }
+              : {}),
             ...(prompt ? { prompt } : {}),
             autoSend: autoSend ?? false,
             ...(modelSelection ? { modelSelection } : {}),
@@ -252,6 +302,9 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const enabled = input.enabled as boolean | undefined;
         const projectId = input.projectId as string | undefined;
         const skillIds = input.skillIds as string[] | undefined;
+        const providerCapabilities = input.providerCapabilities as
+          | SelectedProviderCapability[]
+          | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
         const modelSelection = input.modelSelection as ModelSelection | null | undefined;
@@ -260,6 +313,7 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         if (
           projectId !== undefined ||
           skillIds !== undefined ||
+          providerCapabilities !== undefined ||
           prompt !== undefined ||
           autoSend !== undefined ||
           modelSelection !== undefined
@@ -276,6 +330,13 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
           if (skillIds !== undefined) {
             if (skillIds.length > 0) nextConfig.skillIds = skillIds;
             else delete nextConfig.skillIds;
+          }
+          if (providerCapabilities !== undefined) {
+            if (providerCapabilities.length > 0) {
+              nextConfig.providerCapabilities = providerCapabilities;
+            } else {
+              delete nextConfig.providerCapabilities;
+            }
           }
           if (prompt !== undefined) {
             const trimmedPrompt = prompt.trim();
@@ -347,6 +408,9 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
         const cronExpression = input.cronExpression as string;
         const projectId = input.projectId as string;
         const skillIds = input.skillIds as string[] | undefined;
+        const providerCapabilities = input.providerCapabilities as
+          | SelectedProviderCapability[]
+          | undefined;
         const prompt = input.prompt as string | undefined;
         const autoSend = input.autoSend as boolean | undefined;
         const modelSelection = input.modelSelection as ModelSelection | undefined;
@@ -357,6 +421,9 @@ function toolHandlers(ctx: { scheduledTasks: ScheduledTaskServiceShape }) {
           cronExpression,
           projectId,
           ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
+          ...(providerCapabilities && providerCapabilities.length > 0
+            ? { providerCapabilities }
+            : {}),
           ...(prompt ? { prompt } : {}),
           autoSend: autoSend ?? false,
           ...(modelSelection ? { modelSelection } : {}),

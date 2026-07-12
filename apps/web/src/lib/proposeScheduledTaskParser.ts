@@ -1,4 +1,4 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection, SelectedProviderCapability } from "@t3tools/contracts";
 
 const PROPOSE_SCHEDULED_TASK_LANGUAGE = "language-t3:propose-scheduled-task";
 
@@ -8,6 +8,7 @@ export interface ProposeScheduledTaskPayload {
   cronExpression: string;
   projectId: string;
   skillIds?: string[];
+  providerCapabilities?: SelectedProviderCapability[];
   prompt?: string;
   autoSend: boolean;
   modelSelection?: ModelSelection;
@@ -58,6 +59,9 @@ export function parseProposeScheduledTaskPayload(code: string): ProposeScheduled
     } else if (typeof record.skillId === "string" && record.skillId.trim()) {
       skillIds = [record.skillId.trim()];
     }
+    const providerCapabilities = Array.isArray(record.providerCapabilities)
+      ? record.providerCapabilities.filter(isSelectedProviderCapabilityRecord)
+      : [];
     const prompt =
       typeof record.prompt === "string" && record.prompt.trim() ? record.prompt.trim() : undefined;
     const autoSend = typeof record.autoSend === "boolean" ? record.autoSend : false;
@@ -71,6 +75,7 @@ export function parseProposeScheduledTaskPayload(code: string): ProposeScheduled
       cronExpression,
       projectId,
       ...(skillIds !== undefined ? { skillIds } : {}),
+      ...(providerCapabilities.length > 0 ? { providerCapabilities } : {}),
       ...(prompt !== undefined ? { prompt } : {}),
       autoSend,
       ...(modelSelection !== undefined ? { modelSelection } : {}),
@@ -78,6 +83,17 @@ export function parseProposeScheduledTaskPayload(code: string): ProposeScheduled
   } catch {
     return null;
   }
+}
+
+function isSelectedProviderCapabilityRecord(value: unknown): value is SelectedProviderCapability {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Partial<SelectedProviderCapability>;
+  return (
+    typeof candidate.provider === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.displayName === "string"
+  );
 }
 
 function isModelSelectionRecord(value: unknown): value is ModelSelection {

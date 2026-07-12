@@ -515,6 +515,7 @@ export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 export const ThreadInitialDraft = Schema.Struct({
   prompt: Schema.optional(Schema.String),
   skillIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  providerCapabilities: Schema.optional(Schema.Array(SelectedProviderCapability)),
   autoSend: Schema.optional(Schema.Boolean),
 });
 export type ThreadInitialDraft = typeof ThreadInitialDraft.Type;

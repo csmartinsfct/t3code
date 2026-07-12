@@ -2,6 +2,7 @@ import { Schema } from "effect";
 
 import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { ModelSelection } from "./orchestration";
+import { SelectedProviderCapability } from "./providerCapabilities";
 
 // ---------------------------------------------------------------------------
 // Branded IDs
@@ -30,6 +31,7 @@ export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;
 export const ScheduledTaskNewThreadConfig = Schema.Struct({
   projectId: ProjectId,
   skillIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  providerCapabilities: Schema.optional(Schema.Array(SelectedProviderCapability)),
   prompt: Schema.optional(Schema.String),
   autoSend: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   modelSelection: Schema.optional(ModelSelection),
