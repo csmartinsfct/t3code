@@ -1550,6 +1550,77 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("ignores non-projecting Claude system telemetry without runtime warnings", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "think about this",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "thinking_tokens",
+        estimated_tokens: 42,
+        estimated_tokens_delta: 7,
+        session_id: "sdk-session-thinking-tokens",
+        uuid: "thinking-tokens-1",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_updated",
+        task_id: "background-task-1",
+        patch: {
+          status: "completed",
+          end_time: 1_783_870_963_731,
+        },
+        session_id: "sdk-session-thinking-tokens",
+        uuid: "task-updated-1",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-thinking-tokens",
+        uuid: "result-thinking-tokens",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.deepEqual(
+        runtimeEvents.map((event) => event.type),
+        [
+          "session.started",
+          "session.configured",
+          "session.state.changed",
+          "task.background.changed",
+          "turn.started",
+          "thread.started",
+          "turn.completed",
+        ],
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -2798,6 +2798,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       }
+      case "thinking_tokens":
+      case "task_updated":
+        return;
       case "plugin_install": {
         const raw = message as Record<string, unknown>;
         const status = safeString(raw.status) ?? "updated";
