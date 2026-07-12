@@ -21,7 +21,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Random, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Random, Stream } from "effect";
 import { vi } from "vitest";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
@@ -48,6 +48,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public readonly reloadPluginsCalls: Array<void> = [];
   public closeCalls = 0;
+  public interruptResponse: SDKControlInterruptResponse | undefined;
   public initializationResult?: () => Promise<unknown>;
   public getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   public mcpServerStatus?: () => Promise<McpServerStatus[]>;
@@ -88,7 +89,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   readonly interrupt = async (): Promise<SDKControlInterruptResponse | undefined> => {
     this.interruptCalls.push(undefined);
-    return undefined;
+    return this.interruptResponse;
   };
 
   readonly reinitialize = async (): Promise<SDKControlInitializeResponse> => {
@@ -299,6 +300,270 @@ const THREAD_ID = ThreadId.makeUnsafe("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.makeUnsafe("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
+  it.effect("replaces process-scoped background tasks and clears them on stop", () => {
+    let blockerEntered: Deferred.Deferred<void> | undefined;
+    let releaseBlocker: Deferred.Deferred<void> | undefined;
+    const harness = makeHarness({
+      nativeEventLogger: {
+        filePath: "memory://claude-background-stop-race",
+        write: (event) => {
+          const uuid = (
+            event as { readonly event?: { readonly payload?: { readonly uuid?: unknown } } }
+          ).event?.payload?.uuid;
+          const entered = blockerEntered;
+          const release = releaseBlocker;
+          if (uuid !== "background-stop-blocker" || !entered || !release) {
+            return Effect.void;
+          }
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(entered, undefined);
+            yield* Deferred.await(release);
+          }).pipe(Effect.uninterruptible);
+        },
+        close: () => Effect.void,
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      blockerEntered = yield* Deferred.make<void>();
+      releaseBlocker = yield* Deferred.make<void>();
+      const preStopSnapshotObserved = yield* Deferred.make<void>();
+      const stopEmptyObserved = yield* Deferred.make<void>();
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      let stopStarted = false;
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "session.exited",
+      ).pipe(
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            runtimeEvents.push(event);
+            if (event.type !== "task.background.changed") {
+              return;
+            }
+            if (event.payload.tasks.some((task) => String(task.taskId) === "task-2")) {
+              yield* Deferred.succeed(preStopSnapshotObserved, undefined);
+            }
+            if (stopStarted && event.payload.tasks.length === 0) {
+              yield* Deferred.succeed(stopEmptyObserved, undefined);
+            }
+          }),
+        ),
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: "claudeAgent",
+        resumeCursor: {
+          threadId: RESUME_THREAD_ID,
+          resume: "550e8400-e29b-41d4-a716-446655440000",
+          turnCount: 4,
+        },
+        runtimeMode: "full-access",
+      });
+
+      const emitBackgroundTasks = (
+        tasks: Array<{ task_id: string; task_type: string; description: string }>,
+      ) =>
+        harness.query.emit({
+          type: "system",
+          subtype: "background_tasks_changed",
+          tasks,
+          uuid: `background-${tasks.length}`,
+          session_id: "550e8400-e29b-41d4-a716-446655440000",
+        } as unknown as SDKMessage);
+
+      emitBackgroundTasks([
+        { task_id: " task-1 ", task_type: " shell ", description: " Build release " },
+      ]);
+      yield* Effect.yieldNow;
+      emitBackgroundTasks([]);
+      yield* Effect.yieldNow;
+      emitBackgroundTasks([
+        { task_id: "task-2", task_type: "future-task", description: "Watch deployment" },
+      ]);
+      yield* Deferred.await(preStopSnapshotObserved);
+      harness.query.emit({
+        type: "system",
+        subtype: "background_tasks_changed",
+        tasks: [{ task_id: "task-blocker", task_type: "shell", description: "Hold stream open" }],
+        uuid: "background-stop-blocker",
+        session_id: "550e8400-e29b-41d4-a716-446655440000",
+      } as unknown as SDKMessage);
+      yield* Deferred.await(blockerEntered);
+
+      stopStarted = true;
+      const stopFiber = yield* adapter.stopSession(session.threadId).pipe(Effect.forkChild);
+      yield* Deferred.await(stopEmptyObserved);
+      assert.equal(stopFiber.pollUnsafe(), undefined);
+
+      emitBackgroundTasks([
+        { task_id: "task-after-reset", task_type: "shell", description: "Must be dropped" },
+      ]);
+      yield* Deferred.succeed(releaseBlocker, undefined);
+      yield* Fiber.join(stopFiber);
+      yield* Fiber.join(runtimeEventsFiber);
+
+      const replacements = runtimeEvents.filter(
+        (event) => event.type === "task.background.changed",
+      );
+      const replacementPayloads = replacements.map((event) =>
+        event.type === "task.background.changed"
+          ? {
+              tasks: event.payload.tasks.map((task) => ({
+                ...task,
+                taskId: String(task.taskId),
+              })),
+            }
+          : { tasks: [] },
+      );
+      assert.deepEqual(replacementPayloads.slice(0, 4), [
+        { tasks: [] },
+        {
+          tasks: [{ taskId: "task-1", taskType: "shell", description: "Build release" }],
+        },
+        { tasks: [] },
+        {
+          tasks: [
+            {
+              taskId: "task-2",
+              taskType: "future-task",
+              description: "Watch deployment",
+            },
+          ],
+        },
+      ]);
+      assert.deepEqual(replacementPayloads.at(-1), { tasks: [] });
+      const finalEmptyResetIndex = replacementPayloads.findIndex(
+        (payload, index) => index >= 4 && payload.tasks.length === 0,
+      );
+      assert.equal(finalEmptyResetIndex >= 4, true);
+      assert.equal(
+        replacementPayloads
+          .slice(finalEmptyResetIndex + 1)
+          .some((payload) => payload.tasks.length > 0),
+        false,
+      );
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "task.completed"),
+        false,
+      );
+      assert.deepEqual(session.resumeCursor, {
+        threadId: RESUME_THREAD_ID,
+        resume: "550e8400-e29b-41d4-a716-446655440000",
+        turnCount: 4,
+      });
+      assert.equal(
+        harness.getLastCreateQueryInput()?.options.resume,
+        "550e8400-e29b-41d4-a716-446655440000",
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("reports queued SDK interrupt UUIDs without mutating the prompt queue", () => {
+    const harness = makeHarness();
+    harness.query.interruptResponse = {
+      still_queued: [
+        "550e8400-e29b-41d4-a716-446655440001",
+        "550e8400-e29b-41d4-a716-446655440002",
+      ],
+    };
+
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "keep this queued prompt",
+        attachments: [],
+      });
+
+      yield* adapter.interruptTurn(session.threadId, turn.turnId);
+
+      const queuedPrompt = yield* Effect.promise(() =>
+        readFirstPromptText(harness.getLastCreateQueryInput()),
+      );
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const diagnostic = runtimeEvents.find((event) => event.type === "runtime.diagnostic");
+      assert.equal(diagnostic?.type, "runtime.diagnostic");
+      if (diagnostic?.type === "runtime.diagnostic") {
+        assert.deepEqual(diagnostic.payload.data, {
+          stillQueued: harness.query.interruptResponse?.still_queued,
+        });
+      }
+      assert.equal(queuedPrompt, "keep this queued prompt");
+      assert.equal(harness.query.interruptCalls.length, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("fails unknown structured terminal reasons with a diagnostic", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        terminal_reason: "future_terminal_reason",
+        session_id: "sdk-session-unknown-terminal",
+        uuid: "result-unknown-terminal",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const diagnostic = runtimeEvents.find((event) => event.type === "runtime.diagnostic");
+      assert.equal(diagnostic?.type, "runtime.diagnostic");
+      if (diagnostic?.type === "runtime.diagnostic") {
+        assert.equal(diagnostic.payload.category, "unknown_terminal_reason");
+        assert.deepEqual(diagnostic.payload.data, {
+          terminalReason: "future_terminal_reason",
+        });
+      }
+
+      const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+      assert.equal(turnCompleted?.type, "turn.completed");
+      if (turnCompleted?.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "failed");
+        assert.equal(turnCompleted.payload.terminalReason, "future_terminal_reason");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -796,7 +1061,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 11).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -915,6 +1180,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "content.delta",
@@ -925,7 +1191,7 @@ describe("ClaudeAdapterLive", () => {
         ],
       );
 
-      const turnStarted = runtimeEvents[3];
+      const turnStarted = runtimeEvents[4];
       assert.equal(turnStarted?.type, "turn.started");
       if (turnStarted?.type === "turn.started") {
         assert.equal(String(turnStarted.turnId), String(turn.turnId));
@@ -973,7 +1239,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 11).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 12).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1081,6 +1347,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "content.delta",
@@ -1152,7 +1419,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1228,7 +1495,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1262,6 +1529,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "turn.completed",
@@ -1323,13 +1591,14 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "turn.completed",
           "session.exited",
         ],
       );
 
-      const turnCompleted = runtimeEvents[4];
+      const turnCompleted = runtimeEvents[5];
       assert.equal(turnCompleted?.type, "turn.completed");
       if (turnCompleted?.type === "turn.completed") {
         assert.equal(String(turnCompleted.turnId), String(turn.turnId));
@@ -1337,7 +1606,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(turnCompleted.payload.errorMessage, "Claude runtime interrupted.");
       }
 
-      const sessionExited = runtimeEvents[5];
+      const sessionExited = runtimeEvents[6];
       assert.equal(sessionExited?.type, "session.exited");
 
       assert.equal(yield* adapter.hasSession(THREAD_ID), false);
@@ -1428,7 +1697,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1475,7 +1744,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1530,7 +1799,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1636,7 +1905,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1703,7 +1972,7 @@ describe("ClaudeAdapterLive", () => {
       return Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
 
-        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
           Stream.runCollect,
           Effect.forkChild,
         );
@@ -1764,6 +2033,7 @@ describe("ClaudeAdapterLive", () => {
             "session.started",
             "session.configured",
             "session.state.changed",
+            "task.background.changed",
             "turn.started",
             "thread.started",
             "content.delta",
@@ -1794,7 +2064,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 10).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -1909,6 +2179,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "content.delta",
@@ -1960,7 +2231,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -2004,6 +2275,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "content.delta",
@@ -2029,7 +2301,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 13).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 14).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -2192,6 +2464,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
           "content.delta",
@@ -2251,7 +2524,7 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 5).pipe(
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -2299,6 +2572,7 @@ describe("ClaudeAdapterLive", () => {
           "session.started",
           "session.configured",
           "session.state.changed",
+          "task.background.changed",
           "turn.started",
           "thread.started",
         ],
@@ -2310,7 +2584,7 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(sessionStarted.threadId, THREAD_ID);
       }
 
-      const threadStarted = runtimeEvents[4];
+      const threadStarted = runtimeEvents[5];
       assert.equal(threadStarted?.type, "thread.started");
       if (threadStarted?.type === "thread.started") {
         assert.equal(threadStarted.threadId, THREAD_ID);
@@ -2335,7 +2609,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "approval-required",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -2445,7 +2719,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "approval-required",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       const createInput = harness.getLastCreateQueryInput();
       const canUseTool = createInput?.options.canUseTool;
@@ -2874,7 +3148,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -2941,7 +3215,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -3014,7 +3288,7 @@ describe("ClaudeAdapterLive", () => {
       });
 
       // Drain the session startup events (started, configured, state.changed).
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -3215,7 +3489,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       const createInput = harness.getLastCreateQueryInput();
       const canUseTool = createInput?.options.canUseTool;
@@ -3284,7 +3558,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "approval-required",
       });
 
-      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* Stream.take(adapter.streamEvents, 4).pipe(Stream.runDrain);
 
       const createInput = harness.getLastCreateQueryInput();
       const canUseTool = createInput?.options.canUseTool;
