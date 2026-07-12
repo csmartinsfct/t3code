@@ -8,7 +8,7 @@ import {
 import { readNativeApi } from "../nativeApi";
 
 const EMPTY: readonly ProviderCapabilityEntry[] = [];
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 60_000;
 
 export function useProviderCapabilities(input: {
   provider: ProviderKind | undefined;

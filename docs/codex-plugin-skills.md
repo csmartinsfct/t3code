@@ -32,6 +32,12 @@ T3 discovers Codex provider capabilities through the app-server JSON-RPC API:
 - `skills/list` returns skill entries, including the documented `name` and
   `path` fields needed for explicit skill activation.
 
+Discovery results are cached for 60 seconds per Codex provider, home, binary,
+and project cwd. Concurrent callers share one in-flight app-server query, and
+the web client refreshes on the same cadence. This keeps profile and
+cwd-specific inventories isolated while avoiding a new short-lived
+`codex app-server` process every few seconds.
+
 Some remote connector plugins omit artwork from `plugin/list`. T3 falls back to
 the newest Codex `cache/remote_plugin_catalog` entry, preferring its composer
 icon and then its logo. If neither surface provides artwork, the UI uses the

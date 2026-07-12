@@ -18,6 +18,19 @@ class CodexCapabilityDiscoveryError extends Data.TaggedError("CodexCapabilityDis
   readonly cause: unknown;
 }> {}
 
+const CODEX_CAPABILITY_CACHE_TTL_MS = 60_000;
+
+type CodexCapabilityDiscoveryResult = {
+  capabilities: ProviderCapabilityEntry[];
+};
+
+const capabilityCache = new Map<
+  string,
+  { expiresAt: number; result: CodexCapabilityDiscoveryResult }
+>();
+const capabilityDiscoveryInFlight = new Map<string, Promise<CodexCapabilityDiscoveryResult>>();
+let capabilityCacheGeneration = 0;
+
 export interface CodexPluginListResponse {
   marketplaces?: Array<{
     name?: string;
@@ -357,6 +370,67 @@ export function canonicalizeCodexSelectedCapabilities(input: {
   return result;
 }
 
+function codexCapabilityCacheKey(input: {
+  provider: ProviderKind;
+  cwd: string;
+  binaryPath: string;
+  homePath?: string;
+}): string {
+  return JSON.stringify([input.provider, input.cwd, input.binaryPath, input.homePath ?? null]);
+}
+
+export function clearCodexProviderCapabilitiesCache(): void {
+  capabilityCacheGeneration += 1;
+  capabilityCache.clear();
+  capabilityDiscoveryInFlight.clear();
+}
+
+async function resolveCachedCodexProviderCapabilities(input: {
+  provider: ProviderKind;
+  cwd: string;
+  binaryPath: string;
+  homePath?: string;
+}): Promise<CodexCapabilityDiscoveryResult> {
+  const key = codexCapabilityCacheKey(input);
+  const now = Date.now();
+  const cached = capabilityCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.result;
+  if (cached) capabilityCache.delete(key);
+
+  const existingDiscovery = capabilityDiscoveryInFlight.get(key);
+  if (existingDiscovery) return existingDiscovery;
+
+  for (const [candidateKey, candidate] of capabilityCache) {
+    if (candidate.expiresAt <= now) capabilityCache.delete(candidateKey);
+  }
+
+  const generation = capabilityCacheGeneration;
+  const discovery = queryCodexAppServer(input)
+    .then(({ plugins, skills }) => ({
+      capabilities: normalizeCodexCapabilities({
+        provider: input.provider,
+        plugins,
+        skills,
+      }),
+    }))
+    .then((result) => {
+      if (generation === capabilityCacheGeneration) {
+        capabilityCache.set(key, {
+          expiresAt: Date.now() + CODEX_CAPABILITY_CACHE_TTL_MS,
+          result,
+        });
+      }
+      return result;
+    })
+    .finally(() => {
+      if (capabilityDiscoveryInFlight.get(key) === discovery) {
+        capabilityDiscoveryInFlight.delete(key);
+      }
+    });
+  capabilityDiscoveryInFlight.set(key, discovery);
+  return discovery;
+}
+
 export const resolveCodexProviderCapabilities = Effect.fn("resolveCodexProviderCapabilities")(
   function* (input: {
     provider: ProviderKind;
@@ -364,17 +438,10 @@ export const resolveCodexProviderCapabilities = Effect.fn("resolveCodexProviderC
     binaryPath: string;
     homePath?: string;
   }) {
-    const { plugins, skills } = yield* Effect.tryPromise({
-      try: () => queryCodexAppServer(input),
+    return yield* Effect.tryPromise({
+      try: () => resolveCachedCodexProviderCapabilities(input),
       catch: (cause) => new CodexCapabilityDiscoveryError({ cause }),
     });
-    return {
-      capabilities: normalizeCodexCapabilities({
-        provider: input.provider,
-        plugins,
-        skills,
-      }),
-    };
   },
 );
 

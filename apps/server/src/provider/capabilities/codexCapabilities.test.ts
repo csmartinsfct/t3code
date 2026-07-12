@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
@@ -16,11 +16,16 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 import {
   canonicalizeCodexSelectedCapabilities,
+  clearCodexProviderCapabilitiesCache,
   normalizeCodexCapabilities,
   resolveCodexProviderCapabilities,
   type CodexPluginListResponse,
   type CodexSkillsListResponse,
 } from "./codexCapabilities";
+
+beforeEach(() => {
+  clearCodexProviderCapabilitiesCache();
+});
 
 function makeChild(): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as EventEmitter & {
@@ -336,6 +341,55 @@ describe("resolveCodexProviderCapabilities", () => {
         },
       ],
     });
+
+    await expect(
+      Effect.runPromise(
+        resolveCodexProviderCapabilities({
+          provider: "codex",
+          cwd: "/repo",
+          binaryPath: "codex",
+          homePath: codexHome,
+        }),
+      ),
+    ).resolves.toEqual({
+      capabilities: [
+        expect.objectContaining({
+          id: "gmail@openai-curated-remote",
+          capabilityRootPath: pluginRoot,
+        }),
+      ],
+    });
+    expect(spawnMock).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent capability discovery for the same Codex environment", async () => {
+    spawnMock.mockReset();
+    const child = makeChild();
+    const stdinWrites: string[] = [];
+    child.stdin.on("data", (chunk) => stdinWrites.push(String(chunk)));
+    spawnMock.mockReturnValueOnce(child);
+
+    const input = {
+      provider: "codex" as const,
+      cwd: "/repo/concurrent",
+      binaryPath: "codex",
+    };
+    const first = Effect.runPromise(resolveCodexProviderCapabilities(input));
+    const second = Effect.runPromise(resolveCodexProviderCapabilities(input));
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+    (child.stdout as PassThrough).write(`${JSON.stringify({ id: 1, result: {} })}\n`);
+    await vi.waitFor(() => expect(stdinWrites.join("")).toContain('"plugin/list"'));
+    (child.stdout as PassThrough).write(
+      `${JSON.stringify({ id: 2, result: { marketplaces: [] } })}\n`,
+    );
+    (child.stdout as PassThrough).write(`${JSON.stringify({ id: 3, result: { data: [] } })}\n`);
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { capabilities: [] },
+      { capabilities: [] },
+    ]);
+    expect(spawnMock).toHaveBeenCalledOnce();
   });
 
   it("launches Codex capability discovery from the target project cwd", async () => {
