@@ -555,6 +555,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "task.background.changed")
     .filter((activity) => activity.kind !== "context-window.updated")
+    .filter((activity) => !isSessionStartHookActivity(activity))
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
@@ -590,6 +591,15 @@ export function deriveLiveBackgroundTasks(
     createdAt: latestSnapshot.createdAt,
     tasks,
   };
+}
+
+function isSessionStartHookActivity(activity: OrchestrationThreadActivity): boolean {
+  if (!activity.kind.startsWith("hook.")) {
+    return false;
+  }
+
+  const payload = asRecord(activity.payload);
+  return payload?.hookEvent === "SessionStart";
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {

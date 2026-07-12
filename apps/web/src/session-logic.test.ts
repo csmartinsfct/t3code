@@ -724,6 +724,31 @@ describe("deriveWorkLogEntries", () => {
   it("collapses hook lifecycle entries by hook id", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
+        id: "session-start-hook-start",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        kind: "hook.started",
+        summary: "Hook - SessionStart started",
+        tone: "info",
+        payload: {
+          hookId: "session-start-hook",
+          hookName: "SessionStart:startup",
+          hookEvent: "SessionStart",
+        },
+      }),
+      makeActivity({
+        id: "session-start-hook-complete",
+        createdAt: "2026-02-23T00:00:00.500Z",
+        kind: "hook.completed",
+        summary: "Hook - SessionStart completed",
+        tone: "info",
+        payload: {
+          hookId: "session-start-hook",
+          hookName: "SessionStart:startup",
+          hookEvent: "SessionStart",
+          outcome: "success",
+        },
+      }),
+      makeActivity({
         id: "hook-start",
         createdAt: "2026-02-23T00:00:01.000Z",
         kind: "hook.started",
