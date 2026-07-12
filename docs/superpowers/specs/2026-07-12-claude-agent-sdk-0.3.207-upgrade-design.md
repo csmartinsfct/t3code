@@ -127,7 +127,7 @@ This ticket does not add a user-facing command queue UI. Exact queue reconciliat
 
 Integration must:
 
-- Replace the process-scoped live set with every snapshot and reset it to empty whenever the Claude SDK process starts or restarts.
+- Replace the process-scoped live set with every snapshot and reset it to empty whenever the Claude SDK process starts, stops, exits, or restarts.
 - Project the live set through a provider-neutral contract containing task type, description, and aggregate count.
 - Show compact live status such as `2 background tasks running` inside T3's existing actions group.
 - Let shell, subagent, workflow, and unknown future task types contribute without requiring provider-specific web logic.
