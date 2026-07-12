@@ -80,6 +80,7 @@ import {
   deriveActivePlanState,
   findSidebarProposedPlan,
   findLatestProposedPlan,
+  deriveLiveBackgroundTasks,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
@@ -1695,6 +1696,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
+  );
+  const liveBackgroundTasks = useMemo(
+    () => deriveLiveBackgroundTasks(threadActivities),
+    [threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -5786,6 +5791,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       activeTurnStartedAt={activeWorkStartedAt}
                       scrollContainer={messagesScrollElement}
                       timelineEntries={timelineEntries}
+                      liveBackgroundTasks={liveBackgroundTasks}
                       completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                       completionSummary={completionSummary}
                       completionTerminalReason={completionTerminalReason}

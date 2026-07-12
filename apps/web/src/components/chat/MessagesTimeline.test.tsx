@@ -1,6 +1,10 @@
 import { MessageId, TurnId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  deriveMessagesTimelineRows,
+  estimateMessagesTimelineRowHeight,
+} from "./MessagesTimeline.logic";
 
 function matchMedia() {
   return {
@@ -445,5 +449,118 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("apps/web/src/components/chat");
     expect(markup).not.toContain("MessagesTimeline.tsx");
     expect(markup).not.toContain("ChangedFilesTree.tsx");
+  });
+
+  it("renders live background task counts and removes only the empty replacement status", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const timelineEntries = [
+      {
+        id: "entry-command",
+        kind: "work" as const,
+        createdAt: "2026-07-12T14:00:01.000Z",
+        entry: {
+          id: "command-complete",
+          createdAt: "2026-07-12T14:00:01.000Z",
+          label: "Ran command",
+          tone: "tool" as const,
+        },
+      },
+    ];
+    const renderTimeline = (
+      tasks: ReadonlyArray<{ taskId: string; taskType: string; description: string }>,
+    ) =>
+      renderToStaticMarkup(
+        <MessagesTimeline
+          hasMessages
+          isWorking
+          activeTurnInProgress
+          activeTurnStartedAt="2026-07-12T14:00:00.000Z"
+          scrollContainer={null}
+          timelineEntries={timelineEntries}
+          liveBackgroundTasks={{
+            activityId: "background-snapshot",
+            createdAt: "2026-07-12T14:00:02.000Z",
+            tasks,
+          }}
+          completionDividerBeforeEntryId={null}
+          completionSummary={null}
+          turnDiffSummaryByAssistantMessageId={new Map()}
+          nowIso="2026-07-12T14:00:03.000Z"
+          expandedWorkGroups={{}}
+          onToggleWorkGroup={() => {}}
+          onOpenTurnDiff={() => {}}
+          revertTurnCountByUserMessageId={new Map()}
+          onRevertUserMessage={() => {}}
+          isRevertingCheckpoint={false}
+          onImageExpand={() => {}}
+          markdownCwd={undefined}
+          resolvedTheme="light"
+          timestampFormat="locale"
+          workspaceRoot={undefined}
+        />,
+      );
+    const researchTask = {
+      taskId: "research-1",
+      taskType: "research",
+      description: "Compare provider capabilities",
+    };
+    const validationTask = {
+      taskId: "validation-1",
+      taskType: "validation",
+      description: "Validate the timeline status",
+    };
+    const liveBackgroundTasks = {
+      activityId: "background-snapshot",
+      createdAt: "2026-07-12T14:00:02.000Z",
+      tasks: [researchTask],
+    };
+    const rowInput = {
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnStartedAt: "2026-07-12T14:00:00.000Z",
+    };
+    const rowsWithoutStatus = deriveMessagesTimelineRows({
+      ...rowInput,
+      timelineEntries,
+    });
+    const attachedRows = deriveMessagesTimelineRows({
+      ...rowInput,
+      timelineEntries,
+      liveBackgroundTasks,
+    });
+    const workRowWithoutStatus = rowsWithoutStatus.find((row) => row.kind === "work")!;
+    const attachedWorkRow = attachedRows.find((row) => row.kind === "work")!;
+
+    expect(attachedWorkRow.liveBackgroundTasks).toEqual(liveBackgroundTasks);
+    expect(
+      estimateMessagesTimelineRowHeight(attachedWorkRow, { timelineWidthPx: 720 }) -
+        estimateMessagesTimelineRowHeight(workRowWithoutStatus, { timelineWidthPx: 720 }),
+    ).toBe(32);
+
+    const fallbackRows = deriveMessagesTimelineRows({
+      ...rowInput,
+      timelineEntries: [],
+      liveBackgroundTasks,
+    });
+    expect(fallbackRows.map((row) => row.kind)).toEqual(["work", "working"]);
+    expect(fallbackRows[0]).toMatchObject({
+      id: "live-background-tasks-row",
+      groupedEntries: [],
+      liveBackgroundTasks,
+    });
+
+    const singularMarkup = renderTimeline([researchTask]);
+    expect(singularMarkup).toContain("1 background task running");
+    expect(singularMarkup).toContain("Compare provider capabilities");
+    expect(singularMarkup).toContain("lucide-loader-circle");
+
+    const pluralMarkup = renderTimeline([researchTask, validationTask]);
+    expect(pluralMarkup).toContain("2 background tasks running");
+    expect(pluralMarkup).toContain("Validate the timeline status");
+
+    const emptyMarkup = renderTimeline([]);
+    expect(emptyMarkup).not.toContain("background task running");
+    expect(emptyMarkup).not.toContain("background tasks running");
+    expect(emptyMarkup).toContain("Ran command");
   });
 });

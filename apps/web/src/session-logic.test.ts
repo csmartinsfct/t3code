@@ -12,6 +12,7 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveLiveBackgroundTasks,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -613,6 +614,64 @@ describe("findSidebarProposedPlan", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("derives the latest background task replacement without adding snapshots to work history", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-complete",
+        sequence: 1,
+        kind: "tool.completed",
+        summary: "Ran command",
+      }),
+      makeActivity({
+        id: "background-active",
+        sequence: 2,
+        kind: "task.background.changed",
+        summary: "2 background tasks",
+        tone: "info",
+        payload: {
+          tasks: [
+            {
+              taskId: "research-1",
+              taskType: "research",
+              description: "Compare provider capabilities",
+            },
+            {
+              taskId: "",
+              taskType: "validation",
+              description: "Malformed task without an id",
+            },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "background-idle",
+        sequence: 3,
+        kind: "task.background.changed",
+        summary: "Background work idle",
+        tone: "info",
+        payload: { tasks: [] },
+      }),
+    ];
+
+    expect(deriveLiveBackgroundTasks(activities.slice(0, 2))).toMatchObject({
+      activityId: "background-active",
+      tasks: [
+        {
+          taskId: "research-1",
+          taskType: "research",
+          description: "Compare provider capabilities",
+        },
+      ],
+    });
+    expect(deriveLiveBackgroundTasks(activities)).toMatchObject({
+      activityId: "background-idle",
+      tasks: [],
+    });
+    expect(deriveWorkLogEntries(activities, undefined).map((entry) => entry.label)).toEqual([
+      "Ran command",
+    ]);
+  });
+
   it("omits tool started entries and keeps completed entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

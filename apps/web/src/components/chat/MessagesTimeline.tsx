@@ -19,6 +19,7 @@ import {
 import {
   deriveTimelineEntries,
   formatElapsed,
+  type LiveBackgroundTaskSnapshot,
   type TerminalReasonPresentation,
 } from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
@@ -91,6 +92,7 @@ interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
+  liveBackgroundTasks?: LiveBackgroundTaskSnapshot | null;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   completionTerminalReason?: TerminalReasonPresentation | null;
@@ -141,6 +143,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   scrollContainer,
   timelineEntries,
+  liveBackgroundTasks = null,
   completionDividerBeforeEntryId,
   completionSummary,
   completionTerminalReason = null,
@@ -202,8 +205,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
+        liveBackgroundTasks,
       }),
-    [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
+    [
+      timelineEntries,
+      completionDividerBeforeEntryId,
+      isWorking,
+      activeTurnStartedAt,
+      liveBackgroundTasks,
+    ],
   );
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
@@ -434,6 +444,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
                 ))}
               </div>
+              {row.liveBackgroundTasks && (
+                <div
+                  className="flex h-8 min-w-0 items-center gap-2 px-1 text-[11px] text-muted-foreground/70"
+                  title={row.liveBackgroundTasks.tasks
+                    .map((task) => `${task.taskType}: ${task.description}`)
+                    .join("\n")}
+                >
+                  <Loader2Icon className="size-3 shrink-0 animate-spin" />
+                  <span className="truncate">
+                    {row.liveBackgroundTasks.tasks.length}{" "}
+                    {row.liveBackgroundTasks.tasks.length === 1
+                      ? "background task running"
+                      : "background tasks running"}
+                  </span>
+                </div>
+              )}
             </div>
           );
         })()}
