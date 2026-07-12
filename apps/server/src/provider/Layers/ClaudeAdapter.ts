@@ -107,6 +107,7 @@ import {
   classifyClaudeTerminalReason,
   normalizeClaudeBackgroundTasks,
 } from "../claude/claudeSdkLifecycle.ts";
+import { settleClaudeMcpServers } from "../claude/claudeMcpSettling.ts";
 
 const PROVIDER = "claudeAgent" as const;
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -4160,15 +4161,26 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         context.query.mcpServerStatus,
     );
     if (activeContext?.query.mcpServerStatus) {
+      const abortController = new AbortController();
       const servers = yield* Effect.tryPromise({
-        try: async () => {
-          if (input.reloadPlugins === true && activeContext.query.reloadPlugins) {
-            await activeContext.query.reloadPlugins();
+        try: async (signal) => {
+          const abortPolling = () => abortController.abort(signal.reason);
+          signal.addEventListener("abort", abortPolling, { once: true });
+
+          try {
+            if (input.reloadPlugins === true && activeContext.query.reloadPlugins) {
+              await activeContext.query.reloadPlugins();
+            }
+            return await settleClaudeMcpServers({
+              readStatus: () => activeContext.query.mcpServerStatus!(),
+              signal: abortController.signal,
+            });
+          } finally {
+            signal.removeEventListener("abort", abortPolling);
           }
-          return activeContext.query.mcpServerStatus!();
         },
         catch: (cause) => toRequestError(activeContext.session.threadId, "mcp/status", cause),
-      });
+      }).pipe(Effect.ensuring(Effect.sync(() => abortController.abort())));
       return servers.map(normalizeClaudeMcpServerStatus);
     }
 
@@ -4237,7 +4249,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         if (!runtime.mcpServerStatus) {
           return [];
         }
-        const servers = await runtime.mcpServerStatus();
+        const servers = await settleClaudeMcpServers({
+          readStatus: () => runtime!.mcpServerStatus!(),
+          signal: abortController.signal,
+        });
         return servers.map(normalizeClaudeMcpServerStatus);
       },
       catch: (cause) =>

@@ -3719,12 +3719,38 @@ describe("ClaudeAdapterLive", () => {
   });
 
   describe("probeMcpServers", () => {
-    it.effect("reloads plugins before reading MCP status from an active matching session", () => {
-      const harness = makeHarness();
-      const mcpStatus = vi.fn(
-        async (): Promise<McpServerStatus[]> => [{ name: "github-personal", status: "connected" }],
-      );
-      harness.query.mcpServerStatus = mcpStatus;
+    it.effect("settles active and hidden MCP probes without sending a hidden prompt", () => {
+      const activeMcpStatus = vi
+        .fn<() => Promise<McpServerStatus[]>>()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([{ name: "github-personal", status: "connected" }]);
+
+      const probeQuery = new FakeClaudeQuery();
+      const initializationResult = vi.fn(async () => undefined);
+      const hiddenMcpStatus = vi
+        .fn<() => Promise<McpServerStatus[]>>()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([{ name: "project-tickets", status: "connected" }]);
+      probeQuery.initializationResult = initializationResult;
+      probeQuery.mcpServerStatus = hiddenMcpStatus;
+
+      let closeCalls = 0;
+      let hiddenPrompt: AsyncIterable<SDKUserMessage> | undefined;
+      const startupQuery = vi.fn(async () => ({
+        query: (prompt: AsyncIterable<SDKUserMessage>) => {
+          hiddenPrompt = prompt;
+          return probeQuery;
+        },
+        close: () => {
+          closeCalls += 1;
+        },
+        [Symbol.asyncDispose]: async () => undefined,
+      }));
+
+      const harness = makeHarness({
+        startupQuery,
+      });
+      harness.query.mcpServerStatus = activeMcpStatus;
 
       return Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
@@ -3735,59 +3761,39 @@ describe("ClaudeAdapterLive", () => {
           cwd: "/tmp/claude-adapter-test",
         });
 
-        const result = yield* adapter.probeMcpServers!({
+        const activeResult = yield* adapter.probeMcpServers!({
           provider: "claudeAgent",
           cwd: "/tmp/claude-adapter-test",
+          reloadPlugins: true,
+        });
+        const hiddenResult = yield* adapter.probeMcpServers!({
+          provider: "claudeAgent",
+          cwd: "/tmp/claude-hidden-probe-test",
           reloadPlugins: true,
         });
 
         assert.equal(harness.query.reloadPluginsCalls.length, 1);
-        assert.equal(mcpStatus.mock.calls.length, 1);
-        assert.equal(result[0]?.name, "github-personal");
+        assert.equal(activeMcpStatus.mock.calls.length, 2);
+        assert.equal(activeResult[0]?.name, "github-personal");
+        assert.equal(startupQuery.mock.calls.length, 1);
+        assert.equal(initializationResult.mock.calls.length, 1);
+        assert.equal(probeQuery.reloadPluginsCalls.length, 1);
+        assert.equal(hiddenMcpStatus.mock.calls.length, 2);
+        assert.equal(closeCalls, 1);
+        assert.equal(probeQuery.closeCalls, 1);
+        assert.equal(hiddenResult[0]?.name, "project-tickets");
+        assert.isDefined(hiddenPrompt);
+        assert.deepEqual(
+          yield* Effect.promise(() => hiddenPrompt![Symbol.asyncIterator]().next()),
+          {
+            done: true,
+            value: undefined,
+          },
+        );
       }).pipe(
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),
       );
-    });
-
-    it.effect("reloads plugins during hidden startup probes before reading MCP status", () => {
-      const probeQuery = new FakeClaudeQuery();
-      const initializationResult = vi.fn(async () => undefined);
-      const mcpStatus = vi.fn(
-        async (): Promise<McpServerStatus[]> => [{ name: "project-tickets", status: "connected" }],
-      );
-      probeQuery.initializationResult = initializationResult;
-      probeQuery.mcpServerStatus = mcpStatus;
-
-      let closeCalls = 0;
-      const startupQuery = vi.fn(async () => ({
-        query: () => probeQuery,
-        close: () => {
-          closeCalls += 1;
-        },
-        [Symbol.asyncDispose]: async () => undefined,
-      }));
-
-      const harness = makeHarness({
-        startupQuery,
-      });
-
-      return Effect.gen(function* () {
-        const adapter = yield* ClaudeAdapter;
-        const result = yield* adapter.probeMcpServers!({
-          provider: "claudeAgent",
-          cwd: "/tmp/claude-adapter-test",
-          reloadPlugins: true,
-        });
-
-        assert.equal(startupQuery.mock.calls.length, 1);
-        assert.equal(initializationResult.mock.calls.length, 1);
-        assert.equal(probeQuery.reloadPluginsCalls.length, 1);
-        assert.equal(mcpStatus.mock.calls.length, 1);
-        assert.equal(closeCalls, 1);
-        assert.equal(probeQuery.closeCalls, 1);
-        assert.equal(result[0]?.name, "project-tickets");
-      }).pipe(Effect.provide(harness.layer));
     });
   });
 

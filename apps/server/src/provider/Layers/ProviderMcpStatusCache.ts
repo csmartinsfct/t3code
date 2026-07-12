@@ -29,7 +29,8 @@ const snapshotCacheKey = (projectId: ProjectId, cwd: string, provider: ProviderK
   `${projectCacheKey(projectId, cwd)}\0${provider}`;
 
 function isFresh(snapshot: ResolvedMcpProviderSnapshot, now = Date.now()): boolean {
-  if (snapshot.status === "loading" || snapshot.refreshing) return false;
+  if (snapshot.status === "loading" || snapshot.status === "error" || snapshot.refreshing)
+    return false;
   if (!snapshot.updatedAt) return false;
   return now - Date.parse(snapshot.updatedAt) < CACHE_TTL_MS;
 }
@@ -161,6 +162,30 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
         return next;
       }).pipe(Effect.andThen(publish));
 
+    const setProfileError = (input: {
+      readonly provider: ProviderKind;
+      readonly projectId: ProjectId;
+      readonly cwd: string;
+      readonly error: string;
+    }) =>
+      Ref.update(snapshotsRef, (map) => {
+        const next = new Map(map);
+        const key = snapshotCacheKey(input.projectId, input.cwd, input.provider);
+        const existing = next.get(key);
+        const hasSettledSnapshot = existing?.updatedAt !== undefined;
+        next.set(key, {
+          provider: input.provider,
+          projectId: input.projectId,
+          cwd: input.cwd,
+          status: "error",
+          serverNames: hasSettledSnapshot ? existing.serverNames : [],
+          servers: hasSettledSnapshot ? (existing.servers ?? []) : [],
+          updatedAt: hasSettledSnapshot ? existing.updatedAt : new Date().toISOString(),
+          error: input.error,
+        });
+        return next;
+      }).pipe(Effect.andThen(publish));
+
     const finishProjectRefresh = (projectId: ProjectId, cwd: string) =>
       Ref.update(snapshotsRef, (map) => {
         const next = new Map(map);
@@ -194,16 +219,11 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
                     })
                   : Effect.succeed([])
               ).pipe(Effect.timeoutOption(PROFILE_PROBE_TIMEOUT_MS));
-              const updatedAt = new Date().toISOString();
               if (Option.isNone(result)) {
-                yield* setProfileSnapshot({
+                yield* setProfileError({
                   provider,
                   projectId: input.projectId,
                   cwd: input.cwd,
-                  status: "error",
-                  serverNames: [],
-                  servers: [],
-                  updatedAt,
                   error: "Timed out while loading Claude MCP status.",
                 });
                 return;
@@ -216,18 +236,14 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
                 status: "ready",
                 serverNames: servers.map((server) => server.name),
                 servers: [...servers],
-                updatedAt,
+                updatedAt: new Date().toISOString(),
               });
             }).pipe(
               Effect.catch((error: unknown) =>
-                setProfileSnapshot({
+                setProfileError({
                   provider,
                   projectId: input.projectId,
                   cwd: input.cwd,
-                  status: "error",
-                  serverNames: [],
-                  servers: [],
-                  updatedAt: new Date().toISOString(),
                   error: errorMessage(error),
                 }),
               ),

@@ -114,4 +114,29 @@ describe("McpServersPicker", () => {
       host.remove();
     }
   });
+
+  it("shows the refresh error together with retained server status", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <McpServersPicker
+        status="error"
+        error="Refresh failed"
+        serverNames={["github-personal"]}
+        servers={[{ name: "github-personal", status: "connected", scope: "user" }]}
+      />,
+      { container: host },
+    );
+
+    try {
+      await page.getByLabelText("MCP servers").click();
+
+      await expect.element(page.getByText("Refresh failed")).toBeInTheDocument();
+      await expect.element(page.getByText("github-personal")).toBeInTheDocument();
+      await expect.element(page.getByText("No MCP servers")).not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
 });
