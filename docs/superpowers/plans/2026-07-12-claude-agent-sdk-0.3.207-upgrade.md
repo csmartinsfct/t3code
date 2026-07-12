@@ -18,6 +18,7 @@
 - Treat `background_tasks_changed` as a process-scoped level signal with replacement semantics. Never correlate its IDs with task edge events, and clear the snapshot on process start, stop, exit, and restart.
 - Treat command lifecycle frames and interrupt `still_queued` UUIDs as diagnostics only because SDK 0.3.207 exposes no stable caller-supplied message UUID.
 - Use `bun run test`, never `bun test`.
+- Keep tests proportional: one focused test per independently breakable boundary, table tests for pure classifications, and T3 Browser for real provider flows. Do not duplicate the same behavior across contract, adapter, ingestion, and UI suites.
 - Do not finish until focused tests, `bun fmt`, `bun lint`, `bun typecheck`, packaging checks, and T3 Browser verification pass.
 - Remove superseded compatibility branches and locally duplicated SDK types. Do not leave migration TODOs or dead fallbacks.
 
@@ -178,7 +179,7 @@ const idleEvent: ProviderRuntimeEvent = {
 };
 ```
 
-Assert that ingestion stores both activities as `task.background.changed`, keeps the full replacement payload, and does not change the active turn state.
+Assert in one integration test that ingestion stores both activities as `task.background.changed`, keeps the full replacement payload, and does not change the active turn state. The contract is exercised through this typed fixture; do not add a duplicate schema-only test.
 
 - [ ] **Step 2: Run the focused test and verify the schema rejects the new event**
 
@@ -265,7 +266,7 @@ git commit -m "feat: add background activity snapshots"
 
 - [ ] **Step 1: Write failing selector tests for latest-snapshot semantics**
 
-Cover a two-task snapshot followed by an empty snapshot, malformed payload entries, and unrelated providers:
+Cover a two-task snapshot followed by an empty snapshot and one malformed payload entry:
 
 ```ts
 expect(deriveLiveBackgroundTasks([runningActivity])).toEqual({
@@ -335,9 +336,9 @@ expect(screen.queryByText(/background tasks running/)).toBeNull();
 expect(screen.getByText("Ran command")).toBeVisible();
 ```
 
-Add a no-work-entry case and assert that an ephemeral work card is rendered so live activity is never invisible.
+Add one no-work-entry case and assert that an ephemeral work card is rendered so live activity is never invisible. Do not repeat selector parsing cases in the component suite.
 
-Also assert `estimateMessagesTimelineRowHeight` adds one stable 32 px status row so virtualized content cannot overlap the following message.
+Assert in the existing logic suite that `estimateMessagesTimelineRowHeight` adds one stable 32 px status row so virtualized content cannot overlap the following message.
 
 - [ ] **Step 5: Run the focused timeline tests and verify failure**
 
@@ -500,15 +501,11 @@ The function must return `{ status: "failed", known: false, terminalReason: reas
 
 - [ ] **Step 4: Write failing adapter tests for process reset, replacement, and diagnostics**
 
-Add tests that:
+Add focused adapter tests that:
 
-1. Starting a session emits `task.background.changed` with `tasks: []` before any non-empty snapshot.
-2. An SDK `background_tasks_changed` message emits one normalized replacement event.
-3. A second empty message emits an empty replacement and no `task.completed` event.
-4. Unknown task types survive normalization.
-5. `interrupt()` returning `{ subtype: "success", still_queued: ["sdk-uuid"] }` logs diagnostics but does not enqueue, remove, or replay a T3 prompt.
-6. Unknown terminal reasons produce `failed` plus a runtime diagnostic.
-7. Explicit stop and process exit emit an empty replacement before session teardown without deleting the provider binding or resume cursor.
+1. One session lifecycle test covers initial empty state, a non-empty SDK replacement, an empty replacement, and explicit stop. It asserts no synthetic `task.completed` event and preserves the existing resume cursor.
+2. One interrupt test covers `{ subtype: "success", still_queued: ["sdk-uuid"] }`, verifies the diagnostic, and verifies no T3 prompt is enqueued, removed, or replayed.
+3. One unknown-terminal test verifies failed classification plus a diagnostic. Unknown task-type normalization remains in the pure module test rather than being repeated here.
 
 - [ ] **Step 5: Run adapter tests and verify failure**
 
@@ -618,13 +615,13 @@ git commit -m "feat: adapt Claude SDK lifecycle events"
 
 - [ ] **Step 1: Write failing deterministic settling tests**
 
-Cover these sequences:
+Cover the representative settling sequence:
 
 ```ts
 [][{ name: "slack", status: "pending" }][{ name: "slack", status: "connected" }];
 ```
 
-Also cover a permanently pending server at 8 seconds, terminal `connected`, `needs-auth`, `failed`, and `disabled` statuses, abort cancellation, and no duplicate reload call.
+Use a table to establish that `connected`, `needs-auth`, `failed`, and `disabled` are terminal. Add one deadline case for a permanently pending server and one abort case. Do not duplicate these pure polling cases in adapter tests.
 
 - [ ] **Step 2: Run the focused test and verify failure**
 
@@ -657,7 +654,7 @@ Defaults are an 8,000 ms deadline and 250 ms polling. Return once a non-empty in
 
 - [ ] **Step 4: Write failing adapter and cache tests**
 
-Assert that active and hidden probes both poll until terminal state, hidden probes never send a model prompt, query resources close after success/error/abort, concurrent project requests still coalesce, refresh failure preserves the previous server list, and `claudeAgent:metric` cannot overwrite `claudeAgent:zbd`.
+Add one adapter integration test proving both active and hidden probes use the settling helper and hidden probes never send a model prompt. Extend the cache suite with one stale-on-error test and one profile-isolation assertion; retain existing coalescing coverage rather than duplicating it. Resource closure remains one existing success test plus one abort/error test.
 
 - [ ] **Step 5: Integrate settling in both probe paths**
 
