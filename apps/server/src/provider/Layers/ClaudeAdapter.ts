@@ -12,6 +12,8 @@ import {
   query,
   startup,
   type SDKControlGetContextUsageResponse,
+  type SDKControlInitializeResponse,
+  type SDKControlInterruptResponse,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -234,7 +236,8 @@ interface ClaudeSessionContext {
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
-  readonly interrupt: () => Promise<void>;
+  readonly interrupt: () => Promise<SDKControlInterruptResponse | undefined>;
+  readonly reinitialize: () => Promise<SDKControlInitializeResponse>;
   readonly initializationResult?: () => Promise<unknown>;
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
