@@ -81,13 +81,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface ProjectRefreshInput {
+  readonly projectId: ProjectId;
+  readonly cwd: string;
+  readonly providers: ReadonlyArray<ProviderKind>;
+  readonly reloadPlugins?: boolean;
+}
+
+interface ProjectRefreshState {
+  readonly owner: symbol;
+  readonly runningForced: boolean;
+  readonly pendingForced?: ProjectRefreshInput;
+}
+
 export const ProviderMcpStatusCacheLive = Layer.effect(
   ProviderMcpStatusCache,
   Effect.gen(function* () {
     const providerService = yield* ProviderService;
     const serverSettings = yield* ServerSettingsService;
     const snapshotsRef = yield* Ref.make<Map<string, ResolvedMcpProviderSnapshot>>(new Map());
-    const inFlightProjectsRef = yield* Ref.make<Set<string>>(new Set());
+    const projectRefreshesRef = yield* Ref.make<Map<string, ProjectRefreshState>>(new Map());
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<ReadonlyArray<ResolvedMcpProviderSnapshot>>(),
       PubSub.shutdown,
@@ -199,12 +212,7 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
         return next;
       }).pipe(Effect.andThen(publish));
 
-    const refreshProject = (input: {
-      readonly projectId: ProjectId;
-      readonly cwd: string;
-      readonly providers: ReadonlyArray<ProviderKind>;
-      readonly reloadPlugins?: boolean;
-    }) =>
+    const refreshProject = (input: ProjectRefreshInput) =>
       Effect.gen(function* () {
         yield* Effect.forEach(
           input.providers,
@@ -251,11 +259,38 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
           { concurrency: PROFILE_PROBE_CONCURRENCY, discard: true },
         );
         yield* finishProjectRefresh(input.projectId, input.cwd);
+      });
+
+    const runProjectRefresh = (initialInput: ProjectRefreshInput, owner: symbol) =>
+      Effect.gen(function* () {
+        let input: ProjectRefreshInput | undefined = initialInput;
+        while (input) {
+          yield* refreshProject(input);
+          const projectKey = projectCacheKey(input.projectId, input.cwd);
+          input = yield* Ref.modify(projectRefreshesRef, (refreshes) => {
+            const state = refreshes.get(projectKey);
+            if (state?.owner !== owner) return [undefined, refreshes] as const;
+
+            const next = new Map(refreshes);
+            if (state.pendingForced) {
+              next.set(projectKey, {
+                owner,
+                runningForced: true,
+              });
+              return [state.pendingForced, next] as const;
+            }
+
+            next.delete(projectKey);
+            return [undefined, next] as const;
+          });
+        }
       }).pipe(
         Effect.ensuring(
-          Ref.update(inFlightProjectsRef, (set) => {
-            const next = new Set(set);
-            next.delete(projectCacheKey(input.projectId, input.cwd));
+          Ref.update(projectRefreshesRef, (refreshes) => {
+            const projectKey = projectCacheKey(initialInput.projectId, initialInput.cwd);
+            if (refreshes.get(projectKey)?.owner !== owner) return refreshes;
+            const next = new Map(refreshes);
+            next.delete(projectKey);
             return next;
           }),
         ),
@@ -327,21 +362,36 @@ export const ProviderMcpStatusCacheLive = Layer.effect(
         }
 
         if (needsRefresh && providers.length > 0) {
-          const shouldStart = yield* Ref.modify(inFlightProjectsRef, (set) => {
-            if (set.has(projectKey)) return [false, set] as const;
-            const next = new Set(set);
-            next.add(projectKey);
+          const refreshInput: ProjectRefreshInput = {
+            projectId: input.projectId,
+            cwd: input.cwd,
+            providers,
+            ...(input.forceRefresh === true ? { reloadPlugins: true } : {}),
+          };
+          const owner = Symbol(projectKey);
+          const shouldStart = yield* Ref.modify(projectRefreshesRef, (refreshes) => {
+            const existing = refreshes.get(projectKey);
+            if (existing) {
+              if (input.forceRefresh !== true || existing.runningForced) {
+                return [false, refreshes] as const;
+              }
+              const next = new Map(refreshes);
+              next.set(projectKey, {
+                ...existing,
+                pendingForced: refreshInput,
+              });
+              return [false, next] as const;
+            }
+
+            const next = new Map(refreshes);
+            next.set(projectKey, {
+              owner,
+              runningForced: input.forceRefresh === true,
+            });
             return [true, next] as const;
           });
           if (shouldStart) {
-            yield* Effect.forkDetach(
-              refreshProject({
-                projectId: input.projectId,
-                cwd: input.cwd,
-                providers,
-                ...(input.forceRefresh === true ? { reloadPlugins: true } : {}),
-              }),
-            );
+            yield* Effect.forkDetach(runProjectRefresh(refreshInput, owner));
           }
         }
 

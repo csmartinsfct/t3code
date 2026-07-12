@@ -310,4 +310,69 @@ describe("ProviderMcpStatusCacheLive", () => {
 
     expect(probe.mock.calls.some(([request]) => request.reloadPlugins === true)).toBe(true);
   });
+
+  it("coalesces forced refreshes that arrive during an active probe", async () => {
+    let releaseInitialProbe: (() => void) | undefined;
+    const initialProbe = new Promise<void>((resolve) => {
+      releaseInitialProbe = resolve;
+    });
+    let markInitialProbeStarted: (() => void) | undefined;
+    const initialProbeStarted = new Promise<void>((resolve) => {
+      markInitialProbeStarted = resolve;
+    });
+    let markForcedProbeStarted: (() => void) | undefined;
+    const forcedProbeStarted = new Promise<void>((resolve) => {
+      markForcedProbeStarted = resolve;
+    });
+    let probeCount = 0;
+    const { layer, probe } = makeLayer({
+      settings: {
+        providers: {
+          claudeAgent: { enabled: true },
+          claudeProfiles: [],
+        },
+      },
+      probe: (request) => {
+        probeCount += 1;
+        if (probeCount === 1) {
+          markInitialProbeStarted?.();
+          return Effect.promise(() =>
+            initialProbe.then(() => [{ name: `${request.provider}-mcp` }] as const),
+          );
+        }
+        markForcedProbeStarted?.();
+        return Effect.succeed([{ name: `${request.provider}-mcp` }] as const);
+      },
+    });
+
+    await runWithCache(
+      layer,
+      Effect.gen(function* () {
+        const cache = yield* ProviderMcpStatusCache;
+        yield* cache.ensureClaudeProject({
+          projectId: PROJECT_ID,
+          cwd: CWD,
+          selectedProvider: "claudeAgent",
+        });
+        yield* Effect.promise(() => initialProbeStarted);
+        yield* cache.ensureClaudeProject({
+          projectId: PROJECT_ID,
+          cwd: CWD,
+          selectedProvider: "claudeAgent",
+          forceRefresh: true,
+        });
+        yield* cache.ensureClaudeProject({
+          projectId: PROJECT_ID,
+          cwd: CWD,
+          selectedProvider: "claudeAgent",
+          forceRefresh: true,
+        });
+        releaseInitialProbe?.();
+        yield* Effect.promise(() => forcedProbeStarted);
+      }),
+    );
+
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(probe.mock.calls[1]?.[0].reloadPlugins).toBe(true);
+  });
 });
