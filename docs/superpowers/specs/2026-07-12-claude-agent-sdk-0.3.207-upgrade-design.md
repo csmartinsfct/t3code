@@ -6,7 +6,7 @@
 
 ## Goal
 
-Upgrade `@anthropic-ai/claude-agent-sdk` from `0.2.116` to exactly `0.3.207` and adapt T3's Claude runtime to the SDK's changed lifecycle semantics without expanding the ticket into new user-facing Claude features.
+Upgrade `@anthropic-ai/claude-agent-sdk` from `0.2.116` to exactly `0.3.207` and adapt T3's Claude runtime to the SDK's changed lifecycle semantics. The only new user-facing behavior in this ticket is compact live background-activity status inside T3's existing actions group.
 
 The upgrade must improve correctness under interruption, background work, MCP startup, session restart, and partial failure. It must preserve Claude profile isolation and provider resume cursors.
 
@@ -18,8 +18,8 @@ The upgrade must improve correctness under interruption, background work, MCP st
 - Validate the SDK's peer dependencies and per-platform native optional dependencies.
 - Adapt to nonblocking MCP startup.
 - Classify the complete `0.3.207` terminal-reason surface into T3 turn outcomes.
-- Use command lifecycle and interrupt receipt data to prevent dropped or incorrectly cancelled queued input.
-- Reconcile background-task snapshots with existing task lifecycle events.
+- Retain command lifecycle and interrupt receipt data as diagnostics without claiming unsupported correlation to T3 turns.
+- Project background-task snapshots into provider-neutral live activity shown inside the existing actions group.
 - Use SDK reinitialization only for a detected recoverable control-channel gap.
 - Remove superseded pre-`0.3.207` compatibility code and locally duplicated SDK types where the pinned SDK supplies authoritative types.
 - Update affected provider, packaging, visibility, resource-management, and agent-tool documentation.
@@ -60,9 +60,8 @@ It delegates SDK-version-specific interpretation instead of accumulating more in
 Add `apps/server/src/provider/claude/claudeSdkLifecycle.ts` to own pure interpretation of the pinned SDK lifecycle surface:
 
 - Exhaustive terminal-reason classification.
-- Command lifecycle state transitions.
-- Interrupt receipt interpretation.
-- Background-task snapshot reconciliation.
+- Command lifecycle and interrupt receipt diagnostic interpretation.
+- Background-task snapshot normalization with replace semantics.
 - Decisions about whether a control-channel gap is recoverable through `reinitialize()`.
 
 The module must expose small typed functions with no session or UI ownership. It consumes exported SDK types wherever available and returns provider-neutral decisions that `ClaudeAdapter` can apply.
@@ -111,31 +110,35 @@ Text matching remains only for non-terminal transport exceptions that do not car
 
 ### Command lifecycle
 
-Track command UUID lifecycle as `queued`, `started`, `completed`, `cancelled`, or `discarded`.
+The SDK's command lifecycle and interrupt receipt UUIDs are not publicly correlated to caller-supplied `SDKUserMessage` values in `0.3.207`. T3 therefore must not use them to mutate its turn queue, replay messages, or claim that a specific T3 message remains queued.
 
-- A command reported completed must not be replayed.
-- A cancelled or discarded command must not be reported as successful.
-- An interrupted command listed in `still_queued` remains queued and may run later.
-- Duplicate lifecycle frames must be idempotent.
-- Conflicting regressions produce diagnostics and retain the safest non-success state.
+Runtime frames are retained as structured diagnostics when available:
 
-This ticket uses command lifecycle for correctness and logging. It does not add a new user-facing command queue UI.
+- Lifecycle frames record their UUID, state, and raw metadata in provider logs.
+- Interrupt receipts record `still_queued` UUIDs for investigation.
+- Duplicate, unknown, or out-of-order diagnostic frames must not fail the active session.
+- Structured `terminal_reason` remains the authoritative turn-outcome signal.
+
+This ticket does not add a user-facing command queue UI. Exact queue reconciliation is deferred until the SDK exposes a stable public correlation between T3 input and command UUIDs.
 
 ### Background tasks
 
 `background_tasks_changed` is the authoritative level-triggered snapshot of live background work. Existing `task_started`, `task_progress`, and `task_notification` messages remain the detailed timeline event sources.
 
-Reconciliation must:
+Integration must:
 
-- Add live tasks missing from edge events.
-- Remove tasks no longer present in the authoritative snapshot.
-- Avoid duplicate task rows or duplicate completion events.
-- Preserve the latest progress summary and usage data.
+- Replace the process-scoped live set with every snapshot and reset it to empty whenever the Claude SDK process starts or restarts.
+- Project the live set through a provider-neutral contract containing task type, description, and aggregate count.
+- Show compact live status such as `2 background tasks running` inside T3's existing actions group.
+- Let shell, subagent, workflow, and unknown future task types contribute without requiring provider-specific web logic.
+- Remove the live indicator when the replacement snapshot is empty while preserving completed action history.
 - Allow a foreground turn to complete while background work remains active without closing the session prematurely.
+
+The level snapshot must not be correlated with `task_started`, `task_progress`, `task_updated`, or `task_notification`; the SDK explicitly defines their relative ordering as unspecified. It must not synthesize permanent task rows, progress, completion events, or usage data. Those remain owned by the detailed task event stream, preventing duplicate or phantom actions.
 
 ### Interrupts
 
-Consume the typed interrupt receipt. Commands in `still_queued` survive the interrupt and remain eligible to execute. Other active work transitions through the normal interrupted/cancelled lifecycle.
+Consume and log the typed interrupt receipt. Because `still_queued` UUIDs cannot be safely mapped to T3 inputs in `0.3.207`, the receipt must not mutate T3 queue state. Active work transitions through the normal structured terminal outcome and existing interruption lifecycle.
 
 The existing public T3 interrupt contract remains unchanged unless a contract extension is strictly required to preserve correctness.
 
@@ -176,7 +179,7 @@ The implementation must audit the `0.3.207` peer dependency change for `@anthrop
 - MCP settling timeout is a visible pending state, not a provider failure.
 - An MCP status call failure preserves the last settled snapshot and reports the refresh error.
 - Unknown terminal reasons are logged with the raw reason and classified as failed.
-- Invalid command lifecycle regressions are logged with the command UUID and both states.
+- Command lifecycle frames and interrupt receipts are logged as diagnostics without changing T3 queue state.
 - Reinitialization failure falls back to existing process/session recovery without clearing the resume cursor.
 - SDK process stderr and control errors continue through the existing lifecycle and provider logs.
 - Logs must distinguish session startup, MCP settling, control-channel recovery, and process restart decisions.
@@ -189,8 +192,9 @@ Add focused tests for:
 
 - Every `0.3.207` terminal-reason category.
 - Unknown terminal reasons failing safely.
-- Command lifecycle transitions, idempotency, conflicts, cancellation, discard, and `still_queued` preservation.
-- Background-task snapshot reconciliation and duplicate suppression.
+- Command lifecycle and interrupt receipt diagnostics remaining nonfatal and side-effect free.
+- Background-task replacement semantics, process-start reset, provider-neutral projection, and unknown task types.
+- Existing action history remaining intact while the live background indicator appears and disappears.
 - MCP empty-to-pending-to-terminal settling.
 - MCP deadline behavior with unresolved pending servers.
 - Probe cancellation and coalescing.
@@ -211,11 +215,13 @@ The implementation is not complete until it is verified through the T3 Browser a
 3. Confirm Slack, Mixpanel, and Notion reach connected state while unauthenticated services reach needs-auth.
 4. Make a real read-only Slack request and verify an MCP tool executes successfully.
 5. Start and interrupt a Claude turn, then verify a subsequent turn completes normally.
-6. Store a unique context token in the thread.
-7. Restart the managed dev server.
-8. Reopen the same thread and verify Claude recalls the token through the preserved resume cursor.
-9. Switch to the other Claude profile and verify MCP and authentication state does not leak between profiles.
-10. Inspect the browser console, lifecycle log, provider event log, and timeline logs for uncaught errors, dropped commands, duplicate tasks, or incorrect recovery.
+6. Run a real background shell command and verify the existing actions group shows live background status, then removes it on completion without losing the command row.
+7. Start a background subagent and verify it contributes to the same live status without creating duplicate action rows.
+8. Store a unique context token in the thread.
+9. Restart the managed dev server.
+10. Reopen the same thread and verify Claude recalls the token through the preserved resume cursor and no stale background indicator survives the process restart.
+11. Switch to the other Claude profile and verify MCP, authentication, and background activity state does not leak between profiles.
+12. Inspect the browser console, lifecycle log, provider event log, and timeline logs for uncaught errors, dropped commands, duplicate tasks, stale background state, or incorrect recovery.
 
 ### Completion commands
 
@@ -237,8 +243,8 @@ Review and update these documents or skills when their behavior changes:
 - `.claude/skills/production-build.md`
 - `.claude/skills/provider-integration.md`
 
-Documentation must explain the pinned SDK baseline, nonblocking MCP settling, lifecycle interpretation, recovery boundary, and native packaging behavior.
+Documentation must explain the pinned SDK baseline, nonblocking MCP settling, lifecycle interpretation, background-activity projection, recovery boundary, and native packaging behavior.
 
 ## Success Criteria
 
-The upgrade is successful when T3 runs exactly SDK `0.3.207`, existing Claude conversations and connectors behave normally, structured lifecycle data prevents silent loss or false success, profile state remains isolated, resume survives a real server restart, native packaging remains valid, no superseded compatibility code remains, and all automated and browser verification passes.
+The upgrade is successful when T3 runs exactly SDK `0.3.207`, existing Claude conversations and connectors behave normally, terminal outcomes fail safely, background activity appears accurately in the existing actions group without duplicate history, profile state remains isolated, resume survives a real server restart, native packaging remains valid, no superseded compatibility code remains, and all automated and browser verification passes.
