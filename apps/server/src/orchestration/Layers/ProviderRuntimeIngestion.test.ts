@@ -11,6 +11,7 @@ import {
   MessageId,
   ProjectId,
   ProviderItemId,
+  RuntimeTaskId,
   type ServerSettings,
   ThreadId,
   TurnId,
@@ -2931,6 +2932,94 @@ describe("ProviderRuntimeIngestion", () => {
         (entry: ProviderRuntimeTestProposedPlan) => entry.id === "plan:thread-1:turn:turn-task-1",
       )?.planMarkdown,
     ).toBe("# Plan title");
+  });
+
+  it("persists background task replacement snapshots without changing the active turn", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const turnId = asTurnId("turn-background-snapshot");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-background-turn-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+    );
+
+    const snapshots: ReadonlyArray<
+      Extract<ProviderRuntimeEvent, { type: "task.background.changed" }>
+    > = [
+      {
+        type: "task.background.changed",
+        eventId: asEventId("evt-background-tasks-active"),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId,
+        payload: {
+          tasks: [
+            {
+              taskId: RuntimeTaskId.makeUnsafe("background-research"),
+              taskType: "research",
+              description: "Research provider-neutral task semantics",
+            },
+            {
+              taskId: RuntimeTaskId.makeUnsafe("background-validation"),
+              taskType: "validation",
+              description: "Validate the replacement snapshot",
+            },
+          ],
+        },
+      },
+      {
+        type: "task.background.changed",
+        eventId: asEventId("evt-background-tasks-idle"),
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: now,
+        turnId,
+        payload: { tasks: [] },
+      },
+    ];
+
+    for (const snapshot of snapshots) {
+      harness.emit(snapshot);
+    }
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.activities.filter(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "task.background.changed",
+        ).length === 2,
+    );
+    const activities = thread.activities.filter(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "task.background.changed",
+    );
+
+    expect(activities).toMatchObject([
+      {
+        id: "evt-background-tasks-active",
+        tone: "info",
+        summary: "2 background tasks",
+        turnId,
+        payload: snapshots[0]?.payload,
+      },
+      {
+        id: "evt-background-tasks-idle",
+        tone: "info",
+        summary: "Background work idle",
+        turnId,
+        payload: snapshots[1]?.payload,
+      },
+    ]);
+    expect(thread.session).toMatchObject({ status: "running", activeTurnId: turnId });
   });
 
   it("projects Claude hook lifecycle events into thread activities", async () => {

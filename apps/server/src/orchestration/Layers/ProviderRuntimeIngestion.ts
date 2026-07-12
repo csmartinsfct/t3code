@@ -764,6 +764,25 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "task.background.changed": {
+      const taskCount = event.payload.tasks.length;
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "task.background.changed",
+          summary:
+            taskCount === 0
+              ? "Background work idle"
+              : `${taskCount} background ${taskCount === 1 ? "task" : "tasks"}`,
+          payload: event.payload,
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "hook.started": {
       const hookEvent = hookDisplayName(event.payload.hookEvent);
       return [
