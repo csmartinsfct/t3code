@@ -495,6 +495,19 @@ function normalizeTerminalContextsForThread(
   return normalizedContexts;
 }
 
+function hasClearableContent(draft: ComposerThreadDraftState): boolean {
+  return (
+    draft.prompt.length > 0 ||
+    draft.images.length > 0 ||
+    draft.nonPersistedImageIds.length > 0 ||
+    draft.persistedAttachments.length > 0 ||
+    draft.terminalContexts.length > 0 ||
+    draft.codeSnippets.length > 0 ||
+    draft.ticketAttachments.length > 0 ||
+    draft.skills.length > 0
+  );
+}
+
 function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   return (
     draft.prompt.length === 0 &&
@@ -2546,7 +2559,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         }
         set((state) => {
           const current = state.draftsByThreadId[threadId];
-          if (!current) {
+          // No draft, or a draft that retains only non-clearable state (e.g. a
+          // persisted model selection) with no content to clear: return the
+          // identical state so the draft object reference stays stable.
+          // Rebuilding it here would churn selector references (composerDraft
+          // .skills, etc.) and re-trigger dependent effects indefinitely
+          // (React error #185 "Maximum update depth exceeded").
+          if (!current || !hasClearableContent(current)) {
             return state;
           }
           const nextDraft: ComposerThreadDraftState = {

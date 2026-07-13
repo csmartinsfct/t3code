@@ -223,6 +223,30 @@ describe("composerDraftStore clearComposerContent", () => {
     expect(draft).toBeUndefined();
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:optimistic");
   });
+
+  it("is idempotent when the draft retains a model selection (guards against render loops)", () => {
+    // Regression: React error #185 crash when clicking an auto-send thread.
+    // A draft that keeps a per-thread model selection is NOT removed by
+    // clearComposerContent (shouldRemoveDraft stays false), so a naive
+    // implementation rebuilds the draft object on every call. That churns the
+    // reference behind the `composerDraft.skills` selector, which ChatView's
+    // initial-draft effect depends on, re-triggering the effect forever.
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(threadId, modelSelection("codex", "gpt-5.6-sol"));
+    store.setPrompt(threadId, "auto-sent prompt");
+
+    // First clear empties content but retains the model selection → draft persists.
+    useComposerDraftStore.getState().clearComposerContent(threadId);
+    const afterFirst = useComposerDraftStore.getState();
+    expect(afterFirst.draftsByThreadId[threadId]).toBeDefined();
+
+    // A redundant clear must be a true no-op: same reference, so dependent
+    // selectors stay stable and the effect does not re-run.
+    useComposerDraftStore.getState().clearComposerContent(threadId);
+    const afterSecond = useComposerDraftStore.getState();
+    expect(afterSecond.draftsByThreadId).toBe(afterFirst.draftsByThreadId);
+    expect(afterSecond.draftsByThreadId[threadId]).toBe(afterFirst.draftsByThreadId[threadId]);
+  });
 });
 
 describe("composerDraftStore ticket attachments", () => {
