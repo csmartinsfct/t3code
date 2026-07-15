@@ -441,6 +441,7 @@ const makeLayer = (opts: {
       {
         id: projectId,
         title: "Runner project",
+        nameHidden: false,
         workspaceRoot: "/tmp/runner-project",
         defaultModelSelection: null,
         systemPrompt: null,
@@ -1422,6 +1423,7 @@ describe("OrchestrationRunRunner", () => {
         {
           id: projectId,
           title: "Runner project",
+          nameHidden: false,
           workspaceRoot: "/tmp/runner-project",
           defaultModelSelection: null,
           systemPrompt: null,
@@ -1651,6 +1653,7 @@ describe("OrchestrationRunRunner", () => {
         {
           id: projectId,
           title: "Runner project",
+          nameHidden: false,
           workspaceRoot: "/tmp/runner-project",
           defaultModelSelection: null,
           systemPrompt: null,

@@ -660,6 +660,7 @@ export function projectEvent(
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
+            nameHidden: payload.nameHidden,
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
             systemPrompt: payload.systemPrompt,
@@ -690,6 +691,7 @@ export function projectEvent(
               ? {
                   ...project,
                   ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.nameHidden !== undefined ? { nameHidden: payload.nameHidden } : {}),
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),

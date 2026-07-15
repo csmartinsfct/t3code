@@ -38,6 +38,7 @@ describe("decider project scripts", () => {
     const event = Array.isArray(result) ? result[0] : result;
     expect(event.type).toBe("project.created");
     expect((event.payload as { scripts: unknown[] }).scripts).toEqual([]);
+    expect((event.payload as { nameHidden: boolean }).nameHidden).toBe(false);
   });
 
   it("propagates scripts in project.meta.update payload", async () => {
@@ -58,6 +59,7 @@ describe("decider project scripts", () => {
         payload: {
           projectId: asProjectId("project-scripts"),
           title: "Scripts",
+          nameHidden: false,
           workspaceRoot: "/tmp/scripts",
           defaultModelSelection: null,
           systemPrompt: null,
@@ -85,6 +87,7 @@ describe("decider project scripts", () => {
           type: "project.meta.update",
           commandId: CommandId.makeUnsafe("cmd-project-update-scripts"),
           projectId: asProjectId("project-scripts"),
+          nameHidden: true,
           scripts: Array.from(scripts),
         },
         readModel,
@@ -94,6 +97,7 @@ describe("decider project scripts", () => {
     const event = Array.isArray(result) ? result[0] : result;
     expect(event.type).toBe("project.meta-updated");
     expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
+    expect((event.payload as { nameHidden?: boolean }).nameHidden).toBe(true);
   });
 
   it("stores sparse project prompt overrides and clears removed prompt ids", async () => {
@@ -114,6 +118,7 @@ describe("decider project scripts", () => {
         payload: {
           projectId: asProjectId("project-prompts"),
           title: "Prompts",
+          nameHidden: false,
           workspaceRoot: "/tmp/prompts",
           defaultModelSelection: null,
           systemPrompt: null,
@@ -197,6 +202,7 @@ describe("decider project scripts", () => {
         payload: {
           projectId: asProjectId("project-1"),
           title: "Project",
+          nameHidden: false,
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,
@@ -326,6 +332,7 @@ describe("decider project scripts", () => {
         payload: {
           projectId: asProjectId("project-1"),
           title: "Project",
+          nameHidden: false,
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,
@@ -410,6 +417,7 @@ describe("decider project scripts", () => {
         payload: {
           projectId: asProjectId("project-1"),
           title: "Project",
+          nameHidden: false,
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           systemPrompt: null,

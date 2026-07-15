@@ -22,6 +22,7 @@ const seedProject = (projectId: ProjectId, title: string) =>
     yield* projects.upsert({
       projectId,
       title,
+      nameHidden: false,
       workspaceRoot: `/tmp/${projectId}`,
       defaultModelSelection: null,
       scripts: [],

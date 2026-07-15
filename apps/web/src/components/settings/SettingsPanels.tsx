@@ -29,6 +29,7 @@ import {
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
+import { formatProjectName } from "../../projectName";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -2196,7 +2197,7 @@ export function ArchivedThreadsPanel() {
           {archivedGroups.map(({ project, threads: projectThreads }) => (
             <SettingsSection
               key={project.id}
-              title={project.name}
+              title={formatProjectName(project.name, project.nameHidden)}
               icon={<ProjectFavicon cwd={project.cwd} />}
             >
               {projectThreads.map((thread) => (
@@ -2254,7 +2255,12 @@ export function ArchivedThreadsPanel() {
 // ---------------------------------------------------------------------------
 
 interface ArchivedTicketsByProject {
-  readonly project: { id: string; name: string; cwd: string };
+  readonly project: {
+    id: string;
+    name: string;
+    nameHidden?: boolean | undefined;
+    cwd: string;
+  };
   readonly tickets: ReadonlyArray<TicketSummary>;
 }
 
@@ -2477,7 +2483,7 @@ export function ArchivedTicketsPanel() {
           {groups.map(({ project, tickets }) => (
             <SettingsSection
               key={project.id}
-              title={project.name}
+              title={formatProjectName(project.name, project.nameHidden)}
               icon={<ProjectFavicon cwd={project.cwd} />}
             >
               {tickets.map((ticket) => (

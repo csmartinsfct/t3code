@@ -348,6 +348,7 @@ function createSnapshotForTargetUser(options: {
       {
         id: PROJECT_ID,
         title: "Project",
+        nameHidden: false,
         workspaceRoot: "/repo/project",
         defaultModelSelection: modelSelection,
         scripts: [],
@@ -4958,6 +4959,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         {
           id: "project-2" as ProjectId,
           title: "Project Two",
+          nameHidden: false,
           workspaceRoot: "/repo/project-two",
           defaultModelSelection: {
             provider: "codex" as const,

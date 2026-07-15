@@ -150,6 +150,7 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
       {
         id: ProjectId.makeUnsafe("project-1"),
         title: "Project",
+        nameHidden: false,
         workspaceRoot: "/tmp/project",
         defaultModelSelection: {
           provider: "codex",
@@ -217,6 +218,7 @@ function makeReadModelProject(
   return {
     id: ProjectId.makeUnsafe("project-1"),
     title: "Project",
+    nameHidden: false,
     workspaceRoot: "/tmp/project",
     defaultModelSelection: {
       provider: "codex",
@@ -318,6 +320,26 @@ describe("store read model sync", () => {
 
     expect(next.projects[0]?.updatedAt).toBe("2026-02-27T00:00:00.000Z");
     expect(next.threads[0]?.updatedAt).toBe("2026-02-27T00:05:00.000Z");
+  });
+
+  it("maps and updates project name visibility", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(makeReadModelThread({}));
+    const synced = syncServerReadModel(initialState, {
+      ...readModel,
+      projects: [makeReadModelProject({ nameHidden: true })],
+    });
+
+    expect(synced.projects[0]?.nameHidden).toBe(true);
+
+    const next = applyOrchestrationEvents(synced, [
+      makeEvent("project.meta-updated", {
+        projectId: ProjectId.makeUnsafe("project-1"),
+        nameHidden: false,
+        updatedAt: "2026-02-27T00:10:00.000Z",
+      }),
+    ]);
+    expect(next.projects[0]?.nameHidden).toBe(false);
   });
 
   it("maps archivedAt from the read model", () => {
@@ -862,6 +884,7 @@ describe("incremental orchestration updates", () => {
       makeEvent("project.created", {
         projectId: recreatedProjectId,
         title: "Project Recreated",
+        nameHidden: false,
         workspaceRoot: "/tmp/project",
         defaultModelSelection: {
           provider: "codex",

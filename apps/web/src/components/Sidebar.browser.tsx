@@ -11,8 +11,9 @@ import { findButtonByText, waitForElement } from "~/test-utils/browser";
 import { seedSidebarTestStores } from "~/test-utils/sidebar";
 import { SidebarProvider } from "./ui/sidebar";
 
-const { contextMenuShowSpy, openInEditorSpy } = vi.hoisted(() => ({
+const { contextMenuShowSpy, dispatchCommandSpy, openInEditorSpy } = vi.hoisted(() => ({
   contextMenuShowSpy: vi.fn(),
+  dispatchCommandSpy: vi.fn(async () => undefined),
   openInEditorSpy: vi.fn(async () => undefined),
 }));
 const toastAddSpy = vi.fn();
@@ -153,6 +154,7 @@ function createProvider(input: {
 
 function installNativeApi() {
   contextMenuShowSpy.mockReset();
+  dispatchCommandSpy.mockReset();
   openInEditorSpy.mockReset();
   window.nativeApi = {
     contextMenu: {
@@ -163,7 +165,7 @@ function installNativeApi() {
       confirm: vi.fn(async () => true),
     },
     orchestration: {
-      dispatchCommand: vi.fn(async () => undefined),
+      dispatchCommand: dispatchCommandSpy,
     },
     projects: {
       enhanceSystemPrompt: vi.fn(async () => ({
@@ -264,8 +266,8 @@ describe("Sidebar thread context menu helpers", () => {
         }),
       ],
       projects: [
-        { id: "project-1" as ProjectId, name: "Alpha" },
-        { id: "project-2" as ProjectId, name: "Beta" },
+        { id: "project-1" as ProjectId, name: "Alpha", nameHidden: false },
+        { id: "project-2" as ProjectId, name: "Beta", nameHidden: true },
       ],
       threadProjectId: "project-1" as ProjectId,
       hasActiveSession: false,
@@ -290,7 +292,7 @@ describe("Sidebar thread context menu helpers", () => {
       },
     ]);
     expect(moveItem?.disabled).toBe(false);
-    expect(moveItem?.children).toEqual([{ id: "move::project-2", label: "Beta" }]);
+    expect(moveItem?.children).toEqual([{ id: "move::project-2", label: "****" }]);
   });
 
   it("builds fork model selections for each provider family", () => {
@@ -312,15 +314,15 @@ describe("Sidebar thread context menu helpers", () => {
   it("disables Move to when no target project exists or the thread is active", () => {
     const noTargetItems = buildThreadContextMenuItems({
       serverProviders: [],
-      projects: [{ id: "project-1" as ProjectId, name: "Alpha" }],
+      projects: [{ id: "project-1" as ProjectId, name: "Alpha", nameHidden: false }],
       threadProjectId: "project-1" as ProjectId,
       hasActiveSession: false,
     });
     const activeThreadItems = buildThreadContextMenuItems({
       serverProviders: [],
       projects: [
-        { id: "project-1" as ProjectId, name: "Alpha" },
-        { id: "project-2" as ProjectId, name: "Beta" },
+        { id: "project-1" as ProjectId, name: "Alpha", nameHidden: false },
+        { id: "project-2" as ProjectId, name: "Beta", nameHidden: false },
       ],
       threadProjectId: "project-1" as ProjectId,
       hasActiveSession: true,
@@ -335,7 +337,7 @@ describe("Sidebar thread context menu helpers", () => {
 
     const items = buildThreadContextMenuItems({
       serverProviders: [],
-      projects: [{ id: "project-1" as ProjectId, name: "Alpha" }],
+      projects: [{ id: "project-1" as ProjectId, name: "Alpha", nameHidden: false }],
       threadProjectId: "project-1" as ProjectId,
       hasActiveSession: false,
       openInEditorLabel: resolveOpenInEditorContextMenuLabel({
@@ -345,6 +347,7 @@ describe("Sidebar thread context menu helpers", () => {
       canOpenInEditor: true,
     });
     const projectItems = buildProjectContextMenuItems({
+      nameHidden: false,
       openInEditorLabel: resolveOpenInEditorContextMenuLabel({
         availableEditors: ["cursor", "vscode"],
       }),
@@ -359,6 +362,9 @@ describe("Sidebar thread context menu helpers", () => {
       label: "Open in Cursor",
       disabled: false,
     });
+    expect(projectItems.find((item) => item.id === "toggle-name-visibility")?.label).toBe(
+      "Hide name",
+    );
     window.localStorage.removeItem("t3code:last-editor");
   });
 
@@ -433,6 +439,53 @@ describe("Sidebar project system prompt entry", () => {
 
       await vi.waitFor(() => {
         expect(openInEditorSpy).toHaveBeenCalledWith("/repo/alpha", "vscode");
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows a masked project name and dispatches Show name", async () => {
+    seedSidebarTestStores({ projectNameHidden: true });
+    contextMenuShowSpy.mockImplementation(async (items: Array<{ id: string; label: string }>) => {
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "toggle-name-visibility", label: "Show name" }),
+        ]),
+      );
+      return "toggle-name-visibility";
+    });
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SidebarProvider defaultOpen>
+          <Sidebar />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+
+    try {
+      const projectButton = await waitForElement(
+        () => findButtonByText(document.body, "*****"),
+        "Unable to find the masked project row.",
+      );
+      projectButton.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 24,
+          clientY: 24,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(dispatchCommandSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "project.meta.update",
+            projectId: "project-1",
+            nameHidden: false,
+          }),
+        );
       });
     } finally {
       await screen.unmount();

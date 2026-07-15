@@ -59,6 +59,7 @@ const makeProject = (
 ) => ({
   id: projectId,
   title: "Prompt Project",
+  nameHidden: false,
   workspaceRoot: "/tmp/prompt-project",
   defaultModelSelection: {
     provider: "codex" as const,

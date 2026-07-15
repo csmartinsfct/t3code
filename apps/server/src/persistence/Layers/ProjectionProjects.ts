@@ -1,6 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema, Struct } from "effect";
+import * as Transformation from "effect/SchemaTransformation";
 
 import { ModelSelection, ProjectPromptOverrides, ProjectScript } from "@t3tools/contracts";
 import { hasOrchestrationPromptOverrides } from "@t3tools/shared/promptTemplates";
@@ -15,6 +16,15 @@ import {
 
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
+    nameHidden: Schema.Number.pipe(
+      Schema.decodeTo(
+        Schema.Boolean,
+        Transformation.transform({
+          decode: (value) => value !== 0,
+          encode: (value) => (value ? 1 : 0),
+        }),
+      ),
+    ),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     promptOverrides: Schema.fromJsonString(ProjectPromptOverrides),
@@ -34,6 +44,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         INSERT INTO projection_projects (
           project_id,
           title,
+          name_hidden,
           workspace_root,
           default_model_selection_json,
           scripts_json,
@@ -46,6 +57,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         VALUES (
           ${row.projectId},
           ${row.title},
+          ${row.nameHidden ? 1 : 0},
           ${row.workspaceRoot},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
           ${JSON.stringify(row.scripts)},
@@ -62,6 +74,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         ON CONFLICT (project_id)
         DO UPDATE SET
           title = excluded.title,
+          name_hidden = excluded.name_hidden,
           workspace_root = excluded.workspace_root,
           default_model_selection_json = excluded.default_model_selection_json,
           scripts_json = excluded.scripts_json,
@@ -81,6 +94,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         SELECT
           project_id AS "projectId",
           title,
+          name_hidden AS "nameHidden",
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
@@ -105,6 +119,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         SELECT
           project_id AS "projectId",
           title,
+          name_hidden AS "nameHidden",
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",

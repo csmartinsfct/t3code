@@ -28,6 +28,7 @@ import {
   type SkillEntry,
   type DeclaredService,
 } from "@t3tools/contracts";
+import { formatProjectName } from "../projectName";
 import {
   applyClaudePromptEffortPrefix,
   makeProviderModelSelection,
@@ -2822,7 +2823,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const resolveProjectName = useCallback(
     (projectId: string) => {
       if (activeProject && activeProject.id === projectId) {
-        return activeProject.name;
+        return formatProjectName(activeProject.name, activeProject.nameHidden);
       }
       return projectId;
     },

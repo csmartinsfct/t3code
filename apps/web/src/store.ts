@@ -532,6 +532,7 @@ function mapProject(project: ThreadReadModel["projects"][number]): Project {
   return {
     id: project.id,
     name: project.title,
+    nameHidden: project.nameHidden,
     cwd: project.workspaceRoot,
     defaultModelSelection: project.defaultModelSelection
       ? normalizeModelSelection(project.defaultModelSelection)
@@ -1039,6 +1040,7 @@ function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent)
       const nextProject = mapProject({
         id: event.payload.projectId,
         title: event.payload.title,
+        nameHidden: event.payload.nameHidden,
         workspaceRoot: event.payload.workspaceRoot,
         defaultModelSelection: event.payload.defaultModelSelection,
         systemPrompt: event.payload.systemPrompt,
@@ -1061,6 +1063,7 @@ function applyOrchestrationEventBase(state: AppState, event: OrchestrationEvent)
       const projects = updateProject(state.projects, event.payload.projectId, (project) => ({
         ...project,
         ...(event.payload.title !== undefined ? { name: event.payload.title } : {}),
+        ...(event.payload.nameHidden !== undefined ? { nameHidden: event.payload.nameHidden } : {}),
         ...(event.payload.workspaceRoot !== undefined ? { cwd: event.payload.workspaceRoot } : {}),
         ...(event.payload.defaultModelSelection !== undefined
           ? {

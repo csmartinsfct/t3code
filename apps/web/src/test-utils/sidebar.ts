@@ -13,6 +13,7 @@ export function makeSidebarTestProject() {
   return {
     id: SIDEBAR_TEST_PROJECT_ID,
     name: "Alpha",
+    nameHidden: false,
     cwd: "/repo/alpha",
     defaultModelSelection: { provider: "codex" as const, model: "gpt-5.4" },
     systemPrompt: "Honor the project conventions.",
@@ -28,9 +29,15 @@ export function seedSidebarTestStores(input?: {
   threadIdsByProjectId?: Record<string, string[]>;
   orchestrationRunStatusByThreadId?: Record<string, "pending" | "running" | "completed">;
   projectExpandedById?: Record<string, boolean>;
+  projectNameHidden?: boolean;
 }) {
   useStore.setState({
-    projects: [makeSidebarTestProject()],
+    projects: [
+      {
+        ...makeSidebarTestProject(),
+        nameHidden: input?.projectNameHidden ?? false,
+      },
+    ],
     threads: [],
     threadsById: {},
     sidebarThreadsById: (input?.sidebarThreadsById ?? {}) as never,

@@ -99,6 +99,7 @@ const makeDefaultOrchestrationReadModel = () => {
       {
         id: defaultProjectId,
         title: "Default Project",
+        nameHidden: false,
         workspaceRoot: "/tmp/default-project",
         defaultModelSelection,
         systemPrompt: null,

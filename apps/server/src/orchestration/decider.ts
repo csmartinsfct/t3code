@@ -104,6 +104,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           projectId: command.projectId,
           title: command.title,
+          nameHidden: false,
           workspaceRoot: command.workspaceRoot,
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
@@ -136,6 +137,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           projectId: command.projectId,
           ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.nameHidden !== undefined ? { nameHidden: command.nameHidden } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
           ...(command.defaultModelSelection !== undefined
             ? { defaultModelSelection: command.defaultModelSelection }

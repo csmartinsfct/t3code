@@ -57,6 +57,15 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
+    nameHidden: Schema.Number.pipe(
+      Schema.decodeTo(
+        Schema.Boolean,
+        Transformation.transform({
+          decode: (value) => value !== 0,
+          encode: (value) => (value ? 1 : 0),
+        }),
+      ),
+    ),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     promptOverrides: Schema.fromJsonString(ProjectPromptOverrides),
@@ -69,6 +78,7 @@ function toOrchestrationProject(
   return {
     id: row.projectId,
     title: row.title,
+    nameHidden: row.nameHidden,
     workspaceRoot: row.workspaceRoot,
     defaultModelSelection:
       row.defaultModelSelection === null
@@ -379,6 +389,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           project_id AS "projectId",
           title,
+          name_hidden AS "nameHidden",
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
@@ -889,6 +900,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           project_id AS "projectId",
           title,
+          name_hidden AS "nameHidden",
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
@@ -916,6 +928,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           project_id AS "projectId",
           title,
+          name_hidden AS "nameHidden",
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
@@ -1600,6 +1613,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             (row): OrchestrationProject => ({
               id: row.projectId,
               title: row.title,
+              nameHidden: row.nameHidden,
               workspaceRoot: row.workspaceRoot,
               defaultModelSelection: row.defaultModelSelection,
               scripts: row.scripts,
@@ -1684,6 +1698,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           (row): OrchestrationProject => ({
             id: row.projectId,
             title: row.title,
+            nameHidden: row.nameHidden,
             workspaceRoot: row.workspaceRoot,
             defaultModelSelection: row.defaultModelSelection,
             scripts: row.scripts,

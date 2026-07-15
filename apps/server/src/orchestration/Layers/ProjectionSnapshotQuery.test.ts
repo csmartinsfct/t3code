@@ -322,6 +322,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         {
           id: asProjectId("project-1"),
           title: "Project 1",
+          nameHidden: false,
           workspaceRoot: "/tmp/project-1",
           defaultModelSelection: {
             provider: "codex",

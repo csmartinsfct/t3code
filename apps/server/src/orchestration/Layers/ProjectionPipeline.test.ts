@@ -2157,6 +2157,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         type: "project.meta.update",
         commandId: CommandId.makeUnsafe("cmd-scripts-project-update"),
         projectId: ProjectId.makeUnsafe("project-scripts"),
+        nameHidden: true,
         scripts: [
           {
             id: "script-1",
@@ -2175,10 +2176,12 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       const projectRows = yield* sql<{
         readonly scriptsJson: string;
         readonly defaultModelSelection: string;
+        readonly nameHidden: number;
       }>`
         SELECT
           scripts_json AS "scriptsJson",
-          default_model_selection_json AS "defaultModelSelection"
+          default_model_selection_json AS "defaultModelSelection",
+          name_hidden AS "nameHidden"
         FROM projection_projects
         WHERE project_id = 'project-scripts'
       `;
@@ -2187,6 +2190,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
           scriptsJson:
             '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           defaultModelSelection: '{"provider":"codex","model":"gpt-5"}',
+          nameHidden: 1,
         },
       ]);
     }),

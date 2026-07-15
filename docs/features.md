@@ -43,6 +43,8 @@ The core of T3 Code is an event-sourced orchestration engine that manages all ag
 **User interaction:**
 
 - Create threads from the sidebar or board view.
+- Hide or show individual project names from the sidebar context menu. Hidden names retain their
+  whitespace and character footprint using asterisks, and the preference persists across restarts.
 - Send messages via the composer.
 - Approve or decline agent decisions from the pending-approval panel.
 - Archive or delete threads from context menus.

@@ -108,6 +108,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
       {
         id: PROJECT_ID,
         title: "Project",
+        nameHidden: false,
         workspaceRoot: "/repo/project",
         defaultModelSelection: {
           provider: "codex",

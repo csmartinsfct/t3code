@@ -57,6 +57,7 @@ import Migration0040 from "./Migrations/040_ProjectionThreadProposedPlanStatus.t
 import Migration0041 from "./Migrations/041_ProjectionThreadMessageSequence.ts";
 import Migration0042 from "./Migrations/042_ProjectionThreadsInitialDraft.ts";
 import Migration0043 from "./Migrations/043_ProjectionThreadActivitiesKindIndex.ts";
+import Migration0044 from "./Migrations/044_ProjectNameHidden.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -112,6 +113,7 @@ export const migrationEntries = [
   [41, "ProjectionThreadMessageSequence", Migration0041],
   [42, "ProjectionThreadsInitialDraft", Migration0042],
   [43, "ProjectionThreadActivitiesKindIndex", Migration0043],
+  [44, "ProjectNameHidden", Migration0044],
 ] as const;
 
 const migrationEntryById = new Map<number, string>(

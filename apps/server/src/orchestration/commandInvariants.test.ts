@@ -27,6 +27,7 @@ const readModel: OrchestrationReadModel = {
     {
       id: ProjectId.makeUnsafe("project-a"),
       title: "Project A",
+      nameHidden: false,
       workspaceRoot: "/tmp/project-a",
       defaultModelSelection: {
         provider: "codex",
@@ -42,6 +43,7 @@ const readModel: OrchestrationReadModel = {
     {
       id: ProjectId.makeUnsafe("project-b"),
       title: "Project B",
+      nameHidden: false,
       workspaceRoot: "/tmp/project-b",
       defaultModelSelection: {
         provider: "codex",

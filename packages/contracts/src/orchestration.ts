@@ -380,6 +380,7 @@ export type ProjectPromptOverridesPatch = typeof ProjectPromptOverridesPatch.Typ
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
+  nameHidden: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
@@ -680,6 +681,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
+  nameHidden: Schema.optional(Schema.Boolean),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
@@ -1035,6 +1037,7 @@ export const OrchestrationActorKind = Schema.Literals(["client", "server", "prov
 export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  nameHidden: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   workspaceRoot: TrimmedNonEmptyString,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
@@ -1047,6 +1050,7 @@ export const ProjectCreatedPayload = Schema.Struct({
 export const ProjectMetaUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
+  nameHidden: Schema.optional(Schema.Boolean),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),

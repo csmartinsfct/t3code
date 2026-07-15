@@ -1,5 +1,6 @@
 import type { NativeApi } from "@t3tools/contracts";
 import type { Project } from "../types";
+import { formatProjectName } from "../projectName";
 
 export interface OrchestrationProjectOption {
   readonly id: string;
@@ -8,11 +9,11 @@ export interface OrchestrationProjectOption {
 }
 
 export function mapProjectsToOrchestrationProjectOptions(
-  projects: ReadonlyArray<Pick<Project, "id" | "name" | "cwd">>,
+  projects: ReadonlyArray<Pick<Project, "id" | "name" | "nameHidden" | "cwd">>,
 ): ReadonlyArray<OrchestrationProjectOption> {
   return projects.map((project) => ({
     id: project.id,
-    title: project.name,
+    title: formatProjectName(project.name, project.nameHidden),
     workspaceRoot: project.cwd,
   }));
 }
@@ -24,7 +25,7 @@ export async function getOrchestrationProjectOptions(
 
   return projects.map((project) => ({
     id: project.id,
-    title: project.title,
+    title: formatProjectName(project.title, project.nameHidden),
     workspaceRoot: project.workspaceRoot,
   }));
 }

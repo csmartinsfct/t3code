@@ -157,6 +157,7 @@ import { projectScriptCwd } from "../projectScripts";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { isUserVisibleProvider } from "../providerVisibility";
 import { preloadTicketingProject } from "../lib/ticketingCacheStore";
+import { formatProjectName } from "../projectName";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -184,6 +185,7 @@ type ThreadPr = GitStatusResult["pr"];
 interface ThreadContextMenuProjectOption {
   readonly id: ProjectId;
   readonly name: string;
+  readonly nameHidden?: boolean | undefined;
 }
 
 export function buildThreadContextMenuItems(input: {
@@ -208,7 +210,10 @@ export function buildThreadContextMenuItems(input: {
 
   const moveChildren = input.projects
     .filter((project) => project.id !== input.threadProjectId)
-    .map((project) => ({ id: `move::${project.id}`, label: project.name }));
+    .map((project) => ({
+      id: `move::${project.id}`,
+      label: formatProjectName(project.name, project.nameHidden),
+    }));
 
   return [
     { id: "rename", label: "Rename thread" },
@@ -237,11 +242,16 @@ export function buildThreadContextMenuItems(input: {
 }
 
 export function buildProjectContextMenuItems(input: {
+  readonly nameHidden: boolean;
   readonly openInEditorLabel?: string;
   readonly canOpenInEditor?: boolean;
 }): ReadonlyArray<ContextMenuItem<string>> {
   return [
     { id: "rename", label: "Rename project" },
+    {
+      id: "toggle-name-visibility",
+      label: input.nameHidden ? "Show name" : "Hide name",
+    },
     { id: "system-prompt", label: "Manage system prompt" },
     {
       id: "open-in-editor",
@@ -282,7 +292,7 @@ export function buildMoveThreadConfirmationMessage(input: {
 }
 
 export async function handleProjectDeleteAction(input: {
-  readonly project: { id: ProjectId; name: string };
+  readonly project: { id: ProjectId; name: string; nameHidden?: boolean | undefined };
   readonly projectThreads: ReadonlyArray<{ archivedAt: string | null }>;
   readonly confirmRemoval: (message: string) => Promise<boolean>;
   readonly dispatchDelete: (projectId: ProjectId) => Promise<void>;
@@ -310,7 +320,9 @@ export async function handleProjectDeleteAction(input: {
     return "blocked";
   }
 
-  const confirmed = await input.confirmRemoval(`Remove project "${input.project.name}"?`);
+  const confirmed = await input.confirmRemoval(
+    `Remove project "${formatProjectName(input.project.name, input.project.nameHidden)}"?`,
+  );
   if (!confirmed) {
     return "cancelled";
   }
@@ -1285,7 +1297,11 @@ export default function Sidebar() {
       const clicked = await api.contextMenu.show(
         buildThreadContextMenuItems({
           serverProviders,
-          projects: projects.map((project) => ({ id: project.id, name: project.name })),
+          projects: projects.map((project) => ({
+            id: project.id,
+            name: project.name,
+            nameHidden: project.nameHidden,
+          })),
           threadProjectId: thread.projectId,
           hasActiveSession,
           openInEditorLabel: resolveOpenInEditorContextMenuLabel({
@@ -1350,11 +1366,15 @@ export default function Sidebar() {
       if (clicked?.startsWith("move::")) {
         const targetProject = projects.find((p) => p.id === clicked.slice("move::".length));
         if (!targetProject) return;
+        const displayedTargetProjectName = formatProjectName(
+          targetProject.name,
+          targetProject.nameHidden,
+        );
 
         const confirmed = await api.dialogs.confirm(
           buildMoveThreadConfirmationMessage({
             threadTitle: thread.title,
-            targetProjectName: targetProject.name,
+            targetProjectName: displayedTargetProjectName,
             clearsWorkspaceAssociation: Boolean(thread.worktreePath || thread.branch),
           }),
         );
@@ -1370,7 +1390,7 @@ export default function Sidebar() {
           toastManager.add({
             type: "success",
             title: "Thread moved",
-            description: `Moved to "${targetProject.name}".`,
+            description: `Moved to "${displayedTargetProjectName}".`,
           });
         } catch {
           toastManager.add({
@@ -1572,11 +1592,29 @@ export default function Sidebar() {
 
       const clicked = await api.contextMenu.show(
         buildProjectContextMenuItems({
+          nameHidden: Boolean(project.nameHidden),
           openInEditorLabel: resolveOpenInEditorContextMenuLabel({ availableEditors }),
           canOpenInEditor: resolvePreferredEditor(availableEditors) !== null,
         }),
         position,
       );
+      if (clicked === "toggle-name-visibility") {
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "project.meta.update",
+            commandId: newCommandId(),
+            projectId,
+            nameHidden: !project.nameHidden,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: `Failed to ${project.nameHidden ? "show" : "hide"} project name`,
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
       if (clicked === "rename") {
         setRenamingProjectId(projectId);
         setRenamingProjectTitle(project.name);
@@ -1636,7 +1674,7 @@ export default function Sidebar() {
         console.error("Failed to remove project", { projectId, error });
         toastManager.add({
           type: "error",
-          title: `Failed to remove "${project.name}"`,
+          title: `Failed to remove "${formatProjectName(project.name, project.nameHidden)}"`,
           description: message,
         });
       }
@@ -2059,7 +2097,7 @@ export default function Sidebar() {
               />
             ) : (
               <span className="flex-1 truncate text-xs font-medium text-foreground/90">
-                {project.name}
+                {formatProjectName(project.name, project.nameHidden)}
               </span>
             )}
           </SidebarMenuButton>
@@ -2070,7 +2108,10 @@ export default function Sidebar() {
                   render={
                     <button
                       type="button"
-                      aria-label={`Create new thread in ${project.name}`}
+                      aria-label={`Create new thread in ${formatProjectName(
+                        project.name,
+                        project.nameHidden,
+                      )}`}
                       data-testid="new-thread-button"
                     />
                   }

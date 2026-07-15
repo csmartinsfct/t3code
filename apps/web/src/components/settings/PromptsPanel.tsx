@@ -18,13 +18,15 @@ import { SettingsPageContainer } from "./SettingsPanels";
 import { DynamicChatUiPromptSection } from "./DynamicChatUiPromptSection";
 import { PromptEditorDialog } from "./PromptEditorDialog";
 import { PromptList } from "./PromptList";
+import { formatProjectName } from "../../projectName";
 
 function runLabel(
   run: OrchestrationRunSummary | undefined,
-  projects?: readonly { id: string; name: string }[],
+  projects?: readonly { id: string; name: string; nameHidden?: boolean | undefined }[],
 ): string {
   if (!run) return "Run";
-  const projectName = projects?.find((p) => p.id === run.projectId)?.name;
+  const project = projects?.find((p) => p.id === run.projectId);
+  const projectName = project ? formatProjectName(project.name, project.nameHidden) : undefined;
   const prefix = projectName ? `${projectName} — ` : "";
   return `${prefix}Run ${run.id.slice(0, 6)} (${run.status})`;
 }
@@ -222,7 +224,12 @@ export function PromptsPanel() {
                         ) ?? "Run")
                       : scopeKind === "global"
                         ? "Global"
-                        : (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project")}
+                        : (() => {
+                            const project = projects.find((p) => p.id === selectedProjectId);
+                            return project
+                              ? formatProjectName(project.name, project.nameHidden)
+                              : "Project";
+                          })()}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -231,7 +238,7 @@ export function PromptsPanel() {
                   </SelectItem>
                   {projects.map((project) => (
                     <SelectItem hideIndicator key={project.id} value={project.id}>
-                      {project.name}
+                      {formatProjectName(project.name, project.nameHidden)}
                     </SelectItem>
                   ))}
                   {activeRuns.length > 0 && (

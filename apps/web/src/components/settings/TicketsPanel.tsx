@@ -11,6 +11,7 @@ import { SettingsPageContainer, SettingsSection } from "./SettingsPanels";
 import { LabelEditorDialog } from "./LabelEditorDialog";
 import { confirmSettingsAction } from "./SettingsConfirmOverlay";
 import { TemplateEditorDialog } from "./TemplateEditorDialog";
+import { formatProjectName } from "../../projectName";
 
 type ScopeKind = "global" | "project";
 
@@ -156,7 +157,12 @@ export function TicketsPanel() {
               <SelectValue>
                 {scopeKind === "global"
                   ? "Global"
-                  : (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project")}
+                  : (() => {
+                      const project = projects.find((p) => p.id === selectedProjectId);
+                      return project
+                        ? formatProjectName(project.name, project.nameHidden)
+                        : "Project";
+                    })()}
               </SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -165,7 +171,7 @@ export function TicketsPanel() {
               </SelectItem>
               {projects.map((project) => (
                 <SelectItem hideIndicator key={project.id} value={project.id}>
-                  {project.name}
+                  {formatProjectName(project.name, project.nameHidden)}
                 </SelectItem>
               ))}
             </SelectPopup>

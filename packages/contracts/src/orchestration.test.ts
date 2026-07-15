@@ -160,6 +160,7 @@ it.effect("decodes historical project.created payloads with a default provider",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.defaultModelSelection?.provider, "codex");
+    assert.strictEqual(parsed.nameHidden, false);
   }),
 );
 
@@ -167,6 +168,7 @@ it.effect("decodes project.meta-updated payloads with explicit default provider"
   Effect.gen(function* () {
     const parsed = yield* decodeProjectMetaUpdatedPayload({
       projectId: "project-1",
+      nameHidden: true,
       defaultModelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-8",
@@ -174,6 +176,7 @@ it.effect("decodes project.meta-updated payloads with explicit default provider"
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.defaultModelSelection?.provider, "claudeAgent");
+    assert.strictEqual(parsed.nameHidden, true);
   }),
 );
 

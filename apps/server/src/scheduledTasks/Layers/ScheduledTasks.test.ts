@@ -23,6 +23,7 @@ const projectId = ProjectId.makeUnsafe("project-scheduled");
 const project: OrchestrationProject = {
   id: projectId,
   title: "Scheduled Project",
+  nameHidden: false,
   workspaceRoot: "/tmp/scheduled-project",
   defaultModelSelection: null,
   systemPrompt: null,
