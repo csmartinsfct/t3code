@@ -62,7 +62,7 @@ import { useStore } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsibleContent } from "../ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -251,13 +251,52 @@ export function SettingsSection({
   title,
   icon,
   headerAction,
+  collapsible = false,
+  defaultOpen = true,
   children,
 }: {
   title: string;
   icon?: ReactNode;
   headerAction?: ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
   children: ReactNode;
 }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  if (collapsible) {
+    return (
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <section>
+          <div className="flex items-center justify-between">
+            <CollapsibleTrigger
+              className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+              aria-label={`Toggle ${title}`}
+            >
+              <h2 className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                {icon}
+                <span className="truncate">{title}</span>
+              </h2>
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                  !isOpen && "-rotate-90",
+                )}
+              />
+            </CollapsibleTrigger>
+            {headerAction}
+          </div>
+          <CollapsibleContent>
+            <div className="relative mt-3 overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-xs/5 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+              {children}
+            </div>
+          </CollapsibleContent>
+        </section>
+      </Collapsible>
+    );
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
@@ -2199,6 +2238,8 @@ export function ArchivedThreadsPanel() {
               key={project.id}
               title={formatProjectName(project.name, project.nameHidden)}
               icon={<ProjectFavicon cwd={project.cwd} />}
+              collapsible
+              defaultOpen={false}
             >
               {projectThreads.map((thread) => (
                 <div

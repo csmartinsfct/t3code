@@ -814,6 +814,7 @@ Limits: 256 rules max, 64-char key values, 256-char when expressions.
 **User interaction:**
 
 - Settings UI organized into tabs: General, Prompts, Tickets, Archived, Changelog, Managed Runs, Scheduled Tasks.
+- Archived threads are grouped by project; project groups start collapsed and expand when clicked.
 - Theme toggle (System/Light/Dark).
 - All provider and model configuration in one place.
 

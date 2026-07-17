@@ -502,7 +502,7 @@ describe("GeneralSettingsPanel discovered Claude profiles", () => {
   });
 });
 
-describe("ArchivedThreadsPanel bulk delete", () => {
+describe("ArchivedThreadsPanel", () => {
   beforeEach(() => {
     resetServerStateForTests();
     __resetNativeApiForTests();
@@ -518,6 +518,35 @@ describe("ArchivedThreadsPanel bulk delete", () => {
     __resetNativeApiForTests();
     document.body.innerHTML = "";
     delete window.nativeApi;
+  });
+
+  it("collapses project groups by default and expands them on click", async () => {
+    seedArchivedThreadsPanel([
+      createThread({
+        id: "thread-archived-1" as ThreadId,
+        title: "Archived alpha",
+        archivedAt: "2026-04-11T14:00:00.000Z",
+      }),
+      createThread({
+        id: "thread-archived-2" as ThreadId,
+        title: "Archived beta",
+        archivedAt: "2026-04-11T13:00:00.000Z",
+      }),
+    ]);
+
+    const screen = await renderArchivedThreadsPanel();
+
+    try {
+      await expect.element(page.getByText("Archived alpha")).not.toBeInTheDocument();
+      await expect.element(page.getByText("Archived beta")).not.toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Toggle Alpha" }).click();
+
+      await expect.element(page.getByText("Archived alpha")).toBeInTheDocument();
+      await expect.element(page.getByText("Archived beta")).toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
   });
 
   it("shows the bulk-delete confirmation and orphaned-worktree prompt in sequence", async () => {
