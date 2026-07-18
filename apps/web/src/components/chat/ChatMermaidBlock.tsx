@@ -37,7 +37,7 @@ export function ChatMermaidBlock({
         />
       </div>
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogPopup className="h-[85vh] max-w-[90vw]">
+        <DialogPopup className="h-[85vh] max-w-[90vw] overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col">
             <MermaidZoomPanViewer svg={svg} error={error} />
           </div>
