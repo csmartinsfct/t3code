@@ -1,7 +1,5 @@
-import { MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "~/components/ui/button";
 import {
   clampMermaidZoom,
   type MermaidViewTransform,
@@ -55,14 +53,6 @@ export function MermaidZoomPanViewer({
     return () => cancelAnimationFrame(frame);
   }, [fitDiagram, svg]);
 
-  const zoomAtCenter = useCallback((factor: number) => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    const point = { x: rect.width / 2, y: rect.height / 2 };
-    setTransform((current) => zoomMermaidTransformAtPoint(current, current.scale * factor, point));
-  }, []);
-
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
@@ -102,27 +92,6 @@ export function MermaidZoomPanViewer({
     }
   }, []);
 
-  const controls = useMemo(
-    () => [
-      {
-        label: "Zoom out",
-        icon: <MinusIcon className="size-3.5" />,
-        onClick: () => zoomAtCenter(1 / ZOOM_STEP),
-      },
-      {
-        label: "Zoom in",
-        icon: <PlusIcon className="size-3.5" />,
-        onClick: () => zoomAtCenter(ZOOM_STEP),
-      },
-      {
-        label: "Reset view",
-        icon: <RotateCcwIcon className="size-3.5" />,
-        onClick: fitDiagram,
-      },
-    ],
-    [fitDiagram, zoomAtCenter],
-  );
-
   return (
     <div
       ref={viewportRef}
@@ -148,21 +117,6 @@ export function MermaidZoomPanViewer({
           {error}
         </div>
       ) : null}
-      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded border border-border bg-background/90 p-1">
-        {controls.map((control) => (
-          <Button
-            key={control.label}
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={control.onClick}
-            aria-label={control.label}
-            title={control.label}
-          >
-            {control.icon}
-          </Button>
-        ))}
-      </div>
       <div className="absolute bottom-3 right-3 rounded border border-border bg-background/90 px-2 py-1 font-mono text-[11px] text-muted-foreground">
         {Math.round(transform.scale * 100)}%
       </div>
