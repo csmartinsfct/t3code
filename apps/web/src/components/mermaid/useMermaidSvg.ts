@@ -35,7 +35,7 @@ export function useMermaidSvg(source: string, options: UseMermaidSvgOptions = {}
     let cancelled = false;
     const render = async () => {
       if (!source.trim()) {
-        setState({ svg: "", error: "This Mermaid attachment has no source." });
+        setState({ svg: "", error: "This diagram has no source." });
         return;
       }
       try {

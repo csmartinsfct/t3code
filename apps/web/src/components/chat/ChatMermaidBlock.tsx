@@ -23,13 +23,19 @@ export function ChatMermaidBlock({
 
   return (
     <>
-      <button
-        type="button"
-        className="my-2 block w-full overflow-hidden rounded-md border border-border bg-background p-3 text-left outline-none transition-colors hover:border-ring focus-visible:ring-2 focus-visible:ring-ring [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
-        aria-label="Expand mermaid diagram"
-        onClick={() => setExpanded(true)}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      <div className="group relative my-2 w-full">
+        <div
+          aria-hidden
+          className="overflow-hidden rounded-md border border-border bg-background p-3 transition-colors group-focus-within:border-ring group-hover:border-ring [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+        <button
+          type="button"
+          className="absolute inset-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Expand mermaid diagram"
+          onClick={() => setExpanded(true)}
+        />
+      </div>
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <DialogPopup className="h-[85vh] max-w-[90vw]">
           <div className="flex min-h-0 flex-1 flex-col">
