@@ -18,7 +18,7 @@ import {
   getMermaidRenderSources,
   type MermaidViewTransform,
   zoomMermaidTransformAtPoint,
-} from "./TicketMermaidArtifactView.logic";
+} from "~/components/mermaid/mermaidViewLogic";
 
 const ZOOM_STEP = 1.2;
 

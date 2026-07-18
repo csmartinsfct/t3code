@@ -4,9 +4,9 @@ import {
   clampMermaidZoom,
   getMermaidRenderSources,
   zoomMermaidTransformAtPoint,
-} from "./TicketMermaidArtifactView.logic";
+} from "./mermaidViewLogic";
 
-describe("TicketMermaidArtifactView logic", () => {
+describe("mermaid view logic", () => {
   it("clamps zoom to the supported diagram scale range", () => {
     expect(clampMermaidZoom(0.01)).toBe(0.1);
     expect(clampMermaidZoom(2)).toBe(2);
