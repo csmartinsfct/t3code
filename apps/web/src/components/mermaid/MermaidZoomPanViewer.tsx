@@ -148,7 +148,7 @@ export function MermaidZoomPanViewer({
           {error}
         </div>
       ) : null}
-      <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded border border-border bg-background/90 p-1">
+      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded border border-border bg-background/90 p-1">
         {controls.map((control) => (
           <Button
             key={control.label}
