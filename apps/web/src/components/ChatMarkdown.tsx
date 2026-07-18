@@ -34,10 +34,12 @@ import {
   isProposeScheduledTaskBlock,
   parseProposeScheduledTaskPayload,
 } from "../lib/proposeScheduledTaskParser";
+import { isMermaidBlock } from "../lib/mermaidBlock";
 import { parseInternalLinkTarget, unwrapBacktickedTicketLinks } from "../lib/internalLinkTargets";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import { splitPathAndPosition } from "../terminal-links";
+import { ChatMermaidBlock } from "./chat/ChatMermaidBlock";
 import ProposeActionCard from "./chat/ProposeActionCard";
 import ProposeScheduledTaskCard from "./chat/ProposeScheduledTaskCard";
 import { DynamicChatUiArtifact } from "./chat/DynamicChatUiArtifact";
@@ -432,6 +434,16 @@ function ChatMarkdown({
             );
           }
           return <pre {...props}>{children}</pre>;
+        }
+
+        if (isMermaidBlock(codeBlock.className)) {
+          return (
+            <ChatMermaidBlock
+              code={codeBlock.code}
+              isStreaming={isStreaming}
+              fallback={<pre {...props}>{children}</pre>}
+            />
+          );
         }
 
         return (
