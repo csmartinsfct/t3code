@@ -638,7 +638,7 @@ describe("MessagesTimeline virtualization harness", () => {
     }
   });
 
-  it("keeps the changed-files row virtualizer size in sync after expanding directories", async () => {
+  it("keeps the changed-files row virtualizer size in sync after showing and expanding files", async () => {
     const beforeMessages = createFillerMessages({
       prefix: "before-collapse",
       startOffsetSeconds: 0,
@@ -712,6 +712,22 @@ describe("MessagesTimeline virtualization harness", () => {
       );
       expect(targetRowElement, "Unable to locate target changed-files row.").toBeTruthy();
 
+      const showFilesButton =
+        Array.from(targetRowElement!.querySelectorAll<HTMLButtonElement>("button")).find(
+          (button) => button.textContent?.trim() === "Show files",
+        ) ?? null;
+      expect(showFilesButton, 'Unable to find "Show files" button.').toBeTruthy();
+
+      showFilesButton!.click();
+
+      await vi.waitFor(
+        () => {
+          expect(targetRowElement!.textContent).toContain("Hide files");
+          expect(targetRowElement!.textContent).toContain("Expand all");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
       const expandAllButton =
         Array.from(targetRowElement!.querySelectorAll<HTMLButtonElement>("button")).find(
           (button) => button.textContent?.trim() === "Expand all",
@@ -740,6 +756,31 @@ describe("MessagesTimeline virtualization harness", () => {
       expect(
         Math.abs(afterExpand.actualHeightPx - afterExpand.virtualizerSizePx),
       ).toBeLessThanOrEqual(8);
+
+      const hideFilesButton =
+        Array.from(targetRowElement!.querySelectorAll<HTMLButtonElement>("button")).find(
+          (button) => button.textContent?.trim() === "Hide files",
+        ) ?? null;
+      expect(hideFilesButton, 'Unable to find "Hide files" button.').toBeTruthy();
+
+      hideFilesButton!.click();
+
+      await vi.waitFor(
+        async () => {
+          const afterHide = await measureTimelineRow({
+            host: mounted.host,
+            props,
+            targetRowId: targetMessage.id,
+          });
+          expect(targetRowElement!.textContent).toContain("Show files");
+          expect(targetRowElement!.textContent).not.toContain("Expand all");
+          expect(afterHide.actualHeightPx).toBeLessThan(afterExpand.actualHeightPx - 24);
+          expect(
+            Math.abs(afterHide.actualHeightPx - afterHide.virtualizerSizePx),
+          ).toBeLessThanOrEqual(8);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

@@ -345,9 +345,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
+  const [changedFilesVisibleByTurnId, setChangedFilesVisibleByTurnId] = useState<
+    Record<string, boolean>
+  >({});
   const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
     Record<string, boolean>
   >({});
+  const onToggleChangedFiles = useCallback((turnId: TurnId) => {
+    setChangedFilesVisibleByTurnId((current) => ({
+      ...current,
+      [turnId]: !(current[turnId] ?? false),
+    }));
+  }, []);
   const onToggleAllDirectories = useCallback((turnId: TurnId) => {
     setAllDirectoriesExpandedByTurnId((current) => ({
       ...current,
@@ -608,12 +617,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     if (checkpointFiles.length === 0) return null;
                     const summaryStat = summarizeTurnDiffStats(checkpointFiles);
                     const changedFileCountLabel = String(checkpointFiles.length);
+                    const changedFilesVisible =
+                      changedFilesVisibleByTurnId[turnSummary.turnId] ?? false;
                     const allDirectoriesExpanded =
                       allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? false;
                     return (
                       <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
+                        <div
+                          className={cn(
+                            "flex flex-wrap items-center justify-between gap-2",
+                            changedFilesVisible && "mb-1.5",
+                          )}
+                        >
+                          <p className="min-w-0 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
                             <span>Changed files ({changedFileCountLabel})</span>
                             {hasNonZeroStat(summaryStat) && (
                               <>
@@ -625,16 +641,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                               </>
                             )}
                           </p>
-                          <div className="flex items-center gap-1.5">
+                          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
                             <Button
                               type="button"
                               size="xs"
                               variant="outline"
                               data-scroll-anchor-ignore
-                              onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                              aria-expanded={changedFilesVisible}
+                              onClick={() => onToggleChangedFiles(turnSummary.turnId)}
                             >
-                              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+                              {changedFilesVisible ? "Hide files" : "Show files"}
                             </Button>
+                            {changedFilesVisible && (
+                              <Button
+                                type="button"
+                                size="xs"
+                                variant="outline"
+                                data-scroll-anchor-ignore
+                                onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                              >
+                                {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+                              </Button>
+                            )}
                             <Button
                               type="button"
                               size="xs"
@@ -647,14 +675,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                             </Button>
                           </div>
                         </div>
-                        <ChangedFilesTree
-                          key={`changed-files-tree:${turnSummary.turnId}`}
-                          turnId={turnSummary.turnId}
-                          files={checkpointFiles}
-                          allDirectoriesExpanded={allDirectoriesExpanded}
-                          resolvedTheme={resolvedTheme}
-                          onOpenTurnDiff={onOpenTurnDiff}
-                        />
+                        {changedFilesVisible && (
+                          <ChangedFilesTree
+                            key={`changed-files-tree:${turnSummary.turnId}`}
+                            turnId={turnSummary.turnId}
+                            files={checkpointFiles}
+                            allDirectoriesExpanded={allDirectoriesExpanded}
+                            resolvedTheme={resolvedTheme}
+                            onOpenTurnDiff={onOpenTurnDiff}
+                          />
+                        )}
                       </div>
                     );
                   })()}

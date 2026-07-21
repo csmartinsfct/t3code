@@ -4,7 +4,6 @@ import {
   stripDynamicChatUiFencesFromMarkdown,
 } from "@t3tools/shared/dynamicChatUi";
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
-import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 
@@ -213,21 +212,7 @@ function estimateTimelineProposedPlanHeight(proposedPlan: ProposedPlan): number 
   return 120 + Math.min(estimatedLines * 22, 880);
 }
 
-function estimateChangedFilesCardHeight(turnDiffSummary: TurnDiffSummary): number {
-  const treeNodes = buildTurnDiffTree(turnDiffSummary.files);
-  const visibleNodeCount = countTurnDiffTreeNodes(treeNodes);
-
-  // Card chrome: top/bottom padding, header row, and tree spacing.
-  return 60 + visibleNodeCount * 25;
-}
-
-function countTurnDiffTreeNodes(nodes: ReadonlyArray<TurnDiffTreeNode>): number {
-  let count = 0;
-  for (const node of nodes) {
-    count += 1;
-    if (node.kind === "directory") {
-      count += countTurnDiffTreeNodes(node.children);
-    }
-  }
-  return count;
+function estimateChangedFilesCardHeight(_turnDiffSummary: TurnDiffSummary): number {
+  // Changed-file cards render as a single compact summary row by default.
+  return 52;
 }

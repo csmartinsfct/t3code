@@ -319,7 +319,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("&quot;changesNeeded&quot;");
   });
 
-  it("renders changed files collapsed by default for a new turn summary", async () => {
+  it("renders changed-file cards compact by default for a new turn summary", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const messageId = MessageId.makeUnsafe("message-diff-1");
     const markup = renderToStaticMarkup(
@@ -383,9 +383,11 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Expand all");
-    expect(markup).not.toContain("Collapse all");
-    expect(markup).toContain("apps/web/src/components/chat");
+    expect(markup).toContain("Show files");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).not.toContain("Hide files");
+    expect(markup).not.toContain("Expand all");
+    expect(markup).not.toContain("apps/web/src/components/chat");
     expect(markup).not.toContain("MessagesTimeline.tsx");
     expect(markup).not.toContain("ChangedFilesTree.tsx");
   });

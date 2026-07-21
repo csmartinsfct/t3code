@@ -757,7 +757,9 @@ Git-ref based snapshots that track file state before and after each agent turn.
 
 **User interaction:**
 
-- Turn diffs appear as collapsible file change summaries in the work log timeline.
+- Turn diffs appear as compact file change summaries in the work log timeline. Use **Show
+  files** to expand a summary, **Hide files** to collapse it back to one row, and **View diff**
+  to open the full diff viewer directly.
 - Click a file change to open the full diff viewer.
 
 **Agent interaction:**
