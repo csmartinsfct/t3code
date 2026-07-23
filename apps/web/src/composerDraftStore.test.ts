@@ -1571,6 +1571,36 @@ describe("deriveEffectiveComposerModelState", () => {
 
     expect(state.selectedModel).toBe("claude-sonnet-5");
   });
+
+  it("does not let a retained profile override the selected provider options", () => {
+    const state = deriveEffectiveComposerModelState({
+      draft: {
+        modelSelectionByProvider: {
+          codex: {
+            provider: "codex",
+            model: "gpt-5.4",
+            options: { reasoningEffort: "low" },
+          },
+          ["codex:zbd"]: {
+            provider: "codex",
+            profileId: "zbd",
+            model: "gpt-5.4",
+            options: { reasoningEffort: "ultra" },
+          },
+        },
+        activeProvider: "codex",
+      },
+      providers,
+      selectedProvider: "codex",
+      threadModelSelection: null,
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+
+    expect(state.modelOptions).toEqual({
+      codex: { reasoningEffort: "low" },
+    });
+  });
 });
 
 describe("composerDraftStore runtime and interaction settings", () => {

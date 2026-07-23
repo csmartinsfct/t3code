@@ -43,8 +43,12 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         isCustom: false,
         capabilities: {
           reasoningEffortLevels: [
+            { value: "ultra", label: "Ultra" },
+            { value: "max", label: "Max" },
             { value: "xhigh", label: "Extra High" },
             { value: "high", label: "High", isDefault: true },
+            { value: "medium", label: "Medium" },
+            { value: "low", label: "Low" },
           ],
           supportsFastMode: true,
           supportsThinkingToggle: false,
@@ -269,7 +273,7 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
-  it("shows only the provided effort options", async () => {
+  it("shows the advertised Claude effort options", async () => {
     await using _ = await mountClaudePicker({
       model: "claude-sonnet-5",
     });
@@ -403,11 +407,41 @@ describe("TraitsPicker (Claude)", () => {
 
 // ── Codex TraitsPicker tests ──────────────────────────────────────────
 
+const CODEX_THREAD_ID = ThreadId.makeUnsafe("thread-codex-traits");
+
+function CodexTraitsPickerHarness(props: {
+  model: string;
+  fallbackModelSelection: ModelSelection | null;
+}) {
+  const { modelOptions, selectedModel } = useEffectiveComposerModelState({
+    threadId: CODEX_THREAD_ID,
+    providers: TEST_PROVIDERS,
+    selectedProvider: "codex",
+    threadModelSelection: props.fallbackModelSelection,
+    projectModelSelection: null,
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      ...DEFAULT_CLIENT_SETTINGS,
+    },
+  });
+
+  return (
+    <TraitsPicker
+      provider="codex"
+      models={TEST_PROVIDERS[0]!.models}
+      threadId={CODEX_THREAD_ID}
+      model={selectedModel ?? props.model}
+      prompt=""
+      modelOptions={modelOptions?.codex}
+      onPromptChange={() => {}}
+    />
+  );
+}
+
 async function mountCodexPicker(props: { model?: string; options?: CodexModelOptions }) {
-  const threadId = ThreadId.makeUnsafe("thread-codex-traits");
   const model = props.model ?? "gpt-5.6-sol";
   const draftsByThreadId: Record<ThreadId, ComposerThreadDraftState> = {
-    [threadId]: {
+    [CODEX_THREAD_ID]: {
       prompt: "",
       images: [],
       nonPersistedImageIds: [],
@@ -433,20 +467,19 @@ async function mountCodexPicker(props: { model?: string; options?: CodexModelOpt
     draftsByThreadId,
     draftThreadsByThreadId: {},
     projectDraftThreadIdByProjectId: {
-      [ProjectId.makeUnsafe("project-codex-traits")]: threadId,
+      [ProjectId.makeUnsafe("project-codex-traits")]: CODEX_THREAD_ID,
     },
   });
   const host = document.createElement("div");
   document.body.append(host);
   const screen = await render(
-    <TraitsPicker
-      provider="codex"
-      models={TEST_PROVIDERS[0]!.models}
-      threadId={threadId}
+    <CodexTraitsPickerHarness
       model={model}
-      prompt=""
-      modelOptions={props.options}
-      onPromptChange={() => {}}
+      fallbackModelSelection={{
+        provider: "codex",
+        model,
+        ...(props.options ? { options: props.options } : {}),
+      }}
     />,
     { container: host },
   );
@@ -508,10 +541,12 @@ describe("TraitsPicker (Codex)", () => {
 
     await vi.waitFor(() => {
       const text = document.body.textContent ?? "";
+      expect(text).toContain("Ultra");
+      expect(text).toContain("Max");
       expect(text).toContain("Extra High");
       expect(text).toContain("High");
-      expect(text).not.toContain("Low");
-      expect(text).not.toContain("Medium");
+      expect(text).toContain("Medium");
+      expect(text).toContain("Low");
     });
   });
 
@@ -526,6 +561,26 @@ describe("TraitsPicker (Codex)", () => {
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.codex).toMatchObject({
       provider: "codex",
       options: { fastMode: true },
+    });
+  });
+
+  it("updates the visible Codex effort selection", async () => {
+    await using _ = await mountCodexPicker({
+      options: { reasoningEffort: "ultra", fastMode: false },
+    });
+
+    await expect.element(page.getByRole("button")).toHaveTextContent("Ultra");
+    await page.getByRole("button").click();
+    await page.getByRole("menuitemradio", { name: "Extra High" }).click();
+
+    await expect.element(page.getByRole("button")).toHaveTextContent("Extra High");
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.codex).toMatchObject({
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      options: {
+        reasoningEffort: "xhigh",
+        fastMode: false,
+      },
     });
   });
 });

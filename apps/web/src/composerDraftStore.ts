@@ -373,15 +373,9 @@ function providerModelOptionsFromSelection(
 
 function modelSelectionByProviderToOptions(
   map: Partial<Record<ProviderKind, ModelSelection>> | null | undefined,
+  provider: ProviderKind,
 ): ProviderModelOptions | null {
-  if (!map) return null;
-  const result: Record<string, unknown> = {};
-  for (const [provider, selection] of Object.entries(map)) {
-    if (selection?.options) {
-      result[baseProviderKind(provider as ProviderKind)] = selection.options;
-    }
-  }
-  return Object.keys(result).length > 0 ? (result as ProviderModelOptions) : null;
+  return providerModelOptionsFromSelection(map?.[provider]);
 }
 
 const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftStoreState>({
@@ -908,7 +902,10 @@ export function deriveEffectiveComposerModelState(input: {
       )
     : baseModel;
   const modelOptions =
-    modelSelectionByProviderToOptions(input.draft?.modelSelectionByProvider) ??
+    modelSelectionByProviderToOptions(
+      input.draft?.modelSelectionByProvider,
+      input.selectedProvider,
+    ) ??
     providerModelOptionsFromSelection(threadModelSelection) ??
     providerModelOptionsFromSelection(projectModelSelection) ??
     null;
