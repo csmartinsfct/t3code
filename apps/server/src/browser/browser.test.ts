@@ -14,6 +14,27 @@ import type { BrowserHostResolverShape } from "./BrowserHostResolver.ts";
 
 const TEST_PROJECT = ProjectId.makeUnsafe("00000000-0000-0000-0000-000000000001");
 const TEST_THREAD = ThreadId.makeUnsafe("t3co-325-test");
+const TEST_ADMIN_PROMPTS = {
+  general: ADMIN_PROMPT_SHIPPED_DEFAULTS.general,
+  managedRuns: ADMIN_PROMPT_SHIPPED_DEFAULTS.managedRuns,
+  scheduledTasks: ADMIN_PROMPT_SHIPPED_DEFAULTS.scheduledTasks,
+  ticketing: ADMIN_PROMPT_SHIPPED_DEFAULTS.ticketing,
+  browser: ADMIN_PROMPT_SHIPPED_DEFAULTS.browser,
+  dynamicChatUi: ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi,
+};
+
+function buildTestServiceInjectionPrompt(runtime: {
+  readonly isDev: boolean;
+  readonly isElectron: boolean;
+}): string {
+  return buildT3ServiceInjectionPrompt({
+    port: 3773,
+    projectTitle: "T3 Code",
+    token: "test-token-xxx",
+    adminPrompts: TEST_ADMIN_PROMPTS,
+    ...runtime,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Admin prompt wiring
@@ -66,20 +87,9 @@ it.effect(
   "buildT3ServiceInjectionPrompt renders the browser prompt in the system-prompt output",
   () =>
     Effect.sync(() => {
-      const output = buildT3ServiceInjectionPrompt({
-        port: 3773,
+      const output = buildTestServiceInjectionPrompt({
         isDev: true,
         isElectron: false,
-        projectTitle: "T3 Code",
-        token: "test-token-xxx",
-        adminPrompts: {
-          general: ADMIN_PROMPT_SHIPPED_DEFAULTS.general,
-          managedRuns: ADMIN_PROMPT_SHIPPED_DEFAULTS.managedRuns,
-          scheduledTasks: ADMIN_PROMPT_SHIPPED_DEFAULTS.scheduledTasks,
-          ticketing: ADMIN_PROMPT_SHIPPED_DEFAULTS.ticketing,
-          browser: ADMIN_PROMPT_SHIPPED_DEFAULTS.browser,
-          dynamicChatUi: ADMIN_PROMPT_SHIPPED_DEFAULTS.dynamicChatUi,
-        },
       });
       // Header for the new admin prompt block
       assert.include(output, "## T3 Browser Automation");
@@ -88,6 +98,32 @@ it.effect(
       assert.include(output, "http://127.0.0.1:3773/api/browser");
       assert.include(output, "## Dynamic Chat UI");
       assert.include(output, "create_dynamic_chat_ui_from_prompt");
+    }),
+);
+
+it.effect(
+  "buildT3ServiceInjectionPrompt scopes repository Playwright guidance to packaged Electron",
+  () =>
+    Effect.sync(() => {
+      const productionElectron = buildTestServiceInjectionPrompt({
+        isDev: false,
+        isElectron: true,
+      });
+      assert.include(productionElectron, "### Repository-owned Playwright commands");
+      assert.include(productionElectron, "env -u PLAYWRIGHT_BROWSERS_PATH <test-command>");
+      assert.include(productionElectron, "cache/version mismatch");
+
+      const developmentElectron = buildTestServiceInjectionPrompt({
+        isDev: true,
+        isElectron: true,
+      });
+      assert.notInclude(developmentElectron, "### Repository-owned Playwright commands");
+
+      const productionWeb = buildTestServiceInjectionPrompt({
+        isDev: false,
+        isElectron: false,
+      });
+      assert.notInclude(productionWeb, "### Repository-owned Playwright commands");
     }),
 );
 

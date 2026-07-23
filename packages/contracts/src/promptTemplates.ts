@@ -450,6 +450,20 @@ Typical wallet dapp flow: \`open_extension <id>\` → \`ext_windows\` → \`ext_
 
 Each project has its own Chromium profile at \`<dataDir>/browser/<projectId>/chromium-profile/\`. Cookies, localStorage, and auth sessions persist across server restarts but never bleed between projects.`;
 
+const BROWSER_PACKAGED_AGENT_TEXT = `### Repository-owned Playwright commands
+
+The packaged T3 backend sets \`PLAYWRIGHT_BROWSERS_PATH\` to T3 Code's bundled, version-specific browser cache. That cache is for T3's browser runtime; it is not a universal cache for Playwright versions used by checked-out repositories.
+
+Before running a repository-owned Playwright, Vitest browser, or Storybook test command, remove that variable from the child command so the repository uses its own Playwright cache:
+
+\`\`\`bash
+env -u PLAYWRIGHT_BROWSERS_PATH <test-command>
+\`\`\`
+
+Use the shell-appropriate equivalent on Windows. Do not install a repository's browser revision into T3's application bundle.
+
+If Playwright reports \`Executable doesn't exist\` under T3's \`Resources/playwright-browsers\` directory, compare the revision requested by the repository with the revisions actually bundled by T3 before diagnosing the failure. A different requested revision is a cache/version mismatch, not evidence that T3's production browser is missing.`;
+
 const BROWSER_ELECTRON_TEXT = `### Embedded browser (desktop build)
 
 The browser this tool drives is the **embedded WebContentsView** in the T3 Code chat shell — the same pane the user can see and interact with. There is no separate Playwright instance. Side effects (navigation, scrolling, typing, dialog interception, viewport emulation) are visible to the user in real time, so the agent's actions and the user's expectations stay in sync.
@@ -529,6 +543,10 @@ export const ADMIN_PROMPT_SHIPPED_DEFAULTS = {
     version: PROMPT_TEMPLATE_VERSION,
     blocks: [
       { when: null, text: BROWSER_DEFAULT_TEXT },
+      {
+        when: { type: "runtime", match: "prodElectron" },
+        text: BROWSER_PACKAGED_AGENT_TEXT,
+      },
       { when: { type: "runtime", match: "anyElectron" }, text: BROWSER_ELECTRON_TEXT },
     ],
   },
