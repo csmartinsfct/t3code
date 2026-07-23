@@ -1,5 +1,5 @@
 import type { ServerProvider } from "@t3tools/contracts";
-import { Duration, Effect, PubSub, Ref, Scope, Stream } from "effect";
+import { Effect, PubSub, Ref, Scope, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider";
@@ -12,7 +12,6 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
-  readonly refreshInterval?: Duration.Input;
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
   const refreshSemaphore = yield* Semaphore.make(1);
   const changesPubSub = yield* Effect.acquireRelease(
@@ -51,13 +50,6 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 
   yield* Stream.runForEach(input.streamSettings, (nextSettings) =>
     Effect.asVoid(applySnapshot(nextSettings)),
-  ).pipe(Effect.forkScoped);
-
-  yield* Effect.forever(
-    Effect.sleep(input.refreshInterval ?? "60 seconds").pipe(
-      Effect.flatMap(() => refreshSnapshot()),
-      Effect.ignoreCause({ log: true }),
-    ),
   ).pipe(Effect.forkScoped);
 
   return {
