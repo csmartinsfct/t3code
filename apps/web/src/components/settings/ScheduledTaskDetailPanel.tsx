@@ -7,6 +7,7 @@ import { useOrchestrationProjectOptions } from "../../hooks/useOrchestrationProj
 import { ensureNativeApi } from "../../nativeApi";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ProviderCapabilityIcon } from "../chat/ProviderCapabilityIcon";
 import { Switch } from "../ui/switch";
 import { ScheduledTaskDeleteConfirmDialog } from "./ScheduledTaskConfirmDialogs";
 import { ScheduledTaskDialog } from "./ScheduledTaskDialog";
@@ -176,6 +177,24 @@ export function ScheduledTaskDetailPanel() {
               </p>
             </div>
           )}
+
+          {task.newThreadConfig?.providerCapabilities &&
+            task.newThreadConfig.providerCapabilities.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground">Skills and plugins</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {task.newThreadConfig.providerCapabilities.map((capability) => (
+                    <div
+                      key={`${capability.provider}:${capability.kind}:${capability.id}`}
+                      className="flex items-center gap-1.5 rounded-md border border-border/70 bg-accent/30 px-2 py-1 text-xs"
+                    >
+                      <ProviderCapabilityIcon capability={capability} className="size-3" />
+                      <span className="max-w-48 truncate">{capability.displayName}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
           <div className="flex items-center gap-2">
             <Button size="xs" variant="outline" onClick={() => setEditDialogOpen(true)}>

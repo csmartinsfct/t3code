@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 
 export interface ProposeScheduledTaskCardProps {
   name: string;
@@ -16,6 +17,7 @@ export interface ProposeScheduledTaskCardProps {
   cronExpression: string;
   projectId: string;
   skillIds?: string[];
+  providerCapabilities?: ProposeScheduledTaskPayload["providerCapabilities"];
   prompt?: string;
   autoSend: boolean;
   modelSelection?: ProposeScheduledTaskPayload["modelSelection"];
@@ -31,6 +33,7 @@ function ProposeScheduledTaskCard({
   cronExpression: initialCron,
   projectId: initialProjectId,
   skillIds,
+  providerCapabilities,
   prompt: initialPrompt,
   autoSend,
   modelSelection,
@@ -64,6 +67,7 @@ function ProposeScheduledTaskCard({
       cronExpression: cronExpression.trim(),
       projectId,
       ...(skillIds && skillIds.length > 0 ? { skillIds } : {}),
+      ...(providerCapabilities && providerCapabilities.length > 0 ? { providerCapabilities } : {}),
       ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
       autoSend,
       ...(modelSelection ? { modelSelection } : {}),
@@ -76,6 +80,7 @@ function ProposeScheduledTaskCard({
     cronExpression,
     projectId,
     skillIds,
+    providerCapabilities,
     prompt,
     autoSend,
     modelSelection,
@@ -160,14 +165,22 @@ function ProposeScheduledTaskCard({
         </div>
 
         {/* Metadata row */}
-        {((skillIds && skillIds.length > 0) || autoSend || modelSelection) && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        {((skillIds && skillIds.length > 0) ||
+          (providerCapabilities && providerCapabilities.length > 0) ||
+          autoSend ||
+          modelSelection) && (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             {skillIds && skillIds.length > 0 && <span>Skills: {skillIds.join(", ")}</span>}
-            {skillIds && skillIds.length > 0 && (autoSend || modelSelection) && (
-              <span className="text-border">|</span>
-            )}
+            {providerCapabilities?.map((capability) => (
+              <span
+                key={`${capability.provider}:${capability.kind}:${capability.id}`}
+                className="flex items-center gap-1"
+              >
+                <ProviderCapabilityIcon capability={capability} className="size-3" />
+                {capability.displayName}
+              </span>
+            ))}
             {autoSend && <span>Auto send enabled</span>}
-            {autoSend && modelSelection && <span className="text-border">|</span>}
             {modelSelection && <span>Model: {modelSelection.model}</span>}
           </div>
         )}

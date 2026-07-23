@@ -8,6 +8,7 @@ import {
   EventId,
   ProviderItemId,
   ProviderRequestKind,
+  baseProviderKind,
   type ProviderUserInputAnswers,
   ThreadId,
   TurnId,
@@ -18,6 +19,7 @@ import {
   type ProviderTurnStartResult,
   RuntimeMode,
   ProviderInteractionMode,
+  type SelectedProviderCapability,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Effect, ServiceMap } from "effect";
@@ -115,7 +117,20 @@ export interface CodexAppServerSendTurnInput {
   readonly serviceTier?: string | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
 }
+
+type CodexTextInputItem = { type: "text"; text: string; text_elements: [] };
+type CodexImageInputItem = { type: "image"; url: string };
+type CodexSkillInputItem = { type: "skill"; name: string; path: string };
+type CodexTurnInputItem = CodexTextInputItem | CodexImageInputItem | CodexSkillInputItem;
+type CodexSelectedCapabilityRoots = {
+  environments: Array<{ environmentId: string; cwd: string }>;
+  selectedCapabilityRoots: Array<{
+    id: string;
+    location: { type: "environment"; environmentId: string; path: string };
+  }>;
+};
 
 export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
@@ -128,6 +143,7 @@ export interface CodexAppServerStartSessionInput {
   readonly homePath?: string;
   readonly configOverrides?: ReadonlyArray<string>;
   readonly appendDeveloperInstructions?: string;
+  readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -380,6 +396,106 @@ function buildCodexCollaborationMode(input: {
   };
 }
 
+function buildCodexCapabilityActivationInputItems(
+  capabilities: ReadonlyArray<SelectedProviderCapability> | undefined,
+): CodexSkillInputItem[] {
+  const items: CodexSkillInputItem[] = [];
+  const seen = new Set<string>();
+  for (const capability of capabilities ?? []) {
+    if (baseProviderKind(capability.provider) !== "codex" || capability.kind !== "skill") {
+      continue;
+    }
+    if (!capability.name || !capability.path) continue;
+    const key = `${capability.name}\u0000${capability.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      type: "skill",
+      name: capability.name,
+      path: capability.path,
+    });
+  }
+  return items;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function textIncludesSkillMarker(text: string, marker: string): boolean {
+  return new RegExp(`(^|\\s)${escapeRegExp(marker)}(?=$|\\s|[.,;!?)}\\]])`).test(text);
+}
+
+function appendCodexSkillInvocations(
+  inputItems: readonly CodexTurnInputItem[],
+  skillItems: readonly CodexSkillInputItem[],
+): CodexTurnInputItem[] {
+  if (skillItems.length === 0) return [...inputItems];
+
+  const next = [...inputItems];
+  const firstTextIndex = next.findIndex((item): item is CodexTextInputItem => item.type === "text");
+  const existingText = firstTextIndex >= 0 ? (next[firstTextIndex] as CodexTextInputItem).text : "";
+  const missingMarkers = skillItems
+    .map((item) => `$${item.name}`)
+    .filter((marker) => !textIncludesSkillMarker(existingText, marker));
+
+  if (missingMarkers.length > 0) {
+    const markerText = missingMarkers.join("\n");
+    if (firstTextIndex >= 0) {
+      const firstText = next[firstTextIndex] as CodexTextInputItem;
+      next[firstTextIndex] = {
+        ...firstText,
+        text: firstText.text ? `${markerText}\n\n${firstText.text}` : markerText,
+      };
+    } else {
+      next.unshift({
+        type: "text",
+        text: markerText,
+        text_elements: [],
+      });
+    }
+  }
+
+  next.push(...skillItems);
+  return next;
+}
+
+export function buildCodexSelectedCapabilityRoots(input: {
+  cwd: string;
+  capabilities: ReadonlyArray<SelectedProviderCapability> | undefined;
+}): CodexSelectedCapabilityRoots | undefined {
+  const selectedCapabilityRoots: CodexSelectedCapabilityRoots["selectedCapabilityRoots"] = [];
+  const seen = new Set<string>();
+
+  for (const capability of input.capabilities ?? []) {
+    if (
+      baseProviderKind(capability.provider) !== "codex" ||
+      !capability.capabilityRootPath ||
+      !capability.appIds ||
+      capability.appIds.length === 0
+    ) {
+      continue;
+    }
+    const key = capability.capabilityRootPath;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selectedCapabilityRoots.push({
+      id: capability.id,
+      location: {
+        type: "environment",
+        environmentId: "local",
+        path: capability.capabilityRootPath,
+      },
+    });
+  }
+
+  if (selectedCapabilityRoots.length === 0) return undefined;
+  return {
+    environments: [{ environmentId: "local", cwd: input.cwd }],
+    selectedCapabilityRoots,
+  };
+}
+
 function toCodexUserInputAnswer(value: unknown): CodexUserInputAnswer {
   if (typeof value === "string") {
     return { answers: [value] };
@@ -554,11 +670,18 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         cwd: input.cwd ?? null,
         ...mapCodexRuntimeMode(input.runtimeMode ?? "full-access"),
       };
+      const capabilityRoots = buildCodexSelectedCapabilityRoots({
+        cwd: resolvedCwd,
+        capabilities: input.providerCapabilities,
+      });
 
       const threadStartParams = {
         ...sessionOverrides,
         experimentalRawEvents: false,
       };
+      if (capabilityRoots) {
+        Object.assign(threadStartParams, capabilityRoots);
+      }
       const resumeThreadId = readResumeThreadId(input);
       this.emitLifecycleEvent(
         context,
@@ -681,9 +804,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const context = this.requireSession(input.threadId);
     context.collabReceiverTurns.clear();
 
-    const turnInput: Array<
-      { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
-    > = [];
+    const turnInput: CodexTurnInputItem[] = [];
     if (input.input) {
       turnInput.push({
         type: "text",
@@ -699,7 +820,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         });
       }
     }
-    if (turnInput.length === 0) {
+    const activatedTurnInput = appendCodexSkillInvocations(
+      turnInput,
+      buildCodexCapabilityActivationInputItems(input.providerCapabilities),
+    );
+    if (activatedTurnInput.length === 0) {
       throw new Error("Turn input must include text or attachments.");
     }
 
@@ -713,9 +838,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
     const turnStartParams: {
       threadId: string;
-      input: Array<
-        { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
-      >;
+      input: CodexTurnInputItem[];
       model?: string;
       serviceTier?: string | null;
       effort?: string;
@@ -729,7 +852,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       };
     } = {
       threadId: providerThreadId,
-      input: turnInput,
+      input: activatedTurnInput,
     };
     const normalizedModel = resolveCodexModelForAccount(
       normalizeCodexModelSlug(input.model ?? context.session.model),

@@ -171,6 +171,7 @@ export function deriveComposerSendState(options: {
   imageCount: number;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   skillCount?: number;
+  activatableProviderCapabilityCount?: number;
 }): {
   trimmedPrompt: string;
   sendableTerminalContexts: TerminalContextDraft[];
@@ -189,7 +190,8 @@ export function deriveComposerSendState(options: {
       trimmedPrompt.length > 0 ||
       options.imageCount > 0 ||
       sendableTerminalContexts.length > 0 ||
-      (options.skillCount ?? 0) > 0,
+      (options.skillCount ?? 0) > 0 ||
+      (options.activatableProviderCapabilityCount ?? 0) > 0,
   };
 }
 

@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ModelSelection, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProviderRuntimeEvent,
+  ProviderSession,
+  SelectedProviderCapability,
+} from "@t3tools/contracts";
 import {
   ProviderLifecycleLogger,
   noopProviderLifecycleLogger,
@@ -229,6 +234,7 @@ describe("ProviderCommandReactor", () => {
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
+      resolveSessionCapabilities: ({ requested }) => Effect.succeed(requested ?? []),
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
@@ -342,6 +348,14 @@ describe("ProviderCommandReactor", () => {
           text: "hello reactor",
           attachments: [],
         },
+        providerCapabilities: [
+          {
+            provider: "codex",
+            kind: "skill",
+            id: "skill-review",
+            displayName: "Review Skill",
+          },
+        ],
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
@@ -358,6 +372,18 @@ describe("ProviderCommandReactor", () => {
         model: "gpt-5-codex",
       },
       runtimeMode: "approval-required",
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      input: "hello reactor",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ],
     });
 
     const readModel = (await Effect.runPromise(harness.engine.getReadModel())) as any;
@@ -998,6 +1024,55 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.startSession.mock.calls.length).toBe(1);
     expect(harness.stopSession.mock.calls.length).toBe(0);
+  });
+
+  it("restarts a running session when an explicit provider capability is attached", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const dispatchTurn = (suffix: string, providerCapabilities?: SelectedProviderCapability[]) =>
+      Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe(`cmd-capability-restart-${suffix}`),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-capability-restart-${suffix}`),
+            role: "user",
+            text: suffix,
+            attachments: [],
+          },
+          ...(providerCapabilities ? { providerCapabilities } : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+    await dispatchTurn("first");
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await dispatchTurn("spotify", [
+      {
+        provider: "codex",
+        kind: "plugin",
+        id: "spotify@openai-curated-remote",
+        displayName: "Spotify",
+        capabilityRootPath: "/canonical/spotify",
+        appIds: ["spotify-app"],
+      },
+    ]);
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession).toHaveBeenCalledTimes(2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      resumeCursor: { opaque: "resume-1" },
+      providerCapabilities: [
+        {
+          id: "spotify@openai-curated-remote",
+          capabilityRootPath: "/canonical/spotify",
+          appIds: ["spotify-app"],
+        },
+      ],
+    });
   });
 
   it("restarts the provider session when a same-base provider profile changes", async () => {

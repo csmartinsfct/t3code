@@ -65,7 +65,30 @@ The core of T3 Code is an event-sourced orchestration engine that manages all ag
 
 Assistant messages can include experimental `t3:dynamic-chat-ui` fenced blocks. The web timeline parses these durable message blocks and renders them as inline sandboxed iframe artifacts with compact T3 Code chrome, theme delivery, and a `window.t3ChatUi` postMessage bridge for height and future host-visible events.
 
-The server projection extracts lightweight artifact metadata (`id`, `title`, `description`, `initialHeight`, `maxHeight`) into message metadata so thread hydration and virtualized row measurement can understand the artifact without duplicating large HTML blobs. The HTML source remains in the assistant message text, so reloads/reconnects preserve the artifact as normal timeline content.
+The server projection extracts lightweight artifact metadata (`id`, `title`, `description`, `initialHeight`, `maxHeight`) so thread hydration and virtualized row measurement can understand the artifact. New Dynamic Chat UI output and imported Codex artifacts keep a compact marker block in assistant text and store the full HTML in `metadata.dynamicChatUiArtifacts`. Legacy messages may instead contain the full HTML directly in a `t3:dynamic-chat-ui` fence. Both forms survive reloads and reconnects.
+
+Codex Visualize can emit `::codex-inline-vis{file="<basename>.html"}` in an
+assistant message. Server completion handling resolves that safe basename under
+the configured Codex home and converts the HTML into the same Dynamic Chat UI
+marker plus durable `dynamicChatUiArtifacts` metadata. Missing, stale, or
+otherwise valid-but-unresolvable references become the inline `_Preview
+unavailable: visualization file was removed._` message without failing
+completion. The best-effort resolver is
+bounded to 32 date directories, 8 directives, and 2 seconds; malformed or
+unrelated directives remain unchanged. Native fragments receive aliases for
+the Codex Visualize theme and six light/dark visualization series through the
+existing iframe base style. The `window.openai.sendFollowUpMessage` bridge is
+deferred and is not currently forwarded by T3.
+
+When an older thread is loaded with a raw native directive, T3 backfills it
+using the native thread id stored in the persisted Codex resume cursor. The
+replacement is persisted without starting or resuming a provider session.
+
+Sandboxing prevents artifacts from accessing the parent origin, but it does not
+disable network requests. CORS-enabled external modules can load in the iframe.
+Native Visualize fragments are expected to use the Visualize skill's documented
+CDN allowlist; T3 does not currently enforce that list with a renderer CSP or
+URL filter.
 
 Agents can use `/api/dynamic-chat-ui` to:
 
@@ -100,6 +123,23 @@ T3 Code supports multiple AI providers behind a unified adapter interface.
 - **Profiles:** Multiple named profiles supported. T3 auto-discovers `~/.codex-*`
   homes such as `~/.codex-metric`; profiles appear as separate provider entries
   and run Codex with profile-scoped `CODEX_HOME`.
+- **Provider capabilities:** The composer Skills menu and `@` picker include
+  provider-native Codex plugins and plugin skills discovered from
+  `plugin/list` and `skills/list`. Selecting a capability adds a next-turn chip
+  instead of expanding raw plugin text into the prompt. The selection is
+  persisted in user-message metadata and rendered with its icon and name after
+  sending. Installed app-backed
+  Codex plugins pass their roots as Codex `selectedCapabilityRoots` entries by
+  default on fresh `thread/start` requests, which enables connector-backed
+  plugins such as Gmail for new Codex threads even without a visible plugin
+  chip. Explicit plugin attachments restart an active app-server session while
+  preserving and resuming the native Codex thread, so connector tools such as
+  Gmail and Spotify become available without losing conversation context.
+  Capability metadata is canonicalized against the active Codex profile on the
+  server; remote catalog artwork supplies an icon fallback when `plugin/list`
+  omits one. Codex skill rows with a discovered `name` and `path` also activate
+  through the documented app-server `$<skill-name>` marker plus
+  `{ type: "skill", name, path }` turn input item.
 - Project trust: the server auto-trusts the active project path.
 
 ### Claude Agent (Anthropic)
@@ -468,7 +508,7 @@ ScheduledTask {
   cronExpression   — 5-field standard cron (e.g. "0 9 * * 1" for Mondays at 9am)
   enabled          — on/off toggle
   jobType          — currently only "new_thread"
-  newThreadConfig  — { projectId, skillIds?, prompt?, autoSend }
+  newThreadConfig  — { projectId, skillIds?, providerCapabilities?, prompt?, autoSend }
   lastRunAt        — timestamp of most recent execution
   nextRunAt        — calculated next execution time
 }
@@ -484,7 +524,8 @@ ScheduledTask {
 **User interaction:**
 
 - Create, edit, enable/disable, and delete scheduled tasks in Settings → Scheduled Tasks.
-- View task detail with cron expression, project selector, prompt configuration.
+- Attach local skills, provider plugins, and plugin skills in one compact picker.
+- View task detail with cron expression, project selector, prompt, and capability configuration.
 - Browse execution history with success/failure status.
 - Settings list/detail pages and chat proposal cards hydrate their project dropdowns from the client project store, with `orchestration.listProjects` available for narrow project-only refreshes. Opening scheduled-task UI does not wait for startup snapshot hydration.
 

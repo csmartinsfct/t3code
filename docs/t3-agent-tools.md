@@ -6,15 +6,15 @@ How T3 Code exposes project services (managed runs, scheduled tasks, ticketing, 
 
 T3 Code exposes several internal REST API services that AI models can use during conversations:
 
-| Service         | Endpoint               | Tools | Purpose                                                                                                                                                                                                                                                                             |
-| --------------- | ---------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose                                                                                                                                                                                                                      |
-| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                                                                                                                                                                                                                                                |
-| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                                                                                                                          |
-| Browser         | `/api/browser`         | 59    | Per-project browser automation with plaintext output and stable @ref element IDs. Defaults to Playwright headless Chromium; desktop projects that mount the embedded browser route to Electron `WebContentsView` through the CDP broker — see [browser-tools.md](browser-tools.md). |
-| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                                                                                                                         |
-| Dynamic Chat UI | `/api/dynamic-chat-ui` | 1     | Generate experimental self-contained chat UI artifacts and insert them directly into the timeline through sandboxed iframes. See [dynamic-chat-ui.md](dynamic-chat-ui.md).                                                                                                          |
-| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                                                                                                                |
+| Service         | Endpoint               | Tools | Purpose                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | ---------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Managed Runs    | `/api/managed-runs`    | ~8    | Start/stop/monitor dev servers, build watchers, docker compose                                                                                                                                                                                                                                                                                                                          |
+| Scheduled Tasks | `/api/scheduled-tasks` | ~9    | Recurring cron-based task automation                                                                                                                                                                                                                                                                                                                                                    |
+| Ticketing       | `/api/ticketing`       | 26    | Project tickets, labels, comments, dependencies, artifacts                                                                                                                                                                                                                                                                                                                              |
+| Browser         | `/api/browser`         | 59    | Per-project browser automation with plaintext output and stable @ref element IDs. Server-only/headless deployments use Playwright; when the desktop CDP broker is wired, Electron is authoritative whether or not the view is visible or mounted, and the per-project `WebContentsView` is created lazily on the first user or agent request. See [browser-tools.md](browser-tools.md). |
+| Prompts         | `/api/prompts`         | 5     | Prompt definitions, validation, preview, and scoped updates                                                                                                                                                                                                                                                                                                                             |
+| Dynamic Chat UI | `/api/dynamic-chat-ui` | 1     | Generate experimental self-contained chat UI artifacts and insert them directly into the timeline through sandboxed iframes. See [dynamic-chat-ui.md](dynamic-chat-ui.md).                                                                                                                                                                                                              |
+| Session Restart | `/api/session-restart` | 1     | Model-initiated stop+resume of its own agent session                                                                                                                                                                                                                                                                                                                                    |
 
 Each endpoint uses plain REST with a `{data, error}` response envelope. Authentication uses a per-session Bearer token issued via `managedRunService.issueMcpAccess()`.
 
@@ -26,7 +26,14 @@ The chat composer's MCP picker reflects provider-side MCP availability:
 - Claude: project-scoped live SDK status from `mcpServerStatus()`, loaded in the
   background for every enabled Claude profile in the project. The hidden status
   probe initializes Claude Code MCP state without yielding a user prompt or
-  triggering model inference.
+  triggering model inference, so provider/session startup is nonblocking. Empty
+  or pending inventories are polled for a strict eight-second window, including
+  time spent in a hung status read. The latest inventory is returned at the
+  deadline, with unresolved servers still shown as pending, and cancellation
+  stops polling and hidden probe work. The project cache is keyed by full
+  provider kind, keeping base and named profiles isolated. Settled rows remain
+  visible while a background refresh runs and remain visible with the refresh
+  error if that refresh fails.
 - Gemini: user-level `<GEMINI_CLI_HOME>/settings.json` (default
   `~/.gemini/settings.json`) plus project-local `.gemini/settings.json`
 - Cursor: Cursor CLI `agent mcp list` from the project cwd, backed by
@@ -47,7 +54,8 @@ active Codex home before resolving Codex MCP servers and before starting Codex
 sessions, so repo-local MCP config works without any manual terminal setup.
 See [Codex Plugin Skills](codex-plugin-skills.md) for notes on debugging
 installed Codex plugins whose skills do not appear in `codex app-server`
-sessions.
+sessions and for the provider-capability activation path T3 uses when a user
+selects a Codex plugin or plugin skill in the composer.
 
 ---
 
@@ -63,6 +71,12 @@ Every supported provider (Codex, Claude, Gemini, Cursor) reaches T3 services thr
   service instructions are not re-injected after process restarts.
 
 The model uses its native shell/bash tool to call `curl <ENDPOINT_URL>` with the token. No provider-specific MCP server registration is performed by T3 today. User-configured MCP servers remain visible and usable — they're read from the provider CLI's own config files or status commands and surfaced in the composer MCP menu.
+
+Claude integration is validated against exact
+`@anthropic-ai/claude-agent-sdk` `0.3.207`, including its bundled Claude Code
+`2.1.207`. Future upgrades require an SDK changelog and runtime-contract review.
+The default SDK executable comes from the target-native optional package; a
+configured `pathToClaudeCodeExecutable` remains an explicit override.
 
 Browser automation has two host implementations behind that same REST endpoint. Agents do not choose between them per call. `BrowserHostResolver` picks Electron when the desktop process has wired its CDP broker into the resolver, and Playwright otherwise. In practice that means Electron in the desktop runtime (always) and Playwright only in theoretical server-only deployments. Per [T3CO-421](t3://ticket/T3CO-421) the desktop's per-project `WebContentsView` is always-on — created lazily on first agent or user touch and persisting across visibility toggles — so agents act in the exact tab the user can see, regardless of whether the embedded UI happens to be open.
 

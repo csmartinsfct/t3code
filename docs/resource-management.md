@@ -135,6 +135,28 @@ This means switching between already-loaded projects in Board mode does not repe
 
 Provider sessions (Codex app-server processes, Claude SDK connections, Gemini ACP processes) consume system resources: child processes, MCP server connections, memory.
 
+### Claude Runtime Compatibility
+
+T3 Code pins `@anthropic-ai/claude-agent-sdk` exactly at `0.3.207`, which bundles
+Claude Code `2.1.207`. This pair is the tested compatibility boundary, not a
+floating minimum. Future SDK upgrades must review the Anthropic changelog, the
+exported runtime types, bundled executable layout, terminal reasons, control
+methods, and native-package metadata before changing the pin.
+
+By default the SDK launches the Claude Code executable from its platform-native
+optional package. A configured Claude binary path is passed through
+`pathToClaudeCodeExecutable` and overrides that default. Desktop artifact staging
+installs production dependencies with the requested target OS and CPU, so macOS
+arm64 and x64 builds receive `@anthropic-ai/claude-agent-sdk-darwin-arm64` and
+`@anthropic-ai/claude-agent-sdk-darwin-x64`, respectively.
+
+Claude process recovery does not call `Query.reinitialize()` speculatively.
+That API is reserved for a detected control-channel gap while the same process
+is still valid. A process exit or restart creates a new query with the preserved
+resume cursor. Every stop path must mark the binding stopped with
+`directory.upsert({ status: "stopped" })`; it must never delete the binding or
+its resume cursor.
+
 The **Idle session timeout** setting automatically stops sessions that have been inactive:
 
 | Setting        | Behavior                                         |
@@ -150,5 +172,12 @@ When a session is stopped by the idle reaper:
 - MCP servers attached to the session are torn down.
 - The thread appears idle in the sidebar.
 - Sending a new message cold-starts a fresh session but resumes the conversation via the preserved cursor.
+
+Claude's live `background_tasks_changed` message is a process-scoped level
+snapshot. Each message replaces the prior live set; session start, stop, stream
+exit, and resume-cursor restart reset it to empty. Detailed `task_started`,
+`task_progress`, and task completion/notification messages remain independent
+edge events in the action history and are never correlated to the level
+snapshot's task IDs.
 
 Server setting key: `idleSessionTimeoutMinutes` (persisted in `settings.json`).

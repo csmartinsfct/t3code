@@ -3,7 +3,11 @@ import {
   extractDynamicChatUiArtifactsFromMarkdown,
   stripDynamicChatUiFencesFromMarkdown,
 } from "@t3tools/shared/dynamicChatUi";
-import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import {
+  type LiveBackgroundTaskSnapshot,
+  type TimelineEntry,
+  type WorkLogEntry,
+} from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 
@@ -22,6 +26,7 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       groupedEntries: WorkLogEntry[];
+      liveBackgroundTasks: LiveBackgroundTaskSnapshot | null;
     }
   | {
       kind: "message";
@@ -67,6 +72,7 @@ export function deriveMessagesTimelineRows(input: {
   completionDividerBeforeEntryId: string | null;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
+  liveBackgroundTasks?: LiveBackgroundTaskSnapshot | null;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -93,6 +99,7 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         groupedEntries,
+        liveBackgroundTasks: null,
       });
       index = cursor - 1;
       continue;
@@ -119,6 +126,23 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "assistant" &&
         input.completionDividerBeforeEntryId === timelineEntry.id,
     });
+  }
+
+  const liveBackgroundTasks = input.liveBackgroundTasks;
+  if (liveBackgroundTasks && liveBackgroundTasks.tasks.length > 0) {
+    const latestWorkRowIndex = nextRows.findLastIndex((row) => row.kind === "work");
+    const latestWorkRow = nextRows[latestWorkRowIndex];
+    if (latestWorkRow?.kind === "work") {
+      nextRows[latestWorkRowIndex] = { ...latestWorkRow, liveBackgroundTasks };
+    } else {
+      nextRows.push({
+        kind: "work",
+        id: "live-background-tasks-row",
+        createdAt: liveBackgroundTasks.createdAt,
+        groupedEntries: [],
+        liveBackgroundTasks,
+      });
+    }
   }
 
   if (input.isWorking) {
@@ -204,7 +228,7 @@ function estimateWorkRowHeight(
   const showHeader = hasOverflow || !onlyToolEntries;
 
   // Card chrome, optional header, and one compact work-entry row per visible entry.
-  return 28 + (showHeader ? 26 : 0) + visibleEntries * 32;
+  return 28 + (showHeader ? 26 : 0) + visibleEntries * 32 + (row.liveBackgroundTasks ? 32 : 0);
 }
 
 function estimateTimelineProposedPlanHeight(proposedPlan: ProposedPlan): number {

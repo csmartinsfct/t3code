@@ -199,6 +199,9 @@ import {
   ResolveSkillsInput,
   ResolveSkillsResult,
   ResolveSkillsError,
+  ResolveProviderCapabilitiesInput,
+  ResolveProviderCapabilitiesResult,
+  ResolveProviderCapabilitiesError,
   TrustCodexProjectInput,
   TrustCodexProjectResult,
   TrustCodexProjectError,
@@ -268,6 +271,7 @@ export const WS_METHODS = {
   serverResolveCodexProjectTrust: "server.resolveCodexProjectTrust",
   serverTrustCodexProject: "server.trustCodexProject",
   serverResolveSkills: "server.resolveSkills",
+  serverResolveProviderCapabilities: "server.resolveProviderCapabilities",
 
   // Scheduled task methods
   scheduledTasksList: "scheduledTasks.list",
@@ -396,6 +400,15 @@ export const WsServerResolveSkillsRpc = Rpc.make(WS_METHODS.serverResolveSkills,
   success: ResolveSkillsResult,
   error: ResolveSkillsError,
 });
+
+export const WsServerResolveProviderCapabilitiesRpc = Rpc.make(
+  WS_METHODS.serverResolveProviderCapabilities,
+  {
+    payload: ResolveProviderCapabilitiesInput,
+    success: ResolveProviderCapabilitiesResult,
+    error: ResolveProviderCapabilitiesError,
+  },
+);
 
 export const EnhanceSystemPromptInput = Schema.Struct({
   projectId: ProjectId,
@@ -1115,6 +1128,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerResolveCodexProjectTrustRpc,
   WsServerTrustCodexProjectRpc,
   WsServerResolveSkillsRpc,
+  WsServerResolveProviderCapabilitiesRpc,
   WsProjectsEnhanceSystemPromptRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,

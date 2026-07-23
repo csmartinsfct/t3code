@@ -180,6 +180,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "task.started",
   "task.progress",
   "task.completed",
+  "task.background.changed",
   "hook.started",
   "hook.progress",
   "hook.completed",
@@ -231,6 +232,7 @@ const UserInputResolvedType = Schema.Literal("user-input.resolved");
 const TaskStartedType = Schema.Literal("task.started");
 const TaskProgressType = Schema.Literal("task.progress");
 const TaskCompletedType = Schema.Literal("task.completed");
+const TaskBackgroundChangedType = Schema.Literal("task.background.changed");
 const HookStartedType = Schema.Literal("hook.started");
 const HookProgressType = Schema.Literal("hook.progress");
 const HookCompletedType = Schema.Literal("hook.completed");
@@ -589,6 +591,17 @@ const TaskCompletedPayload = Schema.Struct({
   usage: Schema.optional(Schema.Unknown),
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
+
+const TaskBackgroundChangedPayload = Schema.Struct({
+  tasks: Schema.Array(
+    Schema.Struct({
+      taskId: RuntimeTaskId,
+      taskType: TrimmedNonEmptyStringSchema,
+      description: TrimmedNonEmptyStringSchema,
+    }),
+  ),
+});
+export type TaskBackgroundChangedPayload = typeof TaskBackgroundChangedPayload.Type;
 
 const HookStartedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
@@ -988,6 +1001,14 @@ const ProviderRuntimeTaskCompletedEvent = Schema.Struct({
 });
 export type ProviderRuntimeTaskCompletedEvent = typeof ProviderRuntimeTaskCompletedEvent.Type;
 
+const ProviderRuntimeTaskBackgroundChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: TaskBackgroundChangedType,
+  payload: TaskBackgroundChangedPayload,
+});
+export type ProviderRuntimeTaskBackgroundChangedEvent =
+  typeof ProviderRuntimeTaskBackgroundChangedEvent.Type;
+
 const ProviderRuntimeHookStartedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: HookStartedType,
@@ -1142,6 +1163,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeTaskStartedEvent,
   ProviderRuntimeTaskProgressEvent,
   ProviderRuntimeTaskCompletedEvent,
+  ProviderRuntimeTaskBackgroundChangedEvent,
   ProviderRuntimeHookStartedEvent,
   ProviderRuntimeHookProgressEvent,
   ProviderRuntimeHookCompletedEvent,

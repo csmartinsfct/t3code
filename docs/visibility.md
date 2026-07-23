@@ -57,6 +57,32 @@ These are the most important logs for debugging context loss, session failures, 
 | `turn.complete`                  | Turn finished                            | `status`, `turnCount`, `errorMessage` (truncated)                                            |
 | `thread-id.resolved`             | Provider thread ID received from SDK     | `providerThreadId`, `isNew`                                                                  |
 
+Claude support is pinned to `@anthropic-ai/claude-agent-sdk` `0.3.207` and its
+bundled Claude Code `2.1.207`. Treat structured `result.terminal_reason` as the
+authoritative turn outcome. Raw stream and process error text is classified only
+when no structured result exists. An interrupt receipt's `still_queued` values
+are Claude command UUIDs with no stable mapping to T3 input in this version, so
+they are logged under the `interrupt_still_queued` diagnostic category and never
+mutate or replay T3's queue.
+
+`background_tasks_changed` records the complete process-local live-task set,
+while `task_started`, `task_progress`, and task completion/notification records
+are detailed edge events. The live set is cleared at process start, stop, exit,
+and resume-cursor restart; an empty replacement removes the actions-group live
+indicator without removing retained action rows.
+
+MCP discovery runs in the background and does not block Claude session startup.
+Status reads settle for a strict eight-second window, including a hung read, and
+return the latest inventory at the deadline. Remaining `pending` rows stay
+visible as pending rather than becoming failures. Probe cancellation aborts both
+polling and hidden startup work. Project/profile cache keys isolate each Claude
+profile, retain settled rows during refresh, and retain those rows with a visible
+error if refresh fails.
+
+Do not use `Query.reinitialize()` as a health check or for a process exit. Normal
+exit recovery starts a new query from the persisted resume cursor; stop and
+recovery code must upsert the stopped binding and must never delete it.
+
 #### `gemini-adapter` — Session lifecycle within the Gemini ACP adapter
 
 Gemini sessions flow through the same lifecycle logger as Claude and Codex, but

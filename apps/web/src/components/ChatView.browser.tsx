@@ -1820,6 +1820,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
                         cronExpression: "0 9 * * 1-5",
                         projectId: PROJECT_ID,
                         skillIds: ["skill-backlog", "skill-summary"],
+                        providerCapabilities: [
+                          {
+                            provider: "codex",
+                            kind: "plugin",
+                            id: "spotify@openai-curated-remote",
+                            displayName: "Spotify",
+                            iconUrl: "https://files.openai.com/spotify.png",
+                          },
+                        ],
                         prompt: "Summarize open work.",
                         autoSend: true,
                       },
@@ -1873,6 +1882,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect
         .element(page.getByText("Skills: skill-backlog, skill-summary"))
         .toBeInTheDocument();
+      await expect.element(page.getByText("Spotify")).toBeInTheDocument();
       await page.getByRole("button", { name: "Accept" }).click();
 
       await vi.waitFor(() => {
@@ -1885,6 +1895,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
           newThreadConfig: {
             projectId: PROJECT_ID,
             skillIds: ["skill-backlog", "skill-summary"],
+            providerCapabilities: [
+              {
+                provider: "codex",
+                kind: "plugin",
+                id: "spotify@openai-curated-remote",
+                displayName: "Spotify",
+                iconUrl: "https://files.openai.com/spotify.png",
+              },
+            ],
             prompt: "Summarize open work.",
             autoSend: true,
           },
@@ -3969,6 +3988,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
               initialDraft: {
                 prompt: "Start with a release checklist.",
                 skillIds: ["skill-plan", "skill-ship"],
+                providerCapabilities: [
+                  {
+                    provider: "codex",
+                    kind: "plugin",
+                    id: "spotify@openai-curated-remote",
+                    displayName: "Spotify",
+                    iconUrl: "https://files.openai.com/spotify.png",
+                  },
+                ],
               },
             }
           : thread,
@@ -3997,6 +4025,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 name: "Ship",
                 content: "# Ship skill",
               },
+            ],
+            providerCapabilities: [
+              expect.objectContaining({
+                id: "spotify@openai-curated-remote",
+                displayName: "Spotify",
+              }),
             ],
           });
         },
@@ -4036,6 +4070,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
               initialDraft: {
                 prompt: "Start with an automated release checklist.",
                 skillIds: ["skill-auto-send"],
+                providerCapabilities: [
+                  {
+                    provider: "codex",
+                    kind: "plugin",
+                    id: "spotify@openai-curated-remote",
+                    displayName: "Spotify",
+                  },
+                ],
                 autoSend: true,
               },
             }
@@ -4055,6 +4097,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
           expect(draft?.prompt ?? "").toBe("");
           expect(draft?.skills ?? []).toEqual([]);
+          expect(draft?.providerCapabilities ?? []).toEqual([]);
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -6081,6 +6124,67 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows provider capabilities in composer picker", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-provider-capability-picker" as MessageId,
+        targetText: "provider capability picker thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.serverResolveProviderCapabilities) {
+          return {
+            capabilities: [
+              {
+                id: "superpowers@openai-curated-remote",
+                provider: "codex",
+                kind: "plugin",
+                name: "superpowers",
+                displayName: "Superpowers",
+                description: "Planning workflows",
+                enabled: true,
+                installed: true,
+              },
+            ],
+          };
+        }
+        if (body._tag === WS_METHODS.projectsSearchEntries) {
+          return {
+            entries: [
+              {
+                path: "src/unrelated.ts",
+                kind: "file",
+                parentPath: "src",
+              },
+            ],
+            truncated: false,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("@sup");
+
+      const capability = await waitForComposerMenuItem(
+        "provider-capability:codex:plugin:superpowers@openai-curated-remote",
+      );
+      const unrelatedFile = await waitForComposerMenuItem("path:file:src/unrelated.ts");
+
+      await vi.waitFor(() => {
+        expect(capability.textContent ?? "").toContain("Superpowers");
+        expect(capability.textContent ?? "").toContain("Plugin");
+        expect(
+          capability.compareDocumentPosition(unrelatedFile) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      });
     } finally {
       await mounted.cleanup();
     }

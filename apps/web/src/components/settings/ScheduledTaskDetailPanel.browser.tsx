@@ -58,6 +58,15 @@ function createScheduledTask(input?: Partial<ScheduledTask>): ScheduledTask {
     newThreadConfig: {
       projectId: PROJECT_ID,
       prompt: "Check system health.",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "plugin",
+          id: "spotify@openai-curated-remote",
+          displayName: "Spotify",
+          iconUrl: "https://files.openai.com/spotify.png",
+        },
+      ],
       autoSend: false,
     },
     createdAt: NOW_ISO,
@@ -138,6 +147,7 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
       },
       server: {
         resolveSkills: vi.fn(async () => ({ skills: [] })),
+        resolveProviderCapabilities: vi.fn(async () => ({ capabilities: [] })),
       },
     } as unknown as NativeApi;
 
@@ -145,6 +155,7 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
 
     try {
       await expect.element(page.getByText("Daily health check")).toBeInTheDocument();
+      await expect.element(page.getByText("Spotify")).toBeInTheDocument();
 
       const detailSwitch = await waitForElement(
         () => document.querySelector('[role="switch"]') as HTMLButtonElement | null,
@@ -173,6 +184,15 @@ describe("ScheduledTaskDetailPanel browser coverage", () => {
           newThreadConfig: {
             projectId: PROJECT_ID,
             prompt: "Check nightly systems.",
+            providerCapabilities: [
+              {
+                provider: "codex",
+                kind: "plugin",
+                id: "spotify@openai-curated-remote",
+                displayName: "Spotify",
+                iconUrl: "https://files.openai.com/spotify.png",
+              },
+            ],
             autoSend: false,
           },
         });

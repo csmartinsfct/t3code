@@ -11,6 +11,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CodexAppServerManager,
+  buildCodexSelectedCapabilityRoots,
   classifyCodexStderrLine,
   isRecoverableThreadResumeError,
   normalizeCodexModelSlug,
@@ -407,6 +408,44 @@ describe("resolveCodexModelForAccount", () => {
 });
 
 describe("startSession", () => {
+  it("builds selected capability roots for app-backed Codex plugins", () => {
+    expect(
+      buildCodexSelectedCapabilityRoots({
+        cwd: "/repo",
+        capabilities: [
+          {
+            provider: "codex",
+            kind: "plugin",
+            id: "gmail@openai-curated-remote",
+            name: "gmail",
+            displayName: "Gmail",
+            capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+            appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+          },
+          {
+            provider: "codex",
+            kind: "plugin",
+            id: "superpowers@openai-curated-remote",
+            name: "superpowers",
+            displayName: "Superpowers",
+          },
+        ],
+      }),
+    ).toEqual({
+      environments: [{ environmentId: "local", cwd: "/repo" }],
+      selectedCapabilityRoots: [
+        {
+          id: "gmail@openai-curated-remote",
+          location: {
+            type: "environment",
+            environmentId: "local",
+            path: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+          },
+        },
+      ],
+    });
+  });
+
   it("enables Codex experimental api capabilities during initialize", () => {
     expect(buildCodexInitializeParams()).toEqual({
       clientInfo: {
@@ -672,6 +711,144 @@ describe("sendTurn", () => {
           developer_instructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
         },
       },
+    });
+  });
+
+  it("adds documented Codex skill activation input for selected provider skills", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected skill",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "$superpowers:using-superpowers\n\nUse the selected skill",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
+  it("adds Codex skill activation input for selected profiled-provider skills", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected profile skill",
+      providerCapabilities: [
+        {
+          provider: "codex:zbd",
+          kind: "skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "$superpowers:using-superpowers\n\nUse the selected profile skill",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
+  it("does not duplicate a selected Codex skill marker already present in user text", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Please use $superpowers:using-superpowers here",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "superpowers:using-superpowers",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+          displayName: "Using Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Please use $superpowers:using-superpowers here",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "superpowers:using-superpowers",
+          path: "/Users/me/.codex/plugins/cache/openai-curated-remote/superpowers/6.1.1/skills/using-superpowers/SKILL.md",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
+  it("does not add session-scoped Codex plugin roots to turn input", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Use the selected plugin if supported",
+      providerCapabilities: [
+        {
+          provider: "codex",
+          kind: "plugin",
+          id: "superpowers@openai-curated-remote",
+          name: "superpowers",
+          displayName: "Superpowers",
+        },
+      ],
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Use the selected plugin if supported",
+          text_elements: [],
+        },
+      ],
+      model: "gpt-5.3-codex",
     });
   });
 

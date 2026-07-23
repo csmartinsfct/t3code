@@ -358,6 +358,99 @@ describe("composerDraftStore ticket attachments", () => {
   });
 });
 
+describe("composerDraftStore provider capabilities", () => {
+  const threadId = ThreadId.makeUnsafe("thread-provider-capabilities");
+  const capability = {
+    provider: "codex" as const,
+    kind: "plugin" as const,
+    id: "superpowers@openai-curated-remote",
+    displayName: "Superpowers",
+  };
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("adds and removes a selected provider capability", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.addProviderCapability(threadId, capability);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability]);
+
+    store.removeProviderCapability(threadId, capability.id);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toHaveLength(0);
+  });
+
+  it("ignores ambiguous raw-id provider capability removal", () => {
+    const store = useComposerDraftStore.getState();
+    const profiledCapability = {
+      ...capability,
+      provider: "codex:zbd" as const,
+    };
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, profiledCapability);
+
+    store.removeProviderCapability(threadId, capability.id);
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability, profiledCapability]);
+  });
+
+  it("removes provider capabilities by provider-scoped selection key", () => {
+    const store = useComposerDraftStore.getState();
+    const profiledCapability = {
+      ...capability,
+      provider: "codex:zbd" as const,
+    };
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, profiledCapability);
+
+    store.removeProviderCapability(
+      threadId,
+      "codex:zbd\u0000plugin\u0000superpowers@openai-curated-remote",
+    );
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability]);
+  });
+
+  it("deduplicates capabilities by provider, kind, and id", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, capability);
+    store.addProviderCapability(threadId, {
+      ...capability,
+      provider: "claudeAgent",
+    });
+
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.providerCapabilities,
+    ).toEqual([capability, { ...capability, provider: "claudeAgent" }]);
+  });
+
+  it("clears selected provider capabilities with composer content", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setPrompt(threadId, "sent draft");
+    store.addProviderCapability(threadId, capability);
+
+    store.clearComposerContent(threadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.makeUnsafe("thread-sync-persisted");
 

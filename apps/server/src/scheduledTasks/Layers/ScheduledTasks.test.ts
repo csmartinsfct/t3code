@@ -6,6 +6,7 @@ import {
   type OrchestrationStartupSnapshot,
   type ScheduledTask,
   type ScheduledTaskRun,
+  type SelectedProviderCapability,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -19,6 +20,17 @@ import { ScheduledTaskService } from "../Services/ScheduledTasks.ts";
 import { ScheduledTaskServiceLive } from "./ScheduledTasks.ts";
 
 const projectId = ProjectId.makeUnsafe("project-scheduled");
+
+const spotifyCapability = {
+  provider: "codex" as const,
+  kind: "plugin" as const,
+  id: "spotify@openai-curated-remote",
+  name: "spotify",
+  displayName: "Spotify",
+  capabilityRootPath: "/Users/example/.codex/plugins/cache/spotify/4.0.0",
+  appIds: ["asdk_app_spotify"],
+  iconUrl: "https://files.openai.com/spotify.png",
+} satisfies SelectedProviderCapability;
 
 const project: OrchestrationProject = {
   id: projectId,
@@ -52,6 +64,7 @@ function makeJob(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     newThreadConfig: {
       projectId,
       prompt: "Run the scheduled check.",
+      providerCapabilities: [spotifyCapability],
       autoSend: true,
       ...overrides.newThreadConfig,
     },
@@ -165,8 +178,13 @@ it.effect("scheduled tasks auto-send with the implementer model by default", () 
       ["thread.create", "thread.turn.start"],
     );
     const turnStart = commands.find((command) => command.type === "thread.turn.start");
+    const threadCreate = commands.find((command) => command.type === "thread.create");
+    assert.ok(threadCreate);
     assert.ok(turnStart);
     assert.strictEqual(turnStart.message.text, "Run the scheduled check.");
+    assert.deepStrictEqual(threadCreate.initialDraft?.providerCapabilities, [spotifyCapability]);
+    assert.deepStrictEqual(turnStart.providerCapabilities, [spotifyCapability]);
+    assert.deepStrictEqual(turnStart.message.metadata?.providerCapabilities, [spotifyCapability]);
     assert.deepStrictEqual(turnStart.modelSelection, {
       provider: "codex",
       model: "gpt-5.5",

@@ -248,6 +248,39 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
     }),
   );
+  it.effect("forwards provider capabilities when starting a session", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      const providerCapabilities = [
+        {
+          provider: "codex",
+          kind: "plugin",
+          id: "gmail@openai-curated-remote",
+          name: "gmail",
+          displayName: "Gmail",
+          capabilityRootPath: "/Users/me/.codex/plugins/cache/openai-curated-remote/gmail/0.1.5",
+          appIds: ["connector_2128aebfecb84f64a069897515042a44"],
+        },
+      ] as const;
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        providerCapabilities,
+        runtimeMode: "full-access",
+      });
+
+      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        binaryPath: "codex",
+        homePath: path.join(os.homedir(), ".codex"),
+        providerCapabilities,
+        runtimeMode: "full-access",
+      });
+    }),
+  );
   it.effect("pins the base Codex provider to the default home path", () =>
     Effect.gen(function* () {
       const previousCodexHome = process.env.CODEX_HOME;
@@ -457,6 +490,36 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+      });
+    }),
+  );
+
+  it.effect("forwards provider capabilities when sending a turn", () =>
+    Effect.gen(function* () {
+      sessionErrorManager.sendTurnImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+      const providerCapabilities = [
+        {
+          provider: "codex",
+          kind: "skill",
+          id: "skill-review",
+          displayName: "Review Skill",
+        },
+      ] as const;
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-missing"),
+          input: "hello",
+          attachments: [],
+          providerCapabilities,
+        }),
+      );
+
+      assert.deepStrictEqual(sessionErrorManager.sendTurnImpl.mock.calls[0]?.[0], {
+        threadId: asThreadId("sess-missing"),
+        input: "hello",
+        providerCapabilities,
       });
     }),
   );

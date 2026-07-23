@@ -35,6 +35,7 @@ import {
   ResolveCodexProjectTrustError,
   ResolveMcpServersError,
   ResolveMcpServersResult,
+  ResolveProviderCapabilitiesError,
   ResolveSkillsError,
   ServerConfigStreamMcpStatusUpdatedEvent,
   TextGenerationError,
@@ -43,6 +44,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
   baseProviderKind,
+  providerProfileId,
   type ProviderKind,
 } from "@t3tools/contracts";
 import { formatTimelineLog, summarizeTimelineText } from "@t3tools/shared/timeline";
@@ -101,8 +103,10 @@ import {
   resolveCodexHomePath,
   resolveCodexHomePathForProvider,
 } from "./provider/codexProfileDiscovery";
+import { backfillCodexInlineVisualizations } from "./provider/codexInlineVisualizationBackfill";
 import { resolveCursorSettingsForProvider } from "./provider/cursorProfileDiscovery";
 import { probeCursorMcpServers, runCursorMcpAction } from "./provider/cursorMcpProbe";
+import { resolveProviderCapabilities } from "./provider/capabilities";
 import { resolveSkills } from "./skillsReader";
 import * as os from "node:os";
 import * as nodePath from "node:path";
@@ -248,6 +252,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       serverSettings.getSettings.pipe(
         Effect.map((settings) => resolveCodexHomePathForProvider(settings, provider)),
       );
+
     yield* ensureWatchDirForFile(codexHome, "config.toml");
 
     // Watch each ~/.codex-{profile}/ and ~/.claude-{profile}/ directory
@@ -326,7 +331,17 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [ORCHESTRATION_WS_METHODS.getThreadContent]: (input) =>
         observeRpcEffect(
           ORCHESTRATION_WS_METHODS.getThreadContent,
-          projectionSnapshotQuery.getThreadContent(input.threadId).pipe(
+          backfillCodexInlineVisualizations({
+            threadId: input.threadId,
+            getThreadContent: () => projectionSnapshotQuery.getThreadContent(input.threadId),
+            ...(providerService.getPersistedSession
+              ? {
+                  getPersistedSession: () => providerService.getPersistedSession!(input.threadId),
+                }
+              : {}),
+            resolveCodexHomeForProvider,
+            dispatch: (command) => orchestrationEngine.dispatch(command),
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new OrchestrationGetThreadContentError({
@@ -1018,6 +1033,39 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ResolveSkillsError({
                   message: `Failed to resolve skills: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverResolveProviderCapabilities]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverResolveProviderCapabilities,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings;
+            const profileId = providerProfileId(input.provider);
+            const profile = profileId
+              ? settings.providers.codexProfiles.find(
+                  (candidate) => candidate.profileId === profileId,
+                )
+              : undefined;
+            const binaryPath = profile?.binaryPath || settings.providers.codex.binaryPath;
+            return yield* resolveProviderCapabilities({
+              ...input,
+              binaryPathByProvider: {
+                codex: settings.providers.codex.binaryPath,
+                [input.provider]: binaryPath,
+              },
+              homePathByProvider: {
+                codex: resolveCodexHomePath(settings),
+                [input.provider]: resolveCodexHomePathForProvider(settings, input.provider),
+              },
+            });
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResolveProviderCapabilitiesError({
+                  message: `Failed to resolve provider capabilities: ${String(cause)}`,
                 }),
             ),
           ),

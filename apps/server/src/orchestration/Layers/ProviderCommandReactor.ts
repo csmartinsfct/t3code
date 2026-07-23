@@ -8,6 +8,7 @@ import {
   type ModelSelection,
   type OrchestrationEvent,
   ProviderKind,
+  type SelectedProviderCapability,
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
@@ -318,6 +319,7 @@ const make = Effect.gen(function* () {
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
+      readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
     },
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
@@ -366,6 +368,19 @@ const make = Effect.gen(function* () {
       projects: readModel.projects,
     });
 
+    const resolveCanonicalSessionCapabilities = Effect.fn("resolveCanonicalSessionCapabilities")(
+      function* () {
+        if (!effectiveCwd || !providerService.resolveSessionCapabilities) {
+          return options?.providerCapabilities;
+        }
+        return yield* providerService.resolveSessionCapabilities({
+          provider: preferredProvider,
+          cwd: effectiveCwd,
+          ...(options?.providerCapabilities ? { requested: options.providerCapabilities } : {}),
+        });
+      },
+    );
+
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
@@ -375,13 +390,17 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderKind;
     }) =>
-      providerService.startSession(threadId, {
-        threadId,
-        ...(preferredProvider ? { provider: asProviderInput(preferredProvider) } : {}),
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        runtimeMode: desiredRuntimeMode,
+      Effect.gen(function* () {
+        const providerCapabilities = yield* resolveCanonicalSessionCapabilities();
+        return yield* providerService.startSession(threadId, {
+          threadId,
+          ...(preferredProvider ? { provider: asProviderInput(preferredProvider) } : {}),
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          modelSelection: desiredModelSelection,
+          ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          ...(providerCapabilities !== undefined ? { providerCapabilities } : {}),
+          runtimeMode: desiredRuntimeMode,
+        });
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -428,12 +447,14 @@ const make = Effect.gen(function* () {
         requestedModelSelection !== undefined &&
         previousModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
+      const shouldRestartForProviderCapabilities = options?.providerCapabilities !== undefined;
 
       if (
         !runtimeModeChanged &&
         !providerChanged &&
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange &&
+        !shouldRestartForProviderCapabilities &&
         !cwdChanged &&
         !activeSessionMissing
       ) {
@@ -465,6 +486,7 @@ const make = Effect.gen(function* () {
         modelChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
+        shouldRestartForProviderCapabilities,
         hasResumeCursor: resumeCursor !== undefined,
       });
       yield* lfcyl(threadId, {
@@ -478,6 +500,7 @@ const make = Effect.gen(function* () {
           modelChanged,
           shouldRestartForModelChange,
           shouldRestartForModelSelectionChange,
+          shouldRestartForProviderCapabilities,
           resumeCursor: resumeCursor ?? null,
           currentProvider: currentProvider ?? null,
           desiredProvider,
@@ -588,6 +611,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan" | "plan-accept";
+    readonly providerCapabilities?: ReadonlyArray<SelectedProviderCapability>;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -618,11 +642,12 @@ const make = Effect.gen(function* () {
         model: input.modelSelection?.model ?? null,
       }),
     );
-    yield* ensureSessionForThread(
-      input.threadId,
-      input.createdAt,
-      input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
-    );
+    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+      ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      ...(input.providerCapabilities !== undefined
+        ? { providerCapabilities: input.providerCapabilities }
+        : {}),
+    });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
@@ -664,6 +689,9 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.providerCapabilities !== undefined
+        ? { providerCapabilities: input.providerCapabilities }
+        : {}),
     });
     yield* Effect.logInfo(
       formatTimelineLog("server.provider-reactor", "turn-send.success", {
@@ -857,6 +885,9 @@ const make = Effect.gen(function* () {
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.providerCapabilities !== undefined
+        ? { providerCapabilities: event.payload.providerCapabilities }
+        : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.catchCause((cause) =>

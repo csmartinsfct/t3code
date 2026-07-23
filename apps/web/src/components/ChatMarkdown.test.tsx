@@ -47,6 +47,51 @@ const DYNAMIC_CHAT_UI_BLOCK = [
   "```",
 ].join("\n");
 
+const NATIVE_CODEX_VISUALIZATION_BLOCK = [
+  "```t3:dynamic-chat-ui",
+  JSON.stringify(
+    {
+      version: 1,
+      id: "native-visualization",
+      title: "Native visualization",
+      description: "Native Codex Visualize fragment.",
+      initialHeight: 240,
+      html: `<!doctype html><html><body><main style="background:var(--background);color:var(--foreground);border:1px solid var(--border);font-size:var(--font-size-base)"><svg aria-label="Series" style="color:var(--muted-foreground)"><path stroke="var(--viz-series-1)" /><path stroke="var(--viz-series-2)" /><path stroke="var(--viz-series-3)" /><path stroke="var(--viz-series-4)" /><path stroke="var(--viz-series-5)" /><path stroke="var(--viz-series-6)" /></svg></main></body></html>`,
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
+const NATIVE_CODEX_MODULE_VISUALIZATION_BLOCK = [
+  "```t3:dynamic-chat-ui",
+  JSON.stringify(
+    {
+      version: 1,
+      id: "native-module-visualization",
+      title: "Native module visualization",
+      description: "Native Codex Visualize fragment with a CDN module.",
+      initialHeight: 240,
+      html: `<div data-testid="d3-module-root"></div>
+<script type="module">
+import * as d3 from "https://esm.sh/d3@7.9.0";
+const root = d3.select('[data-testid="d3-module-root"]');
+root.attr("data-d3-loaded", "true");
+root.append("svg").append("circle").attr("data-testid", "d3-module-mark");
+window.parent.postMessage({
+  source: "t3-native-module-test",
+  loaded: root.attr("data-d3-loaded"),
+  markCount: root.selectAll('[data-testid="d3-module-mark"]').size(),
+}, "*");
+</script>`,
+    },
+    null,
+    2,
+  ),
+  "```",
+].join("\n");
+
 const DYNAMIC_CHAT_UI_STATUS_BLOCK = [
   "```t3:dynamic-chat-ui-status",
   JSON.stringify(
@@ -300,6 +345,98 @@ describe("ChatMarkdown", () => {
         expect(onDynamicChatUiResize).toHaveBeenCalled();
       });
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("injects native Codex Visualize theme aliases into the rendered iframe srcdoc", async () => {
+    const mounted = await mountMarkdown({
+      text: NATIVE_CODEX_VISUALIZATION_BLOCK,
+    });
+
+    try {
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="native-visualization"]',
+      );
+      expect(iframe).toBeTruthy();
+      const srcdoc = iframe?.srcdoc ?? "";
+
+      for (const token of [
+        "--background",
+        "--foreground",
+        "--card",
+        "--card-foreground",
+        "--popover",
+        "--popover-foreground",
+        "--primary",
+        "--primary-foreground",
+        "--secondary",
+        "--secondary-foreground",
+        "--muted",
+        "--muted-foreground",
+        "--accent",
+        "--accent-foreground",
+        "--destructive",
+        "--border",
+        "--input",
+        "--ring",
+        "--font-size-base",
+      ]) {
+        expect(srcdoc).toContain(`${token}:`);
+      }
+
+      expect(srcdoc).toContain("--viz-series-1:");
+      expect(srcdoc).toContain("--viz-series-2:");
+      expect(srcdoc).toContain("--viz-series-3:");
+      expect(srcdoc).toContain("--viz-series-4:");
+      expect(srcdoc).toContain("--viz-series-5:");
+      expect(srcdoc).toContain("--viz-series-6:");
+
+      for (const value of [
+        "--viz-series-1: var(--primary);",
+        "--viz-series-2: rgb(243 136 59);",
+        "--viz-series-3: rgb(93 201 119);",
+        "--viz-series-4: rgb(235 119 177);",
+        "--viz-series-5: rgb(155 121 236);",
+        "--viz-series-6: rgb(58 185 177);",
+        "--viz-series-2: rgb(245 154 86);",
+        "--viz-series-3: rgb(116 213 139);",
+        "--viz-series-4: rgb(240 143 192);",
+        "--viz-series-5: rgb(170 145 239);",
+        "--viz-series-6: rgb(90 203 194);",
+      ]) {
+        expect(srcdoc).toContain(value);
+      }
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("runs native Codex Visualize modules from a CORS-enabled CDN", async () => {
+    let resolveModuleResult: (event: MessageEvent) => void;
+    const moduleResult = new Promise<MessageEvent>((resolve) => {
+      resolveModuleResult = resolve;
+    });
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.source === "t3-native-module-test") {
+        resolveModuleResult(event);
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    const mounted = await mountMarkdown({ text: NATIVE_CODEX_MODULE_VISUALIZATION_BLOCK });
+
+    try {
+      const iframe = document.querySelector<HTMLIFrameElement>(
+        'iframe[data-dynamic-chat-ui-artifact-id="native-module-visualization"]',
+      );
+      expect(iframe).toBeTruthy();
+
+      const event = await moduleResult;
+      expect(event.source).toBe(iframe?.contentWindow);
+      expect(event.data).toMatchObject({ loaded: "true", markCount: 1 });
+    } finally {
+      window.removeEventListener("message", onMessage);
       await mounted.cleanup();
     }
   });

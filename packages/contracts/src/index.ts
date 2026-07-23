@@ -3,6 +3,7 @@ export * from "./ipc";
 export * from "./terminal";
 export * from "./provider";
 export * from "./providerRuntime";
+export * from "./providerCapabilities";
 export * from "./model";
 export * from "./keybindings";
 export * from "./server";

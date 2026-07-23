@@ -54,6 +54,11 @@ import {
   discoverClaudeProfiles,
   mergeClaudeProfiles,
 } from "../../provider/claudeProfileDiscovery.ts";
+import { resolveCodexHomePathForProvider } from "../../provider/codexProfileDiscovery.ts";
+import {
+  materializeCodexInlineVisualizations,
+  type MaterializedCodexInlineVisualizations,
+} from "../../provider/codexInlineVisualizations.ts";
 
 /** Format a backoffUntil timestamp as a human-readable "Xm" or "Xs" string. */
 function formatBackoffMinutes(backoffUntil: number): string {
@@ -75,6 +80,24 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
+const CODEX_INLINE_VISUALIZATION_MATERIALIZATION_TIMEOUT = Duration.seconds(2);
+
+export function materializeAssistantTextWithTimeout(input: {
+  readonly text: string;
+  readonly materialization: Effect.Effect<MaterializedCodexInlineVisualizations>;
+}): Effect.Effect<MaterializedCodexInlineVisualizations> {
+  const fallback = { text: input.text, artifacts: [] };
+  return input.materialization.pipe(
+    Effect.timeoutOption(CODEX_INLINE_VISUALIZATION_MATERIALIZATION_TIMEOUT),
+    Effect.map(
+      Option.match({
+        onNone: () => fallback,
+        onSome: (materialized) => materialized,
+      }),
+    ),
+    Effect.catchCause(() => Effect.succeed(fallback)),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Rate-limit payload normalization
@@ -741,6 +764,25 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "task.background.changed": {
+      const taskCount = event.payload.tasks.length;
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "task.background.changed",
+          summary:
+            taskCount === 0
+              ? "Background work idle"
+              : `${taskCount} background ${taskCount === 1 ? "task" : "tasks"}`,
+          payload: event.payload,
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "hook.started": {
       const hookEvent = hookDisplayName(event.payload.hookEvent);
       return [
@@ -1085,6 +1127,34 @@ const make = Effect.fn("make")(function* () {
   const clearAssistantMessageState = (messageId: MessageId) =>
     clearBufferedAssistantText(messageId);
 
+  const materializeAssistantText = Effect.fn("materializeAssistantText")(function* (input: {
+    event: ProviderRuntimeEvent;
+    threadId: ThreadId;
+    text: string;
+  }) {
+    const rawPayload = asRecord(input.event.raw?.payload);
+    const nativeThreadId = rawPayload?.threadId;
+    if (typeof nativeThreadId !== "string") {
+      return { text: input.text, artifacts: [] };
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const thread = readModel.threads.find((entry) => entry.id === input.threadId);
+    if (!thread || baseProviderKind(thread.modelSelection.provider) !== "codex") {
+      return { text: input.text, artifacts: [] };
+    }
+
+    const settings = yield* serverSettingsService.getSettings;
+    return yield* materializeAssistantTextWithTimeout({
+      text: input.text,
+      materialization: materializeCodexInlineVisualizations({
+        text: input.text,
+        codexHomePath: resolveCodexHomePathForProvider(settings, thread.modelSelection.provider),
+        nativeThreadId,
+      }),
+    });
+  });
+
   const finalizeAssistantMessage = Effect.fn("finalizeAssistantMessage")(function* (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
@@ -1092,34 +1162,39 @@ const make = Effect.fn("make")(function* () {
     turnId?: TurnId;
     createdAt: string;
     commandTag: string;
-    finalDeltaCommandTag: string;
     fallbackText?: string;
   }) {
     const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+    const threadContent = yield* projectionSnapshotQuery.getThreadContent(input.threadId);
+    const existingMessage = threadContent.messages.find((entry) => entry.id === input.messageId);
+    const existingText = existingMessage?.text ?? "";
     const text =
       bufferedText.length > 0
-        ? bufferedText
-        : (input.fallbackText?.trim().length ?? 0) > 0
-          ? input.fallbackText!
-          : "";
-
-    if (text.length > 0) {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.message.assistant.delta",
-        commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
-        threadId: input.threadId,
-        messageId: input.messageId,
-        delta: text,
-        ...(input.turnId ? { turnId: input.turnId } : {}),
-        createdAt: input.createdAt,
-      });
-    }
+        ? `${existingText}${bufferedText}`
+        : existingText || ((input.fallbackText?.trim().length ?? 0) > 0 ? input.fallbackText! : "");
+    const materialized = yield* materializeAssistantText({
+      event: input.event,
+      threadId: input.threadId,
+      text,
+    }).pipe(Effect.catchCause(() => Effect.succeed({ text, artifacts: [] })));
 
     yield* orchestrationEngine.dispatch({
       type: "thread.message.assistant.complete",
       commandId: providerCommandId(input.event, input.commandTag),
       threadId: input.threadId,
       messageId: input.messageId,
+      text: materialized.text,
+      ...(materialized.artifacts.length > 0
+        ? {
+            metadata: {
+              ...existingMessage?.metadata,
+              dynamicChatUiArtifacts: [
+                ...(existingMessage?.metadata?.dynamicChatUiArtifacts ?? []),
+                ...materialized.artifacts,
+              ],
+            },
+          }
+        : {}),
       ...(input.turnId ? { turnId: input.turnId } : {}),
       createdAt: input.createdAt,
     });
@@ -1735,7 +1810,6 @@ const make = Effect.fn("make")(function* () {
         ...(turnId ? { turnId } : {}),
         createdAt: now,
         commandTag: "assistant-complete",
-        finalDeltaCommandTag: "assistant-delta-finalize",
         ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
           ? { fallbackText: assistantCompletion.fallbackText }
           : {}),
@@ -1809,7 +1883,6 @@ const make = Effect.fn("make")(function* () {
               turnId,
               createdAt: now,
               commandTag: "assistant-complete-finalize",
-              finalDeltaCommandTag: "assistant-delta-finalize-fallback",
             }),
           { concurrency: 1 },
         ).pipe(Effect.asVoid);

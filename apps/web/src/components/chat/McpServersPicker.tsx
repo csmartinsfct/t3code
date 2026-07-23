@@ -268,7 +268,8 @@ function McpServersMenuContent({
         <div className="max-w-[22rem] px-2 py-1.5 text-amber-500/90 text-sm">
           {error?.trim() || "Unable to load MCP status."}
         </div>
-      ) : hasLiveServers ? (
+      ) : null}
+      {hasLiveServers ? (
         <div className="space-y-2 py-0.5">
           {groupedServers.map((group) => (
             <div key={group.scope}>
@@ -300,7 +301,7 @@ function McpServersMenuContent({
           <span>Loading</span>
           <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" />
         </div>
-      ) : (
+      ) : isError ? null : (
         <div className="px-2 py-1.5 text-muted-foreground text-sm">No MCP servers</div>
       )}
     </>

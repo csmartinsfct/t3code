@@ -104,6 +104,7 @@ Do not pass a one-time rect unless the surface is intentionally fixed to its ori
 
 - Base UI close requests must forward back to the native overlay bridge.
 - Outside click and Escape should dismiss the full-window overlay so it cannot become an invisible glass pane over the app.
+- Routed dialogs must ignore Base UI `focus-out` close requests from nested portal controls such as menus and selects. Only explicit outside click, Escape, or a close button dismisses the native dialog route.
 - Routed menus must use `OverlayRouteMenu`, which centralizes dismissal filtering: only explicit dismiss reasons such as outside click, Escape, or a close button cancel the route. Base UI `focus-out`, `item-press`, and hover bookkeeping must not dismiss a routed menu by themselves, because routed menu items can emit non-dismissing events while the same overlay remains open.
 - Routed selects must use `OverlayRouteSelect`, which submits selected values through the route result path and ignores Base UI `item-press` close requests as route cancellations. Outside click, Escape, and resize still dismiss the native route.
 - Routed comboboxes must use `OverlayRouteCombobox`, which follows the routed select dismissal policy. Row selection is a route result; outside click, Escape, and resize dismiss the native route.

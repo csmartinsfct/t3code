@@ -1,6 +1,6 @@
 # T3 Scheduled Tasks
 
-Scheduled Tasks let T3 Code schedule recurring tasks that automatically create new threads on a cron schedule. Tasks can preload a prompt and/or skill into the thread, with optional auto-send.
+Scheduled Tasks let T3 Code schedule recurring tasks that automatically create new threads on a cron schedule. Tasks can preload a prompt, local skills, and provider plugins or plugin skills into the thread, with optional auto-send.
 
 ## Overview
 
@@ -55,6 +55,7 @@ ScheduledTask {
   newThreadConfig: {
     projectId: ProjectId
     skillIds?: string[]      // optional skill IDs to attach (multi-select)
+    providerCapabilities?: SelectedProviderCapability[] // plugins and plugin skills
     prompt?: string          // optional prompt to preload
     autoSend: boolean        // if true, sends the prompt automatically
     modelSelection?: ModelSelection // optional per-task model override
@@ -157,11 +158,11 @@ Embedded in the service layer (not a separate reactor). On layer initialization:
 3. **Execute**: For `new_thread` type:
    - Generate new `ThreadId` and `CommandId`.
    - Resolve the model selection from `newThreadConfig.modelSelection`, or fall back to the global orchestration implementer model.
-   - Build `initialDraft` from config (prompt, skillIds, autoSend).
+   - Build `initialDraft` from config (prompt, skillIds, providerCapabilities, autoSend).
    - Dispatch `thread.create` orchestration command with `initialDraft`.
-   - If `autoSend` is true, resolve configured skills from the project workspace, prepend their content to the prompt, and dispatch `thread.turn.start` server-side.
+   - If `autoSend` is true, resolve configured local skills from the project workspace, prepend their content to the prompt, and dispatch `thread.turn.start` server-side with provider capabilities on both the turn activation payload and user-message metadata.
    - Create run record with `status: "created"`.
-   - The web client auto-populates the composer (prompt + skills) when the thread is opened.
+   - The web client auto-populates the composer (prompt + local skills + provider capabilities) when a non-auto-send thread is opened.
 4. Update `job.lastRunAt` and recompute `job.nextRunAt` via `cron-parser`.
 5. Publish `job_fired` event via PubSub.
 
@@ -223,8 +224,8 @@ Injected into Codex, Claude, Gemini, and Cursor sessions alongside the managed r
 ### Settings Pages
 
 - **List page**: `apps/web/src/components/settings/ScheduledTasksPanel.tsx` — shows all tasks with name, human-readable schedule, enabled toggle, last run time. Route: `/settings/scheduled-tasks`.
-- **Detail page**: `apps/web/src/components/settings/ScheduledTaskDetailPanel.tsx` — task metadata, prompt preview, Edit/Run Now/Delete buttons, run history table with thread links. Route: `/settings/scheduled-tasks/$jobId`.
-- **Add/Edit dialog**: `apps/web/src/components/settings/ScheduledTaskDialog.tsx` — form with name, description, cron expression, Type selector, Project dropdown, Skills multi-select combobox with chips, Prompt textarea, Auto send toggle.
+- **Detail page**: `apps/web/src/components/settings/ScheduledTaskDetailPanel.tsx` — task metadata, prompt and attached capability previews, Edit/Run Now/Delete buttons, run history table with thread links. Route: `/settings/scheduled-tasks/$jobId`.
+- **Add/Edit dialog**: `apps/web/src/components/settings/ScheduledTaskDialog.tsx` — form with name, description, cron expression, Type selector, Project dropdown, one compact local-skills/provider-capabilities picker with chips, Prompt textarea, Auto send toggle. Capability discovery follows the effective task provider and selected project; changing either removes incompatible selections.
 - **Sidebar nav**: `apps/web/src/components/settings/SettingsSidebarNav.tsx` — "Scheduled Tasks" tab with ClockIcon.
 - **Routes**: `apps/web/src/routes/settings.scheduled-tasks.tsx` (layout), `settings.scheduled-tasks.index.tsx` (list), `settings.scheduled-tasks.$jobId.tsx` (detail).
 
@@ -233,7 +234,7 @@ The settings list/detail pages render task data independently from project dropd
 ### Propose Card (Chat)
 
 - **Parser**: `apps/web/src/lib/proposeScheduledTaskParser.ts` — detects `language-t3:propose-scheduled-task` code blocks, parses JSON payload.
-- **Card**: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx` — interactive card with editable name/description/cron/prompt, project dropdown, Accept/Reject buttons.
+- **Card**: `apps/web/src/components/chat/ProposeScheduledTaskCard.tsx` — interactive card with editable name/description/cron/prompt, project dropdown, attached plugin metadata, and Accept/Reject buttons.
 - **Wiring**: `ChatMarkdown.tsx` → `MessagesTimeline.tsx` → `ChatView.tsx` (`handleProposeScheduledTask`).
 
 The card uses the already-hydrated client project store for project options, preserving the initially supplied project when the store is not ready yet. It avoids fetching startup snapshots during message rendering.

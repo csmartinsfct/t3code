@@ -254,6 +254,9 @@ export interface WsRpcClient {
     >;
     readonly trustCodexProject: RpcUnaryMethod<typeof WS_METHODS.serverTrustCodexProject>;
     readonly resolveSkills: RpcUnaryMethod<typeof WS_METHODS.serverResolveSkills>;
+    readonly resolveProviderCapabilities: RpcUnaryMethod<
+      typeof WS_METHODS.serverResolveProviderCapabilities
+    >;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
   };
@@ -530,6 +533,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverTrustCodexProject](input)),
       resolveSkills: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveSkills](input)),
+      resolveProviderCapabilities: (input) =>
+        transport.request((client) => client[WS_METHODS.serverResolveProviderCapabilities](input)),
       subscribeConfig: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener),
       subscribeLifecycle: (listener) =>

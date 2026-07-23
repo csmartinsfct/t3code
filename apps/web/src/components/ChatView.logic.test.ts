@@ -63,6 +63,17 @@ describe("deriveComposerSendState", () => {
     expect(state.expiredTerminalContextCount).toBe(1);
     expect(state.hasSendableContent).toBe(true);
   });
+
+  it("treats activatable provider capability chips as sendable content", () => {
+    const state = deriveComposerSendState({
+      prompt: "",
+      imageCount: 0,
+      terminalContexts: [],
+      activatableProviderCapabilityCount: 1,
+    });
+
+    expect(state.hasSendableContent).toBe(true);
+  });
 });
 
 describe("buildExpiredTerminalContextToastCopy", () => {

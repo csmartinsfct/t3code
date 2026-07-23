@@ -174,6 +174,7 @@ export function createWsNativeApi(): NativeApi {
       resolveCodexProjectTrust: rpcClient.server.resolveCodexProjectTrust,
       trustCodexProject: rpcClient.server.trustCodexProject,
       resolveSkills: rpcClient.server.resolveSkills,
+      resolveProviderCapabilities: rpcClient.server.resolveProviderCapabilities,
     },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,

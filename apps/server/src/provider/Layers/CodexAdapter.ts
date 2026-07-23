@@ -1502,6 +1502,9 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         homePath: codexHomePath,
         ...(configOverrides.length > 0 ? { configOverrides } : {}),
         ...(appendDeveloperInstructions ? { appendDeveloperInstructions } : {}),
+        ...(input.providerCapabilities !== undefined && input.providerCapabilities.length > 0
+          ? { providerCapabilities: input.providerCapabilities }
+          : {}),
         ...(input.modelSelection?.provider === "codex"
           ? { model: input.modelSelection.model }
           : {}),
@@ -1579,6 +1582,9 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : {}),
           ...(input.interactionMode !== undefined
             ? { interactionMode: input.interactionMode }
+            : {}),
+          ...(input.providerCapabilities !== undefined && input.providerCapabilities.length > 0
+            ? { providerCapabilities: input.providerCapabilities }
             : {}),
           ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
         };

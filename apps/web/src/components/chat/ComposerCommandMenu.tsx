@@ -1,10 +1,15 @@
-import { type ProjectEntry, type ProviderKind } from "@t3tools/contracts";
+import {
+  type ProjectEntry,
+  type ProviderCapabilityEntry,
+  type ProviderKind,
+} from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { BotIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandItem, CommandList } from "../ui/command";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
 export type ComposerCommandItem =
@@ -28,6 +33,20 @@ export type ComposerCommandItem =
       type: "model";
       provider: ProviderKind;
       model: string;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "provider-capability";
+      capability: ProviderCapabilityEntry;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "local-skill";
+      skillId: string;
       label: string;
       description: string;
     };
@@ -129,6 +148,14 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       {props.item.type === "model" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
           model
+        </Badge>
+      ) : null}
+      {props.item.type === "provider-capability" ? (
+        <ProviderCapabilityIcon capability={props.item.capability} />
+      ) : null}
+      {props.item.type === "local-skill" ? (
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+          Skill
         </Badge>
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">

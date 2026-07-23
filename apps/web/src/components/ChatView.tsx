@@ -10,6 +10,8 @@ import {
   type ProjectScript,
   type ProjectScriptIcon,
   type ProviderKind,
+  type ProviderCapabilityEntry,
+  type SelectedProviderCapability,
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -79,6 +81,7 @@ import {
   deriveActivePlanState,
   findSidebarProposedPlan,
   findLatestProposedPlan,
+  deriveLiveBackgroundTasks,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
@@ -165,6 +168,7 @@ import {
 import { useManagedRunCompletionToasts } from "../hooks/useManagedRunCompletionToasts";
 import { useMcpServers } from "../hooks/useMcpServerNames";
 import { useSkills } from "../hooks/useSkills";
+import { useProviderCapabilities } from "../hooks/useProviderCapabilities";
 import { useRehydrateSkillContent } from "../hooks/useRehydrateSkillContent";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
@@ -208,6 +212,15 @@ import { buildExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { useImagePreviewOverlay } from "./imagePreview/ImagePreviewOverlay";
 import { getAvailableProviderOptions, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
+import { ComposerCapabilityChips } from "./chat/ComposerCapabilityChips";
+import {
+  defaultProviderCapabilitiesForProvider,
+  isActivatableProviderCapabilityForProvider,
+  mergeProviderCapabilitiesForSend,
+  providerCapabilitySelectionKey,
+  selectComposerAttachment,
+  toSelectedProviderCapability,
+} from "./chat/composerCapabilitySelection";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import {
@@ -262,6 +275,8 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const CAPABILITY_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached a provider capability without additional text. Use that capability and explain what information or action is available.]";
 
 function formatCodeSnippetsForModel(snippets: ComposerCodeSnippetAttachment[]): string {
   if (snippets.length === 0) return "";
@@ -296,6 +311,9 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_SELECTED_PROVIDER_CAPABILITIES: SelectedProviderCapability[] = Object.freeze(
+  [],
+) as unknown as SelectedProviderCapability[];
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -703,17 +721,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerCodeSnippets = composerDraft.codeSnippets;
   const composerTicketAttachments = composerDraft.ticketAttachments;
   const composerSkills = composerDraft.skills;
+  const composerProviderCapabilities =
+    composerDraft.providerCapabilities ?? EMPTY_SELECTED_PROVIDER_CAPABILITIES;
   const composerPersistedAttachments = composerDraft.persistedAttachments;
-  const composerSendState = useMemo(
-    () =>
-      deriveComposerSendState({
-        prompt,
-        imageCount: composerImages.length,
-        terminalContexts: composerTerminalContexts,
-        skillCount: composerSkills.length,
-      }),
-    [composerImages.length, composerTerminalContexts, composerSkills.length, prompt],
-  );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
@@ -730,6 +740,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.removeTicketAttachment,
   );
   const addComposerDraftSkill = useComposerDraftStore((store) => store.addSkill);
+  const addComposerDraftProviderCapability = useComposerDraftStore(
+    (store) => store.addProviderCapability,
+  );
+  const removeComposerDraftProviderCapability = useComposerDraftStore(
+    (store) => store.removeProviderCapability,
+  );
   const removeComposerDraftSkill = useComposerDraftStore((store) => store.removeSkill);
   const insertComposerDraftTerminalContext = useComposerDraftStore(
     (store) => store.insertTerminalContext,
@@ -899,6 +915,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       addComposerDraftTerminalContexts(threadId, contexts);
     },
     [addComposerDraftTerminalContexts, threadId],
+  );
+  const addComposerProviderCapabilitiesToDraft = useCallback(
+    (capabilities: typeof composerProviderCapabilities) => {
+      for (const capability of capabilities) {
+        addComposerDraftProviderCapability(threadId, capability);
+      }
+    },
+    [addComposerDraftProviderCapability, threadId],
   );
   const removeComposerImageFromDraft = useCallback(
     (imageId: string) => {
@@ -1410,6 +1434,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const sendableComposerProviderCapabilities = useMemo(
+    () =>
+      composerProviderCapabilities.filter((capability) =>
+        isActivatableProviderCapabilityForProvider(capability, selectedProvider),
+      ),
+    [composerProviderCapabilities, selectedProvider],
+  );
+  const composerSendState = useMemo(
+    () =>
+      deriveComposerSendState({
+        prompt,
+        imageCount: composerImages.length,
+        terminalContexts: composerTerminalContexts,
+        skillCount: composerSkills.length,
+        activatableProviderCapabilityCount: sendableComposerProviderCapabilities.length,
+      }),
+    [
+      composerImages.length,
+      composerTerminalContexts,
+      composerSkills.length,
+      prompt,
+      sendableComposerProviderCapabilities.length,
+    ],
+  );
 
   // Rate limits: always derive from the currently-selected provider so that
   // switching profiles in the dropdown immediately reflects the selected
@@ -1437,15 +1485,42 @@ export default function ChatView({ threadId }: ChatViewProps) {
     refreshKey: mcpStatusRefreshKey,
   });
   const availableSkills = useSkills(activeProject?.cwd);
+  const providerCapabilities = useProviderCapabilities({
+    provider: selectedProvider,
+    cwd: activeProject?.cwd,
+  });
+  const defaultProviderCapabilities = useMemo(
+    () => defaultProviderCapabilitiesForProvider(providerCapabilities, selectedProvider),
+    [providerCapabilities, selectedProvider],
+  );
+  const providerCapabilitiesForSend = useMemo(
+    () =>
+      mergeProviderCapabilitiesForSend(
+        sendableComposerProviderCapabilities,
+        defaultProviderCapabilities,
+      ),
+    [defaultProviderCapabilities, sendableComposerProviderCapabilities],
+  );
   useRehydrateSkillContent(threadId, activeProject?.cwd);
   const attachedSkillIds = useMemo(
     () => new Set(composerSkills.map((s) => s.id)),
     [composerSkills],
   );
+  const attachedProviderCapabilityIds = useMemo(
+    () => new Set(composerProviderCapabilities.map(providerCapabilitySelectionKey)),
+    [composerProviderCapabilities],
+  );
 
   // Populate composer from thread initialDraft (e.g. scheduled task created threads)
   const initialDraftHydrationRef = useRef<
-    Map<string, { promptApplied: boolean; attachedSkillIds: Set<string> }>
+    Map<
+      string,
+      {
+        promptApplied: boolean;
+        attachedSkillIds: Set<string>;
+        attachedProviderCapabilityIds: Set<string>;
+      }
+    >
   >(new Map());
   useEffect(() => {
     const draft = activeThread?.initialDraft;
@@ -1454,15 +1529,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const hydrationState =
       initialDraftHydrationRef.current.get(tid) ??
       (() => {
-        const initialState = { promptApplied: false, attachedSkillIds: new Set<string>() };
+        const initialState = {
+          promptApplied: false,
+          attachedSkillIds: new Set<string>(),
+          attachedProviderCapabilityIds: new Set<string>(),
+        };
         initialDraftHydrationRef.current.set(tid, initialState);
         return initialState;
       })();
     const hasAppliedInitialDraft =
-      hydrationState.promptApplied || hydrationState.attachedSkillIds.size > 0;
+      hydrationState.promptApplied ||
+      hydrationState.attachedSkillIds.size > 0 ||
+      hydrationState.attachedProviderCapabilityIds.size > 0;
 
     if (draft.autoSend) {
       const draftSkillIds = new Set(draft.skillIds ?? []);
+      const draftProviderCapabilityIds = new Set(
+        (draft.providerCapabilities ?? []).map(providerCapabilitySelectionKey),
+      );
       const composerHasOnlyAutoSentDraftContent =
         (prompt === "" || prompt === (draft.prompt ?? "")) &&
         composerImages.length === 0 &&
@@ -1471,7 +1555,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         composerTerminalContexts.length === 0 &&
         composerCodeSnippets.length === 0 &&
         composerTicketAttachments.length === 0 &&
-        composerSkills.every((skill) => draftSkillIds.has(skill.id));
+        composerSkills.every((skill) => draftSkillIds.has(skill.id)) &&
+        composerProviderCapabilities.every((capability) =>
+          draftProviderCapabilityIds.has(providerCapabilitySelectionKey(capability)),
+        );
       if (composerHasOnlyAutoSentDraftContent) {
         clearComposerDraftContent(tid);
       }
@@ -1479,12 +1566,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       for (const skillId of draft.skillIds ?? []) {
         hydrationState.attachedSkillIds.add(skillId);
       }
+      for (const capabilityId of draftProviderCapabilityIds) {
+        hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+      }
       return;
     }
 
     // Only seed untouched composers. If initial hydration has already started for this thread,
     // continue attaching any remaining referenced skills as they resolve.
-    if (!hasAppliedInitialDraft && (prompt || composerSkills.length > 0)) return;
+    if (
+      !hasAppliedInitialDraft &&
+      (prompt || composerSkills.length > 0 || composerProviderCapabilities.length > 0)
+    ) {
+      return;
+    }
 
     // Pre-fill prompt
     if (!hydrationState.promptApplied && draft.prompt) {
@@ -1517,6 +1612,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
     }
+
+    for (const capability of draft.providerCapabilities ?? []) {
+      const capabilityId = providerCapabilitySelectionKey(capability);
+      if (
+        hydrationState.attachedProviderCapabilityIds.has(capabilityId) ||
+        composerProviderCapabilities.some(
+          (attached) => providerCapabilitySelectionKey(attached) === capabilityId,
+        )
+      ) {
+        hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+        continue;
+      }
+      addComposerDraftProviderCapability(tid, capability);
+      hydrationState.attachedProviderCapabilityIds.add(capabilityId);
+    }
   }, [
     activeThread?.id,
     activeThread?.initialDraft,
@@ -1528,9 +1638,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerCodeSnippets.length,
     composerTicketAttachments.length,
     composerSkills,
+    composerProviderCapabilities,
     availableSkills,
     setComposerDraftPrompt,
     addComposerDraftSkill,
+    addComposerDraftProviderCapability,
     clearComposerDraftContent,
   ]);
 
@@ -1585,6 +1697,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
+  );
+  const liveBackgroundTasks = useMemo(
+    () => deriveLiveBackgroundTasks(threadActivities),
+    [threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -2061,14 +2177,55 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
-      return workspaceEntries.map((entry) => ({
+      const query = composerTrigger.query.trim().toLowerCase();
+      const capabilityItems = providerCapabilities
+        .filter((capability) => {
+          if (!query) return false;
+          return (
+            capability.displayName.toLowerCase().includes(query) ||
+            capability.name.toLowerCase().includes(query) ||
+            capability.parentDisplayName?.toLowerCase().includes(query)
+          );
+        })
+        .map((capability) => ({
+          id: `provider-capability:${capability.provider}:${capability.kind}:${capability.id}`,
+          type: "provider-capability" as const,
+          capability,
+          label: capability.displayName,
+          description:
+            capability.kind === "skill" && capability.parentDisplayName
+              ? `Skill · ${capability.parentDisplayName}`
+              : "Plugin",
+        }));
+      const rankedCapabilityItems = capabilityItems.toSorted((left, right) => {
+        const matchRank = (capability: ProviderCapabilityEntry) => {
+          const values = [capability.displayName, capability.name, capability.parentDisplayName]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => value.toLowerCase());
+          if (values.some((value) => value === query)) return 0;
+          if (values.some((value) => value.startsWith(query))) return 1;
+          return 2;
+        };
+        return matchRank(left.capability) - matchRank(right.capability);
+      });
+      const rankedLocalSkillItems = availableSkills
+        .filter((skill) => query.length > 0 && skill.name.toLowerCase().includes(query))
+        .map((skill) => ({
+          id: `local-skill:${skill.id}`,
+          type: "local-skill" as const,
+          skillId: skill.id,
+          label: skill.name,
+          description: skill.group ? `Local skill · ${skill.group}` : "Local skill",
+        }));
+      const pathItems = workspaceEntries.map((entry) => ({
         id: `path:${entry.kind}:${entry.path}`,
-        type: "path",
+        type: "path" as const,
         path: entry.path,
         pathKind: entry.kind,
         label: basenameOfPath(entry.path),
         description: entry.parentPath ?? "",
       }));
+      return [...rankedCapabilityItems, ...rankedLocalSkillItems, ...pathItems];
     }
 
     if (composerTrigger.kind === "slash-command") {
@@ -2120,7 +2277,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [
+    availableSkills,
+    composerTrigger,
+    providerCapabilities,
+    searchableModelOptions,
+    workspaceEntries,
+  ]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -2734,6 +2897,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       cronExpression: string;
       projectId: string;
       skillIds?: string[];
+      providerCapabilities?: SelectedProviderCapability[];
       prompt?: string;
       autoSend: boolean;
       modelSelection?: ModelSelection;
@@ -2754,6 +2918,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             newThreadConfig: {
               projectId: event.projectId as never,
               ...(event.skillIds && event.skillIds.length > 0 ? { skillIds: event.skillIds } : {}),
+              ...(event.providerCapabilities && event.providerCapabilities.length > 0
+                ? { providerCapabilities: event.providerCapabilities }
+                : {}),
               ...(event.prompt ? { prompt: event.prompt } : {}),
               autoSend: event.autoSend,
               ...(event.modelSelection ? { modelSelection: event.modelSelection } : {}),
@@ -3771,6 +3938,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThreadId, addComposerDraftSkill],
   );
 
+  const onAttachProviderCapability = useCallback(
+    (capability: ProviderCapabilityEntry) => {
+      if (!activeThreadId) return;
+      addComposerDraftProviderCapability(activeThreadId, toSelectedProviderCapability(capability));
+    },
+    [activeThreadId, addComposerDraftProviderCapability],
+  );
+
+  const removeComposerProviderCapability = useCallback(
+    (capabilityId: string) => {
+      if (!activeThreadId) return;
+      removeComposerDraftProviderCapability(activeThreadId, capabilityId);
+    },
+    [activeThreadId, removeComposerDraftProviderCapability],
+  );
+
   const onRevealSkill = useCallback(
     (skill: SkillEntry) => {
       const cwd = activeProject?.cwd;
@@ -4073,6 +4256,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
       skillCount: composerSkills.length,
+      activatableProviderCapabilityCount: sendableComposerProviderCapabilities.length,
     });
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -4161,6 +4345,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const composerCodeSnippetsSnapshot = [...composerCodeSnippets];
     const composerTicketAttachmentsSnapshot = [...composerTicketAttachments];
     const composerSkillsSnapshot = [...composerSkills];
+    const composerProviderCapabilitiesSnapshot = [...sendableComposerProviderCapabilities];
+    const providerCapabilitiesForSendSnapshot = [...providerCapabilitiesForSend];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const skillsBlock = formatSkillsForModel(composerSkillsSnapshot);
     const snippetsBlock = formatCodeSnippetsForModel(composerCodeSnippetsSnapshot);
@@ -4178,8 +4364,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       model: selectedModel,
       models: selectedProviderModels,
       effort: selectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text:
+        messageTextForSend ||
+        (composerProviderCapabilitiesSnapshot.length > 0
+          ? CAPABILITY_ONLY_BOOTSTRAP_PROMPT
+          : IMAGE_ONLY_BOOTSTRAP_PROMPT),
     });
+    const messageCapabilityMetadata =
+      composerProviderCapabilitiesSnapshot.length > 0
+        ? { providerCapabilities: composerProviderCapabilitiesSnapshot }
+        : undefined;
     logWebTimeline("composer.submit.prepared", {
       threadId: threadIdForSend,
       messageId: messageIdForSend,
@@ -4214,6 +4408,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         role: "user",
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        ...(messageCapabilityMetadata ? { metadata: messageCapabilityMetadata } : {}),
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -4404,11 +4599,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
               role: "user",
               text: outgoingMessageText,
               attachments: turnAttachments,
+              ...(messageCapabilityMetadata ? { metadata: messageCapabilityMetadata } : {}),
             },
             modelSelection: selectedModelSelection,
             titleSeed: title,
             runtimeMode,
             interactionMode,
+            ...((isFirstMessage || composerProviderCapabilitiesSnapshot.length > 0) &&
+            providerCapabilitiesForSendSnapshot.length > 0
+              ? { providerCapabilities: providerCapabilitiesForSendSnapshot }
+              : {}),
             createdAt: messageCreatedAt,
           });
           turnStartSucceeded = true;
@@ -4447,6 +4647,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setComposerCursor(collapseExpandedComposerCursor(promptForSend, promptForSend.length));
         addComposerImagesToDraft(composerImagesSnapshot.map(cloneComposerImageForRetry));
         addComposerTerminalContextsToDraft(composerTerminalContextsSnapshot);
+        for (const skill of composerSkillsSnapshot) {
+          addComposerDraftSkill(threadIdForSend, skill);
+        }
+        addComposerProviderCapabilitiesToDraft(composerProviderCapabilitiesSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
       }
       logWebTimeline("composer.submit.failed", {
@@ -5095,6 +5299,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
+      if (item.type === "provider-capability") {
+        const applied = selectComposerAttachment({
+          item,
+          availableSkills,
+          snapshot,
+          trigger,
+          applyPromptReplacement,
+          onAttachProviderCapability,
+          onAttachSkill,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+      if (item.type === "local-skill") {
+        const applied = selectComposerAttachment({
+          item,
+          availableSkills,
+          snapshot,
+          trigger,
+          applyPromptReplacement,
+          onAttachProviderCapability,
+          onAttachSkill,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       onProviderModelSelect(item.provider, item.model);
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
         expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -5105,7 +5339,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
+      availableSkills,
       handleInteractionModeChange,
+      onAttachProviderCapability,
+      onAttachSkill,
       onProviderModelSelect,
       resolveActiveComposerTrigger,
     ],
@@ -5555,6 +5792,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       activeTurnStartedAt={activeWorkStartedAt}
                       scrollContainer={messagesScrollElement}
                       timelineEntries={timelineEntries}
+                      liveBackgroundTasks={liveBackgroundTasks}
                       completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                       completionSummary={completionSummary}
                       completionTerminalReason={completionTerminalReason}
@@ -5682,6 +5920,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               <ComposerSkillChips
                                 skills={composerSkills}
                                 onRemove={removeComposerSkill}
+                              />
+                            </div>
+                          )}
+
+                        {!isComposerApprovalState &&
+                          pendingUserInputs.length === 0 &&
+                          composerProviderCapabilities.length > 0 && (
+                            <div className="-mx-3 mb-2 sm:-mx-4">
+                              <ComposerCapabilityChips
+                                capabilities={composerProviderCapabilities}
+                                onRemove={removeComposerProviderCapability}
                               />
                             </div>
                           )}
@@ -5885,8 +6134,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}
+                                  providerCapabilities={providerCapabilities}
+                                  attachedProviderCapabilityIds={attachedProviderCapabilityIds}
                                   compact
                                   onAttachSkill={onAttachSkill}
+                                  onAttachProviderCapability={onAttachProviderCapability}
                                   onRevealSkill={onRevealSkill}
                                 />
                                 <CompactComposerControlsMenu
@@ -5980,7 +6232,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 <SkillsPicker
                                   skills={availableSkills}
                                   attachedSkillIds={attachedSkillIds}
+                                  providerCapabilities={providerCapabilities}
+                                  attachedProviderCapabilityIds={attachedProviderCapabilityIds}
                                   onAttachSkill={onAttachSkill}
+                                  onAttachProviderCapability={onAttachProviderCapability}
                                   onRevealSkill={onRevealSkill}
                                 />
                               </>

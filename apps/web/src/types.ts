@@ -16,6 +16,7 @@ import type {
   CheckpointRef,
   ProviderInteractionMode,
   RuntimeMode,
+  SelectedProviderCapability,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -101,6 +102,7 @@ export interface Project {
 export interface ThreadInitialDraft {
   prompt?: string | undefined;
   skillIds?: readonly string[] | undefined;
+  providerCapabilities?: readonly SelectedProviderCapability[] | undefined;
   autoSend?: boolean | undefined;
 }
 

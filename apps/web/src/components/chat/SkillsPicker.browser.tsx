@@ -1,9 +1,21 @@
 import "../../index.css";
 
-import { type SkillEntry } from "@t3tools/contracts";
+import { type ProviderCapabilityEntry, type SkillEntry } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+
+const { resolveProviderCapabilities } = vi.hoisted(() => ({
+  resolveProviderCapabilities: vi.fn().mockResolvedValue({ capabilities: [] }),
+}));
+
+vi.mock("~/nativeApi", () => ({
+  readNativeApi: () => ({
+    server: { resolveProviderCapabilities },
+  }),
+}));
+
+import { useProviderCapabilities } from "~/hooks/useProviderCapabilities";
 
 import { SkillsPicker } from "./SkillsPicker";
 
@@ -37,6 +49,32 @@ const TEST_SKILLS: readonly SkillEntry[] = [
   },
 ];
 
+const TEST_PROVIDER_CAPABILITIES: readonly ProviderCapabilityEntry[] = [
+  {
+    id: "superpowers@openai-curated-remote",
+    provider: "codex",
+    kind: "plugin",
+    name: "superpowers",
+    displayName: "Superpowers",
+    description: "Planning workflows",
+    enabled: true,
+    installed: true,
+    iconUrl: "https://example.com/superpowers.png",
+  },
+  {
+    id: "superpowers:brainstorming",
+    provider: "codex",
+    kind: "skill",
+    name: "superpowers:brainstorming",
+    displayName: "Brainstorming",
+    parentId: "superpowers@openai-curated-remote",
+    parentDisplayName: "Superpowers",
+    enabled: true,
+    installed: true,
+    iconUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E",
+  },
+];
+
 async function mountPicker(props?: { attachedSkillIds?: ReadonlySet<string> }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -46,7 +84,10 @@ async function mountPicker(props?: { attachedSkillIds?: ReadonlySet<string> }) {
     <SkillsPicker
       skills={TEST_SKILLS}
       attachedSkillIds={props?.attachedSkillIds ?? new Set()}
+      providerCapabilities={[]}
+      attachedProviderCapabilityIds={new Set()}
       onAttachSkill={onAttachSkill}
+      onAttachProviderCapability={vi.fn()}
       onRevealSkill={onRevealSkill}
     />,
     { container: host },
@@ -65,9 +106,15 @@ async function mountPicker(props?: { attachedSkillIds?: ReadonlySet<string> }) {
   };
 }
 
+function ProviderCapabilitiesProbe() {
+  useProviderCapabilities({ provider: "codex:profile", cwd: "/repo" });
+  return null;
+}
+
 describe("SkillsPicker", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    resolveProviderCapabilities.mockClear();
   });
 
   it("shows discovered skills with top-level items first and grouped package sections after", async () => {
@@ -130,5 +177,57 @@ describe("SkillsPicker", () => {
     expect(mounted.onRevealSkill).toHaveBeenCalledTimes(1);
     expect(mounted.onRevealSkill).toHaveBeenCalledWith(TEST_SKILLS[2]);
     expect(mounted.onAttachSkill).not.toHaveBeenCalled();
+  });
+
+  it("shows Codex provider capabilities and attaches a selected plugin", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const onAttachProviderCapability = vi.fn();
+    const screen = await render(
+      <SkillsPicker
+        skills={TEST_SKILLS}
+        attachedSkillIds={new Set()}
+        providerCapabilities={TEST_PROVIDER_CAPABILITIES}
+        attachedProviderCapabilityIds={new Set()}
+        onAttachSkill={vi.fn()}
+        onAttachProviderCapability={onAttachProviderCapability}
+        onRevealSkill={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    await page.getByLabelText("Skills").click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Codex plugins");
+      expect(document.body.textContent).toContain("Codex plugin skills");
+      expect(document.querySelector('img[src="https://example.com/superpowers.png"]')).toBeTruthy();
+    });
+
+    await page.getByRole("menuitem", { name: "Superpowers" }).click();
+
+    expect(onAttachProviderCapability).toHaveBeenCalledWith(TEST_PROVIDER_CAPABILITIES[0]);
+    await expect
+      .element(page.getByRole("menuitem", { name: "Superpowers" }))
+      .not.toBeInTheDocument();
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("preserves a profiled provider when resolving capabilities", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(<ProviderCapabilitiesProbe />, { container: host });
+
+    await vi.waitFor(() => {
+      expect(resolveProviderCapabilities).toHaveBeenCalledWith({
+        provider: "codex:profile",
+        cwd: "/repo",
+      });
+    });
+
+    await screen.unmount();
+    host.remove();
   });
 });

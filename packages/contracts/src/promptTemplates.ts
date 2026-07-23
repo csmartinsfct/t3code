@@ -348,6 +348,8 @@ This project has T3 scheduled tasks support via the T3 scheduled tasks REST API.
 5. Use run_scheduled_task_now to manually trigger a task for testing.
 6. Use list_scheduled_task_runs to check run history.
 
+Scheduled tasks can include providerCapabilities for provider-native plugins or plugin skills. Reuse exact capability metadata already present in the conversation or tool context; do not invent capability IDs, paths, or connector IDs.
+
 ### Proposing Scheduled Tasks
 
 When proposing a scheduled task, use propose_scheduled_task. After calling it, you MUST include the returned code block with language tag \`t3:propose-scheduled-task\` in your response. The user will see an interactive card to review and accept.

@@ -610,9 +610,40 @@ expect(Object.keys(PROVIDER_CONFIG).toSorted()).toEqual([...BASE_PROVIDER_KINDS]
 
 Use the shared provider union as the source of truth. A new provider should fail typecheck or a focused test until the relevant model-selection, status, adapter, and UI surfaces are wired.
 
-## Chrome DevTools MCP verification
+## Claude SDK compatibility boundary
 
-For UI and provider interactions, verify with Chrome DevTools MCP instead of a detached browser:
+Claude is pinned exactly to `@anthropic-ai/claude-agent-sdk` `0.3.207`, which
+ships Claude Code `2.1.207`. Treat that pair as one runtime boundary. Before a
+future upgrade, review the SDK changelog, exported control and message types,
+terminal reasons, peer ranges, bundled Claude Code version, and native optional
+package layout.
+
+Keep these provider-specific guarantees intact:
+
+- MCP probing is background work and must not block session startup. Settle
+  empty and pending inventories for a strict eight seconds, including hung
+  reads; preserve pending rows at the deadline, propagate cancellation, retain
+  settled rows through refresh/error, and key snapshots by full profile kind.
+- `background_tasks_changed` replaces the process-scoped live set. Detailed
+  task messages remain independent edge events and retained action history. The
+  actions group owns the live count, and process start, stop, exit, and
+  resume-cursor restart clear it.
+- Interrupt `still_queued` UUIDs are diagnostic only in `0.3.207`. They do not
+  identify T3 inputs and must not mutate the queue. Structured terminal reasons
+  remain authoritative; raw text classification is only for transport/process
+  failures without a structured result.
+- Do not call `Query.reinitialize()` speculatively or after process exit. Recover
+  an exited process by starting a new query from the persisted resume cursor.
+  Stop paths upsert the binding as stopped and never delete it.
+- Let the SDK use its bundled target-native `claude` executable by default;
+  preserve an explicit `pathToClaudeCodeExecutable` override. Desktop staging
+  installs production dependencies for the requested OS and CPU.
+
+## T3 Browser verification
+
+T3 Browser is the required surface for UI and provider verification. Start the
+branch through a T3 managed run, then use the project-scoped `/api/browser`
+tools so automation exercises the same embedded browser surface the user sees:
 
 1. Reload the app and inspect console logs for new errors.
 2. Open the provider/model picker and confirm the provider, icon, profile label, model list, custom models, context badge, and rate-limit meter render as expected.
@@ -629,5 +660,5 @@ Before closing a phase ticket:
 1. Run the focused tests that cover the changed provider surface.
 2. Run `bun fmt`, `bun lint`, and `bun typecheck`.
 3. Record any provider limitations in docs and in the ticket comment.
-4. Mark acceptance criteria met only after the automated checks and Chrome DevTools MCP verification relevant to the ticket have passed.
+4. Mark acceptance criteria met only after the automated checks and T3 Browser verification relevant to the ticket have passed.
 5. Commit all work for the phase in a single, tightly-scoped commit that names the phase (`Add <provider> session context prompt injection`, `Implement <provider> approval flow`, etc.). Follow the Gemini commit sequence for inspiration — each commit there is scoped to one phase or one fix.

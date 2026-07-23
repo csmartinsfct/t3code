@@ -19,6 +19,7 @@ import {
 import {
   deriveTimelineEntries,
   formatElapsed,
+  type LiveBackgroundTaskSnapshot,
   type TerminalReasonPresentation,
 } from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
@@ -51,6 +52,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ProviderCapabilityIcon } from "./ProviderCapabilityIcon";
 import {
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
@@ -90,6 +92,7 @@ interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
+  liveBackgroundTasks?: LiveBackgroundTaskSnapshot | null;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   completionTerminalReason?: TerminalReasonPresentation | null;
@@ -140,6 +143,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   scrollContainer,
   timelineEntries,
+  liveBackgroundTasks = null,
   completionDividerBeforeEntryId,
   completionSummary,
   completionTerminalReason = null,
@@ -201,8 +205,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
+        liveBackgroundTasks,
       }),
-    [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
+    [
+      timelineEntries,
+      completionDividerBeforeEntryId,
+      isWorking,
+      activeTurnStartedAt,
+      liveBackgroundTasks,
+    ],
   );
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
@@ -442,6 +453,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
                 ))}
               </div>
+              {row.liveBackgroundTasks && (
+                <div
+                  className="flex h-8 min-w-0 items-center gap-2 px-1 text-[11px] text-muted-foreground/70"
+                  title={row.liveBackgroundTasks.tasks
+                    .map((task) => `${task.taskType}: ${task.description}`)
+                    .join("\n")}
+                >
+                  <Loader2Icon className="size-3 shrink-0 animate-spin" />
+                  <span className="truncate">
+                    {row.liveBackgroundTasks.tasks.length}{" "}
+                    {row.liveBackgroundTasks.tasks.length === 1
+                      ? "background task running"
+                      : "background tasks running"}
+                  </span>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -450,6 +477,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "user" &&
         (() => {
           const userImages = row.message.attachments ?? [];
+          const providerCapabilities = row.message.metadata?.providerCapabilities ?? [];
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
@@ -469,6 +497,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                {providerCapabilities.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1.5">
+                    {providerCapabilities.map((capability) => (
+                      <div
+                        key={`${capability.provider}:${capability.kind}:${capability.id}`}
+                        className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground"
+                      >
+                        <ProviderCapabilityIcon capability={capability} className="size-4" />
+                        <span className="truncate">{capability.displayName}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(

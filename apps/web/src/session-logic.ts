@@ -74,6 +74,16 @@ export interface WorkLogEntry {
   diagnosticCategory?: string;
 }
 
+export interface LiveBackgroundTaskSnapshot {
+  activityId: string;
+  createdAt: string;
+  tasks: ReadonlyArray<{
+    taskId: string;
+    taskType: string;
+    description: string;
+  }>;
+}
+
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
@@ -543,13 +553,53 @@ export function deriveWorkLogEntries(
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
+    .filter((activity) => activity.kind !== "task.background.changed")
     .filter((activity) => activity.kind !== "context-window.updated")
+    .filter((activity) => !isSessionStartHookActivity(activity))
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+export function deriveLiveBackgroundTasks(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): LiveBackgroundTaskSnapshot | null {
+  const latestSnapshot = [...activities]
+    .filter((activity) => activity.kind === "task.background.changed")
+    .toSorted(compareActivitiesByOrder)
+    .at(-1);
+  if (!latestSnapshot) {
+    return null;
+  }
+
+  const payload = asRecord(latestSnapshot.payload);
+  const tasks = Array.isArray(payload?.tasks)
+    ? payload.tasks.flatMap((value) => {
+        const task = asRecord(value);
+        const taskId = asTrimmedString(task?.taskId);
+        const taskType = asTrimmedString(task?.taskType);
+        const description = asTrimmedString(task?.description);
+        return taskId && taskType && description ? [{ taskId, taskType, description }] : [];
+      })
+    : [];
+
+  return {
+    activityId: latestSnapshot.id,
+    createdAt: latestSnapshot.createdAt,
+    tasks,
+  };
+}
+
+function isSessionStartHookActivity(activity: OrchestrationThreadActivity): boolean {
+  if (!activity.kind.startsWith("hook.")) {
+    return false;
+  }
+
+  const payload = asRecord(activity.payload);
+  return payload?.hookEvent === "SessionStart";
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {

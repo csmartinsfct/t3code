@@ -263,10 +263,13 @@ const makeScheduledTaskService = Effect.gen(function* () {
         const modelSelection =
           config.modelSelection ?? settings.orchestrationImplementerModelSelection;
 
-        // Build initial draft from config (prompt, skills, autoSend)
+        // Build initial draft from config (prompt, capabilities, autoSend)
         const initialDraft = {
           ...(config.prompt ? { prompt: config.prompt } : {}),
           ...(config.skillIds && config.skillIds.length > 0 ? { skillIds: config.skillIds } : {}),
+          ...(config.providerCapabilities && config.providerCapabilities.length > 0
+            ? { providerCapabilities: config.providerCapabilities }
+            : {}),
           ...(config.autoSend ? { autoSend: config.autoSend } : {}),
         };
         const hasInitialDraft = Object.keys(initialDraft).length > 0;
@@ -319,10 +322,20 @@ const makeScheduledTaskService = Effect.gen(function* () {
                   role: "user",
                   text: messageText,
                   attachments: [],
+                  ...(config.providerCapabilities && config.providerCapabilities.length > 0
+                    ? {
+                        metadata: {
+                          providerCapabilities: config.providerCapabilities,
+                        },
+                      }
+                    : {}),
                 },
                 modelSelection,
                 runtimeMode: DEFAULT_RUNTIME_MODE,
                 interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+                ...(config.providerCapabilities && config.providerCapabilities.length > 0
+                  ? { providerCapabilities: config.providerCapabilities }
+                  : {}),
                 ...(config.prompt ? { titleSeed: config.prompt } : {}),
                 createdAt: now,
               })
