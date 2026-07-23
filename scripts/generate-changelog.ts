@@ -18,7 +18,7 @@ import {
 } from "@t3tools/contracts/changelog";
 import { Schema } from "effect";
 
-const PROMPT_VERSION = "2026-04-11.v1";
+const PROMPT_VERSION = "2026-07-23.v1";
 const CHANGELOG_CACHE_PATH = ".generated/changelog/cache.json";
 const CHANGELOG_ASSET_PATH = "apps/web/public/generated/changelog.json";
 const DIST_CHANGELOG_ASSET_PATH = "generated/changelog.json";
@@ -302,6 +302,8 @@ function buildPrompt(commits: ReadonlyArray<CommitRecord>): string {
     "Return only structured JSON matching the provided schema.",
     "Use only the supplied commit history.",
     "Do not mention file paths, pull requests, tests, prompts, or internal maintenance unless it directly affects user-visible behavior.",
+    'If none of the supplied commits warrants a user-facing entry, return exactly {"groups":[]}.',
+    "Never return a group with an empty entries array.",
     "You may merge multiple related commits into a single changelog entry.",
     "Every entry must cite one or more commit SHAs taken exactly from the supplied commits.",
     "Group entries by the supplied YYYY-MM-DD date strings.",
@@ -322,6 +324,28 @@ function createIsolatedCodexHome(): string {
   }
 
   return isolatedHomePath;
+}
+
+export function normalizeGeneratedChangelogGroups(
+  groups: (typeof GeneratedChangelogResponse.Type)["groups"],
+): ReadonlyArray<ChangelogGroup> {
+  return Schema.decodeUnknownSync(Schema.Array(ChangelogGroup))(
+    groups
+      .filter((group) => group.entries.length > 0)
+      .map((group) => ({
+        date: group.date,
+        entries: group.entries.map((entry) => ({
+          id: createHash("sha256")
+            .update(`${group.date}:${entry.title}:${entry.commitShas.join(",")}`)
+            .digest("hex")
+            .slice(0, 16),
+          title: entry.title,
+          summary: entry.summary,
+          category: entry.category,
+          commitShas: [...new Set(entry.commitShas)].toSorted(),
+        })),
+      })),
+  );
 }
 
 function generateBatch(
@@ -375,21 +399,7 @@ function generateBatch(
 
     const rawOutput = JSON.parse(readFileSync(outputPath, "utf8"));
     const decoded = Schema.decodeUnknownSync(GeneratedChangelogResponse)(rawOutput);
-    const groups = Schema.decodeUnknownSync(Schema.Array(ChangelogGroup))(
-      decoded.groups.map((group) => ({
-        date: group.date,
-        entries: group.entries.map((entry) => ({
-          id: createHash("sha256")
-            .update(`${group.date}:${entry.title}:${entry.commitShas.join(",")}`)
-            .digest("hex")
-            .slice(0, 16),
-          title: entry.title,
-          summary: entry.summary,
-          category: entry.category,
-          commitShas: [...new Set(entry.commitShas)].toSorted(),
-        })),
-      })),
-    );
+    const groups = normalizeGeneratedChangelogGroups(decoded.groups);
 
     return {
       groups,
@@ -621,4 +631,6 @@ function main() {
   );
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

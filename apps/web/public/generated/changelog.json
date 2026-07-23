@@ -1,8 +1,211 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-10T10:50:22.143Z",
-  "lastProcessedCommit": "cb48153bba32c05dd6231efcdf31052387f9b2c1",
+  "generatedAt": "2026-07-23T11:36:45.817Z",
+  "lastProcessedCommit": "13d5fb5fce3bf9b5b39fc86a5b187fe2c7737d65",
   "groups": [
+    {
+      "date": "2026-07-23",
+      "entries": [
+        {
+          "id": "d4b7750cc99dbda2",
+          "title": "Stopped background provider status polling",
+          "summary": "Improved runtime stability by no longer polling provider status in the background.",
+          "category": "fix",
+          "commitShas": ["13d5fb5fce3bf9b5b39fc86a5b187fe2c7737d65"]
+        },
+        {
+          "id": "d8374c5afb2e98c0",
+          "title": "Provider capability handling and chat experience were refined",
+          "summary": "Improved provider capability support across the app, with related updates to chat rendering, activity timelines, and draft handling for a smoother day-to-day experience.",
+          "category": "improvement",
+          "commitShas": ["da54d5a149881a43b83b44c54c737cff80be316a"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-21",
+      "entries": [
+        {
+          "id": "31990ccab81697a0",
+          "title": "Changed-file cards now start collapsed",
+          "summary": "Improved chat timeline readability by collapsing changed-file cards by default, reducing visual clutter in conversations with file edits.",
+          "category": "improvement",
+          "commitShas": ["3a1b31cb79824717bff11ebd60e91ef3c282c43f"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-18",
+      "entries": [
+        {
+          "id": "c0dc1d71a5822ab9",
+          "title": "Refined the Mermaid expanded-view experience",
+          "summary": "The expanded Mermaid viewer is cleaner and more polished, with improved interaction behavior, uncluttered controls, and diagram content that stays properly clipped within rounded dialog corners.",
+          "category": "fix",
+          "commitShas": [
+            "0727e166b181402a7961adc22de0f38789889e11",
+            "392680032a1e41bb13a2855db28b92b572ed21e5",
+            "65fd93bf40c5a4c94418f0b42e6f4d62f4f818a6",
+            "fa41f79ef8124262e988ac9d81792852a1ca4148"
+          ]
+        },
+        {
+          "id": "69270a544cc7cecb",
+          "title": "Mermaid diagrams now render inline in chat",
+          "summary": "Chat messages can now display Mermaid diagrams directly in the conversation, with support for expanding diagrams into a larger interactive view.",
+          "category": "feature",
+          "commitShas": [
+            "06bcd64acbc49c08c6b0307ff173d1449ea8470b",
+            "1e53baa19b4fcb149fa452cab7bc9c241658cf73",
+            "2077feddb07925875dd11026d81d0a5add90a406",
+            "5aa6ad1ef0a2d07da9d8c2001c25eec3cc32d7d4",
+            "b07df7dbcebce351f7d5186e41dcda4db95245a2",
+            "b87b3d8fbdac052f56eef50871bc80ae7ed67cae",
+            "d2f2c8843b7fbbd8b423439c49368e7db8754bb6"
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-17",
+      "entries": [
+        {
+          "id": "e362997a6b0b5ce3",
+          "title": "Archived thread projects now start collapsed",
+          "summary": "Archived projects in the thread list are collapsed by default, making settings views easier to scan while keeping older work accessible when needed.",
+          "category": "improvement",
+          "commitShas": ["f8b0aff9d06c4266ed5166eca95d36f50512d051"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-15",
+      "entries": [
+        {
+          "id": "7985f90677dfe938",
+          "title": "Hidden project names now persist",
+          "summary": "Project name visibility preferences are now saved, so projects you hide stay hidden across refreshes and later sessions.",
+          "category": "feature",
+          "commitShas": ["8e212bbfdd8f479ee10e19824c430bca5ba22f8e"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-13",
+      "entries": [
+        {
+          "id": "cea95f9a0636ff23",
+          "title": "Fixed a composer crash when reopening certain threads",
+          "summary": "Resolved a render loop that could crash the app when opening threads with preserved composer state, making thread restore and composer behavior more stable.",
+          "category": "fix",
+          "commitShas": ["d61012ba033f037697bfc0d185ddc8299f5d5f04"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-12",
+      "entries": [
+        {
+          "id": "d40f71343950f00e",
+          "title": "Claude sessions report cleaner, more reliable runtime status",
+          "summary": "Improved Claude lifecycle handling and MCP startup behavior so session state settles more predictably and transient startup noise is reduced.",
+          "category": "fix",
+          "commitShas": [
+            "4d68da8c58d107987f9f684a760909afdd3a3788",
+            "68538818433c25cb9c2a72ff294925fe5fc12909",
+            "7fd1caf4289eebb001055392c3b247319242ced7",
+            "ac9d12b878aa60bfcb84e2836da261a4957025c8",
+            "c7b9a54be9470d45a8253d63a5fec8c33f267ae6"
+          ]
+        },
+        {
+          "id": "1b54be30bdde2cd6",
+          "title": "Live background activity is now visible in chat",
+          "summary": "T3 Code now surfaces background agent activity directly in the conversation view, making it easier to see what work is happening while a session runs.",
+          "category": "feature",
+          "commitShas": [
+            "a02b23027bf1359edf852106ede9fe12a9951ca5",
+            "c99a98ad0890f039dc38ebdb62325e41fc3395f4"
+          ]
+        },
+        {
+          "id": "8e61f2fb59c0060f",
+          "title": "Capability discovery is faster",
+          "summary": "Provider capability loading for Codex is now cached, reducing repeated discovery work and improving responsiveness.",
+          "category": "performance",
+          "commitShas": ["3bebfef196ef649d4d9dad66e9e8466f418da64a"]
+        },
+        {
+          "id": "98395a67af86c424",
+          "title": "Scheduled tasks can include provider capabilities",
+          "summary": "You can now attach provider capabilities to scheduled tasks so recurring runs use the same supported capabilities you selected in chat.",
+          "category": "feature",
+          "commitShas": ["b641ad5fe3dc373245001768171745ff45f10e86"]
+        },
+        {
+          "id": "13fb00e38b2a6c3d",
+          "title": "Codex plugin capabilities are supported",
+          "summary": "Codex sessions can now use plugin-based capabilities, expanding what supported providers can do from within T3 Code.",
+          "category": "feature",
+          "commitShas": ["1233729258ebf1dbfeaa8790af2a181154203cbd"]
+        },
+        {
+          "id": "5b269414e868e1a4",
+          "title": "Extension popups stay anchored to the project window",
+          "summary": "Improved extension popup positioning so browser extension windows stay attached to the correct project window instead of appearing detached or misplaced.",
+          "category": "fix",
+          "commitShas": ["5bf697fd5da2179adeaec70afcaf00435285334e"]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-11",
+      "entries": [
+        {
+          "id": "38a7113bf3bc4711",
+          "title": "Capability selection is more reliable",
+          "summary": "Capability discovery and activation for Codex is more resilient, with improved handling for detection failures, better scoping, and more stable draft and menu behavior while composing.",
+          "category": "fix",
+          "commitShas": [
+            "0926a163ecd048796cd1687be01151b5a7903c8e",
+            "1c49eb0675a9742c65e99cf01cf4e45cb42280bc",
+            "1d9798c3aa9d42bfd6aeb49effe5e14e414ab7ef",
+            "6e5f09118219e9f538067d417a2112c59492df5a",
+            "9c0c0a98160a4341ea6e7e3cd0b94b5ce316e132",
+            "a6593b7fcd6e09c2eaf048d0dd783e79e0e90cb3",
+            "df6f36e1a9114df1dfaa50ebf1e0c8d202068103"
+          ]
+        },
+        {
+          "id": "8e3e80ea772d91af",
+          "title": "Provider capabilities are now available in the composer",
+          "summary": "T3 Code now surfaces provider-specific capabilities directly in the composer and skills menus, making it easier to choose supported tools and behaviors before sending a message.",
+          "category": "feature",
+          "commitShas": [
+            "2c5e288aaade3a9e46502db876c035c6e3fe1b04",
+            "38a705a1e796e83831a4fd7b52e2f059ad296c2e",
+            "3ea40f6f83aca74823e9e3b1a1607bac5a3b9543",
+            "685222cd8e4f1100d9af32d897ebddd6f442406d",
+            "6b7d194a614a4263ea4ec6a46ff775dd7d9c5c5b",
+            "b53e307a16a49dc8ed1a4aab55658b0a622bf4cb",
+            "ee812af1b1772c7b129317e7852af1ea8da85a85",
+            "f152e958f3d5b246e9fc73dccc6bc01c18132e61"
+          ]
+        },
+        {
+          "id": "121d57518e0fcfaa",
+          "title": "Improved composer focus while using file pickers and overlays",
+          "summary": "Fixed focus issues that could interrupt typing in the composer when opening file pickers or other passive overlays, making attachment and compose flows feel more stable.",
+          "category": "fix",
+          "commitShas": [
+            "39abf2e35be257307b72bc337f7115577702acc8",
+            "9514ce4e8eeca908a942744c04cbd0a7e245645b",
+            "dd436dc3eefa15cc71b12ba313b5fcc806671df8",
+            "f3d7f60d53189d80febfbce1dfb359c1e912d733"
+          ]
+        }
+      ]
+    },
     {
       "date": "2026-07-10",
       "entries": [
@@ -4049,6 +4252,146 @@
         "fromExclusiveCommit": "16174301c0ebdd1a496b53d85be2c26496b6eedc",
         "toInclusiveCommit": "cb48153bba32c05dd6231efcdf31052387f9b2c1",
         "commitShas": ["cb48153bba32c05dd6231efcdf31052387f9b2c1"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-11T15:17:06.890Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "cb48153bba32c05dd6231efcdf31052387f9b2c1",
+        "toInclusiveCommit": "31917c4f96ba237cb32f5fe1d3b62e01cc63bf35",
+        "commitShas": [
+          "1628a37f0e023a36c7787bdf0383e2e6cbea95cc",
+          "2affa0e1bb25ea61056b52ee82cae9c57d04198d",
+          "dd436dc3eefa15cc71b12ba313b5fcc806671df8",
+          "f3d7f60d53189d80febfbce1dfb359c1e912d733",
+          "39abf2e35be257307b72bc337f7115577702acc8",
+          "9514ce4e8eeca908a942744c04cbd0a7e245645b",
+          "31917c4f96ba237cb32f5fe1d3b62e01cc63bf35"
+        ],
+        "commitCount": 7,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-13T18:21:08.566Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "31917c4f96ba237cb32f5fe1d3b62e01cc63bf35",
+        "toInclusiveCommit": "d61012ba033f037697bfc0d185ddc8299f5d5f04",
+        "commitShas": [
+          "5bf697fd5da2179adeaec70afcaf00435285334e",
+          "d61012ba033f037697bfc0d185ddc8299f5d5f04"
+        ],
+        "commitCount": 2,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-15T11:24:39.709Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "d61012ba033f037697bfc0d185ddc8299f5d5f04",
+        "toInclusiveCommit": "8e212bbfdd8f479ee10e19824c430bca5ba22f8e",
+        "commitShas": ["8e212bbfdd8f479ee10e19824c430bca5ba22f8e"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-18T17:41:58.454Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "8e212bbfdd8f479ee10e19824c430bca5ba22f8e",
+        "toInclusiveCommit": "65fd93bf40c5a4c94418f0b42e6f4d62f4f818a6",
+        "commitShas": [
+          "f8b0aff9d06c4266ed5166eca95d36f50512d051",
+          "144333725bbd609a573f34580ed650794d1bf42d",
+          "2077feddb07925875dd11026d81d0a5add90a406",
+          "d2f2c8843b7fbbd8b423439c49368e7db8754bb6",
+          "5aa6ad1ef0a2d07da9d8c2001c25eec3cc32d7d4",
+          "1e53baa19b4fcb149fa452cab7bc9c241658cf73",
+          "b07df7dbcebce351f7d5186e41dcda4db95245a2",
+          "06bcd64acbc49c08c6b0307ff173d1449ea8470b",
+          "b87b3d8fbdac052f56eef50871bc80ae7ed67cae",
+          "fa41f79ef8124262e988ac9d81792852a1ca4148",
+          "0727e166b181402a7961adc22de0f38789889e11",
+          "392680032a1e41bb13a2855db28b92b572ed21e5",
+          "65fd93bf40c5a4c94418f0b42e6f4d62f4f818a6"
+        ],
+        "commitCount": 13,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-21T17:57:50.351Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "65fd93bf40c5a4c94418f0b42e6f4d62f4f818a6",
+        "toInclusiveCommit": "3a1b31cb79824717bff11ebd60e91ef3c282c43f",
+        "commitShas": ["3a1b31cb79824717bff11ebd60e91ef3c282c43f"],
+        "commitCount": 1,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-23T10:41:58.012Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "3a1b31cb79824717bff11ebd60e91ef3c282c43f",
+        "toInclusiveCommit": "b9b57589d9744e311fe1ba597c424563d439548f",
+        "commitShas": [
+          "3ea40f6f83aca74823e9e3b1a1607bac5a3b9543",
+          "ee812af1b1772c7b129317e7852af1ea8da85a85",
+          "df6f36e1a9114df1dfaa50ebf1e0c8d202068103",
+          "0926a163ecd048796cd1687be01151b5a7903c8e",
+          "2c5e288aaade3a9e46502db876c035c6e3fe1b04",
+          "f152e958f3d5b246e9fc73dccc6bc01c18132e61",
+          "9c0c0a98160a4341ea6e7e3cd0b94b5ce316e132",
+          "1d9798c3aa9d42bfd6aeb49effe5e14e414ab7ef",
+          "b53e307a16a49dc8ed1a4aab55658b0a622bf4cb",
+          "a6593b7fcd6e09c2eaf048d0dd783e79e0e90cb3",
+          "38a705a1e796e83831a4fd7b52e2f059ad296c2e",
+          "6b7d194a614a4263ea4ec6a46ff775dd7d9c5c5b",
+          "685222cd8e4f1100d9af32d897ebddd6f442406d",
+          "80c656e1a342561a4b5376d506cf017f4696f6b1",
+          "1c49eb0675a9742c65e99cf01cf4e45cb42280bc",
+          "6e5f09118219e9f538067d417a2112c59492df5a",
+          "1233729258ebf1dbfeaa8790af2a181154203cbd",
+          "b641ad5fe3dc373245001768171745ff45f10e86",
+          "3bebfef196ef649d4d9dad66e9e8466f418da64a",
+          "f88076595fc7ea4c192a6510e12782e36bb1060f",
+          "c713f4e48f2e1890e41f41de66a4cbd9c8213ae6",
+          "a5b6ab4c468accb9a7ec7927222a7ac5ff727435",
+          "736fde9efd30c4ea5af77dbd6679d2b35bf957ee",
+          "b9b57589d9744e311fe1ba597c424563d439548f"
+        ],
+        "commitCount": 24,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-23T10:42:12.762Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "b9b57589d9744e311fe1ba597c424563d439548f",
+        "toInclusiveCommit": "da54d5a149881a43b83b44c54c737cff80be316a",
+        "commitShas": [
+          "c99a98ad0890f039dc38ebdb62325e41fc3395f4",
+          "a02b23027bf1359edf852106ede9fe12a9951ca5",
+          "7fd1caf4289eebb001055392c3b247319242ced7",
+          "c7b9a54be9470d45a8253d63a5fec8c33f267ae6",
+          "73797c3eeec1138d1e98c62187dee89b1a84fb59",
+          "4d68da8c58d107987f9f684a760909afdd3a3788",
+          "68538818433c25cb9c2a72ff294925fe5fc12909",
+          "ac9d12b878aa60bfcb84e2836da261a4957025c8",
+          "da54d5a149881a43b83b44c54c737cff80be316a"
+        ],
+        "commitCount": 9,
+        "model": "gpt-5.4",
+        "mcpDisabled": true
+      },
+      {
+        "generatedAt": "2026-07-23T11:36:45.798Z",
+        "promptVersion": "2026-04-11.v1",
+        "fromExclusiveCommit": "da54d5a149881a43b83b44c54c737cff80be316a",
+        "toInclusiveCommit": "13d5fb5fce3bf9b5b39fc86a5b187fe2c7737d65",
+        "commitShas": ["13d5fb5fce3bf9b5b39fc86a5b187fe2c7737d65"],
         "commitCount": 1,
         "model": "gpt-5.4",
         "mcpDisabled": true

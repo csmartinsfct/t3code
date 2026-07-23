@@ -29,6 +29,9 @@ This intentionally disables MCP/config-driven tools while still allowing authent
 
 - Codex is asked for strict structured JSON release-note groups.
 - The model-facing schema is intentionally simple for CLI compatibility.
+- Batches without user-facing changes return `{"groups":[]}`. Empty groups are defensively
+  discarded, while the batch provenance and `lastProcessedCommit` still advance so existing
+  changelog history is preserved and internal-only commits are not retried.
 - Before writing anything, the script re-validates the final cache and shipped asset against stricter shared contracts in `packages/contracts/src/changelog.ts`.
 - The cache and asset both preserve provenance such as:
   - `lastProcessedCommit`
