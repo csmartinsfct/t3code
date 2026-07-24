@@ -183,6 +183,20 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
       }),
   );
 
+  const consumeCodexRateLimitResetCredit = vi.fn(
+    (
+      _input: Parameters<
+        NonNullable<ProviderAdapterShape<ProviderAdapterError>["consumeCodexRateLimitResetCredit"]>
+      >[0],
+    ) =>
+      Effect.succeed({
+        outcome: "reset" as const,
+        rateLimits: {
+          rateLimitResetCredits: { availableCount: 0, credits: [] },
+        },
+      }),
+  );
+
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
     capabilities: {
@@ -198,6 +212,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     hasSession,
     readThread,
     rollbackThread,
+    consumeCodexRateLimitResetCredit,
     stopAll,
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
@@ -231,6 +246,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     hasSession,
     readThread,
     rollbackThread,
+    consumeCodexRateLimitResetCredit,
     stopAll,
   };
 }
@@ -625,6 +641,30 @@ it.effect(
 );
 
 routing.layer("ProviderServiceLive routing", (it) => {
+  it.effect("routes reset consumption by provider without creating a thread session", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+
+      const result = yield* provider.consumeCodexRateLimitResetCredit({
+        provider: "codex",
+        idempotencyKey: "reset-attempt-1",
+        creditId: "credit-1",
+      });
+
+      assert.equal(result.outcome, "reset");
+      assert.deepEqual(routing.codex.consumeCodexRateLimitResetCredit.mock.calls, [
+        [
+          {
+            provider: "codex",
+            idempotencyKey: "reset-attempt-1",
+            creditId: "credit-1",
+          },
+        ],
+      ]);
+      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+    }),
+  );
+
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;

@@ -363,6 +363,7 @@ const makeProviderService = (
   rollbackConversation: () => Effect.die(new Error("not mocked")),
   streamEvents: Stream.empty,
   probeAllRateLimits: () => Effect.succeed([]),
+  consumeCodexRateLimitResetCredit: () => Effect.die(new Error("not mocked")),
   ...overrides,
 });
 
@@ -604,6 +605,7 @@ const makeLayer = (opts: {
       Layer.succeed(ProviderRateLimitsCache, {
         set: () => Effect.void,
         setOAuthTiers: () => Effect.void,
+        setResetCredits: () => Effect.void,
         getAll: Effect.succeed([]),
         streamChanges: Stream.empty,
       }),

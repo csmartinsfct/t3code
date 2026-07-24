@@ -42,6 +42,7 @@ import {
   CodexAppServerManager,
   type CodexAppServerStartSessionInput,
 } from "../../codexAppServerManager.ts";
+import { consumeCodexRateLimitResetCreditWithAppServer } from "../codexAppServer.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { trustCodexProject } from "../../mcpConfigReader.ts";
@@ -1665,6 +1666,63 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
     Effect.sync(() => manager.hasSession(threadId));
 
+  const consumeCodexRateLimitResetCredit: NonNullable<
+    CodexAdapterShape["consumeCodexRateLimitResetCredit"]
+  > = Effect.fn("consumeCodexRateLimitResetCredit")(function* (input) {
+    if (baseProviderKind(input.provider) !== PROVIDER) {
+      return yield* new ProviderAdapterValidationError({
+        provider: PROVIDER,
+        operation: "consumeCodexRateLimitResetCredit",
+        issue: `Expected a Codex provider but received '${input.provider}'.`,
+      });
+    }
+
+    const settings = yield* serverSettingsService.getSettings.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "account/rateLimitResetCredit/consume",
+            detail: toMessage(cause, "Failed to load Codex provider settings."),
+            cause,
+          }),
+      ),
+    );
+    const profileId = providerProfileId(input.provider);
+    const binaryPath = profileId
+      ? resolveCodexProfileBinaryPath(settings, profileId)
+      : settings.providers.codex.binaryPath;
+    const homePath = profileId
+      ? resolveCodexHomePathForProfile(settings, profileId)
+      : resolveCodexHomePath(settings);
+
+    const result = yield* Effect.tryPromise({
+      try: (signal) =>
+        consumeCodexRateLimitResetCreditWithAppServer({
+          binaryPath,
+          homePath,
+          idempotencyKey: input.idempotencyKey,
+          ...(input.creditId !== undefined ? { creditId: input.creditId } : {}),
+          signal,
+        }),
+      catch: (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "account/rateLimitResetCredit/consume",
+          detail: toMessage(cause, "Failed to consume Codex rate-limit reset credit."),
+          cause,
+        }),
+    });
+
+    if (result.refreshError) {
+      yield* Effect.logWarning("Codex rate-limit refresh failed after reset consume", {
+        provider: input.provider,
+        cause: result.refreshError,
+      });
+    }
+    return result;
+  });
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.sync(() => {
       manager.stopAll();
@@ -1728,6 +1786,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    consumeCodexRateLimitResetCredit,
     stopAll,
     streamEvents: Stream.fromQueue(runtimeEventQueue),
   } satisfies CodexAdapterShape;

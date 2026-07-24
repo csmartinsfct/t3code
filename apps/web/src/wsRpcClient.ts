@@ -257,6 +257,9 @@ export interface WsRpcClient {
     readonly resolveProviderCapabilities: RpcUnaryMethod<
       typeof WS_METHODS.serverResolveProviderCapabilities
     >;
+    readonly consumeCodexRateLimitResetCredit: RpcUnaryMethod<
+      typeof WS_METHODS.serverConsumeCodexRateLimitResetCredit
+    >;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
   };
@@ -535,6 +538,10 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.serverResolveSkills](input)),
       resolveProviderCapabilities: (input) =>
         transport.request((client) => client[WS_METHODS.serverResolveProviderCapabilities](input)),
+      consumeCodexRateLimitResetCredit: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.serverConsumeCodexRateLimitResetCredit](input),
+        ),
       subscribeConfig: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener),
       subscribeLifecycle: (listener) =>

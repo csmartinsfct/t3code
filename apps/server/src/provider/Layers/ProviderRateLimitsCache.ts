@@ -8,6 +8,7 @@ import {
   type OAuthUsageTier,
   type ProviderKind,
   type ProviderRateLimitInfo,
+  type ProviderRateLimitResetCreditsSummary,
   type ProviderRateLimitsSnapshot,
 } from "@t3tools/contracts";
 import { Effect, Layer, PubSub, Ref, Stream } from "effect";
@@ -68,6 +69,8 @@ export const ProviderRateLimitsCacheLive = Layer.effect(
             updatedAt: new Date().toISOString(),
             // Preserve OAuth tiers from a previous fetch.
             ...(existing?.oauthUsageTiers ? { oauthUsageTiers: existing.oauthUsageTiers } : {}),
+            ...(existing?.resetCredits ? { resetCredits: existing.resetCredits } : {}),
+            ...(existing?.fetchWarning ? { fetchWarning: existing.fetchWarning } : {}),
           };
           const next = new Map(map);
           next.set(provider, snapshot);
@@ -107,9 +110,46 @@ export const ProviderRateLimitsCacheLive = Layer.effect(
         yield* PubSub.publish(changesPubSub, snapshotArray(nextMap));
       });
 
+    const setResetCredits: ProviderRateLimitsCacheShape["setResetCredits"] = (
+      provider: ProviderKind,
+      summary: ProviderRateLimitResetCreditsSummary | null,
+    ) =>
+      Effect.gen(function* () {
+        const nextMap = yield* Ref.updateAndGet(cacheRef, (map) => {
+          const existing = map.get(provider);
+          if (!existing && summary === null) {
+            return map;
+          }
+          const existingWithoutResetCredits = existing
+            ? (({ resetCredits: _resetCredits, ...rest }) => rest)(existing)
+            : undefined;
+          const snapshot: ProviderRateLimitsSnapshot = {
+            ...((summary === null ? existingWithoutResetCredits : existing) ?? {
+              provider: asProviderInput(provider),
+              rateLimitInfo: { status: "allowed" as const },
+              updatedAt: new Date().toISOString(),
+            }),
+            updatedAt: new Date().toISOString(),
+            ...(summary === null
+              ? {}
+              : {
+                  resetCredits: {
+                    availableCount: summary.availableCount,
+                    credits: summary.credits === null ? null : [...summary.credits],
+                  },
+                }),
+          };
+          const next = new Map(map);
+          next.set(provider, snapshot);
+          return next;
+        });
+        yield* PubSub.publish(changesPubSub, snapshotArray(nextMap));
+      });
+
     return {
       set,
       setOAuthTiers,
+      setResetCredits,
       get getAll() {
         return Ref.get(cacheRef).pipe(Effect.map(snapshotArray));
       },

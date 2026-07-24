@@ -248,6 +248,7 @@ describe("ProviderCommandReactor", () => {
         }),
       rollbackConversation: () => unsupported(),
       probeAllRateLimits: () => Effect.succeed([]),
+      consumeCodexRateLimitResetCredit: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
 

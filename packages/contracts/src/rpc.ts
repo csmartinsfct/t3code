@@ -202,6 +202,9 @@ import {
   ResolveProviderCapabilitiesInput,
   ResolveProviderCapabilitiesResult,
   ResolveProviderCapabilitiesError,
+  ConsumeCodexRateLimitResetCreditInput,
+  ConsumeCodexRateLimitResetCreditResult,
+  ConsumeCodexRateLimitResetCreditError,
   TrustCodexProjectInput,
   TrustCodexProjectResult,
   TrustCodexProjectError,
@@ -272,6 +275,7 @@ export const WS_METHODS = {
   serverTrustCodexProject: "server.trustCodexProject",
   serverResolveSkills: "server.resolveSkills",
   serverResolveProviderCapabilities: "server.resolveProviderCapabilities",
+  serverConsumeCodexRateLimitResetCredit: "server.consumeCodexRateLimitResetCredit",
 
   // Scheduled task methods
   scheduledTasksList: "scheduledTasks.list",
@@ -407,6 +411,15 @@ export const WsServerResolveProviderCapabilitiesRpc = Rpc.make(
     payload: ResolveProviderCapabilitiesInput,
     success: ResolveProviderCapabilitiesResult,
     error: ResolveProviderCapabilitiesError,
+  },
+);
+
+export const WsServerConsumeCodexRateLimitResetCreditRpc = Rpc.make(
+  WS_METHODS.serverConsumeCodexRateLimitResetCredit,
+  {
+    payload: ConsumeCodexRateLimitResetCreditInput,
+    success: ConsumeCodexRateLimitResetCreditResult,
+    error: ConsumeCodexRateLimitResetCreditError,
   },
 );
 
@@ -1129,6 +1142,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerTrustCodexProjectRpc,
   WsServerResolveSkillsRpc,
   WsServerResolveProviderCapabilitiesRpc,
+  WsServerConsumeCodexRateLimitResetCreditRpc,
   WsProjectsEnhanceSystemPromptRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,

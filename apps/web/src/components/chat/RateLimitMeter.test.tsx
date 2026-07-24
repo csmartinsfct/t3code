@@ -1,11 +1,23 @@
 import "../../index.css";
 
 import { page } from "vitest/browser";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import type { RateLimitSnapshot } from "../../lib/rateLimit";
 import { RateLimitMeter } from "./RateLimitMeter";
+
+const nativeApiMocks = vi.hoisted(() => ({
+  consumeCodexRateLimitResetCredit: vi.fn(),
+}));
+
+vi.mock("~/nativeApi", () => ({
+  ensureNativeApi: () => ({
+    server: {
+      consumeCodexRateLimitResetCredit: nativeApiMocks.consumeCodexRateLimitResetCredit,
+    },
+  }),
+}));
 
 function createRateLimitSnapshot(): RateLimitSnapshot {
   const resetsAt = new Date("2026-04-11T12:30:00.000Z");
@@ -46,6 +58,7 @@ function createRateLimitSnapshot(): RateLimitSnapshot {
       resetsAt,
     },
     fetchWarning: "Usage data is temporarily unavailable while the provider backs off.",
+    resetCredits: null,
   };
 }
 
@@ -55,6 +68,9 @@ async function mountMeter(rateLimit = createRateLimitSnapshot()) {
   const screen = await render(<RateLimitMeter rateLimit={rateLimit} />, { container: host });
 
   return {
+    rerender: async (nextRateLimit: RateLimitSnapshot) => {
+      await screen.rerender(<RateLimitMeter rateLimit={nextRateLimit} />);
+    },
     cleanup: async () => {
       await screen.unmount();
       host.remove();
@@ -63,6 +79,11 @@ async function mountMeter(rateLimit = createRateLimitSnapshot()) {
 }
 
 describe("RateLimitMeter", () => {
+  beforeEach(() => {
+    nativeApiMocks.consumeCodexRateLimitResetCredit.mockReset();
+    nativeApiMocks.consumeCodexRateLimitResetCredit.mockResolvedValue({ outcome: "reset" });
+  });
+
   afterEach(() => {
     document.body.innerHTML = "";
   });
@@ -74,7 +95,7 @@ describe("RateLimitMeter", () => {
       const trigger = page.getByRole("button", { name: "Rate limit 82% used" });
       await trigger.hover();
 
-      await expect.element(page.getByText("Usage")).toBeInTheDocument();
+      await expect.element(page.getByText("Usage", { exact: true })).toBeInTheDocument();
       const content = document.body.textContent ?? "";
       expect(content).toContain("5h");
       expect(content).toContain("Weekly (Sonnet)");
@@ -96,6 +117,168 @@ describe("RateLimitMeter", () => {
           page.getByText("Usage data is temporarily unavailable while the provider backs off."),
         )
         .toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows earned Codex resets with the soonest expiration and consumes that credit", async () => {
+    const snapshot = createRateLimitSnapshot();
+    const mounted = await mountMeter({
+      ...snapshot,
+      provider: "codex:metric",
+      resetCredits: {
+        availableCount: 2,
+        credits: [
+          {
+            id: "later-reset",
+            status: "available",
+            expiresAt: new Date("2026-08-22T12:00:00.000Z"),
+            title: null,
+            description: null,
+          },
+          {
+            id: "next-reset",
+            status: "available",
+            expiresAt: new Date("2026-08-12T12:00:00.000Z"),
+            title: null,
+            description: null,
+          },
+        ],
+      },
+    });
+
+    try {
+      await page.getByRole("button", { name: "Rate limit 82% used" }).hover();
+
+      await expect.element(page.getByText("2 resets available")).toBeInTheDocument();
+      await expect.element(page.getByText(/^Expires /)).toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Use Codex usage reset" }).click();
+
+      await vi.waitFor(() => {
+        expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledTimes(1);
+      });
+      expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledWith({
+        provider: "codex:metric",
+        creditId: "next-reset",
+        idempotencyKey: expect.any(String),
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("omits a credit id when Codex only reports the authoritative count", async () => {
+    const snapshot = createRateLimitSnapshot();
+    const mounted = await mountMeter({
+      ...snapshot,
+      provider: "codex",
+      resetCredits: {
+        availableCount: 1,
+        credits: null,
+      },
+    });
+
+    try {
+      await page.getByRole("button", { name: "Rate limit 82% used" }).click();
+      await page.getByRole("button", { name: "Use Codex usage reset" }).click();
+
+      await vi.waitFor(() => {
+        expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledTimes(1);
+      });
+      expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledWith({
+        provider: "codex",
+        idempotencyKey: expect.any(String),
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("retries the exact redemption attempt when refreshed credit details change", async () => {
+    nativeApiMocks.consumeCodexRateLimitResetCredit
+      .mockRejectedValueOnce(new Error("Temporary connection failure"))
+      .mockResolvedValueOnce({ outcome: "reset" });
+    const snapshot = createRateLimitSnapshot();
+    const initialRateLimit: RateLimitSnapshot = {
+      ...snapshot,
+      provider: "codex",
+      resetCredits: {
+        availableCount: 2,
+        credits: [
+          {
+            id: "retry-reset",
+            status: "available",
+            expiresAt: new Date("2026-08-12T12:00:00.000Z"),
+            title: null,
+            description: null,
+          },
+          {
+            id: "later-reset",
+            status: "available",
+            expiresAt: new Date("2026-08-22T12:00:00.000Z"),
+            title: null,
+            description: null,
+          },
+        ],
+      },
+    };
+    const mounted = await mountMeter(initialRateLimit);
+
+    try {
+      await page.getByRole("button", { name: "Rate limit 82% used" }).click();
+      const consumeButton = page.getByRole("button", { name: "Use Codex usage reset" });
+      await consumeButton.click();
+      await vi.waitFor(() => {
+        expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledTimes(1);
+      });
+
+      await mounted.rerender({
+        ...initialRateLimit,
+        resetCredits: {
+          availableCount: 1,
+          credits: [
+            {
+              id: "refreshed-reset",
+              status: "available",
+              expiresAt: new Date("2026-08-10T12:00:00.000Z"),
+              title: null,
+              description: null,
+            },
+          ],
+        },
+      });
+      await consumeButton.click();
+      await vi.waitFor(() => {
+        expect(nativeApiMocks.consumeCodexRateLimitResetCredit).toHaveBeenCalledTimes(2);
+      });
+
+      const [firstAttempt, retryAttempt] =
+        nativeApiMocks.consumeCodexRateLimitResetCredit.mock.calls;
+      expect(firstAttempt?.[0].creditId).toBe("retry-reset");
+      expect(retryAttempt?.[0].creditId).toBe("retry-reset");
+      expect(retryAttempt?.[0].idempotencyKey).toBe(firstAttempt?.[0].idempotencyKey);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not show reset controls for non-Codex providers", async () => {
+    const snapshot = createRateLimitSnapshot();
+    const mounted = await mountMeter({
+      ...snapshot,
+      resetCredits: {
+        availableCount: 1,
+        credits: null,
+      },
+    });
+
+    try {
+      await page.getByRole("button", { name: "Rate limit 82% used" }).click();
+      await expect
+        .element(page.getByRole("button", { name: "Use Codex usage reset" }))
+        .not.toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

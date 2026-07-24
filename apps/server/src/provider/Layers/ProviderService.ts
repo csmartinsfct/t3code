@@ -12,6 +12,7 @@
 import {
   asProviderInput,
   baseProviderKind,
+  ConsumeCodexRateLimitResetCreditInput,
   providerProfileId,
   ModelSelection,
   NonNegativeInt,
@@ -1143,6 +1144,30 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const consumeCodexRateLimitResetCredit: ProviderServiceShape["consumeCodexRateLimitResetCredit"] =
+    Effect.fn("consumeCodexRateLimitResetCredit")(function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.consumeCodexRateLimitResetCredit",
+        schema: ConsumeCodexRateLimitResetCreditInput,
+        payload: rawInput,
+      });
+      if (baseProviderKind(input.provider) !== "codex") {
+        return yield* toValidationError(
+          "ProviderService.consumeCodexRateLimitResetCredit",
+          `Provider '${input.provider}' does not support Codex reset credits.`,
+        );
+      }
+
+      const adapter = yield* registry.getByProvider(input.provider);
+      if (!adapter.consumeCodexRateLimitResetCredit) {
+        return yield* toValidationError(
+          "ProviderService.consumeCodexRateLimitResetCredit",
+          `Provider '${input.provider}' does not support Codex reset credits.`,
+        );
+      }
+      return yield* adapter.consumeCodexRateLimitResetCredit(input);
+    });
+
   const rollbackConversation: ProviderServiceShape["rollbackConversation"] = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1282,6 +1307,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     probeMcpServers,
     rollbackConversation,
     probeAllRateLimits,
+    consumeCodexRateLimitResetCredit,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

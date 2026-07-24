@@ -281,6 +281,41 @@ describe("profiled Codex rate-limit events", () => {
       }),
     );
   });
+
+  it("reads full rate limits and emits the response as a profiled account update", async () => {
+    const { manager, context, sendRequest } = createThreadControlHarness();
+    context.session = {
+      ...context.session,
+      provider: "codex:metric" as never,
+    };
+    const emitEvent = vi
+      .spyOn(
+        manager as unknown as { emitEvent: (event: Record<string, unknown>) => void },
+        "emitEvent",
+      )
+      .mockImplementation(() => {});
+    const response = {
+      rateLimits: {
+        primary: { usedPercent: 42, windowDurationMins: 300 },
+      },
+      rateLimitResetCredits: {
+        availableCount: 1,
+        credits: null,
+      },
+    };
+    sendRequest.mockResolvedValueOnce(response);
+
+    await expect(manager.readRateLimits(asThreadId("thread_1"))).resolves.toEqual(response);
+    expect(sendRequest).toHaveBeenCalledWith(context, "account/rateLimits/read", null);
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "codex:metric",
+        threadId: "thread_1",
+        method: "account/rateLimits/updated",
+        payload: response,
+      }),
+    );
+  });
 });
 
 describe("normalizeCodexModelSlug", () => {

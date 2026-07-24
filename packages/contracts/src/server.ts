@@ -322,16 +322,77 @@ export const OAuthUsageTier = Schema.Struct({
 });
 export type OAuthUsageTier = typeof OAuthUsageTier.Type;
 
+export const ProviderRateLimitResetCreditStatus = Schema.Literals([
+  "available",
+  "redeeming",
+  "redeemed",
+  "unknown",
+]);
+export type ProviderRateLimitResetCreditStatus = typeof ProviderRateLimitResetCreditStatus.Type;
+
+export const ProviderRateLimitResetCreditType = Schema.Literals(["codexRateLimits", "unknown"]);
+export type ProviderRateLimitResetCreditType = typeof ProviderRateLimitResetCreditType.Type;
+
+export const ProviderRateLimitResetCredit = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  resetType: ProviderRateLimitResetCreditType,
+  status: ProviderRateLimitResetCreditStatus,
+  /** Unix timestamp in seconds. */
+  grantedAt: NonNegativeInt,
+  /** Unix timestamp in seconds, or `null` when the provider omits an expiry. */
+  expiresAt: Schema.NullOr(NonNegativeInt),
+  title: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+});
+export type ProviderRateLimitResetCredit = typeof ProviderRateLimitResetCredit.Type;
+
+export const ProviderRateLimitResetCreditsSummary = Schema.Struct({
+  /** Authoritative count; providers may cap or omit the detailed credit rows. */
+  availableCount: NonNegativeInt,
+  credits: Schema.NullOr(Schema.Array(ProviderRateLimitResetCredit)),
+});
+export type ProviderRateLimitResetCreditsSummary = typeof ProviderRateLimitResetCreditsSummary.Type;
+
 export const ProviderRateLimitsSnapshot = Schema.Struct({
   provider: ProviderKind,
   rateLimitInfo: ProviderRateLimitInfo,
   updatedAt: IsoDateTime,
   /** Multi-tier OAuth/quota usage data (5h, 7d, model-specific). Absent when unavailable. */
   oauthUsageTiers: Schema.optional(Schema.Array(OAuthUsageTier)),
+  /** Earned provider reset credits. Absent until the provider returns an authoritative read. */
+  resetCredits: Schema.optional(ProviderRateLimitResetCreditsSummary),
   /** Warning message when the usage-data fetch is degraded (e.g. API 429 backoff). */
   fetchWarning: Schema.optional(Schema.String),
 });
 export type ProviderRateLimitsSnapshot = typeof ProviderRateLimitsSnapshot.Type;
+
+export const ConsumeCodexRateLimitResetCreditInput = Schema.Struct({
+  provider: ProviderKind,
+  idempotencyKey: TrimmedNonEmptyString,
+  creditId: Schema.optional(TrimmedNonEmptyString),
+});
+export type ConsumeCodexRateLimitResetCreditInput =
+  typeof ConsumeCodexRateLimitResetCreditInput.Type;
+
+export const ConsumeCodexRateLimitResetCreditOutcome = Schema.Literals([
+  "reset",
+  "nothingToReset",
+  "noCredit",
+  "alreadyRedeemed",
+]);
+export type ConsumeCodexRateLimitResetCreditOutcome =
+  typeof ConsumeCodexRateLimitResetCreditOutcome.Type;
+
+export const ConsumeCodexRateLimitResetCreditResult = Schema.Struct({
+  outcome: ConsumeCodexRateLimitResetCreditOutcome,
+});
+export type ConsumeCodexRateLimitResetCreditResult =
+  typeof ConsumeCodexRateLimitResetCreditResult.Type;
+
+export class ConsumeCodexRateLimitResetCreditError extends Schema.TaggedErrorClass<ConsumeCodexRateLimitResetCreditError>()(
+  "ConsumeCodexRateLimitResetCreditError",
+  { message: TrimmedNonEmptyString },
+) {}
 
 export const ServerConfigStreamRateLimitsUpdatedEvent = Schema.Struct({
   version: Schema.Literal(1),

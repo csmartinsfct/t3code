@@ -31,6 +31,7 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ConsumeCodexRateLimitResetCreditError,
   ManageMcpServerError,
   ResolveCodexProjectTrustError,
   ResolveMcpServersError,
@@ -72,6 +73,7 @@ import { ProviderRateLimitsCache } from "./provider/Services/ProviderRateLimitsC
 import { ProviderMcpStatusCache } from "./provider/Services/ProviderMcpStatusCache";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ProviderService } from "./provider/Services/ProviderService";
+import { normalizeRateLimitPayload } from "./provider/rateLimitNormalization";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -1066,6 +1068,38 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ResolveProviderCapabilitiesError({
                   message: `Failed to resolve provider capabilities: ${String(cause)}`,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.serverConsumeCodexRateLimitResetCredit]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverConsumeCodexRateLimitResetCredit,
+          Effect.gen(function* () {
+            const result = yield* providerService.consumeCodexRateLimitResetCredit(input);
+            if (result.rateLimits !== undefined) {
+              const normalized = normalizeRateLimitPayload({
+                rateLimits: result.rateLimits,
+              });
+              if (normalized) {
+                if (normalized.info) {
+                  yield* rateLimitsCache.set(input.provider, normalized.info);
+                }
+                if (normalized.tiers.length > 0) {
+                  yield* rateLimitsCache.setOAuthTiers(input.provider, normalized.tiers);
+                }
+                if (normalized.resetCredits !== undefined) {
+                  yield* rateLimitsCache.setResetCredits(input.provider, normalized.resetCredits);
+                }
+              }
+            }
+            return { outcome: result.outcome };
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ConsumeCodexRateLimitResetCreditError({
+                  message: `Failed to consume Codex rate-limit reset credit: ${cause.message}`,
                 }),
             ),
           ),

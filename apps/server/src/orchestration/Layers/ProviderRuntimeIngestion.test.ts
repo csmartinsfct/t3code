@@ -118,6 +118,7 @@ function createProviderServiceHarness() {
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     rollbackConversation: () => unsupported(),
     probeAllRateLimits: () => Effect.succeed([]),
+    consumeCodexRateLimitResetCredit: () => unsupported(),
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
 

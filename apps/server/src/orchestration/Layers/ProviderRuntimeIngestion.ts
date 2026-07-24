@@ -4,7 +4,6 @@ import {
   baseProviderKind,
   CommandId,
   MessageId,
-  type OAuthUsageTier,
   type OrchestrationEvent,
   type OrchestrationProposedPlanId,
   type OrchestrationProposedPlanStatus,
@@ -17,7 +16,6 @@ import {
   type ProviderRuntimeEvent,
   type ProviderKind,
   type ProviderRateLimitInfo,
-  type AccountRateLimitsUpdatedPayload,
 } from "@t3tools/contracts";
 import { buildPlanImplementationPrompt } from "@t3tools/shared/proposedPlan";
 import { formatTimelineLog } from "@t3tools/shared/timeline";
@@ -59,6 +57,7 @@ import {
   materializeCodexInlineVisualizations,
   type MaterializedCodexInlineVisualizations,
 } from "../../provider/codexInlineVisualizations.ts";
+import { normalizeRateLimitPayload } from "../../provider/rateLimitNormalization.ts";
 
 /** Format a backoffUntil timestamp as a human-readable "Xm" or "Xs" string. */
 function formatBackoffMinutes(backoffUntil: number): string {
@@ -82,6 +81,12 @@ const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 const CODEX_INLINE_VISUALIZATION_MATERIALIZATION_TIMEOUT = Duration.seconds(2);
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 export function materializeAssistantTextWithTimeout(input: {
   readonly text: string;
   readonly materialization: Effect.Effect<MaterializedCodexInlineVisualizations>;
@@ -97,198 +102,6 @@ export function materializeAssistantTextWithTimeout(input: {
     ),
     Effect.catchCause(() => Effect.succeed(fallback)),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Rate-limit payload normalization
-// ---------------------------------------------------------------------------
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-const VALID_RATE_LIMIT_STATUSES = new Set(["allowed", "allowed_warning", "rejected"]);
-
-/** Pick the first defined string from camelCase / snake_case variants. */
-function pickString(rec: Record<string, unknown>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = rec[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return undefined;
-}
-
-/** Pick the first defined finite number from camelCase / snake_case variants. */
-function pickNumber(rec: Record<string, unknown>, ...keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = rec[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-/** Pick the first defined boolean from camelCase / snake_case variants. */
-function pickBoolean(rec: Record<string, unknown>, ...keys: string[]): boolean | undefined {
-  for (const key of keys) {
-    const value = rec[key];
-    if (typeof value === "boolean") return value;
-  }
-  return undefined;
-}
-
-function pickRateLimitStatus(
-  rec: Record<string, unknown>,
-  ...keys: string[]
-): ProviderRateLimitInfo["status"] | undefined {
-  for (const key of keys) {
-    const value = rec[key];
-    if (typeof value === "string" && VALID_RATE_LIMIT_STATUSES.has(value)) {
-      return value as ProviderRateLimitInfo["status"];
-    }
-  }
-  return undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Codex rate-limit window helpers
-// ---------------------------------------------------------------------------
-
-function codexWindowTierKey(windowMinutes: number | undefined): string {
-  if (windowMinutes !== undefined && windowMinutes <= 360) return "five_hour";
-  return "seven_day";
-}
-
-interface CodexWindowData {
-  usedPercent: number;
-  windowMinutes?: number;
-  /** Absolute Unix timestamp (seconds) when this window resets. */
-  resetsAtEpoch?: number;
-}
-
-function asCodexWindow(value: unknown): CodexWindowData | null {
-  const rec = asRecord(value);
-  if (!rec) return null;
-  const pct = pickNumber(rec, "used_percent", "usedPercent");
-  if (pct === undefined) return null;
-  const windowMinutes = pickNumber(
-    rec,
-    "window_minutes",
-    "windowMinutes",
-    "window_duration_mins",
-    "windowDurationMins",
-  );
-  // resetsAt may be an absolute epoch (seconds) or a relative offset.
-  const resetsAtRaw = pickNumber(rec, "resets_at", "resetsAt");
-  const resetsInSeconds = pickNumber(rec, "resets_in_seconds", "resetsInSeconds");
-  // Prefer the absolute timestamp; fall back to relative offset.
-  const resetsAtEpoch =
-    resetsAtRaw !== undefined
-      ? resetsAtRaw
-      : resetsInSeconds !== undefined
-        ? Math.floor(Date.now() / 1000) + resetsInSeconds
-        : undefined;
-  return {
-    usedPercent: pct,
-    ...(windowMinutes !== undefined ? { windowMinutes } : {}),
-    ...(resetsAtEpoch !== undefined ? { resetsAtEpoch } : {}),
-  };
-}
-
-function codexWindowToTier(win: CodexWindowData): OAuthUsageTier {
-  const tier = codexWindowTierKey(win.windowMinutes);
-  const resetsAt =
-    win.resetsAtEpoch !== undefined ? new Date(win.resetsAtEpoch * 1000).toISOString() : null;
-  return {
-    tier,
-    utilization: win.usedPercent / 100, // 0-100 → 0-1
-    resetsAt,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Normalization
-// ---------------------------------------------------------------------------
-
-interface NormalizedRateLimitResult {
-  info: ProviderRateLimitInfo;
-  /** Additional tiers extracted from Codex primary/secondary windows. */
-  tiers: ReadonlyArray<OAuthUsageTier>;
-}
-
-/**
- * Normalize the raw `account.rate-limits.updated` payload.
- *
- * Claude SDK wraps the info as `{ rateLimits: { type: "rate_limit_event", rate_limit_info: {...} } }`.
- * Codex sends `{ rateLimits: { primary: {...}, secondary: {...} } }` or
- * `{ rateLimits: { rate_limits_by_name: {...} } }`.
- * We try the Claude path first, then fall back to Codex window extraction.
- */
-function normalizeRateLimitPayload(
-  payload: AccountRateLimitsUpdatedPayload,
-): NormalizedRateLimitResult | null {
-  const outer = asRecord(payload.rateLimits);
-  if (!outer) return null;
-
-  // -----------------------------------------------------------------------
-  // Path 1: Claude — has a `status` field (directly or nested in rate_limit_info).
-  // -----------------------------------------------------------------------
-  const inner = asRecord(outer.rate_limit_info) ?? outer;
-  const status = pickRateLimitStatus(inner, "status");
-  if (status) {
-    return {
-      info: {
-        status,
-        rateLimitType: pickString(inner, "rateLimitType", "rate_limit_type"),
-        utilization: pickNumber(inner, "utilization"),
-        resetsAt: pickNumber(inner, "resetsAt", "resets_at"),
-        isUsingOverage: pickBoolean(inner, "isUsingOverage", "is_using_overage"),
-        overageStatus: pickRateLimitStatus(inner, "overageStatus", "overage_status"),
-        overageResetsAt: pickNumber(inner, "overageResetsAt", "overage_resets_at"),
-        overageDisabledReason: pickString(
-          inner,
-          "overageDisabledReason",
-          "overage_disabled_reason",
-        ),
-        surpassedThreshold: pickNumber(inner, "surpassedThreshold", "surpassed_threshold"),
-      },
-      tiers: [],
-    };
-  }
-
-  // -----------------------------------------------------------------------
-  // Path 2: Codex — has `primary` / `secondary` windows with `used_percent`.
-  // The Codex app-server payload may be double-wrapped: the adapter wraps
-  // `event.payload` (which itself contains a `rateLimits` key) into
-  // `{ rateLimits: event.payload }`, producing `{ rateLimits: { rateLimits: { primary: ... } } }`.
-  // Unwrap one level when the outer object doesn't have `primary`/`secondary`
-  // but has a nested `rateLimits` object that does.
-  // -----------------------------------------------------------------------
-  const codexData =
-    outer.primary || outer.secondary ? outer : (asRecord(outer.rateLimits) ?? outer);
-  const primary = asCodexWindow(codexData.primary);
-  const secondary = asCodexWindow(codexData.secondary);
-  if (!primary && !secondary) return null;
-
-  const tiers: OAuthUsageTier[] = [];
-  if (primary) tiers.push(codexWindowToTier(primary));
-  if (secondary) tiers.push(codexWindowToTier(secondary));
-
-  // Derive a single ProviderRateLimitInfo from the most-constraining window.
-  const highestPct = Math.max(primary?.usedPercent ?? 0, secondary?.usedPercent ?? 0);
-  const highestWindow =
-    primary && primary.usedPercent >= (secondary?.usedPercent ?? 0) ? primary : secondary;
-
-  return {
-    info: {
-      status: highestPct >= 80 ? "allowed_warning" : "allowed",
-      utilization: highestPct / 100,
-      rateLimitType: highestWindow ? codexWindowTierKey(highestWindow.windowMinutes) : undefined,
-      resetsAt: highestWindow?.resetsAtEpoch,
-    },
-    tiers,
-  };
 }
 
 type TurnStartRequestedDomainEvent = Extract<
@@ -1477,9 +1290,14 @@ const make = Effect.fn("make")(function* () {
     if (event.type === "account.rate-limits.updated") {
       const normalized = normalizeRateLimitPayload(event.payload);
       if (normalized) {
-        yield* rateLimitsCache.set(event.provider, normalized.info);
+        if (normalized.info) {
+          yield* rateLimitsCache.set(event.provider, normalized.info);
+        }
         if (normalized.tiers.length > 0) {
           yield* rateLimitsCache.setOAuthTiers(event.provider, normalized.tiers);
+        }
+        if (normalized.resetCredits !== undefined) {
+          yield* rateLimitsCache.setResetCredits(event.provider, normalized.resetCredits);
         }
       }
       return;

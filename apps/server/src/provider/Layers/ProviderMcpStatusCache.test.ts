@@ -72,6 +72,7 @@ function makeLayer(input?: {
         rollbackConversation: () => Effect.die(new Error("not mocked")),
         streamEvents: Stream.empty,
         probeAllRateLimits: () => Effect.succeed([]),
+        consumeCodexRateLimitResetCredit: () => Effect.die(new Error("not mocked")),
         probeMcpServers: (request) => probe(request),
       }),
     ),

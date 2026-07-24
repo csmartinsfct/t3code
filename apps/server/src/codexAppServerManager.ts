@@ -659,6 +659,13 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       } catch (error) {
         console.log("codex account/read failed", error);
       }
+      try {
+        await this.readRateLimits(threadId);
+      } catch (error) {
+        // Older Codex app-server builds may not expose this experimental
+        // method. Account usage enrichment must never block session startup.
+        console.log("codex account/rateLimits/read failed", error);
+      }
 
       const normalizedModel = resolveCodexModelForAccount(
         normalizeCodexModelSlug(input.model),
@@ -798,6 +805,21 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
       throw new Error(message, { cause: error });
     }
+  }
+
+  async readRateLimits(threadId: ThreadId): Promise<unknown> {
+    const context = this.requireSession(threadId);
+    const response = await this.sendRequest(context, "account/rateLimits/read", null);
+    this.emitEvent({
+      id: EventId.makeUnsafe(randomUUID()),
+      kind: "notification",
+      provider: context.session.provider,
+      threadId,
+      createdAt: new Date().toISOString(),
+      method: "account/rateLimits/updated",
+      payload: response,
+    });
+    return response;
   }
 
   async sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ProviderRateLimitsSnapshot } from "@t3tools/contracts";
 
-import { deriveRateLimitSnapshot } from "./rateLimit";
+import { deriveRateLimitSnapshot, selectNextResetCredit } from "./rateLimit";
 
 describe("deriveRateLimitSnapshot", () => {
   it("labels Gemini model quota tiers and uses the first tier as primary", () => {
@@ -45,5 +45,51 @@ describe("deriveRateLimitSnapshot", () => {
 
     expect(snapshot.primaryTier?.tierLabel).toBe("Claude Design");
     expect(snapshot.oauthTiers.map((tier) => tier.tierLabel)).toEqual(["Claude Design"]);
+  });
+
+  it("derives Codex reset credits and selects the soonest-expiring available credit", () => {
+    const snapshot = deriveRateLimitSnapshot({
+      provider: "codex:metric" as never,
+      rateLimitInfo: { status: "allowed" },
+      updatedAt: "2026-07-24T12:00:00.000Z",
+      resetCredits: {
+        availableCount: 2,
+        credits: [
+          {
+            id: "redeemed",
+            resetType: "codexRateLimits",
+            status: "redeemed",
+            grantedAt: 1_753_353_600,
+            expiresAt: 1_754_908_800,
+            title: null,
+            description: null,
+          },
+          {
+            id: "later",
+            resetType: "codexRateLimits",
+            status: "available",
+            grantedAt: 1_753_353_600,
+            expiresAt: 1_754_908_800,
+            title: "Full reset",
+            description: null,
+          },
+          {
+            id: "next",
+            resetType: "codexRateLimits",
+            status: "available",
+            grantedAt: 1_753_353_600,
+            expiresAt: 1_754_044_800,
+            title: "Full reset",
+            description: null,
+          },
+        ],
+      },
+    } satisfies ProviderRateLimitsSnapshot);
+
+    expect(snapshot.resetCredits?.availableCount).toBe(2);
+    expect(selectNextResetCredit(snapshot.resetCredits)?.id).toBe("next");
+    expect(selectNextResetCredit(snapshot.resetCredits)?.expiresAt?.toISOString()).toBe(
+      "2025-08-01T10:40:00.000Z",
+    );
   });
 });

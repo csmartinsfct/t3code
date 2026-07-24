@@ -12,6 +12,7 @@ import type {
   OAuthUsageTier,
   ProviderKind,
   ProviderRateLimitInfo,
+  ProviderRateLimitResetCreditsSummary,
   ProviderRateLimitsSnapshot,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
@@ -35,6 +36,16 @@ export interface ProviderRateLimitsCacheShape {
     provider: ProviderKind,
     tiers: ReadonlyArray<OAuthUsageTier>,
     warning?: string,
+  ) => Effect.Effect<void>;
+
+  /**
+   * Replace the authoritative earned-reset summary. Passing `null` clears a
+   * previously cached summary; sparse provider notifications should not call
+   * this method.
+   */
+  readonly setResetCredits: (
+    provider: ProviderKind,
+    summary: ProviderRateLimitResetCreditsSummary | null,
   ) => Effect.Effect<void>;
 
   /**

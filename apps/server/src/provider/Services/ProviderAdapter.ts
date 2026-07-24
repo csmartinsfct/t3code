@@ -9,6 +9,8 @@
  */
 import type {
   ApprovalRequestId,
+  ConsumeCodexRateLimitResetCreditInput,
+  ConsumeCodexRateLimitResetCreditResult,
   ProviderApprovalDecision,
   ProviderKind,
   ProviderRateLimitInfo,
@@ -49,6 +51,13 @@ export interface ProviderThreadTurnSnapshot {
 export interface ProviderThreadSnapshot {
   readonly threadId: ThreadId;
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
+}
+
+export interface ProviderConsumeCodexRateLimitResetCreditResult extends ConsumeCodexRateLimitResetCreditResult {
+  /** Authoritative full read returned after consume, when refresh succeeded. */
+  readonly rateLimits?: unknown;
+  /** Non-fatal refresh failure after the consume mutation already succeeded. */
+  readonly refreshError?: string;
 }
 
 export interface ProviderAdapterShape<TError> {
@@ -151,4 +160,12 @@ export interface ProviderAdapterShape<TError> {
    * Optional — adapters that don't implement this are never probed.
    */
   readonly probeRateLimits?: () => Effect.Effect<ProviderRateLimitInfo | null, TError>;
+
+  /**
+   * Consume an earned Codex rate-limit reset for a provider account. This is
+   * account-scoped and must not depend on an active thread/session.
+   */
+  readonly consumeCodexRateLimitResetCredit?: (
+    input: ConsumeCodexRateLimitResetCreditInput,
+  ) => Effect.Effect<ProviderConsumeCodexRateLimitResetCreditResult, TError>;
 }

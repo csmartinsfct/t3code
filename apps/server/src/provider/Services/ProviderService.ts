@@ -12,6 +12,7 @@
  * @module ProviderService
  */
 import type {
+  ConsumeCodexRateLimitResetCreditInput,
   ProviderInterruptTurnInput,
   ProviderKind,
   SelectedProviderCapability,
@@ -31,7 +32,10 @@ import { ServiceMap } from "effect";
 import type { Effect, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type {
+  ProviderAdapterCapabilities,
+  ProviderConsumeCodexRateLimitResetCreditResult,
+} from "./ProviderAdapter.ts";
 
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
@@ -145,6 +149,14 @@ export interface ProviderServiceShape {
   readonly probeAllRateLimits: () => Effect.Effect<
     ReadonlyArray<{ provider: ProviderKind; info: ProviderRateLimitInfo }>
   >;
+
+  /**
+   * Consume an earned Codex reset for an exact account/profile. This operation
+   * is account-scoped and does not require or recover a thread session.
+   */
+  readonly consumeCodexRateLimitResetCredit: (
+    input: ConsumeCodexRateLimitResetCreditInput,
+  ) => Effect.Effect<ProviderConsumeCodexRateLimitResetCreditResult, ProviderServiceError>;
 }
 
 /**

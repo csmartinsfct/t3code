@@ -106,6 +106,7 @@ function createProviderServiceHarness(
       }),
     rollbackConversation,
     probeAllRateLimits: () => Effect.succeed([]),
+    consumeCodexRateLimitResetCredit: () => unsupported(),
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
 

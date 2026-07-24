@@ -1,5 +1,6 @@
 import type {
   OAuthUsageTier,
+  ProviderKind,
   ProviderRateLimitInfo,
   ProviderRateLimitsSnapshot,
 } from "@t3tools/contracts";
@@ -18,6 +19,20 @@ export interface OAuthTierSnapshot {
   readonly usedPercentage: number;
   /** When this tier resets. */
   readonly resetsAt: Date | null;
+}
+
+export interface RateLimitResetCreditSnapshot {
+  readonly id: string;
+  readonly status: "available" | "redeeming" | "redeemed" | "unknown";
+  readonly expiresAt: Date | null;
+  readonly title: string | null;
+  readonly description: string | null;
+}
+
+export interface RateLimitResetCreditsSnapshot {
+  /** Authoritative count from Codex. Detailed rows may be omitted or capped. */
+  readonly availableCount: number;
+  readonly credits: ReadonlyArray<RateLimitResetCreditSnapshot> | null;
 }
 
 export interface RateLimitSnapshot {
@@ -43,13 +58,15 @@ export interface RateLimitSnapshot {
   /** ISO timestamp of last update from the server. */
   readonly updatedAt: string;
   /** Provider this snapshot belongs to. */
-  readonly provider: string;
+  readonly provider: ProviderKind;
   /** All OAuth usage tiers when available. */
   readonly oauthTiers: ReadonlyArray<OAuthTierSnapshot>;
   /** The highest-utilization tier, used for the circle display. */
   readonly primaryTier: OAuthTierSnapshot | null;
   /** Warning when the usage-data fetch is degraded (e.g. API 429 backoff). */
   readonly fetchWarning: string | null;
+  /** Earned Codex usage-limit resets. API billing credits are intentionally excluded. */
+  readonly resetCredits: RateLimitResetCreditsSnapshot | null;
 }
 
 const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
@@ -71,8 +88,8 @@ const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
   extra_usage: "Extra usage",
 };
 
-function toDate(value: number | undefined): Date | null {
-  if (value === undefined || !Number.isFinite(value)) return null;
+function toDate(value: number | null | undefined): Date | null {
+  if (value === undefined || value === null || !Number.isFinite(value)) return null;
   // The SDK sends seconds-since-epoch
   const date = new Date(value * 1000);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -92,6 +109,27 @@ function deriveOAuthTierSnapshot(raw: OAuthUsageTier): OAuthTierSnapshot {
     utilization: raw.utilization,
     usedPercentage,
     resetsAt: toDateFromIso(raw.resetsAt),
+  };
+}
+
+function deriveResetCreditsSnapshot(
+  raw: ProviderRateLimitsSnapshot["resetCredits"],
+): RateLimitResetCreditsSnapshot | null {
+  if (!raw) return null;
+
+  const credits = raw.credits
+    ? raw.credits.map((credit) => ({
+        id: credit.id,
+        status: credit.status,
+        expiresAt: toDate(credit.expiresAt),
+        title: credit.title,
+        description: credit.description,
+      }))
+    : null;
+
+  return {
+    availableCount: raw.availableCount,
+    credits,
   };
 }
 
@@ -128,6 +166,7 @@ export function deriveRateLimitSnapshot(entry: ProviderRateLimitsSnapshot): Rate
     oauthTiers,
     primaryTier,
     fetchWarning: entry.fetchWarning ?? null,
+    resetCredits: deriveResetCreditsSnapshot(entry.resetCredits),
   };
 }
 
@@ -173,4 +212,39 @@ export function formatUpdatedAt(updatedAt: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function selectNextResetCredit(
+  resetCredits: RateLimitResetCreditsSnapshot | null,
+): RateLimitResetCreditSnapshot | null {
+  if (!resetCredits?.credits) return null;
+
+  return (
+    resetCredits.credits
+      .filter((credit) => credit.status === "available")
+      .toSorted((left, right) => {
+        if (!left.expiresAt) return right.expiresAt ? 1 : 0;
+        if (!right.expiresAt) return -1;
+        return left.expiresAt.getTime() - right.expiresAt.getTime();
+      })[0] ?? null
+  );
+}
+
+export function formatResetCreditExpiration(expiresAt: Date | null): string | null {
+  if (!expiresAt) return null;
+  const now = new Date();
+  const includeYear = expiresAt.getFullYear() !== now.getFullYear();
+  return `Expires ${new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(expiresAt)}`;
+}
+
+export function formatResetCreditExpirationTitle(expiresAt: Date | null): string | undefined {
+  if (!expiresAt) return undefined;
+  return `Expires ${new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(expiresAt)}`;
 }

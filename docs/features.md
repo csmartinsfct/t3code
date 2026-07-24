@@ -286,7 +286,20 @@ Model selection settings (each can target a specific provider + model):
 
 ### Rate limits
 
-Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and 7-day windows, per-model breakdowns). Rate limit snapshots are keyed by the exact provider kind, including profile suffixes such as `codex:metric`, so profile accounts never inherit the base provider's usage data. Rate limit state is streamed to the UI via `subscribeServerConfig`.
+Provider rate limits are tracked in real time with OAuth usage tiers (5-hour
+and 7-day windows, per-model breakdowns). Rate limit snapshots are keyed by the
+exact provider kind, including profile suffixes such as `codex:metric`, so
+profile accounts never inherit the base provider's usage data. Rate limit state
+is streamed to the UI via `subscribeServerConfig`.
+
+For Codex accounts, the usage meter also shows earned usage-limit reset credits.
+The count comes from the provider's authoritative `availableCount`; when credit
+details are provided, the popover shows the soonest expiration and a small
+`Use reset` action while at least one reset is available. Redemption uses a
+client-generated idempotency key and remains scoped to the exact Codex provider
+or profile that supplied the snapshot. These are Codex usage-limit resets only:
+T3 does not display or consume API billing credits, and it does not expose
+account token totals in this surface.
 
 **User interaction:**
 
@@ -299,6 +312,8 @@ Provider rate limits are tracked in real time with OAuth usage tiers (5-hour and
 
 - `provider.startSession` / `provider.sendTurn` / `provider.interruptTurn` — Session lifecycle.
 - `server.refreshProviders` — Re-scan provider statuses.
+- `server.consumeCodexRateLimitResetCredit` — Idempotently redeem one available
+  Codex usage-limit reset for the selected exact provider/profile account.
 - `server.resolveMcpServers` — Get project-scoped MCP status for Claude,
   provider config discovery for Codex/Gemini, and Cursor CLI MCP status.
 - `server.manageMcpServer` — Run provider-specific MCP management actions.

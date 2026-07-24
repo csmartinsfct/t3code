@@ -54,6 +54,8 @@ import type {
   ResolveMcpServersResult,
   ManageMcpServerInput,
   ManageMcpServerResult,
+  ConsumeCodexRateLimitResetCreditInput,
+  ConsumeCodexRateLimitResetCreditResult,
   ResolveCodexProjectTrustInput,
   ResolveCodexProjectTrustResult,
   ResolveSkillsInput,
@@ -586,6 +588,9 @@ export interface NativeApi {
     resolveProviderCapabilities: (
       input: ResolveProviderCapabilitiesInput,
     ) => Promise<ResolveProviderCapabilitiesResult>;
+    consumeCodexRateLimitResetCredit: (
+      input: ConsumeCodexRateLimitResetCreditInput,
+    ) => Promise<ConsumeCodexRateLimitResetCreditResult>;
   };
   managedRuns: {
     launchProjectScript: (

@@ -1,15 +1,26 @@
+import { Loader2Icon } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+
+import { asProviderInput } from "@t3tools/contracts";
+
 import { registerOverlayRoute } from "~/components/overlay/overlayRouteRegistry";
 import { OverlayRoutePopover, OverlayRoutePopoverPopup } from "~/routedOverlayAdapters";
 import { useRoutedPopoverSurface } from "~/routedPopover";
-import { cn } from "~/lib/utils";
+import { ensureNativeApi } from "~/nativeApi";
+import { cn, randomUUID } from "~/lib/utils";
 import {
   type OAuthTierSnapshot,
   type RateLimitSnapshot,
   formatPercentage,
+  formatResetCreditExpiration,
+  formatResetCreditExpirationTitle,
   formatResetsAt,
   formatUpdatedAt,
+  selectNextResetCredit,
 } from "~/lib/rateLimit";
+import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { toastManager } from "../ui/toast";
 
 const RATE_LIMIT_METER_OVERLAY_ROUTE_KEY = "rate-limit-meter";
 
@@ -130,14 +141,99 @@ function SingleTierContent(props: { rateLimit: RateLimitSnapshot }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+interface ResetCreditAttempt {
+  readonly provider: ReturnType<typeof asProviderInput>;
+  readonly creditId?: string;
+  readonly idempotencyKey: string;
+}
+
 export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
   const { rateLimit } = props;
+  const [resetPending, setResetPending] = useState(false);
+  const resetPendingRef = useRef(false);
+  const resetAttemptRef = useRef<ResetCreditAttempt | null>(null);
+
+  const consumeResetCredit = useCallback(
+    async (creditId?: string) => {
+      if (resetPendingRef.current) return;
+      resetPendingRef.current = true;
+      setResetPending(true);
+
+      const priorAttempt = resetAttemptRef.current;
+      const attempt =
+        priorAttempt?.provider === rateLimit.provider
+          ? priorAttempt
+          : {
+              provider: asProviderInput(rateLimit.provider),
+              ...(creditId ? { creditId } : {}),
+              idempotencyKey: randomUUID(),
+            };
+      resetAttemptRef.current = attempt;
+
+      try {
+        const result = await ensureNativeApi().server.consumeCodexRateLimitResetCredit(attempt);
+        resetAttemptRef.current = null;
+
+        switch (result.outcome) {
+          case "reset":
+            toastManager.add({
+              type: "success",
+              title: "Usage limit reset",
+              description: "Your Codex usage window has been reset.",
+            });
+            break;
+          case "alreadyRedeemed":
+            toastManager.add({
+              type: "success",
+              title: "Reset already applied",
+              description: "This Codex usage reset was already redeemed.",
+            });
+            break;
+          case "nothingToReset":
+            toastManager.add({
+              type: "warning",
+              title: "No usage window to reset",
+              description: "Your current Codex usage limits do not need a reset.",
+            });
+            break;
+          case "noCredit":
+            toastManager.add({
+              type: "warning",
+              title: "No reset available",
+              description: "Codex did not find an available usage reset.",
+            });
+            break;
+        }
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not use reset",
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        resetPendingRef.current = false;
+        setResetPending(false);
+      }
+    },
+    [rateLimit.provider],
+  );
+
+  const handleOverlayEvent = useCallback(
+    (type: string, payload: unknown) => {
+      if (type !== "consume-reset-credit") return;
+      const creditId = readResetCreditId(payload);
+      void consumeResetCredit(creditId);
+    },
+    [consumeResetCredit],
+  );
+
   const routedPopover = useRoutedPopoverSurface<HTMLButtonElement>({
     routeKey: RATE_LIMIT_METER_OVERLAY_ROUTE_KEY,
-    params: { rateLimit },
+    params: { rateLimit, resetPending },
     side: "top",
     align: "end",
     interaction: "hover",
+    onEvent: handleOverlayEvent,
   });
   const usedPercentage = formatPercentage(rateLimit.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, rateLimit.usedPercentage ?? 0));
@@ -206,14 +302,30 @@ export function RateLimitMeter(props: { rateLimit: RateLimitSnapshot }) {
         }
       />
       <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2.5">
-        <RateLimitPopoverContent rateLimit={rateLimit} />
+        <RateLimitPopoverContent
+          rateLimit={rateLimit}
+          resetPending={resetPending}
+          onConsumeResetCredit={consumeResetCredit}
+        />
       </PopoverPopup>
     </Popover>
   );
 }
 
-function RateLimitPopoverContent({ rateLimit }: { rateLimit: RateLimitSnapshot }) {
+function RateLimitPopoverContent({
+  rateLimit,
+  resetPending,
+  onConsumeResetCredit,
+}: {
+  rateLimit: RateLimitSnapshot;
+  resetPending: boolean;
+  onConsumeResetCredit: (creditId?: string) => void;
+}) {
   const hasOAuthTiers = rateLimit.oauthTiers.length > 0;
+  const isCodexProvider = rateLimit.provider === "codex" || rateLimit.provider.startsWith("codex:");
+  const resetCredits = isCodexProvider ? rateLimit.resetCredits : null;
+  const nextResetCredit = selectNextResetCredit(resetCredits);
+  const resetExpiration = formatResetCreditExpiration(nextResetCredit?.expiresAt ?? null);
 
   return (
     <div className="min-w-[180px] space-y-2 leading-tight">
@@ -254,6 +366,35 @@ function RateLimitPopoverContent({ rateLimit }: { rateLimit: RateLimitSnapshot }
         <div className="text-[10px] text-warning/70">{rateLimit.fetchWarning}</div>
       ) : null}
 
+      {resetCredits && resetCredits.availableCount > 0 ? (
+        <div className="flex items-center justify-between gap-3 border-border/60 border-t pt-2">
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-foreground">
+              {resetCredits.availableCount} {resetCredits.availableCount === 1 ? "reset" : "resets"}{" "}
+              available
+            </div>
+            {resetExpiration ? (
+              <div
+                className="mt-0.5 text-[10px] text-muted-foreground/60"
+                title={formatResetCreditExpirationTitle(nextResetCredit?.expiresAt ?? null)}
+              >
+                {resetExpiration}
+              </div>
+            ) : null}
+          </div>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={resetPending}
+            aria-label={resetPending ? "Using Codex usage reset" : "Use Codex usage reset"}
+            onClick={() => onConsumeResetCredit(nextResetCredit?.id)}
+          >
+            {resetPending ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+            {resetPending ? "Using..." : "Use reset"}
+          </Button>
+        </div>
+      ) : null}
+
       {/* Timestamp */}
       <div className="text-[10px] text-muted-foreground/40">
         {formatUpdatedAt(rateLimit.updatedAt)}
@@ -262,10 +403,11 @@ function RateLimitPopoverContent({ rateLimit }: { rateLimit: RateLimitSnapshot }
   );
 }
 
-registerOverlayRoute<{ rateLimit?: unknown }>(
+registerOverlayRoute<{ rateLimit?: unknown; resetPending?: unknown }>(
   RATE_LIMIT_METER_OVERLAY_ROUTE_KEY,
   function RateLimitMeterOverlayRoute({ message, controller }) {
     const rateLimit = readRateLimitSnapshot(message.params.rateLimit);
+    const resetPending = message.params.resetPending === true;
 
     if (!rateLimit) {
       controller.fail(new Error("Rate limit meter route requires rateLimit params."));
@@ -280,7 +422,13 @@ registerOverlayRoute<{ rateLimit?: unknown }>(
           align="end"
           className="w-max max-w-none px-3 py-2.5"
         >
-          <RateLimitPopoverContent rateLimit={rateLimit} />
+          <RateLimitPopoverContent
+            rateLimit={rateLimit}
+            resetPending={resetPending}
+            onConsumeResetCredit={(creditId) =>
+              controller.bridge.emitEvent("consume-reset-credit", creditId ? { creditId } : {})
+            }
+          />
         </OverlayRoutePopoverPopup>
       </OverlayRoutePopover>
     );
@@ -293,5 +441,50 @@ function readRateLimitSnapshot(value: unknown): RateLimitSnapshot | null {
   if (typeof snapshot.status !== "string") return null;
   if (!Array.isArray(snapshot.oauthTiers)) return null;
   if (typeof snapshot.usedPercentage !== "number" && snapshot.usedPercentage !== null) return null;
-  return value as RateLimitSnapshot;
+
+  const typed = value as RateLimitSnapshot;
+  const oauthTiers = typed.oauthTiers.map((tier) => ({
+    ...tier,
+    resetsAt: readSerializedDate(tier.resetsAt),
+  }));
+  const primaryTier = typed.primaryTier
+    ? {
+        ...typed.primaryTier,
+        resetsAt: readSerializedDate(typed.primaryTier.resetsAt),
+      }
+    : null;
+  const resetCredits = typed.resetCredits
+    ? {
+        ...typed.resetCredits,
+        credits: typed.resetCredits.credits
+          ? typed.resetCredits.credits.map((credit) => ({
+              ...credit,
+              expiresAt: readSerializedDate(credit.expiresAt),
+            }))
+          : null,
+      }
+    : null;
+
+  return {
+    ...typed,
+    resetsAt: readSerializedDate(typed.resetsAt),
+    overageResetsAt: readSerializedDate(typed.overageResetsAt),
+    oauthTiers,
+    primaryTier,
+    resetCredits,
+  };
+}
+
+function readSerializedDate(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function readResetCreditId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const creditId = (value as { creditId?: unknown }).creditId;
+  return typeof creditId === "string" && creditId.trim() ? creditId : undefined;
 }
